@@ -45,7 +45,11 @@ One remembered fact in a **User memory** or **Project memory**: a short title an
 _Avoid_: Note, memory (for a single entry)
 
 **Team**:
-The group of users sharing one **Server**; a Server hosts exactly one Team.
+The group of users sharing one **Server**; a Server hosts exactly one Team. Membership follows the **Forge** organizations or groups the Server is configured with: belonging to one makes you a member, leaving it removes you.
+
+**Forge account**:
+A user's account on one **Forge** instance (e.g. github.com, a self-managed GitLab). A user logs in with any of their Forge accounts and can link several; Loom acts on the Forge only with the access that account already has.
+_Avoid_: Identity, login
 
 **Forge**:
 The service hosting a **Project**'s repository, issues and merge requests (GitHub or GitLab).
@@ -65,6 +69,7 @@ _Avoid_: Watch, monitor
 - A **Session** runs on exactly one agent (Pi or OpenCode), chosen when the Session is created; it cannot change afterwards
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
 - A **Project** has one **Project memory**; a user has one **User memory**
+- A user has one or more **Forge accounts**; a Forge account belongs to exactly one user
 - An **Artifact** belongs to a **Project** and may originate from a **Session**
 - A **User memory** or **Project memory** is a list of **Memory entries**
 - Agents read, create and update **Memory entries** themselves; only users delete them
