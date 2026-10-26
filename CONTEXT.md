@@ -40,6 +40,10 @@ A user's personal preferences and working habits, reused across all their **Proj
 **Project memory**:
 Context, decisions, conventions and knowledge about one **Project**, reused by agents throughout its lifecycle. Shared by everyone on the team.
 
+**Memory entry**:
+One remembered fact in a **User memory** or **Project memory**: a short title and a full description, with its author and the **Session** that wrote it. Agents see every entry's title and read descriptions on demand.
+_Avoid_: Note, memory (for a single entry)
+
 **Team**:
 The group of users sharing one **Server**; a Server hosts exactly one Team.
 
@@ -62,7 +66,9 @@ _Avoid_: Watch, monitor
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
 - A **Project** has one **Project memory**; a user has one **User memory**
 - An **Artifact** belongs to a **Project** and may originate from a **Session**
-- Agents read and write memory themselves; users can edit or delete memory entries
+- A **User memory** or **Project memory** is a list of **Memory entries**
+- Agents read, create and update **Memory entries** themselves; only users delete them
+- Any **Team** member can edit or delete a **Project memory** entry; a **User memory** is visible only to its user
 
 ## Flagged ambiguities
 
