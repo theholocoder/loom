@@ -1,0 +1,432 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Answers "UI layout prototype" (theholocoder/loom#5):
+  what should the Client's main screen look and behave like?
+  Three structurally different variants of the main screen, switchable via ?variant=A|B|C
+  (floating bar at the bottom, or ← / → keys). All data is mocked in memory; actions are stubs.
+  Open by double-clicking this file.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom UI prototype</title>
+<style>
+  :root {
+    --bg: #15171c; --panel: #1c1f26; --panel2: #232731; --line: #2e3340; --text: #e3e6ec; --muted: #8b93a5;
+    --accent: #7aa2f7; --wait: #e0af68; --work: #7dcfff; --arch: #565f73; --ok: #9ece6a; --err: #f7768e;
+    --add: rgba(158,206,106,.12); --del: rgba(247,118,142,.12);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); }
+  button { font: inherit; color: inherit; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.ghost { background: none; border-color: transparent; }
+  button.ghost:hover { border-color: var(--line); }
+  button.primary { background: var(--accent); color: #111; border-color: var(--accent); }
+  code, pre { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 12px; }
+  code { background: var(--panel2); padding: 0 4px; border-radius: 4px; }
+  pre { background: #0f1115; border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow: auto; margin: 6px 0; }
+  .muted { color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.waiting { background: var(--wait); } .dot.working { background: var(--work); animation: pulse 1.2s infinite; } .dot.archived { background: var(--arch); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .chip { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .chip.reason-question { color: var(--wait); border-color: var(--wait); }
+  .chip.reason-stuck { color: var(--err); border-color: var(--err); }
+  .chip.reason-finished { color: var(--ok); border-color: var(--ok); }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; min-width: 0; }
+  .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #root { height: 100%; }
+
+  /* tool cards (shared look, rendered differently per variant) */
+  .tool { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin: 6px 0; overflow: hidden; }
+  .tool-head { display: flex; gap: 8px; align-items: center; padding: 5px 8px; cursor: pointer; }
+  .tool-head .name { font-family: ui-monospace, monospace; font-size: 12px; color: var(--accent); }
+  .tool-body { border-top: 1px solid var(--line); padding: 6px 8px; }
+  .tool.question { border-color: var(--wait); }
+  .tool.question .tool-head .name { color: var(--wait); }
+  .tool.memory .tool-head .name { color: #bb9af7; }
+
+  /* diff */
+  .diff-file { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; overflow: hidden; }
+  .diff-file h4 { margin: 0; padding: 5px 8px; background: var(--panel2); font: 12px ui-monospace, monospace; display: flex; justify-content: space-between; }
+  .diff-line { font: 12px/1.5 ui-monospace, monospace; white-space: pre; padding: 0 8px; }
+  .diff-line.add { background: var(--add); } .diff-line.del { background: var(--del); }
+  .diff-loading { padding: 20px; color: var(--muted); text-align: center; }
+
+  /* composer */
+  .composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); background: var(--panel); }
+  .composer textarea { flex: 1; resize: none; height: 38px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: inherit; }
+
+  /* ===== Variant A: three panes ===== */
+  .A { display: grid; grid-template-columns: 290px 1fr auto; height: 100%; }
+  .A-side { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .A-side header { padding: 10px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+  .A-side .scroll { flex: 1; overflow: auto; padding: 6px; }
+  .A-group-title { display: flex; align-items: center; gap: 6px; padding: 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; user-select: none; }
+  .A-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 4px 0 8px; background: var(--panel2); cursor: pointer; }
+  .A-card.sel { border-color: var(--accent); }
+  .A-card .title { font-weight: 600; margin-bottom: 4px; }
+  .A-card .actions { margin-top: 6px; display: flex; gap: 4px; }
+  .A-mini { display: flex; gap: 8px; align-items: center; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+  .A-mini:hover, .A-mini.sel { background: var(--panel2); }
+  .A-side footer { border-top: 1px solid var(--line); padding: 8px; display: flex; gap: 4px; }
+  .A-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .A-main > header { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .A-chat { flex: 1; overflow: auto; padding: 16px; }
+  .bubble-row { display: flex; margin: 10px 0; gap: 8px; }
+  .bubble-row.user { justify-content: flex-end; }
+  .avatar { width: 28px; height: 28px; border-radius: 6px; background: var(--panel2); display: grid; place-items: center; font-size: 11px; flex: none; }
+  .bubble { max-width: 70ch; padding: 8px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+  .bubble-row.user .bubble { background: #2a3550; border-color: #3a4a70; }
+  .bubble p { margin: 4px 0; }
+  .A-diff-rail { width: 36px; border-left: 1px solid var(--line); background: var(--panel); writing-mode: vertical-rl; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted); letter-spacing: .1em; }
+  .A-diff-rail:hover { color: var(--text); }
+  .A-diff { width: min(46vw, 640px); border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .A-diff header { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+  .A-diff .scroll { flex: 1; overflow: auto; padding: 0 12px; }
+
+  /* ===== Variant B: inbox / triage ===== */
+  .B { display: flex; flex-direction: column; height: 100%; }
+  .B-top { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: relative; }
+  .B-pop { position: absolute; top: 40px; right: 120px; width: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 30px #0008; z-index: 5; padding: 6px; }
+  .B-inbox { flex: 1; overflow: auto; padding: 24px; max-width: 980px; width: 100%; margin: 0 auto; }
+  .B-inbox h2 { font-size: 15px; margin: 0 0 12px; }
+  .B-item { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: start; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin-bottom: 10px; cursor: pointer; }
+  .B-item.focus { border-color: var(--accent); }
+  .B-item .title { font-size: 14px; font-weight: 600; }
+  .B-item .excerpt { color: var(--muted); margin-top: 6px; border-left: 2px solid var(--line); padding-left: 8px; }
+  .B-item .actions { display: flex; flex-direction: column; gap: 4px; }
+  .B-focus { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .B-focus-head { padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
+  .B-chat { flex: 1; overflow: auto; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; }
+  .B-drawer { border-top: 1px solid var(--line); background: var(--panel); }
+  .B-drawer-bar { padding: 6px 16px; display: flex; gap: 8px; align-items: center; cursor: pointer; color: var(--muted); }
+  .B-drawer-body { height: 42vh; overflow: auto; padding: 0 16px; display: grid; grid-template-columns: 220px 1fr; gap: 12px; }
+  .B-files div { padding: 4px 6px; border-radius: 4px; font: 12px ui-monospace, monospace; cursor: pointer; }
+  .B-files div:hover { background: var(--panel2); }
+
+  /* ===== Variant C: tabs + document transcript ===== */
+  .C { display: grid; grid-template-columns: 48px 1fr; grid-template-rows: auto 1fr; height: 100%; }
+  .C-rail { grid-row: 1 / 3; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0; }
+  .C-rail button { width: 34px; height: 34px; padding: 0; position: relative; }
+  .C-rail .badge { position: absolute; top: -4px; right: -4px; background: var(--wait); color: #111; font-size: 10px; border-radius: 8px; padding: 0 4px; }
+  .C-tabs { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--panel); overflow-x: auto; }
+  .C-tab { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-right: 1px solid var(--line); cursor: pointer; max-width: 240px; color: var(--muted); }
+  .C-tab.sel { background: var(--bg); color: var(--text); }
+  .C-tab .x { opacity: .5; }
+  .C-body { display: grid; min-height: 0; position: relative; }
+  .C-doc { overflow: auto; padding: 24px 40px; min-height: 0; }
+  .C-doc .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+  .C-doc h1 { font-size: 20px; margin: 0 0 6px; }
+  .C-turn-user { margin: 22px 0 8px; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--panel); border-radius: 0 6px 6px 0; }
+  .C-turn-agent p { margin: 6px 0; }
+  .C-tool-line { font: 12px ui-monospace, monospace; color: var(--muted); padding: 2px 0; cursor: pointer; }
+  .C-tool-line:hover { color: var(--text); }
+  .C-split { border-left: 1px solid var(--line); overflow: auto; padding: 0 16px; background: var(--panel); min-height: 0; }
+  .C-overlay { position: absolute; inset: 0; background: #0009; display: flex; justify-content: center; align-items: flex-start; padding-top: 60px; z-index: 6; }
+  .C-palette { width: 560px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 40px #000a; overflow: hidden; }
+  .C-palette input { width: 100%; padding: 12px; background: var(--bg); border: 0; border-bottom: 1px solid var(--line); color: var(--text); font: inherit; outline: none; }
+  .C-palette .item { padding: 7px 12px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .C-palette .item:hover, .C-palette .item.hi { background: var(--panel2); }
+  .C-palette .grp { padding: 6px 12px 2px; font-size: 11px; text-transform: uppercase; color: var(--muted); }
+
+  /* switcher + toast + state */
+  #switcher { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: #fff; color: #111; border-radius: 999px; box-shadow: 0 6px 24px #000a; display: flex; align-items: center; gap: 8px; padding: 4px 6px; z-index: 100; font-weight: 600; }
+  #switcher button { background: #eee; color: #111; border: 0; border-radius: 50%; width: 28px; height: 28px; padding: 0; }
+  #switcher .state { font: 11px ui-monospace, monospace; font-weight: 400; color: #555; padding: 0 8px; border-left: 1px solid #ddd; }
+  #toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--accent); padding: 6px 12px; border-radius: 8px; z-index: 101; display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="switcher"></div>
+<div id="toast"></div>
+<script>
+// ---------- mock data ----------
+const projects = {
+  loom: { name: 'loom', forge: 'GitHub', repo: 'theholocoder/loom' },
+  billing: { name: 'billing-api', forge: 'GitLab', repo: 'acme/billing-api' },
+};
+const sessions = [
+  { id: 's1', status: 'waiting', reason: 'question', title: 'Add Merge request button to Session header', project: 'loom', branch: 'loom/31-mr-button', issue: '#31', mr: null, updated: '2 min ago',
+    excerpt: 'Should the button open a draft MR by default, or ask every time?' },
+  { id: 's2', status: 'waiting', reason: 'finished', title: 'Fix flaky worktree cleanup test', project: 'loom', branch: 'loom/28-flaky-cleanup', issue: '#28', mr: '#40', updated: '9 min ago',
+    excerpt: 'Done. The test now waits for the git lock to be released; 3/3 runs green.' },
+  { id: 's3', status: 'waiting', reason: 'stuck', title: 'Rate-limit webhook retries', project: 'billing', branch: 'billing/112-retry-limit', issue: '#112', mr: '!87', updated: '14 min ago',
+    excerpt: 'No output for 6 min while running `pnpm test:integration` (watchdog).' },
+  { id: 's4', status: 'working', title: 'Spec: memory tools', project: 'loom', branch: 'loom/spec-memory-tools', issue: null, mr: null, updated: 'now' },
+  { id: 's5', status: 'working', title: 'Migrate invoices table to PostgreSQL', project: 'billing', branch: 'billing/98-pg-invoices', issue: '#98', mr: null, updated: 'now' },
+  { id: 's6', status: 'archived', title: 'Bootstrap Electron shell', project: 'loom', branch: 'loom/1-electron-shell', issue: '#1', mr: '#12', updated: '3 days ago' },
+  { id: 's7', status: 'archived', title: 'Upgrade Stripe SDK', project: 'billing', branch: 'billing/77-stripe-sdk', issue: '#77', mr: '!70', updated: 'last week' },
+  { id: 's8', status: 'archived', title: 'Try OpenCode adapter spike', project: 'loom', branch: 'loom/oc-spike', issue: null, mr: null, updated: 'last week' },
+];
+function transcript(s) {
+  const t = [
+    { who: 'user', text: s.issue ? `Work on ${s.issue}: **${s.title}**.` : `**${s.title}**` },
+    { who: 'agent', text: `Reading the issue and the relevant code first.` },
+    { tool: 'read', input: 'src/renderer/session/SessionHeader.tsx', status: 'ok', output: '142 lines' },
+    { tool: 'bash', input: 'pnpm test --filter session', status: 'ok', output: 'Tests  41 passed (41)\nDuration  3.2s' },
+    { tool: 'memory', input: 'Project memory ← "Session headers use the ActionBar component, never ad-hoc buttons."', status: 'ok', output: 'saved' },
+    { who: 'agent', text: 'I added the button to `ActionBar` and wired it to the forge adapter:\n\n- shows **Open Merge request** when the branch has commits\n- disabled while the Session is Working\n\n```ts\nactions.push({ id: "open-mr", label: "Open Merge request", run: openMergeRequest })\n```' },
+    { tool: 'edit', input: 'src/renderer/session/ActionBar.tsx', status: 'ok', output: '+18 −3' },
+  ];
+  if (s.reason === 'question') t.push({ tool: 'question', input: 'Should the button open a draft MR by default, or ask every time?', options: ['Draft by default', 'Ask every time', 'Ready by default'] });
+  if (s.reason === 'finished') t.push({ who: 'agent', text: 'Done. The test now waits for the git lock to be released; **3/3 runs green**. Ready for review.' });
+  if (s.reason === 'stuck') t.push({ tool: 'bash', input: 'pnpm test:integration', status: 'running', output: '(no output for 6 min — watchdog flagged this Session as stuck)' });
+  if (s.status === 'working') t.push({ tool: 'bash', input: 'pnpm typecheck', status: 'running', output: '…' });
+  return t;
+}
+const transcripts = Object.fromEntries(sessions.map(s => [s.id, transcript(s)]));
+const diffFor = () => [
+  { file: 'src/renderer/session/ActionBar.tsx', add: 18, del: 3, lines: [
+    [' ', 'export function ActionBar({ session }: Props) {'], [' ', '  const actions = baseActions(session)'],
+    ['-', '  return <Bar actions={actions} />'], ['+', '  if (session.hasCommits) {'], ['+', '    actions.push({ id: "open-mr", label: "Open Merge request", run: openMergeRequest })'],
+    ['+', '  }'], ['+', '  return <Bar actions={actions} disabled={session.status === "working"} />'], [' ', '}'] ] },
+  { file: 'src/main/forge/mergeRequest.ts', add: 22, del: 0, lines: [
+    ['+', 'export async function openMergeRequest(session: Session) {'], ['+', '  const forge = forgeFor(session.project)'],
+    ['+', '  return forge.createMergeRequest({ source: session.branch, draft: true })'], ['+', '}'] ] },
+  { file: 'src/renderer/session/ActionBar.test.tsx', add: 9, del: 4, lines: [
+    [' ', 'it("hides MR action without commits", () => {'], ['-', '  render(<ActionBar session={s} />)'], ['+', '  render(<ActionBar session={{ ...s, hasCommits: false }} />)'], [' ', '})'] ] },
+];
+
+// ---------- state ----------
+const VARIANTS = { A: 'Three panes (sidebar · chat · diff rail)', B: 'Inbox triage (queue → focus, diff drawer)', C: 'Tabs + document transcript (split diff)' };
+const params = new URLSearchParams(location.search);
+const state = {
+  variant: VARIANTS[params.get('variant')] ? params.get('variant') : 'A',
+  sel: 's1',
+  groups: { waiting: true, working: false, archived: false },
+  diff: { open: false, loading: false, loaded: false },
+  openTools: {},
+  bView: 'inbox', bPop: false, bFocus: 0,
+  cTabs: ['s1', 's2', 's4'], cPalette: false, cQuery: '', cOverlay: null,
+};
+const byId = id => sessions.find(s => s.id === id);
+const ofStatus = st => sessions.filter(s => s.status === st);
+
+// ---------- helpers ----------
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function md(src) {
+  const parts = src.split(/```\w*\n?/);
+  return parts.map((p, i) => {
+    if (i % 2) return `<pre>${esc(p.trim())}</pre>`;
+    return esc(p).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+      .split(/\n\n+/).map(b => b.trim()).filter(Boolean)
+      .map(b => b.startsWith('- ') ? `<ul>${b.split('\n').map(l => `<li>${l.slice(2)}</li>`).join('')}</ul>` : `<p>${b.replace(/\n/g, '<br>')}</p>`).join('');
+  }).join('');
+}
+const reasonChip = s => s.reason ? `<span class="chip reason-${s.reason}">${{ question: 'asked a question', finished: 'finished', stuck: 'stuck' }[s.reason]}</span>` : '';
+const metaChips = s => `<span class="chip">${projects[s.project].name}</span><span class="chip">⎇ ${s.branch}</span>${s.issue ? `<span class="chip">issue ${s.issue}</span>` : ''}${s.mr ? `<span class="chip">MR ${s.mr}</span>` : ''}`;
+function toolCard(t, key) {
+  const open = state.openTools[key] ?? (t.tool === 'question');
+  const icon = t.status === 'running' ? '<span class="dot working"></span>' : t.tool === 'question' ? '?' : '✓';
+  let body = '';
+  if (open) {
+    if (t.tool === 'question') body = `<div class="tool-body"><p>${esc(t.input)}</p><div class="row">${t.options.map(o => `<button data-act="answer" data-v="${esc(o)}">${esc(o)}</button>`).join('')}<span class="muted">or reply below</span></div></div>`;
+    else body = `<div class="tool-body"><pre>${esc(t.output)}</pre></div>`;
+  }
+  return `<div class="tool ${t.tool}"><div class="tool-head" data-act="tool" data-k="${key}">${icon}<span class="name">${t.tool}</span><span class="grow ellipsis muted">${esc(t.tool === 'question' ? 'Agent is asking you' : t.input)}</span><span class="muted">${open ? '▾' : '▸'}</span></div>${body}</div>`;
+}
+function diffBody() {
+  const d = state.diff;
+  if (d.loading) return `<div class="diff-loading">Computing diff against base branch…</div>`;
+  if (!d.loaded) return `<div class="diff-loading">Not loaded</div>`;
+  return diffFor().map(f => `<div class="diff-file" id="f-${esc(f.file)}"><h4><span>${esc(f.file)}</span><span><span style="color:var(--ok)">+${f.add}</span> <span style="color:var(--err)">−${f.del}</span></span></h4>${f.lines.map(([k, l]) => `<div class="diff-line ${k === '+' ? 'add' : k === '-' ? 'del' : ''}">${k} ${esc(l)}</div>`).join('')}</div>`).join('');
+}
+function toggleDiff() {
+  const d = state.diff;
+  d.open = !d.open;
+  if (d.open && !d.loaded && !d.loading) { // lazy: only computed the first time it is opened
+    d.loading = true;
+    setTimeout(() => { d.loading = false; d.loaded = true; render(); }, 700);
+  }
+}
+function selectSession(id) { state.sel = id; state.diff = { open: false, loading: false, loaded: false }; }
+const composer = () => `<div class="composer"><textarea id="msg" placeholder="Reply to the agent… (Enter to send)"></textarea><button class="primary" data-act="send">Send</button></div>`;
+const settingsButtons = () => `<button class="ghost" data-act="stub" data-v="Projects">Projects</button><button class="ghost" data-act="stub" data-v="Memory">Memory</button><button class="ghost" data-act="stub" data-v="Artifacts">Artifacts</button><button class="ghost" data-act="stub" data-v="Settings">⚙</button>`;
+
+// ---------- Variant A: three panes ----------
+function VariantA() {
+  const s = byId(state.sel);
+  const group = (st, label) => {
+    const list = ofStatus(st), open = state.groups[st];
+    const items = !open ? '' : st === 'waiting'
+      ? list.map(x => `<div class="A-card ${x.id === state.sel ? 'sel' : ''}" data-act="sel" data-id="${x.id}">
+          <div class="row"><span class="dot waiting"></span><span class="title grow ellipsis">${esc(x.title)}</span></div>
+          <div class="row">${reasonChip(x)}${metaChips(x)}</div>
+          <div class="actions"><button data-act="stub" data-v="Reply">Reply</button>${x.mr ? `<button data-act="stub" data-v="Open MR ${x.mr} in browser">MR ${x.mr} ↗</button>` : `<button data-act="stub" data-v="Open Merge request">Open MR</button>`}<button data-act="stub" data-v="Archive">Archive</button></div></div>`).join('')
+      : list.map(x => `<div class="A-mini ${x.id === state.sel ? 'sel' : ''}" data-act="sel" data-id="${x.id}"><span class="dot ${st}"></span><span class="grow ellipsis">${esc(x.title)}</span><span class="muted">${projects[x.project].name}</span></div>`).join('');
+    return `<div class="A-group-title" data-act="group" data-v="${st}">${open ? '▾' : '▸'} ${label} <span class="chip">${list.length}</span></div>${items}`;
+  };
+  return `<div class="A">
+    <aside class="A-side">
+      <header><b>Loom</b><span class="grow"></span><button data-act="stub" data-v="New Session">+ Session</button></header>
+      <div class="scroll">${group('waiting', 'Waiting')}${group('working', 'Working')}${group('archived', 'Archived')}</div>
+      <footer>${settingsButtons()}</footer>
+    </aside>
+    <main class="A-main">
+      <header><div class="row"><span class="dot ${s.status}"></span><b class="grow">${esc(s.title)}</b>${reasonChip(s)}</div><div class="row" style="margin-top:4px">${metaChips(s)}</div></header>
+      <div class="A-chat">${transcripts[s.id].map((m, i) => m.tool
+        ? `<div style="margin-left:36px;max-width:70ch">${toolCard(m, s.id + i)}</div>`
+        : `<div class="bubble-row ${m.who}">${m.who === 'agent' ? '<div class="avatar">π</div>' : ''}<div class="bubble">${md(m.text)}</div>${m.who === 'user' ? '<div class="avatar">LB</div>' : ''}</div>`).join('')}</div>
+      ${composer()}
+    </main>
+    ${state.diff.open
+      ? `<section class="A-diff"><header><b>Changes</b><span class="muted">vs main</span><span class="grow"></span><button class="ghost" data-act="diff">✕</button></header><div class="scroll">${diffBody()}</div></section>`
+      : `<div class="A-diff-rail" data-act="diff">◂ DIFF</div>`}
+  </div>`;
+}
+
+// ---------- Variant B: inbox triage ----------
+function VariantB() {
+  const waiting = ofStatus('waiting'), working = ofStatus('working');
+  const top = `<div class="B-top"><b>Loom</b>
+      ${state.bView === 'session' ? `<button class="ghost" data-act="b-inbox">← Inbox <span class="chip">${waiting.length}</span></button>` : ''}
+      <span class="grow"></span>
+      <button data-act="b-pop"><span class="dot working"></span> ${working.length} working</button>
+      <button data-act="stub" data-v="New Session">+ Session</button>${settingsButtons()}
+      ${state.bPop ? `<div class="B-pop">${working.map(x => `<div class="A-mini" data-act="b-open" data-id="${x.id}"><span class="dot working"></span><span class="grow ellipsis">${esc(x.title)}</span><span class="muted">${projects[x.project].name}</span></div>`).join('')}</div>` : ''}
+    </div>`;
+  if (state.bView === 'inbox') {
+    return `<div class="B">${top}<div class="B-inbox">
+      <h2>Needs your attention <span class="muted">· j/k to move, Enter to open</span></h2>
+      ${waiting.map((x, i) => `<div class="B-item ${i === state.bFocus ? 'focus' : ''}" data-act="b-open" data-id="${x.id}">
+        <span class="dot waiting" style="margin-top:6px"></span>
+        <div><div class="row"><span class="title">${esc(x.title)}</span>${reasonChip(x)}<span class="muted">${x.updated}</span></div>
+          <div class="row" style="margin-top:4px">${metaChips(x)}</div><div class="excerpt">${md(x.excerpt)}</div></div>
+        <div class="actions"><button data-act="b-open" data-id="${x.id}">Open</button>${x.mr ? `<button data-act="stub" data-v="Open MR ${x.mr}">MR ${x.mr} ↗</button>` : `<button data-act="stub" data-v="Open Merge request">Open MR</button>`}<button data-act="stub" data-v="Archive">Archive</button></div>
+      </div>`).join('')}
+      <p class="muted" style="margin-top:24px">${ofStatus('archived').length} archived Sessions · <a href="#" data-act="stub" data-v="Archive list" style="color:var(--accent)">browse</a></p>
+    </div></div>`;
+  }
+  const s = byId(state.sel), wi = waiting.findIndex(x => x.id === s.id), next = waiting[(wi + 1) % waiting.length];
+  return `<div class="B">${top}<div class="B-focus">
+    <div class="B-focus-head"><span class="dot ${s.status}"></span><b>${esc(s.title)}</b>${reasonChip(s)}${metaChips(s)}<span class="grow"></span>
+      ${next && next.id !== s.id ? `<button data-act="b-open" data-id="${next.id}">Next waiting →</button>` : ''}</div>
+    <div class="B-chat">${transcripts[s.id].map((m, i) => m.tool ? toolCard(m, s.id + i)
+      : `<div class="bubble-row ${m.who}"><div class="bubble">${md(m.text)}</div></div>`).join('')}</div>
+    <div class="B-drawer"><div class="B-drawer-bar" data-act="diff">${state.diff.open ? '▾' : '▴'} Changes on ${esc(s.branch)} ${state.diff.loaded ? '<span class="chip">3 files</span>' : ''}</div>
+      ${state.diff.open ? `<div class="B-drawer-body"><div class="B-files">${state.diff.loaded ? diffFor().map(f => `<div>${esc(f.file.split('/').pop())} <span style="color:var(--ok)">+${f.add}</span></div>`).join('') : ''}</div><div>${diffBody()}</div></div>` : ''}
+    </div>
+    ${composer()}
+  </div></div>`;
+}
+
+// ---------- Variant C: tabs + document transcript ----------
+function VariantC() {
+  const s = byId(state.sel), waitingN = ofStatus('waiting').length;
+  const doc = `<div class="C-doc">
+      <h1>${esc(s.title)}</h1>
+      <div class="meta"><span class="dot ${s.status}" style="margin-top:5px"></span>${reasonChip(s)}${metaChips(s)}<span class="grow"></span>
+        <button data-act="stub" data-v="Open Merge request">Merge request</button><button data-act="stub" data-v="Create spec Artifact">→ Spec</button><button data-act="diff">${state.diff.open ? 'Hide diff' : 'Diff ⇆'}</button></div>
+      ${transcripts[s.id].map((m, i) => {
+        if (m.tool === 'question') return toolCard(m, s.id + i);
+        if (m.tool) {
+          const k = s.id + i, open = state.openTools[k];
+          return `<div class="C-tool-line" data-act="tool" data-k="${k}">${m.status === 'running' ? '<span class="dot working"></span>' : '·'} ${m.tool} ${esc(m.input)}  <span>${esc(m.output.split('\n')[0])}</span></div>${open ? `<pre>${esc(m.output)}</pre>` : ''}`;
+        }
+        return m.who === 'user' ? `<div class="C-turn-user">${md(m.text)}</div>` : `<div class="C-turn-agent">${md(m.text)}</div>`;
+      }).join('')}
+      <div style="height:80px"></div></div>`;
+  const overlay = state.cPalette ? palette() : state.cOverlay ? `<div class="C-overlay" data-act="c-close"><div class="C-palette" onclick="event.stopPropagation()"><div class="grp">${state.cOverlay}</div><div class="item muted">Stub panel: ${state.cOverlay}</div></div></div>` : '';
+  return `<div class="C">
+    <nav class="C-rail">
+      <button title="Sessions (Ctrl+K)" data-act="c-palette">☰${waitingN ? `<span class="badge">${waitingN}</span>` : ''}</button>
+      <button title="Next waiting" data-act="c-next">⏎</button>
+      <span class="grow"></span>
+      <button title="Projects" data-act="c-overlay" data-v="Projects">P</button><button title="Memory" data-act="c-overlay" data-v="Memory">M</button>
+      <button title="Artifacts" data-act="c-overlay" data-v="Artifacts">A</button><button title="Settings" data-act="c-overlay" data-v="Settings">⚙</button>
+    </nav>
+    <div class="C-tabs">${state.cTabs.map(id => { const t = byId(id); return `<div class="C-tab ${id === state.sel ? 'sel' : ''}" data-act="c-tab" data-id="${id}"><span class="dot ${t.status}"></span><span class="ellipsis">${esc(t.title)}</span><span class="x" data-act="c-closetab" data-id="${id}">✕</span></div>`; }).join('')}
+      <div class="C-tab" data-act="c-palette">+ <span class="muted">Ctrl+K</span></div></div>
+    <div class="C-body" style="grid-template-columns:${state.diff.open ? '1fr 1fr' : '1fr'};grid-template-rows:1fr auto">
+      ${doc}${state.diff.open ? `<div class="C-split" style="grid-row:1/3;grid-column:2">${diffBody()}</div>` : ''}
+      <div style="grid-column:1">${composer()}</div>
+      ${overlay}
+    </div>
+  </div>`;
+}
+function palette() {
+  const q = state.cQuery.toLowerCase();
+  const grp = (st, label) => { const l = ofStatus(st).filter(x => x.title.toLowerCase().includes(q)); return l.length ? `<div class="grp">${label}</div>` + l.map(x => `<div class="item" data-act="c-open" data-id="${x.id}"><span class="dot ${st}"></span><span class="grow">${esc(x.title)}</span>${reasonChip(x)}<span class="muted">${projects[x.project].name}</span></div>`).join('') : ''; };
+  return `<div class="C-overlay" data-act="c-close"><div class="C-palette" onclick="event.stopPropagation()"><input id="pal" placeholder="Jump to Session, or type a new task…" value="${esc(state.cQuery)}">${grp('waiting', 'Waiting')}${grp('working', 'Working')}${grp('archived', 'Archived')}</div></div>`;
+}
+
+// ---------- render + events ----------
+function render() {
+  document.getElementById('root').innerHTML = { A: VariantA, B: VariantB, C: VariantC }[state.variant]();
+  const keys = Object.keys(VARIANTS);
+  const d = state.diff;
+  document.getElementById('switcher').innerHTML = `<button data-act="v-prev">←</button><span>${state.variant} (${VARIANTS[state.variant]})</span><button data-act="v-next">→</button>
+    <span class="state">session=${state.sel} · ${byId(state.sel).status} · diff=${d.open ? 'open' : 'closed'}/${d.loading ? 'loading' : d.loaded ? 'loaded' : 'unloaded'}</span>`;
+  const pal = document.getElementById('pal');
+  if (pal) { pal.focus(); pal.setSelectionRange(pal.value.length, pal.value.length); }
+}
+function setVariant(dir) {
+  const keys = Object.keys(VARIANTS), i = keys.indexOf(state.variant);
+  state.variant = keys[(i + dir + keys.length) % keys.length];
+  history.replaceState(null, '', '?variant=' + state.variant);
+  render();
+}
+let toastT;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg + ' (stub)'; t.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', 1400); }
+function send(text) {
+  if (!text.trim()) return;
+  transcripts[state.sel].push({ who: 'user', text });
+  const s = byId(state.sel);
+  if (s.status === 'waiting') { s.status = 'working'; delete s.reason; }
+  render();
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const { act, id, v, k } = el.dataset;
+  e.stopPropagation();
+  switch (act) {
+    case 'v-prev': return setVariant(-1);
+    case 'v-next': return setVariant(1);
+    case 'sel': selectSession(id); break;
+    case 'group': state.groups[v] = !state.groups[v]; break;
+    case 'diff': toggleDiff(); break;
+    case 'tool': state.openTools[k] = !(state.openTools[k] ?? el.closest('.tool')?.classList.contains('question')); break;
+    case 'answer': return send(v);
+    case 'send': return send(document.getElementById('msg').value);
+    case 'stub': e.preventDefault(); return toast(v);
+    case 'b-inbox': state.bView = 'inbox'; break;
+    case 'b-pop': state.bPop = !state.bPop; break;
+    case 'b-open': selectSession(id); state.bView = 'session'; state.bPop = false; break;
+    case 'c-tab': selectSession(id); break;
+    case 'c-closetab': state.cTabs = state.cTabs.filter(x => x !== id); if (state.sel === id && state.cTabs.length) selectSession(state.cTabs[0]); break;
+    case 'c-palette': state.cPalette = true; state.cQuery = ''; break;
+    case 'c-close': state.cPalette = false; state.cOverlay = null; break;
+    case 'c-overlay': state.cOverlay = v; break;
+    case 'c-open': if (!state.cTabs.includes(id)) state.cTabs.push(id); selectSession(id); state.cPalette = false; break;
+    case 'c-next': { const w = ofStatus('waiting'); if (!w.length) return toast('Nothing waiting'); const n = w[(w.findIndex(x => x.id === state.sel) + 1) % w.length]; if (!state.cTabs.includes(n.id)) state.cTabs.push(n.id); selectSession(n.id); break; }
+  }
+  render();
+});
+document.addEventListener('input', e => { if (e.target.id === 'pal') { state.cQuery = e.target.value; render(); } });
+document.addEventListener('keydown', e => {
+  const typing = e.target.matches('input, textarea, [contenteditable]');
+  if (e.target.id === 'msg' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); return send(e.target.value); }
+  if (e.key === 'Escape') { state.cPalette = false; state.cOverlay = null; state.bPop = false; return render(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k' && state.variant === 'C') { e.preventDefault(); state.cPalette = true; state.cQuery = ''; return render(); }
+  if (typing) return;
+  if (e.key === 'ArrowLeft') return setVariant(-1);
+  if (e.key === 'ArrowRight') return setVariant(1);
+  if (state.variant === 'B' && state.bView === 'inbox') {
+    const w = ofStatus('waiting');
+    if (e.key === 'j') state.bFocus = Math.min(state.bFocus + 1, w.length - 1);
+    else if (e.key === 'k') state.bFocus = Math.max(state.bFocus - 1, 0);
+    else if (e.key === 'Enter' && w[state.bFocus]) { selectSession(w[state.bFocus].id); state.bView = 'session'; }
+    else return;
+    render();
+  }
+});
+render();
+</script>
+</body>
+</html>
