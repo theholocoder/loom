@@ -22,7 +22,11 @@ The shared, team-wide service that persists **Projects**, **Artifacts** and memo
 The agent is currently running; the **Session** does not need the user's attention.
 
 **Waiting** (Session status):
-The agent has finished, is stuck, or has asked a question; the **Session** needs the user's attention.
+The agent has finished, is stuck, has asked a question, or is held on an **Approval request**; the **Session** needs the user's attention.
+
+**Approval request**:
+The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
+_Avoid_: Permission prompt, confirmation
 
 **Archived** (Session status):
 The **Session** is closed and kept only for history.
