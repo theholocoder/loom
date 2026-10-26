@@ -27,6 +27,10 @@ The agent has finished, is stuck, or has asked a question; the **Session** needs
 **Archived** (Session status):
 The **Session** is closed and kept only for history.
 
+**Inbox**:
+The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**) or archives it.
+_Avoid_: Queue, notifications
+
 **Artifact**:
 A durable document produced during development (specification, implementation plan, code review, development note), stored on the server.
 
@@ -58,4 +62,4 @@ _Avoid_: PR (except when talking about GitHub specifically)
 ## Flagged ambiguities
 
 - "Discussion" was used for what is now **Session**; a Session is 1:1 with the agent's own conversation.
-- "In progress" / "working" in the original brief: resolved as **Waiting** (needs attention, expanded in the sidebar) vs **Working** (agent busy, collapsed).
+- "In progress" / "working" in the original brief: resolved as **Waiting** (needs attention, shown in the **Inbox**) vs **Working** (agent busy, collapsed).
