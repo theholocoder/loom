@@ -1,43 +1,43 @@
 # Loom
 
-A developer workspace for AI-assisted software development: a server that keeps projects, artifacts and memory, and clients where coding agents do the actual work on the developer's machine.
+A local desktop workspace for AI-assisted software development: coding agents do the work on the developer's machine, and Loom keeps everything there, with no server or account of its own.
 
 ## Language
 
 **Project**:
-A codebase tracked by Loom, backed by a git repository hosted on a forge.
+A git checkout the user has added to Loom on their machine, either an existing folder or a fresh clone. It belongs to that machine only. **Forge** features (starting a **Session** from an issue, **Merge requests**, **Babysit**) are available only when its remote is on a Forge the user is signed in to with that Forge's CLI.
 _Avoid_: Repo, workspace
 
 **Session**:
-A unit of work on a **Project**: one agent conversation bound to one branch and its isolated working copy, optionally linked to an issue and a merge request. A Session is private to its user and lives only on the machine where it was created.
+A unit of work on a **Project**: one agent conversation in a working copy, either its own git worktree (a *worktree Session*) or the **Project**'s checkout itself (a *checkout Session*), optionally linked to an issue and a merge request. The Session's branch is whatever its working copy has checked out at the moment; it may change during the Session. Several checkout Sessions may share the checkout. A Session is private to its user and lives only on the machine where it was created.
 _Avoid_: Discussion, chat, thread
 
 **Client**:
-The desktop application on a developer's machine, where Sessions, codebases and agents live.
+The desktop application on a developer's machine, where Sessions, codebases and agents live. It is all of Loom: there is no server.
 
-**Server**:
-The shared, team-wide service that persists **Projects**, **Artifacts** and memory; it never executes development work.
+**Environment**:
+Where a **Project** checkout's development work runs on a **Client** machine: the machine's native OS, or one WSL distro on Windows. The agent, git and the **Forge** CLIs of that checkout's **Sessions** all run inside it.
+_Avoid_: Host, runtime, target
+
+**Agent**:
+The coding agent a **Session** runs on (OpenCode in v1), installed on the developer's machine and signed in to their own model providers. Loom drives it with the user's own setup (skills, extensions, MCP servers), but never configures its providers or holds its credentials.
 
 **Working** (Session status):
 The agent is currently running; the **Session** does not need the user's attention.
 
 **Waiting** (Session status):
-The agent has finished, is stuck, or has asked a question; the **Session** needs the user's attention.
+The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, is held on an **Approval request**, or its **Merge request** has new feedback from **Babysit**; the **Session** needs the user's attention.
+
+**Approval request**:
+The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
+_Avoid_: Permission prompt, confirmation
 
 **Archived** (Session status):
 The **Session** is closed and kept only for history.
 
-**Artifact**:
-A durable document produced during development (specification, implementation plan, code review, development note), stored on the server.
-
-**User memory**:
-A user's personal preferences and working habits, reused across all their **Projects**. Private to that user.
-
-**Project memory**:
-Context, decisions, conventions and knowledge about one **Project**, reused by agents throughout its lifecycle. Shared by everyone on the team.
-
-**Team**:
-The group of users sharing one **Server**; a Server hosts exactly one Team.
+**Inbox**:
+The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**) or archives it.
+_Avoid_: Queue, notifications
 
 **Forge**:
 The service hosting a **Project**'s repository, issues and merge requests (GitHub or GitLab).
@@ -46,16 +46,20 @@ The service hosting a **Project**'s repository, issues and merge requests (GitHu
 A request to merge a **Session**'s branch, whatever the **Forge** calls it (MR on GitLab, PR on GitHub).
 _Avoid_: PR (except when talking about GitHub specifically)
 
+**Babysit**:
+Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on; a merged or closed Merge request archives the Session.
+_Avoid_: Watch, monitor
+
 ## Relationships
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**
-- A **Session** has one branch and at most one linked issue and one **Merge request**
+- A **Project** checkout on a **Client** machine runs in exactly one **Environment**; its **Sessions** run there too
+- A **Session** is on one branch at a time and has at most one linked issue and one **Merge request** (its current branch's)
+- A **Session** runs on exactly one agent, chosen when the Session is created; it cannot change afterwards
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
-- A **Project** has one **Project memory**; a user has one **User memory**
-- An **Artifact** belongs to a **Project** and may originate from a **Session**
-- Agents read and write memory themselves; users can edit or delete memory entries
 
 ## Flagged ambiguities
 
 - "Discussion" was used for what is now **Session**; a Session is 1:1 with the agent's own conversation.
-- "In progress" / "working" in the original brief: resolved as **Waiting** (needs attention, expanded in the sidebar) vs **Working** (agent busy, collapsed).
+- "Server", "Team", "Artifact" and Loom's own memory were dropped (ADR 0006): team knowledge, if any, reaches agents through the user's own MCP servers.
+- "In progress" / "working" in the original brief: resolved as **Waiting** (needs attention, shown in the **Inbox**) vs **Working** (agent busy, collapsed).
