@@ -50,6 +50,10 @@ The service hosting a **Project**'s repository, issues and merge requests (GitHu
 A request to merge a **Session**'s branch, whatever the **Forge** calls it (MR on GitLab, PR on GitHub).
 _Avoid_: PR (except when talking about GitHub specifically)
 
+**Babysit**:
+Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments, failed checks) is surfaced on the Session, or sent straight to the agent when auto-prompt is on; a merged or closed Merge request archives the Session.
+_Avoid_: Watch, monitor
+
 ## Relationships
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**
