@@ -369,7 +369,7 @@ function composer(s) {
       <button class="icon-btn sm" title="Commands and skills (/)" data-act="stub" data-v="Slash commands">${ic('square-slash')}</button>
       <button class="icon-btn sm" title="Attach an Artifact" data-act="stub" data-v="Attach Artifact">${ic('file-text')}</button>
       <span class="sep"></span>
-      ${pick(AGENTS[c.agent].icon, 'Agent', AGENTS[c.agent].name, 'agent', Object.entries(AGENTS).map(([k, a]) => [k, a.name]))}
+      <span class="pick" title="Agent is fixed for the Session (chosen at creation)" style="cursor:default">${ic(AGENTS[c.agent].icon, 'sm')}<b>${AGENTS[c.agent].name}</b>${ic('lock', 'sm')}</span>
       ${pick('cpu', 'Model', c.model, 'model', MODELS.map(m => [m, m]), true)}
       ${pick('brain', 'Thinking', 'think: ' + c.thinking, 'thinking', ['off', 'low', 'medium', 'high'].map(x => [x, 'Thinking: ' + x]))}
       <span class="grow"></span>

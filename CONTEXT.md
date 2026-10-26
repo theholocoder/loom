@@ -54,6 +54,7 @@ _Avoid_: PR (except when talking about GitHub specifically)
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**
 - A **Session** has one branch and at most one linked issue and one **Merge request**
+- A **Session** runs on exactly one agent (Pi or OpenCode), chosen when the Session is created; it cannot change afterwards
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
 - A **Project** has one **Project memory**; a user has one **User memory**
 - An **Artifact** belongs to a **Project** and may originate from a **Session**
