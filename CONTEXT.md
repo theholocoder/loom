@@ -15,6 +15,10 @@ _Avoid_: Discussion, chat, thread
 **Client**:
 The desktop application on a developer's machine, where Sessions, codebases and agents live.
 
+**Environment**:
+Where a **Project** checkout's development work runs on a **Client** machine: the machine's native OS, or one WSL distro on Windows. The agent, git and the **Forge** CLIs of that checkout's **Sessions** all run inside it.
+_Avoid_: Host, runtime, target
+
 **Agent**:
 The coding agent a **Session** runs on (Pi or OpenCode), installed on the developer's machine and signed in to their own model providers. Loom drives it with the user's own setup (skills, extensions, MCP servers) plus Loom's tools, but never configures its providers or holds its credentials.
 
@@ -73,6 +77,7 @@ _Avoid_: Watch, monitor
 ## Relationships
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**
+- A **Project** checkout on a **Client** machine runs in exactly one **Environment**; its **Sessions** run there too
 - A **Session** has one branch and at most one linked issue and one **Merge request**
 - A **Session** runs on exactly one agent (Pi or OpenCode), chosen when the Session is created; it cannot change afterwards
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
