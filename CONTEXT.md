@@ -25,7 +25,7 @@ The shared, team-wide service that persists **Projects**, **Artifacts** and memo
 The agent is currently running; the **Session** does not need the user's attention.
 
 **Waiting** (Session status):
-The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, or is held on an **Approval request**; the **Session** needs the user's attention.
+The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, is held on an **Approval request**, or its **Merge request** has new feedback from **Babysit**; the **Session** needs the user's attention.
 
 **Approval request**:
 The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
@@ -66,7 +66,7 @@ A request to merge a **Session**'s branch, whatever the **Forge** calls it (MR o
 _Avoid_: PR (except when talking about GitHub specifically)
 
 **Babysit**:
-Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments, failed checks) is surfaced on the Session, or sent straight to the agent when auto-prompt is on; a merged or closed Merge request archives the Session.
+Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on; a merged or closed Merge request archives the Session.
 _Avoid_: Watch, monitor
 
 ## Relationships
