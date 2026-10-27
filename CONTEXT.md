@@ -16,7 +16,7 @@ _Avoid_: Discussion, chat, thread
 The desktop application on a developer's machine, where Sessions, codebases and agents live.
 
 **Agent**:
-The coding agent a **Session** runs on (Pi or OpenCode), installed on the developer's machine and signed in to their own model providers. Loom drives it but never configures its providers or holds its credentials.
+The coding agent a **Session** runs on (Pi or OpenCode), installed on the developer's machine and signed in to their own model providers. Loom drives it with the user's own setup (skills, extensions, MCP servers) plus Loom's tools, but never configures its providers or holds its credentials.
 
 **Server**:
 The shared, team-wide service that persists **Projects**, **Artifacts** and memory; it never executes development work.
@@ -25,7 +25,7 @@ The shared, team-wide service that persists **Projects**, **Artifacts** and memo
 The agent is currently running; the **Session** does not need the user's attention.
 
 **Waiting** (Session status):
-The agent has finished, is stuck, has asked a question, or is held on an **Approval request**; the **Session** needs the user's attention.
+The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, or is held on an **Approval request**; the **Session** needs the user's attention.
 
 **Approval request**:
 The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
