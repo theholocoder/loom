@@ -9,7 +9,7 @@ A codebase tracked by Loom, backed by exactly one git repository hosted on a for
 _Avoid_: Repo, workspace
 
 **Session**:
-A unit of work on a **Project**: one agent conversation bound to one branch and its isolated working copy, optionally linked to an issue and a merge request. A Session is private to its user and lives only on the machine where it was created.
+A unit of work on a **Project**: one agent conversation bound to one branch and a working copy, either its own isolated one or the **Project**'s main checkout, optionally linked to an issue and a merge request. A Session is private to its user and lives only on the machine where it was created.
 _Avoid_: Discussion, chat, thread
 
 **Client**:
