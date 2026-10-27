@@ -15,6 +15,9 @@ _Avoid_: Discussion, chat, thread
 **Client**:
 The desktop application on a developer's machine, where Sessions, codebases and agents live.
 
+**Agent**:
+The coding agent a **Session** runs on (Pi or OpenCode), installed on the developer's machine and signed in to their own model providers. Loom drives it but never configures its providers or holds its credentials.
+
 **Server**:
 The shared, team-wide service that persists **Projects**, **Artifacts** and memory; it never executes development work.
 
