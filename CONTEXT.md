@@ -39,7 +39,8 @@ The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what
 _Avoid_: Queue, notifications
 
 **Artifact**:
-A durable document produced during development (specification, implementation plan, code review, development note), stored on the server.
+A durable document produced during development and stored on the server, of one kind: a spec (what to build), a task (one vertical slice of a spec, picked up by a later **Session**), or a code review report. Agents write and revise Artifacts themselves; Loom gives each kind no structure beyond its markdown.
+_Avoid_: Ticket, issue (for a task Artifact: it is not tracked on the **Forge**)
 
 **User memory**:
 A user's personal preferences and working habits, reused across all their **Projects**. Private to that user.
@@ -81,6 +82,7 @@ _Avoid_: Watch, monitor
 - Any **Team** member can edit or delete an **Artifact**; edits keep a revision history, deletion is permanent
 - A **User memory** or **Project memory** is a list of **Memory entries**
 - Agents read, create and update **Memory entries** themselves; only users delete them
+- Agents create, read and update **Artifacts** themselves; only users delete them
 - Any **Team** member can edit or delete a **Project memory** entry; a **User memory** is visible only to its user
 
 ## Flagged ambiguities
