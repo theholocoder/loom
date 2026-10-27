@@ -5,7 +5,7 @@ A developer workspace for AI-assisted software development: a server that keeps 
 ## Language
 
 **Project**:
-A codebase tracked by Loom, backed by a git repository hosted on a forge.
+A codebase tracked by Loom, backed by exactly one git repository hosted on a forge. Any **Team** member can add one, and every member sees all of them. A Project is archived rather than deleted: it disappears from pickers, but its memory, **Artifacts** and usage history stay.
 _Avoid_: Repo, workspace
 
 **Session**:
@@ -77,7 +77,8 @@ _Avoid_: Watch, monitor
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
 - A **Project** has one **Project memory**; a user has one **User memory**
 - A user has one or more **Forge accounts**; a Forge account belongs to exactly one user
-- An **Artifact** belongs to a **Project** and may originate from a **Session**
+- An **Artifact** belongs to a **Project** and may originate from a **Session**; teammates see that Session's issue and **Merge request**, never its title
+- Any **Team** member can edit or delete an **Artifact**; edits keep a revision history, deletion is permanent
 - A **User memory** or **Project memory** is a list of **Memory entries**
 - Agents read, create and update **Memory entries** themselves; only users delete them
 - Any **Team** member can edit or delete a **Project memory** entry; a **User memory** is visible only to its user
