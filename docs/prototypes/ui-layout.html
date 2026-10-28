@@ -8,10 +8,11 @@
   (default Midnight), New Session becomes a "+" icon, no Plan/Build toggle, separate UI and monospace fonts
   (monospace for technical refs: issues, MRs, branches, repos, models). This round keeps that layout and explores:
     - the left sidebar as an Inbox, three ways (?variant=A|B|C)
-    - a richer composer (agent, model, thinking, mode, attachments, context gauge)
+    - a richer composer (agent, model, effort, attachments, context gauge)
     - a Ctrl+K command palette (actions + session search with is:/project:/has: filters)
     - themes and fonts (?theme=… &font=…), switchable independently from the bottom pill
-  All data is mocked in memory; actions are stubs.
+  All data is mocked; actions are stubs.
+  Aligned with v1 as decided (theholocoder/loom#42): a local-only Client, OpenCode as the only agent.
 -->
 <html lang="en">
 <head>
@@ -248,21 +249,23 @@ const sessions = [
     snippet: 'Added a "Verifying signatures" page with Node and Python examples.' },
   { id: 's10', status: 'waiting', reason: 'question', unread: false, title: 'Split invoice PDF rendering into a worker', project: 'billing', branch: 'billing/120-pdf-worker', issue: '#120', mr: null, time: 'Yesterday',
     snippet: 'Use BullMQ (already a dependency) or a plain child process?' },
-  { id: 's4', status: 'working', title: 'Spec: memory tools', project: 'loom', branch: 'loom/spec-memory-tools', issue: null, mr: null, time: 'now', since: Date.now() - 4 * 60e3 - 12e3, snippet: 'Running pnpm typecheck…' },
+  { id: 's4', status: 'working', title: 'Persist Inbox section state', project: 'loom', branch: 'loom/persist-inbox-sections', issue: null, mr: null, time: 'now', since: Date.now() - 4 * 60e3 - 12e3, snippet: 'Running pnpm typecheck…' },
   { id: 's5', status: 'working', title: 'Migrate invoices table to PostgreSQL', project: 'billing', branch: 'billing/98-pg-invoices', issue: '#98', mr: null, time: 'now', since: Date.now() - 27 * 60e3 - 40e3, snippet: 'Editing migrations/0042_invoices.sql' },
   { id: 's6', status: 'archived', title: 'Bootstrap Electron shell', project: 'loom', branch: 'loom/1-electron-shell', issue: '#1', mr: '#12', time: 'Oct 22', snippet: 'Merged.' },
   { id: 's7', status: 'archived', title: 'Upgrade Stripe SDK', project: 'billing', branch: 'billing/77-stripe-sdk', issue: '#77', mr: '!70', time: 'Oct 18', snippet: 'Merged.' },
   { id: 's8', status: 'archived', title: 'Try OpenCode adapter spike', project: 'loom', branch: 'loom/oc-spike', issue: null, mr: null, time: 'Oct 15', snippet: 'Abandoned.' },
 ];
-const AGENTS = { pi: { name: 'Pi', icon: 'pi' }, opencode: { name: 'OpenCode', icon: 'square-code' } };
-const MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'gpt-5.1', 'qwen3-coder (local)'];
+const AGENTS = { opencode: { name: 'OpenCode', icon: 'square-code' } };
+// Models as OpenCode reports them (`provider/model`, from the user's own providers) and its effort levels
+const MODELS = ['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5', 'anthropic/claude-haiku-5-5', 'openai/gpt-5.1', 'ollama/qwen3-coder'];
+const EFFORTS = ['default', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];
 function transcript(s) {
   const t = [
     { who: 'user', text: s.issue ? `Work on ${s.issue}: **${s.title}**. Keep the change small and add a test.` : `**${s.title}**` },
     { who: 'agent', text: 'Reading the issue and the relevant code first.' },
     { tool: 'read', input: 'src/renderer/session/SessionHeader.tsx', status: 'ok', output: '142 lines' },
     { tool: 'bash', input: 'pnpm test --filter session', status: 'ok', output: 'Tests  41 passed (41)\nDuration  3.2s' },
-    { tool: 'memory', input: 'Project memory ← "Session headers use the ActionBar component, never ad-hoc buttons."', status: 'ok', output: 'saved' },
+    { tool: 'grep', input: 'ActionBar src/renderer', status: 'ok', output: '6 matches in 3 files' },
     { who: 'agent', text: 'I added the button to `ActionBar` and wired it to the forge adapter:\n\n- shows **Open Merge request** when the branch has commits\n- disabled while the Session is Working\n- the label follows the forge (PR on GitHub, MR on GitLab)\n\n```ts\nif (session.hasCommits) {\n  actions.push({ id: "open-mr", label: mergeRequestLabel(project.forge), run: openMergeRequest })\n}\n```' },
     { tool: 'edit', input: 'src/renderer/session/ActionBar.tsx', status: 'ok', output: '+18 −3' },
   ];
@@ -304,10 +307,10 @@ const state = {
   sections: { working: false, archived: false },
   diff: { open: false, loading: false, loaded: false },
   openTools: {},
-  composer: { agent: 'pi', model: 'claude-sonnet-5-5', thinking: 'medium', attachments: [], draft: '' },
+  composer: { agent: 'opencode', model: 'anthropic/claude-sonnet-5-5', effort: 'default', attachments: [], draft: '' },
   palette: null, // { q, hi }
   view: params.get('view') === 'dashboard' ? 'dashboard' : 'session', // 'session' | 'dashboard'
-  dash: { scope: 'me', period: 30, project: 'all', table: false },
+  dash: { period: 30, project: 'all', table: false },
 };
 const byId = id => sessions.find(s => s.id === id);
 const ofStatus = st => sessions.filter(s => s.status === st);
@@ -351,16 +354,13 @@ function toggleDiff() {
   if (d.open && !d.loaded && !d.loading) { d.loading = true; setTimeout(() => { d.loading = false; d.loaded = true; render(); }, 700); }
 }
 const sideTop = () => `<div class="side-top">
-    <div class="brand">${ic('waypoints')} Loom<span class="grow"></span><button class="icon-btn" title="New Session (N)" data-act="stub" data-v="New Session">${ic('plus')}</button><button class="icon-btn" title="Notifications" data-act="stub" data-v="Notifications">${ic('bell')}</button></div>
+    <div class="brand">${ic('waypoints')} Loom<span class="grow"></span><button class="icon-btn" title="New Session (N)" data-act="stub" data-v="New Session">${ic('plus')}</button></div>
     <div class="search" data-act="palette">${ic('search')}<span>Search Sessions and actions</span><kbd>Ctrl K</kbd></div></div>`;
 const sideFoot = () => `<div class="side-foot">
     <button class="icon-btn" title="Projects" data-act="stub" data-v="Projects">${ic('folder-git-2')}</button>
-    <button class="icon-btn" title="Artifacts" data-act="stub" data-v="Artifacts">${ic('file-text')}</button>
-    <button class="icon-btn" title="Memory" data-act="stub" data-v="Memory">${ic('brain')}</button>
     <button class="icon-btn" title="Dashboard" data-act="dashboard" style="${state.view === 'dashboard' ? 'color:var(--accent)' : ''}">${ic('chart-column')}</button>
     <span class="grow"></span>
-    <button class="icon-btn" title="Settings" data-act="stub" data-v="Settings">${ic('settings')}</button>
-    <button class="icon-btn" title="Account" data-act="stub" data-v="Account">${ic('circle-user-round')}</button></div>`;
+    <button class="icon-btn" title="Settings" data-act="stub" data-v="Settings">${ic('settings')}</button></div>`;
 
 // ---------- sidebar variants ----------
 function SideB() {
@@ -387,7 +387,7 @@ function SideB() {
 // ---------- main pane (shared) ----------
 function toolCard(t, key) {
   const open = state.openTools[key] ?? (t.tool === 'question');
-  const icons = { read: 'file-search', bash: 'square-terminal', memory: 'brain', edit: 'file-pen', question: 'message-circle-question' };
+  const icons = { read: 'file-search', bash: 'square-terminal', grep: 'text-search', edit: 'file-pen', question: 'message-circle-question' };
   const st = t.status === 'running' ? `<span class="spin st-working">${ic('loader-circle', 'sm')}</span>` : t.tool === 'question' ? '' : `<span style="color:var(--ok)">${ic('check', 'sm')}</span>`;
   let body = '';
   if (open) body = t.tool === 'question'
@@ -420,11 +420,10 @@ function composer(s) {
       <button class="icon-btn sm" title="Attach file or image" data-act="attach">${ic('paperclip')}</button>
       <button class="icon-btn sm" title="Mention a file (@)" data-act="stub" data-v="Mention file">${ic('at-sign')}</button>
       <button class="icon-btn sm" title="Commands and skills (/)" data-act="stub" data-v="Slash commands">${ic('square-slash')}</button>
-      <button class="icon-btn sm" title="Attach an Artifact" data-act="stub" data-v="Attach Artifact">${ic('file-text')}</button>
       <span class="sep"></span>
-      <span class="pick" title="Agent is fixed for the Session (chosen at creation)" style="cursor:default">${ic(AGENTS[c.agent].icon, 'sm')}<b>${AGENTS[c.agent].name}</b>${ic('lock', 'sm')}</span>
+      <span class="pick" title="Agent (OpenCode is v1's only agent)" style="cursor:default">${ic(AGENTS[c.agent].icon, 'sm')}<b>${AGENTS[c.agent].name}</b></span>
       ${pick('cpu', 'Model', c.model, 'model', MODELS.map(m => [m, m]), true)}
-      ${pick('brain', 'Thinking', 'think: ' + c.thinking, 'thinking', ['off', 'low', 'medium', 'high'].map(x => [x, 'Thinking: ' + x]))}
+      ${pick('brain', 'Effort', 'effort: ' + c.effort, 'effort', EFFORTS.map(x => [x, 'Effort: ' + x]))}
       <span class="grow"></span>
       <span class="gauge" title="Context window used">${ic('gauge', 'sm')}38%</span>
       ${working ? `<button class="send" data-act="stub" data-v="Stop agent">${ic('square')}Stop</button>` : ''}
@@ -442,7 +441,6 @@ function Main() {
         <div class="row"><h1 class="ellipsis">${esc(s.title)}</h1>${statusIcon(s)}${elapsed(s)}${refs(s)}</div>
       </div>
       <button class="icon-btn" title="${s.mr ? 'Open Merge request' : 'Create Merge request'}" data-act="stub" data-v="${s.mr ? 'Open MR ' + s.mr : 'Create Merge request'}">${ic(s.mr ? 'git-pull-request' : 'git-pull-request-create')}</button>
-      <button class="icon-btn" title="Create spec Artifact from this Session" data-act="stub" data-v="Create spec Artifact">${ic('file-plus-2')}</button>
       <button class="icon-btn" title="Open worktree in editor" data-act="stub" data-v="Open in editor">${ic('code-xml')}</button>
       <button class="icon-btn" title="Archive" data-act="archive" data-id="${s.id}">${ic('archive')}</button>
       <button class="icon-btn" title="More" data-act="stub" data-v="More">${ic('ellipsis-vertical')}</button>
@@ -460,19 +458,17 @@ function Diff() {
 }
 
 // ---------- dashboard ----------
-// Usage stats. "Me" is computed on the Client from local Sessions; "Team" comes from the Server,
-// which receives per-Session usage counters from every Client (counts only, never transcripts).
-const MEMBERS = ['you', 'amira', 'tom', 'sana', 'jules'];
-const MODEL_SHARE = [['claude-sonnet-5-5', .58], ['claude-opus-5-5', .22], ['claude-haiku-5-5', .12], ['gpt-5.1', .06], ['qwen3-coder (local)', .02]];
+// Personal usage stats, computed on the Client from the Sessions on this machine (nothing leaves it).
+const MODEL_SHARE = [['anthropic/claude-sonnet-5-5', .58], ['anthropic/claude-opus-5-5', .22], ['anthropic/claude-haiku-5-5', .12], ['openai/gpt-5.1', .06], ['ollama/qwen3-coder', .02]];
 const PROJECT_BASE = { loom: 900e3, billing: 620e3, docs: 160e3 };
 const rnd = (a, b) => { const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return x - Math.floor(x); };
 const fmtN = n => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n));
 const END = new Date(2026, 9, 26);
 const dayLabel = i => { const d = new Date(END); d.setDate(d.getDate() - i); return d.toLocaleDateString('en', { month: 'short', day: 'numeric' }); };
 function usage() {
-  const { scope, period, project } = state.dash;
+  const { period, project } = state.dash;
   const projs = Object.keys(projects).filter(p => project === 'all' || p === project);
-  const mult = scope === 'team' ? 4.6 : 1, seed = scope === 'team' ? 7 : 1;
+  const mult = 1, seed = 1;
   const days = [];
   for (let i = period - 1; i >= 0; i--) {
     const d = new Date(END); d.setDate(d.getDate() - i);
@@ -518,14 +514,13 @@ function hbars(rows, color) {
   return rows.map(([label, v, c]) => `<div class="hbar" data-tip="${esc(`<b>${label}</b><div class="r">tokens<b>${fmtN(v)}</b></div>`)}"><span class="ellipsis">${label}</span><div class="track"><div class="fill" style="width:${v / max * 100}%;background:${c || color}"></div></div><span class="val">${fmtN(v)}</span></div>`).join('');
 }
 function Dashboard() {
-  const D = state.dash, u = usage(), team = D.scope === 'team';
+  const D = state.dash, u = usage();
   const cost = u.total / 1e6 * 3.1, prev = .88;
   const seg = (k, opts) => `<span class="seg">${opts.map(([v, l]) => `<span class="${String(D[k]) === String(v) ? 'on' : ''}" data-act="dash" data-k="${k}" data-v="${v}">${l}</span>`).join('')}</span>`;
-  const top = sessions.filter(s => u.projs.includes(s.project)).map((s, i) => ({ s, tok: (2.4 - i * .21) * 1e6 * (team ? 1 : .6), dur: [72, 41, 133, 18, 55, 27, 64, 22, 39, 12][i % 10] }));
+  const top = sessions.filter(s => u.projs.includes(s.project)).map((s, i) => ({ s, tok: (2.4 - i * .21) * 1e6 * .6, dur: [72, 41, 133, 18, 55, 27, 64, 22, 39, 12][i % 10] }));
   return `<main class="dash">
-    <div class="row"><h1>Dashboard</h1><span class="grow"></span><span class="muted" style="font-size:12px">${team ? 'Reported to the Server by every Client · counts only' : 'Computed from Sessions on this machine'}</span></div>
+    <div class="row"><h1>Dashboard</h1><span class="grow"></span><span class="muted" style="font-size:12px">Computed from Sessions on this machine</span></div>
     <div class="dash-filters">
-      ${seg('scope', [['me', `${ic('user-round', 'sm')}Me`], ['team', `${ic('users-round', 'sm')}Team`]])}
       ${seg('period', [[7, '7 days'], [30, '30 days'], [90, '90 days']])}
       <select data-dash="project"><option value="all">All Projects</option>${Object.entries(projects).map(([k, p]) => `<option value="${k}" ${D.project === k ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
     </div>
@@ -535,7 +530,7 @@ function Dashboard() {
       ${tile('messages-square', 'Sessions started', u.sessionsN, `${Math.round(u.sessionsN * .62)} with a Merge request`)}
       ${tile('git-merge', 'Merge requests merged', Math.round(u.sessionsN * .48), `${Math.round(u.sessionsN * .08)} still open`)}
       ${tile('timer', 'Median agent run', '6m 40s', 'Working → Waiting')}
-      ${tile('inbox', 'Median wait for you', team ? '38m' : '22m', 'Time a Session sits in the Inbox')}
+      ${tile('inbox', 'Median wait for you', '22m', 'Time a Session sits in the Inbox')}
     </div>
     <div class="cards">
       <div class="card wide"><div class="card-head"><h3>Tokens per day</h3><div class="legend">${u.projs.map(p => `<span><span class="sw" style="background:${projects[p].color}"></span>${esc(projects[p].name)}</span>`).join('')}</div><span class="grow"></span>
@@ -551,11 +546,9 @@ function Dashboard() {
         <p class="muted" style="font-size:12.5px;margin:10px 0 0">Cache hit rate 67% · saves ≈ $${Math.round(cost * .9).toLocaleString('en')} vs uncached</p></div>
       <div class="card"><div class="card-head"><h3>Session outcomes</h3></div>
         ${hbars([[`<span class="row" style="color:var(--ok)">${ic('git-merge', 'sm')}<span style="color:var(--text)">Merged</span></span>`, u.sessionsN * .48, 'var(--ok)'], [`<span class="row muted">${ic('archive', 'sm')}<span style="color:var(--text)">Archived, no MR</span></span>`, u.sessionsN * .3, 'var(--muted)'], [`<span class="row" style="color:var(--work)">${ic('git-pull-request', 'sm')}<span style="color:var(--text)">Open</span></span>`, u.sessionsN * .14, 'var(--work)'], [`<span class="row" style="color:var(--err)">${ic('triangle-alert', 'sm')}<span style="color:var(--text)">Stuck at least once</span></span>`, u.sessionsN * .08, 'var(--err)']])}</div>
-      ${team ? `<div class="card wide"><div class="card-head"><h3>By member</h3></div><table class="data"><tr><th>Member</th><th class="n">Sessions</th><th class="n">Tokens</th><th class="n">Est. cost</th><th class="n">MRs merged</th><th class="n">Median wait for you</th></tr>
-        ${MEMBERS.map((m, i) => { const f = [.24, .27, .19, .18, .12][i]; return `<tr><td>${m === 'you' ? '<b>you</b>' : m}</td><td class="n">${Math.round(u.sessionsN * f)}</td><td class="n">${fmtN(u.total * f)}</td><td class="n">$${Math.round(cost * f)}</td><td class="n">${Math.round(u.sessionsN * f * .48)}</td><td class="n">${[22, 41, 15, 63, 30][i]}m</td></tr>`; }).join('')}</table></div>` : ''}
-      <div class="card wide"><div class="card-head"><h3>Top Sessions by tokens</h3><span class="muted" style="font-size:12px">${team ? 'titles of teammates\' Sessions are not shared' : 'click to open'}</span></div><table class="data">
-        <tr><th>Session</th><th>Project</th><th>Agent · model</th><th class="n">Tokens</th><th class="n">Working time</th><th>Status</th></tr>
-        ${top.slice(0, 6).map(({ s, tok, dur }, i) => `<tr class="${team && i % 2 ? '' : 'click'}" ${team && i % 2 ? '' : `data-act="sel" data-id="${s.id}"`}><td>${team && i % 2 ? `<span class="muted">${MEMBERS[i % 5 || 1]}'s Session</span>` : esc(s.title)}</td><td>${projTag(s.project)}</td><td><span class="tech">${i % 4 === 3 ? 'OpenCode' : 'Pi'} · ${MODEL_SHARE[i % 3][0]}</span></td><td class="n">${fmtN(tok)}</td><td class="n">${dur}m</td><td>${statusIcon(s)}</td></tr>`).join('')}
+      <div class="card wide"><div class="card-head"><h3>Top Sessions by tokens</h3><span class="muted" style="font-size:12px">click to open</span></div><table class="data">
+        <tr><th>Session</th><th>Project</th><th>Model</th><th class="n">Tokens</th><th class="n">Working time</th><th>Status</th></tr>
+        ${top.slice(0, 6).map(({ s, tok, dur }, i) => `<tr class="click" data-act="sel" data-id="${s.id}"><td>${esc(s.title)}</td><td>${projTag(s.project)}</td><td><span class="tech">${MODEL_SHARE[i % 3][0]}</span></td><td class="n">${fmtN(tok)}</td><td class="n">${dur}m</td><td>${statusIcon(s)}</td></tr>`).join('')}
       </table></div>
     </div>
   </main>`;
@@ -570,12 +563,9 @@ function actions() {
     { icon: 'folder-plus', label: 'Add Project', run: () => toast('Add Project') },
     { icon: 'arrow-right-to-line', label: 'Go to next waiting Session', kbd: 'J', run: nextWaiting },
     { icon: s.mr ? 'git-pull-request' : 'git-pull-request-create', label: (s.mr ? 'Open Merge request ' + s.mr : 'Create Merge request') + ' for current Session', run: () => toast('Merge request') },
-    { icon: 'file-plus-2', label: 'Create spec Artifact from current Session', run: () => toast('Create spec Artifact') },
     { icon: 'chart-column', label: 'Open dashboard', run: () => { state.view = 'dashboard'; } },
     { icon: 'file-diff', label: 'Toggle changes panel', kbd: 'D', run: toggleDiff },
     { icon: 'archive', label: 'Archive current Session', kbd: 'E', run: () => archive(s.id) },
-    { icon: 'brain', label: 'Edit Project memory', run: () => toast('Project memory') },
-    { icon: 'user-round-cog', label: 'Edit User memory', run: () => toast('User memory') },
     ...Object.entries(THEMES).map(([k, t]) => ({ icon: 'palette', label: 'Theme: ' + t.label, run: () => setTheme(k) })),
     { icon: 'settings', label: 'Open settings', kbd: ',', run: () => toast('Settings') },
   ];
