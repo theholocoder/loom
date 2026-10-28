@@ -11,15 +11,16 @@ A local desktop workspace for AI-assisted software development. See `CONTEXT.md`
 
 ## Development
 
-Tool versions are pinned in `mise.toml` (`mise install`).
+Tool versions are pinned in `mise.toml`. Common tasks are in the `justfile` (`just` lists them):
 
 ```bash
-pnpm install
-pnpm dev            # build the bridge and run the app
-pnpm typecheck
-pnpm test           # seam C (Go), then seams A and B (Vitest)
-pnpm test:e2e       # Electron smoke tests (Playwright); set LOOM_SMOKE_HEADLESS=1 with no display
+just install        # mise install, then pnpm install
+just dev            # build the bridge and run the app (alias: just start)
+just lint           # typecheck, go vet, gofmt check
+just test           # seams C, A and B, then the Electron smoke tests
 ```
+
+With no display, run the smoke tests headless: `LOOM_SMOKE_HEADLESS=1 just test`.
 
 ## Test seams
 
