@@ -1,13 +1,15 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 import electronBinary from 'electron';
 import clientPackage from '../package.json' with { type: 'json' };
 
-const appDir = fileURLToPath(new URL('..', import.meta.url));
+// resolve() drops the trailing separator: on Windows a quoted "…\client\"
+// escapes its closing quote and Electron gets a broken app path.
+const appDir = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 // GitHub's Linux runners don't allow Chromium's sandbox.
 const args = [
   ...(process.env.CI && process.platform === 'linux' ? ['--no-sandbox'] : []),
@@ -18,12 +20,18 @@ const args = [
 
 let userDataDir: string;
 let app: ElectronApplication | undefined;
+let appOutput: string[] = [];
 
 test.beforeEach(() => {
   userDataDir = mkdtempSync(join(tmpdir(), 'loom-smoke-'));
 });
 
-test.afterEach(async () => {
+test.afterEach(async ({}, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus && appOutput.length) {
+    await testInfo.attach('app output', { body: appOutput.join(''), contentType: 'text/plain' });
+    console.log(`--- app output (${testInfo.title}) ---\n${appOutput.join('')}`);
+  }
+  appOutput = [];
   await app?.close();
   app = undefined;
   // Windows can hold the profile's files briefly after the app exits.
@@ -32,7 +40,9 @@ test.afterEach(async () => {
 
 async function launch() {
   app = await electron.launch({ args, env: { ...process.env, LOOM_USER_DATA_DIR: userDataDir } });
-  const window = await app.firstWindow();
+  app.process().stdout?.on('data', (chunk) => appOutput.push(String(chunk)));
+  app.process().stderr?.on('data', (chunk) => appOutput.push(String(chunk)));
+  const window = await app.firstWindow({ timeout: 20_000 });
   // Headless windows start at 1x1, where nothing counts as visible.
   if (process.env.LOOM_SMOKE_HEADLESS) await window.setViewportSize({ width: 1400, height: 900 });
   return window;

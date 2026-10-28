@@ -59,6 +59,7 @@ if (!app.requestSingleInstanceLock()) {
         clock: systemClock,
       });
     } catch (error) {
+      console.error('Loom could not start:', error);
       dialog.showErrorBox('Loom could not start', (error as Error).message);
       app.exit(1);
       return;
