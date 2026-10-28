@@ -9,7 +9,7 @@ A git checkout the user has added to Loom on their machine, either an existing f
 _Avoid_: Repo, workspace
 
 **Session**:
-A unit of work on a **Project**: one agent conversation bound to one branch and a working copy, either its own isolated one or the **Project**'s main checkout, optionally linked to an issue and a merge request. A Session is private to its user and lives only on the machine where it was created.
+A unit of work on a **Project**: one agent conversation in a working copy, either its own git worktree (a *worktree Session*) or the **Project**'s checkout itself (a *checkout Session*), optionally linked to an issue and a merge request. The Session's branch is whatever its working copy has checked out at the moment; it may change during the Session. Several checkout Sessions may share the checkout. A Session is private to its user and lives only on the machine where it was created.
 _Avoid_: Discussion, chat, thread
 
 **Client**:
@@ -54,7 +54,7 @@ _Avoid_: Watch, monitor
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**
 - A **Project** checkout on a **Client** machine runs in exactly one **Environment**; its **Sessions** run there too
-- A **Session** has one branch and at most one linked issue and one **Merge request**
+- A **Session** is on one branch at a time and has at most one linked issue and one **Merge request** (its current branch's)
 - A **Session** runs on exactly one agent, chosen when the Session is created; it cannot change afterwards
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
 
