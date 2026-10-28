@@ -7,6 +7,6 @@ We considered keeping each transcript as an append-only NDJSON file, with SQLite
 ## Consequences
 
 - Only one Client runs per machine (single-instance lock), so the database never has two writers.
-- On Windows the database stays on the Windows side, even for Sessions in a WSL Environment. Nothing Loom stores lives in the distro except worktrees.
+- On Windows the database stays on the Windows side, even for Sessions in a WSL Environment. Nothing Loom stores lives in the distro except worktrees and the stateless bridge binary (ADR 0008).
 - Migrations are forward-only, with a `VACUUM INTO` snapshot taken first. A Client that finds a newer schema refuses to start rather than read it.
 - If better-sqlite3's prebuilt binary won't load on a supported Linux distro, the fallback is `node:sqlite` with our own Kysely dialect. Kysely keeps that swap a port, not a rewrite.
