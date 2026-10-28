@@ -1,6 +1,9 @@
 packages:
   - apps/*
 onlyBuiltDependencies:
-  - better-sqlite3
   - electron
   - esbuild
+# better-sqlite3 ships N-API prebuilds that load in both Node and Electron; its
+# install script would only run node-gyp, which CI runners don't have.
+ignoredBuiltDependencies:
+  - better-sqlite3
