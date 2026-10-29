@@ -1,3 +1,6 @@
+// The window's three panes, following docs/prototypes/ui-layout.html: the
+// Inbox sidebar, the main pane and the diff rail.
+import { Archive, ChartColumn, ChevronDown, ChevronRight, FileDiff, FolderGit2, Inbox, LoaderCircle, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { Settings } from './Settings';
 
@@ -11,42 +14,82 @@ export function App() {
     <div className="app">
       <aside className="side" aria-label="Inbox">
         <div className="side-top">
-          <div className="brand">Loom</div>
-          <button className="compose primary" type="button" disabled>
-            New Session
-          </button>
-          <div className="search muted">
-            Search <kbd>Ctrl K</kbd>
+          <div className="brand">
+            <Waypoints /> Loom<span className="grow" />
+            <button className="icon-btn" type="button" title="New Session (N)" aria-label="New Session">
+              <Plus />
+            </button>
           </div>
+          <button className="search" type="button" aria-label="Search Sessions and actions">
+            <Search />
+            <span>Search Sessions and actions</span>
+            <kbd>Ctrl K</kbd>
+          </button>
         </div>
         <div className="side-list">
-          <p className="empty muted">Nothing needs you right now.</p>
+          <div className="section-head" style={{ borderTop: 0, cursor: 'default' }}>
+            <Inbox className="sm" /> Inbox<span className="grow" />0
+          </div>
+          <div className="empty">Nothing needs you right now.</div>
+          <Section label="Working" icon={LoaderCircle} />
+          <Section label="Archived" icon={Archive} />
         </div>
         <nav className="side-foot">
-          <button type="button" aria-current={view === 'projects'} onClick={() => setView('projects')}>
-            Projects
-          </button>
-          <button type="button" aria-current={view === 'dashboard'} onClick={() => setView('dashboard')}>
-            Dashboard
-          </button>
-          <button type="button" aria-current={view === 'settings'} onClick={() => setView('settings')}>
-            Settings
-          </button>
+          <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => setView('projects')} />
+          <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => setView('dashboard')} />
+          <span className="grow" />
+          <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => setView('settings')} />
         </nav>
       </aside>
-      <main className="main" aria-label="Session">
-        {view === 'settings' ? <Settings /> : <div className="empty muted">No Session selected.</div>}
-      </main>
-      <div className="diff-pane">
-        <button className="diff-rail" type="button" aria-label="Diff" aria-expanded={diffOpen} aria-controls="diff-panel" onClick={() => setDiffOpen(!diffOpen)}>
-          <span>Diff</span>
+      {view === 'settings' ? (
+        <Settings />
+      ) : (
+        <main className="main" aria-label="Session">
+          <div className="empty">No Session selected.</div>
+        </main>
+      )}
+      {diffOpen ? (
+        <section className="diff" id="diff-panel" aria-label="Changes">
+          <header>
+            <FileDiff />
+            <b>Changes</b>
+            <span className="grow" />
+            <button className="icon-btn sm" type="button" title="Close" aria-label="Hide changes" aria-controls="diff-panel" aria-expanded onClick={() => setDiffOpen(false)}>
+              <PanelRightClose />
+            </button>
+          </header>
+          <div className="scroll">
+            <div className="empty">No Session selected.</div>
+          </div>
+        </section>
+      ) : (
+        <button className="diff-rail" type="button" title="Show changes" aria-label="Show changes" aria-expanded={false} onClick={() => setDiffOpen(true)}>
+          <FileDiff />
+          <span>CHANGES</span>
         </button>
-        {diffOpen && (
-          <section id="diff-panel" className="diff" aria-label="Diff panel">
-            <div className="empty muted">No diff available.</div>
-          </section>
-        )}
-      </div>
+      )}
     </div>
+  );
+}
+
+/** A collapsible sidebar section (Working, Archived) below the Inbox. */
+function Section({ label, icon: Icon }: { label: string; icon: LucideIcon }) {
+  const [open, setOpen] = useState(false);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <button className="section-head" type="button" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Chevron className="sm" />
+      <Icon className="sm" />
+      {label}
+      <span className="grow" />0
+    </button>
+  );
+}
+
+function FootButton({ label, icon: Icon, current, onClick }: { label: string; icon: LucideIcon; current: boolean; onClick: () => void }) {
+  return (
+    <button className="icon-btn" type="button" title={label} aria-label={label} aria-current={current ? 'page' : undefined} onClick={onClick}>
+      <Icon />
+    </button>
   );
 }

@@ -30,13 +30,16 @@ describe('the window', () => {
 
     const inbox = screen.getByRole('complementary', { name: 'Inbox' });
     expect(within(inbox).getByRole('button', { name: 'New Session' })).toBeTruthy();
+    expect(within(inbox).getByRole('button', { name: 'Search Sessions and actions' })).toBeTruthy();
     expect(within(inbox).getByText('Nothing needs you right now.')).toBeTruthy();
+    for (const section of ['Working', 'Archived']) {
+      expect(within(inbox).getByRole('button', { name: section }).getAttribute('aria-expanded')).toBe('false');
+    }
     expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy();
-    const diff = screen.getByRole('button', { name: 'Diff' });
-    expect(diff.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Show changes' }).getAttribute('aria-expanded')).toBe('false');
 
     const footer = within(inbox).getByRole('navigation');
-    expect(within(footer).getAllByRole('button').map((b) => b.textContent)).toEqual(['Projects', 'Dashboard', 'Settings']);
+    expect(within(footer).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Projects', 'Dashboard', 'Settings']);
   });
 });
 
@@ -46,21 +49,22 @@ describe('Settings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
 
-    const env = screen.getByRole('group', { name: 'Native Environment' });
-    expect(within(env).getByText('Native Environment: connected')).toBeTruthy();
-    expect(within(env).getByText('loom-bridge 0.1.0')).toBeTruthy();
+    const row = screen.getByRole('row', { name: /Native/ });
+    expect(within(row).getByText('connected')).toBeTruthy();
+    expect(within(row).getByText('loom-bridge 0.1.0')).toBeTruthy();
   });
 
   it('follows the Environment as main reports changes', () => {
     const main = renderApp(new FakeMain({ environments: [{ id: 'native', label: 'Native', state: 'starting' }] }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(screen.getByText('Native Environment: starting')).toBeTruthy();
+    const row = () => screen.getByRole('row', { name: /Native/ });
+    expect(within(row()).getByText('starting')).toBeTruthy();
 
     act(() => main.publish('environments', [connectedNative]));
-    expect(screen.getByText('Native Environment: connected')).toBeTruthy();
+    expect(within(row()).getByText('connected')).toBeTruthy();
 
     act(() => main.publish('environments', [{ ...connectedNative, state: 'disconnected', error: 'bridge exited (SIGKILL)' }]));
-    expect(screen.getByText('Native Environment: disconnected')).toBeTruthy();
-    expect(screen.getByText('bridge exited (SIGKILL)')).toBeTruthy();
+    expect(within(row()).getByText('disconnected')).toBeTruthy();
+    expect(within(row()).getByText('bridge exited (SIGKILL)')).toBeTruthy();
   });
 });

@@ -53,11 +53,12 @@ test('launches into the three-pane window and connects the native Environment', 
 
   await expect(window.getByRole('complementary', { name: 'Inbox' })).toBeVisible();
   await expect(window.getByRole('main', { name: 'Session' })).toBeVisible();
-  await expect(window.getByRole('button', { name: 'Diff' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(window.getByRole('button', { name: 'Show changes' })).toHaveAttribute('aria-expanded', 'false');
 
   await window.getByRole('button', { name: 'Settings' }).click();
-  await expect(window.getByText('Native Environment: connected')).toBeVisible();
-  await expect(window.getByText(`loom-bridge ${clientPackage.version}`)).toBeVisible();
+  const native = window.getByRole('row', { name: /Native/ });
+  await expect(native.getByText('connected')).toBeVisible();
+  await expect(native.getByText(`loom-bridge ${clientPackage.version}`)).toBeVisible();
 });
 
 test('a second launch exits and leaves the first window in place', async () => {
