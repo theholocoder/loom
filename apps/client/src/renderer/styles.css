@@ -129,3 +129,10 @@ button.diff-rail:hover { background: var(--panel); }
 .warn { color: var(--wait); font-size: 12px; max-width: 46ch; margin-top: 2px; }
 .ag-ready { color: var(--ok); } .ag-checking { color: var(--work); } .ag-signed-out, .ag-unsupported { color: var(--wait); }
 .ag-missing, .ag-error { color: var(--err); } .ag-unknown { color: var(--muted); }
+.fg-available { color: var(--ok); } .fg-checking { color: var(--work); } .fg-off { color: var(--wait); } .fg-unknown { color: var(--muted); }
+input.prefix { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; width: 16ch; }
+/* The + menu, styled like the prototype's panels. */
+.menu-anchor { position: relative; display: inline-flex; }
+.menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 10; min-width: 260px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); padding: 4px; display: flex; flex-direction: column; }
+.menu [role="menuitem"] { background: none; border: 0; border-radius: 6px; padding: 6px 10px; font-weight: 400; font-size: 13px; text-align: left; white-space: nowrap; }
+.menu [role="menuitem"]:hover, .menu [role="menuitem"]:focus-visible { background: var(--hover); outline: none; }

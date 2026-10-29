@@ -112,6 +112,13 @@ export class Environment {
     await this.detectAgent();
   }
 
+  /** Sends one request to the bridge; rejects unless the Environment is connected. */
+  request<T>(method: string, timeoutMs: number, params?: unknown): Promise<T> {
+    const connection = this.connected();
+    if (!connection) return Promise.reject(new Error(`${this.options.label} is not connected`));
+    return connection.request<T>(method, timeoutMs, params);
+  }
+
   private connected(): BridgeConnection | undefined {
     return this.current.state === 'connected' ? this.connection : undefined;
   }

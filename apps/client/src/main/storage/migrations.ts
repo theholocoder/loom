@@ -15,4 +15,20 @@ export const migrations: Migration[] = [
       .addColumn('value', 'text', (c) => c.notNull())
       .execute();
   },
+  async (db) => {
+    await db.schema
+      .createTable('projects')
+      .addColumn('id', 'integer', (c) => c.primaryKey().autoIncrement())
+      .addColumn('name', 'text', (c) => c.notNull())
+      .addColumn('branch_prefix', 'text', (c) => c.notNull())
+      .addColumn('created_at', 'integer', (c) => c.notNull())
+      .execute();
+    await db.schema
+      .createTable('checkouts')
+      .addColumn('project_id', 'integer', (c) => c.primaryKey().references('projects.id').onDelete('cascade'))
+      .addColumn('environment_id', 'text', (c) => c.notNull())
+      .addColumn('path', 'text', (c) => c.notNull())
+      .addUniqueConstraint('checkouts_environment_path', ['environment_id', 'path'])
+      .execute();
+  },
 ];
