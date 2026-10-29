@@ -152,10 +152,12 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   }
 
   /** Every ACP message the `opencode acp` stand-ins received, in order. */
+  /** What the `opencode acp` stand-ins received, with `cwd` written like `folder()` paths. */
   acpMessages(): AcpMessage[] {
     return this.scripts
       .filter((script) => basename(script) === 'opencode.json')
-      .flatMap((script) => readLines(`${script}.acp.log`).map((line) => JSON.parse(line) as AcpMessage));
+      .flatMap((script) => readLines(`${script}.acp.log`).map((line) => JSON.parse(line) as AcpMessage))
+      .map((m) => (process.platform === 'win32' ? { ...m, cwd: m.cwd.replaceAll('\\', '/') } : m));
   }
 
   /** Lets an `opencode acp` stand-in run holding on `name` finish. */
