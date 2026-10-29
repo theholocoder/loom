@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { BridgeInfo, EnvironmentStatus, ShellEnvironmentSource } from '../../shared/api';
-import { detectOpenCode } from '../agents/opencode';
+import { detectOpenCode, OPENCODE_NAME } from '../agents/opencode';
 import type { Clock, TimerHandle } from '../clock';
 import { BridgeConnection } from './bridge-connection';
 
@@ -75,11 +75,10 @@ export class Environment {
       return;
     }
     try {
-      const { source } = await connection.request<{ source: ShellEnvironmentSource }>('environment.get', SHELL_ENVIRONMENT_TIMEOUT_MS);
-      this.update({ shellEnvironment: source });
+      await this.readShellEnvironment(connection, 'environment.get');
     } catch {
-      // The bridge went away; its close listener has reported it.
-      return;
+      // Either the bridge went away, which its close listener has reported,
+      // or it was slow; detecting below covers both.
     }
     await this.detectAgent();
   }
@@ -89,10 +88,10 @@ export class Environment {
    * check already running is joined rather than repeated.
    */
   detectAgent(): Promise<void> {
-    const connection = this.connection;
-    if (!connection || this.current.state !== 'connected') return Promise.resolve();
+    const connection = this.connected();
+    if (!connection) return Promise.resolve();
     this.detecting ??= (async () => {
-      const previous = this.current.agent ?? { name: 'OpenCode', state: 'unknown' as const };
+      const previous = this.current.agent ?? { name: OPENCODE_NAME, state: 'unknown' as const };
       this.update({ agent: { ...previous, checking: true } });
       const agent = await detectOpenCode((method, timeoutMs, params) => connection.request(method, timeoutMs, params));
       if (this.connection === connection) this.update({ agent: { ...agent, checking: false } });
@@ -105,13 +104,22 @@ export class Environment {
    * ones keep theirs), then checks the agent again.
    */
   async reload(): Promise<void> {
-    const connection = this.connection;
-    if (!connection || this.current.state !== 'connected') throw new Error(`${this.options.label} is not connected`);
-    const { source } = await connection.request<{ source: ShellEnvironmentSource }>('environment.reload', SHELL_ENVIRONMENT_TIMEOUT_MS);
-    this.update({ shellEnvironment: source });
+    const connection = this.connected();
+    if (!connection) throw new Error(`${this.options.label} is not connected`);
+    await this.readShellEnvironment(connection, 'environment.reload');
     // A check started before the reload would report the old environment.
     await this.detecting;
     await this.detectAgent();
+  }
+
+  private connected(): BridgeConnection | undefined {
+    return this.current.state === 'connected' ? this.connection : undefined;
+  }
+
+  /** Records where the bridge's shell environment came from, after `method` resolves it. */
+  private async readShellEnvironment(connection: BridgeConnection, method: 'environment.get' | 'environment.reload'): Promise<void> {
+    const { source } = await connection.request<{ source: ShellEnvironmentSource }>(method, SHELL_ENVIRONMENT_TIMEOUT_MS);
+    if (this.connection === connection) this.update({ shellEnvironment: source });
   }
 
   async stop(): Promise<void> {

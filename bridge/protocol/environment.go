@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"context"
 	"sync"
 
 	"github.com/theholocoder/loom/bridge/shellenv"
@@ -17,17 +18,19 @@ type environmentResult struct {
 // reload; commands started after a reload get the new one, and those already
 // running keep theirs.
 type environment struct {
-	host  Host
-	ready chan struct{}
-	mu    sync.Mutex
-	env   shellenv.Env
+	// ctx ends when the bridge shuts down, which stops a resolution in flight.
+	ctx     context.Context
+	machine Machine
+	ready   chan struct{}
+	mu      sync.Mutex
+	env     shellenv.Env
 }
 
-func newEnvironment(host Host) *environment {
-	if host.ShellTimeout == 0 {
-		host.ShellTimeout = shellenv.DefaultTimeout
+func newEnvironment(ctx context.Context, machine Machine) *environment {
+	if machine.ShellTimeout == 0 {
+		machine.ShellTimeout = shellenv.DefaultTimeout
 	}
-	e := &environment{host: host, ready: make(chan struct{})}
+	e := &environment{ctx: ctx, machine: machine, ready: make(chan struct{})}
 	go func() {
 		e.set(e.resolve())
 		close(e.ready)
@@ -52,7 +55,7 @@ func (e *environment) reload() shellenv.Env {
 }
 
 func (e *environment) resolve() shellenv.Env {
-	return shellenv.Resolve(e.host.Shell, e.host.Environ, e.host.ShellTimeout)
+	return shellenv.Resolve(e.ctx, e.machine.Shell, e.machine.Environ, e.machine.ShellTimeout)
 }
 
 func (e *environment) set(env shellenv.Env) {

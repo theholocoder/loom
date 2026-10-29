@@ -97,7 +97,9 @@ function AgentCell({ agent }: { agent: AgentStatus }) {
   const label = agent.checking ? 'checking' : agent.state;
   return (
     <>
-      <div className="tech">{agent.version ? `${agent.name} ${agent.version}` : agent.name}</div>
+      <div className="tech" title={agent.path}>
+        {agent.version ? `${agent.name} ${agent.version}` : agent.name}
+      </div>
       <span className={`row ag-${agent.checking ? 'checking' : agent.state}`}>
         <AgentIcon agent={agent} />
         <span>{label}</span>
@@ -139,7 +141,7 @@ function agentWarning(agent: AgentStatus): string | undefined {
         ? `OpenCode ${agent.version} is V1 OpenCode (opencode-ai), which is not supported. ${install}`
         : `OpenCode ${agent.version} is too old. ${install}`;
     case 'signed-out':
-      return "OpenCode isn't signed in to any model provider. Sign in from OpenCode, then Reload.";
+      return "OpenCode isn't signed in to any model provider. Sign in from OpenCode; Loom checks again whenever Settings opens.";
     case 'error':
       return `Loom couldn't check OpenCode: ${agent.error}`;
     default:

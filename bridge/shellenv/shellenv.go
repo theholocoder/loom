@@ -42,11 +42,11 @@ type Env struct {
 
 // Resolve asks shell for its environment with `-ilc 'env -0'`, then `-lc`,
 // giving each attempt timeout, and falls back to own. An empty shell means
-// there is none to ask.
-func Resolve(shell string, own []string, timeout time.Duration) Env {
+// there is none to ask. Cancelling ctx stops the attempt in flight.
+func Resolve(ctx context.Context, shell string, own []string, timeout time.Duration) Env {
 	if shell != "" {
 		for _, attempt := range []struct{ flags, source string }{{"-ilc", SourceInteractive}, {"-lc", SourceLogin}} {
-			if vars, err := fromShell(shell, attempt.flags, own, timeout); err == nil {
+			if vars, err := fromShell(ctx, shell, attempt.flags, own, timeout); err == nil {
 				return Env{Source: attempt.source, vars: vars}
 			}
 		}
@@ -56,13 +56,13 @@ func Resolve(shell string, own []string, timeout time.Duration) Env {
 
 // fromShell runs `env -0` in shell between two markers, so whatever the
 // user's profile prints around it is ignored.
-func fromShell(shell, flags string, own []string, timeout time.Duration) ([]string, error) {
+func fromShell(ctx context.Context, shell, flags string, own []string, timeout time.Duration) ([]string, error) {
 	mark := make([]byte, 8)
 	if _, err := rand.Read(mark); err != nil {
 		return nil, err
 	}
 	marker := "__LOOM_ENV_" + hex.EncodeToString(mark) + "__"
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, flags, "printf '%s' "+marker+"; env -0; printf '%s' "+marker)
 	cmd.Env = own
@@ -96,7 +96,7 @@ func fromShell(shell, flags string, own []string, timeout time.Duration) ([]stri
 func (e Env) ForTools() []string {
 	out := make([]string, 0, len(e.vars))
 	for _, entry := range e.vars {
-		if name, value, _ := strings.Cut(entry, "="); isPath(name) {
+		if name, value, _ := strings.Cut(entry, "="); sameName(name, "PATH") {
 			entry = name + "=" + stripMnt(value)
 		}
 		out = append(out, entry)
@@ -129,7 +129,7 @@ func (e Env) LookPath(name string) (string, error) {
 func (e Env) get(key string) string {
 	for _, entry := range e.vars {
 		name, value, _ := strings.Cut(entry, "=")
-		if name == key || (runtime.GOOS == "windows" && strings.EqualFold(name, key)) {
+		if sameName(name, key) {
 			return value
 		}
 	}
@@ -151,11 +151,13 @@ func firstExecutable(candidates, exts []string) (string, error) {
 	return "", exec.ErrNotFound
 }
 
-func isPath(name string) bool {
+// sameName compares variable names the way the OS does: case-insensitively on
+// Windows.
+func sameName(a, b string) bool {
 	if runtime.GOOS == "windows" {
-		return strings.EqualFold(name, "PATH")
+		return strings.EqualFold(a, b)
 	}
-	return name == "PATH"
+	return a == b
 }
 
 func stripMnt(path string) string {

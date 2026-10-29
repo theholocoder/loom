@@ -1,6 +1,7 @@
 package protocol_test
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -56,7 +57,7 @@ var launcherEnv = []string{"PATH=/usr/bin:/bin", "HOME=/nonexistent"}
 func TestCommandsRunWithTheInteractiveLoginShellsEnvironment(t *testing.T) {
 	shell := fakeShell(t, `[ "$1" = "-ilc" ] || exit 1
 FOO=from-shell exec /bin/sh -c "$2"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 
 	if got := p.environment(1, "environment.get")["source"]; got != "interactive" {
 		t.Errorf("environment source = %v, want interactive", got)
@@ -69,7 +70,7 @@ FOO=from-shell exec /bin/sh -c "$2"`)
 func TestALoginShellIsUsedWhenTheInteractiveOneFails(t *testing.T) {
 	shell := fakeShell(t, `[ "$1" = "-lc" ] || exit 1
 FOO=from-login exec /bin/sh -c "$2"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 
 	if got := p.environment(1, "environment.get")["source"]; got != "login" {
 		t.Errorf("environment source = %v, want login", got)
@@ -81,7 +82,7 @@ FOO=from-login exec /bin/sh -c "$2"`)
 
 func TestTheBridgesOwnEnvironmentIsUsedWhenTheShellFails(t *testing.T) {
 	shell := fakeShell(t, `exit 1`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: append([]string{"FOO=from-bridge"}, launcherEnv...)})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: append([]string{"FOO=from-bridge"}, launcherEnv...)})
 
 	if got := p.environment(1, "environment.get")["source"]; got != "bridge" {
 		t.Errorf("environment source = %v, want bridge", got)
@@ -93,7 +94,7 @@ func TestTheBridgesOwnEnvironmentIsUsedWhenTheShellFails(t *testing.T) {
 
 func TestAShellThatHangsTimesOutAndFallsBack(t *testing.T) {
 	shell := fakeShell(t, `exec sleep 30`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv, ShellTimeout: 200 * time.Millisecond})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv, ShellTimeout: 200 * time.Millisecond})
 
 	started := time.Now()
 	if got := p.environment(1, "environment.get")["source"]; got != "bridge" {
@@ -108,7 +109,7 @@ func TestProfileOutputAroundTheEnvironmentIsIgnored(t *testing.T) {
 	shell := fakeShell(t, `echo "Welcome to the machine"
 FOO=from-shell /bin/sh -c "$2"
 echo "bye"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 
 	if got := p.run(1, "sh", "-c", `printf %s "$FOO"`)["stdout"]; got != "from-shell" {
 		t.Errorf("FOO = %q, want from-shell", got)
@@ -117,7 +118,7 @@ echo "bye"`)
 
 func TestMntEntriesAreStrippedFromThePathOfCommands(t *testing.T) {
 	shell := fakeShell(t, `PATH="/mnt/c/Windows:/usr/bin:/mnt/c/Program Files/Git/bin:/bin" exec /bin/sh -c "$2"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 
 	if got := p.run(1, "sh", "-c", `printf %s "$PATH"`)["stdout"]; got != "/usr/bin:/bin" {
 		t.Errorf("PATH = %q, want /usr/bin:/bin", got)
@@ -130,7 +131,7 @@ func TestCommandsAreLookedUpOnTheShellsPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	shell := fakeShell(t, `PATH="`+bin+`:/usr/bin:/bin" exec /bin/sh -c "$2"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 
 	result := p.run(1, "hello", "there")
 
@@ -144,7 +145,7 @@ func TestCommandsAreLookedUpOnTheShellsPath(t *testing.T) {
 
 func TestACommandNotOnThePathIsANotFoundError(t *testing.T) {
 	shell := fakeShell(t, `PATH=/usr/bin:/bin exec /bin/sh -c "$2"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 
 	p.send(map[string]any{"id": 1, "method": "exec", "params": map[string]any{"command": "no-such-loom-tool"}})
 
@@ -161,7 +162,7 @@ func TestReloadReReadsTheShellEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	shell := fakeShell(t, `FOO="$(cat `+value+`)" exec /bin/sh -c "$2"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 	if got := p.run(1, "sh", "-c", `printf %s "$FOO"`)["stdout"]; got != "before" {
 		t.Fatalf("FOO = %q, want before", got)
 	}
@@ -182,12 +183,30 @@ func TestReloadReReadsTheShellEnvironment(t *testing.T) {
 
 func TestPingIsAnsweredWhileACommandRuns(t *testing.T) {
 	shell := fakeShell(t, `exec /bin/sh -c "$2"`)
-	p := startBridgeHost(t, protocol.Host{Shell: shell, Environ: launcherEnv})
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
 
 	p.send(map[string]any{"id": 1, "method": "exec", "params": map[string]any{"command": "sleep", "args": []string{"2"}}})
 	p.send(map[string]any{"id": 2, "method": "ping"})
 
 	if reply := p.receive(); reply["id"] != float64(2) {
 		t.Fatalf("first reply = %v, want the ping's", reply)
+	}
+}
+
+func TestShuttingDownStopsAShellStillResolving(t *testing.T) {
+	shell := fakeShell(t, `exec sleep 30`)
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
+	p.send(map[string]any{"id": 1, "method": "environment.get"})
+
+	// main reads replies until the bridge exits.
+	go io.Copy(io.Discard, p.stdout)
+	started := time.Now()
+	p.stdin.Close()
+
+	if err := p.waitExit(); err != nil {
+		t.Fatalf("Serve returned %v on stdin EOF, want nil", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Errorf("shutting down took %v, want it to stop the shell rather than wait it out", elapsed)
 	}
 }

@@ -9,7 +9,7 @@ import { BridgeRequestError } from '../environments/bridge-connection';
 /** Sends one request to an Environment's bridge. */
 export type BridgeCall = <T>(method: string, timeoutMs: number, params?: unknown) => Promise<T>;
 
-const NAME = 'OpenCode';
+export const OPENCODE_NAME = 'OpenCode';
 const VERSION_TIMEOUT_MS = 10_000;
 // The bridge gives the probe 15 s; this leaves it room to answer.
 const PROBE_REQUEST_TIMEOUT_MS = 20_000;
@@ -30,10 +30,10 @@ export async function detectOpenCode(call: BridgeCall): Promise<Omit<AgentStatus
   try {
     exec = await call<ExecResult>('exec', VERSION_TIMEOUT_MS + 5_000, { command: 'opencode', args: ['--version'], timeoutMs: VERSION_TIMEOUT_MS });
   } catch (error) {
-    if (error instanceof BridgeRequestError && error.code === 'not_found') return { name: NAME, state: 'missing' };
-    return { name: NAME, state: 'error', error: `opencode --version failed: ${(error as Error).message}` };
+    if (error instanceof BridgeRequestError && error.code === 'not_found') return { name: OPENCODE_NAME, state: 'missing' };
+    return { name: OPENCODE_NAME, state: 'error', error: `opencode --version failed: ${(error as Error).message}` };
   }
-  const found = { name: NAME, path: exec.path };
+  const found = { name: OPENCODE_NAME, path: exec.path };
   if (exec.exitCode !== 0) {
     return { ...found, state: 'error', error: `opencode --version exited with code ${exec.exitCode}: ${(exec.stderr || exec.stdout).trim()}` };
   }

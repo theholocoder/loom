@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,7 +103,7 @@ func probeOpencode(ctx context.Context, env shellenv.Env) (*probeResult, *Error)
 	case <-ctx.Done():
 	}
 	if url == "" {
-		return nil, &Error{Code: "probe_failed", Message: "opencode serve did not report its URL" + stderrSuffix(stderr)}
+		return nil, probeFailed(errors.New("opencode serve did not report its URL" + stderrSuffix(stderr)))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(url, "/")+"/api/integration", nil)
@@ -121,17 +122,17 @@ func probeOpencode(ctx context.Context, env shellenv.Env) (*probeResult, *Error)
 		return nil, probeFailed(err)
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, &Error{Code: "probe_failed", Message: fmt.Sprintf("GET /api/integration answered %s", res.Status)}
+		return nil, probeFailed(fmt.Errorf("GET /api/integration answered %s", res.Status))
 	}
 	// OpenCode wraps most results as {"data": ...}.
 	var wrapped struct {
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(body, &wrapped); err != nil {
-		return nil, &Error{Code: "probe_failed", Message: "GET /api/integration answered something other than JSON"}
+		return nil, probeFailed(errors.New("GET /api/integration answered something other than JSON"))
 	}
 	if len(wrapped.Data) == 0 {
-		return nil, &Error{Code: "probe_failed", Message: "GET /api/integration answered no data"}
+		return nil, probeFailed(errors.New("GET /api/integration answered no data"))
 	}
 	return &probeResult{Integrations: wrapped.Data}, nil
 }

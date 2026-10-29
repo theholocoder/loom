@@ -20,11 +20,9 @@ const maxOutput = 1 << 20
 
 type execParams struct {
 	// Command is looked up on the Environment's PATH.
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
-	// Dir is the working directory; empty means the bridge's.
-	Dir       string `json:"dir"`
-	TimeoutMs int    `json:"timeoutMs"`
+	Command   string   `json:"command"`
+	Args      []string `json:"args"`
+	TimeoutMs int      `json:"timeoutMs"`
 }
 
 type execResult struct {
@@ -54,17 +52,21 @@ func runCommand(ctx context.Context, env shellenv.Env, params execParams) (*exec
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, params.Args...)
 	cmd.Env = env.ForTools()
-	cmd.Dir = params.Dir
 	proc.Isolate(cmd)
 	cmd.WaitDelay = time.Second
 	stdout, stderr := &cappedBuffer{}, &cappedBuffer{}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err = cmd.Run()
-	if ctx.Err() != nil {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, &Error{Code: "timeout", Message: fmt.Sprintf("%s did not finish within %v", params.Command, timeout)}
 	}
+	if ctx.Err() != nil {
+		return nil, &Error{Code: "cancelled", Message: "the bridge is shutting down"}
+	}
 	var exit *exec.ExitError
-	if err != nil && !errors.As(err, &exit) {
+	// ErrWaitDelay: the command exited, but something it started kept its
+	// output open; what it printed before exiting still counts.
+	if err != nil && !errors.As(err, &exit) && !errors.Is(err, exec.ErrWaitDelay) {
 		return nil, &Error{Code: "exec_failed", Message: err.Error()}
 	}
 	return &execResult{Path: path, ExitCode: cmd.ProcessState.ExitCode(), Stdout: stdout.String(), Stderr: stderr.String()}, nil

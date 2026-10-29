@@ -30,9 +30,9 @@ type Info struct {
 	Version string
 }
 
-// Host is what the bridge needs from the machine it runs on to resolve the
-// Environment's shell environment.
-type Host struct {
+// Machine is what the bridge needs from the machine (or WSL distro) it runs
+// on to resolve the Environment's shell environment.
+type Machine struct {
 	// Shell is the user's login shell ($SHELL), or empty when there is none to
 	// ask, as on native Windows.
 	Shell string
@@ -73,10 +73,10 @@ type handshakeResult struct {
 // slow command never holds up a ping. It returns nil on a clean EOF and an
 // error if the stream breaks or a frame can't be read; either way it first
 // stops whatever the requests in flight were running.
-func Serve(r io.Reader, w io.Writer, info Info, host Host) error {
+func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 	out := &writer{w: w}
-	s := &server{info: info, env: newEnvironment(host)}
 	ctx, cancel := context.WithCancel(context.Background())
+	s := &server{info: info, env: newEnvironment(ctx, machine)}
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
 	defer cancel()

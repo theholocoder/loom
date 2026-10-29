@@ -16,13 +16,13 @@ import (
 var version = "dev"
 
 func main() {
-	host := protocol.Host{Shell: os.Getenv("SHELL"), Environ: os.Environ()}
+	machine := protocol.Machine{Shell: os.Getenv("SHELL"), Environ: os.Environ()}
 	// Native Windows has no login shell to ask; a $SHELL there comes from
 	// something like Git Bash and isn't the Environment's.
 	if runtime.GOOS == "windows" {
-		host.Shell = ""
+		machine.Shell = ""
 	}
-	if err := protocol.Serve(os.Stdin, os.Stdout, protocol.Info{Version: version}, host); err != nil {
+	if err := protocol.Serve(os.Stdin, os.Stdout, protocol.Info{Version: version}, machine); err != nil {
 		fmt.Fprintln(os.Stderr, "loom-bridge:", err)
 		os.Exit(1)
 	}
