@@ -73,6 +73,59 @@ export interface EnvironmentStatus {
   agent?: AgentStatus;
 }
 
+/** Where a Project's checkout is on this machine. */
+export interface Checkout {
+  /** The Environment the checkout's work runs in. */
+  environmentId: string;
+  /** The checkout's top-level folder, as its Environment's git reports it. */
+  path: string;
+}
+
+export type ForgeKind = 'github' | 'gitlab';
+
+/** The CLI Loom reaches each Forge through, with the user's own login. */
+export const FORGE_CLI: Record<ForgeKind, 'gh' | 'glab'> = { github: 'gh', gitlab: 'glab' };
+
+/**
+ * Whether a Project's Forge features are on, and why not:
+ * - `unknown`: not checked yet.
+ * - `available`: `origin` is on GitHub or GitLab, and its CLI is signed in to that host.
+ * - `no-remote`: the checkout has no `origin`.
+ * - `unsupported`: `origin` is not on GitHub or GitLab.
+ * - `cli-missing`: `gh` or `glab` isn't on the Environment's PATH.
+ * - `signed-out`: the CLI isn't signed in to `origin`'s host.
+ * - `error`: the check itself failed.
+ */
+export type ForgeState = 'unknown' | 'available' | 'no-remote' | 'unsupported' | 'cli-missing' | 'signed-out' | 'error';
+
+export interface ForgeStatus {
+  state: ForgeState;
+  /** Whether a check is running; the other fields are from the last one. */
+  checking: boolean;
+  /** The Forge `origin` is on, once known. */
+  kind?: ForgeKind;
+  /** `origin`'s host, e.g. `github.com`. */
+  host?: string;
+  /** The repository's path on the host, e.g. `theholocoder/loom`. */
+  repository?: string;
+  /** `origin`'s URL, when it has one. */
+  remote?: string;
+  /** Why the check failed, or what the CLI said when signed out. */
+  error?: string;
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  /** What Loom's branch names start with: `<prefix>/<slug>`. */
+  branchPrefix: string;
+  checkout: Checkout;
+  forge: ForgeStatus;
+}
+
+/** The branch prefix a new Project gets. */
+export const DEFAULT_BRANCH_PREFIX = 'loom';
+
 /** Commands the renderer can invoke, with their parameters and results. */
 export interface Commands {
   'environments.list': { params: void; result: EnvironmentStatus[] };
@@ -83,11 +136,30 @@ export interface Commands {
    * now on, then checks its agent again.
    */
   'environments.reload': { params: { id: string }; result: void };
+  /** Asks the user to choose a folder; null if they cancel. */
+  'dialogs.chooseFolder': { params: void; result: string | null };
+  'projects.list': { params: void; result: Project[] };
+  /**
+   * Adds the git checkout containing `path` as a Project, in the given
+   * Environment (the native one by default). Rejects a folder that isn't in a
+   * git repository, and a checkout that is already a Project. Resolves once
+   * its Forge has been checked.
+   */
+  'projects.link': { params: { path: string; environmentId?: string }; result: Project };
+  /**
+   * Sets what the Project's branch names start with. Rejects a prefix git
+   * would not accept at the start of a branch name.
+   */
+  'projects.setBranchPrefix': { params: { id: number; branchPrefix: string }; result: Project };
+  /** Checks every Project's Forge again, and resolves once done. */
+  'projects.check': { params: void; result: void };
 }
 
 /** Topics the renderer can subscribe to, with the value each one carries. */
 export interface Topics {
   environments: EnvironmentStatus[];
+  /** Every Project, by name. */
+  projects: Project[];
 }
 
 export type CommandName = keyof Commands;

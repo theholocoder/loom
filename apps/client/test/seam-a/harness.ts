@@ -2,10 +2,10 @@
 // uses. Everything below the API is real: SQLite in a temporary userData and
 // the real loom-bridge binary. Time is a manual clock the test advances, and
 // the user's machine is a temporary one (see Machine).
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach } from 'vitest';
 import { createLoom, type Loom } from '../../src/main/loom';
@@ -61,7 +61,16 @@ export interface OpencodeScript {
   integrations?: Array<{ id: string; name: string; connections: unknown[] }>;
 }
 
+/** What a scripted `gh` or `glab` stand-in reports (see stand-ins/forge-cli.mjs). */
+export interface ForgeCliScript {
+  /** The hosts `auth status --hostname <host>` says it is signed in to. */
+  signedInHosts: string[];
+}
+
+export type ForgeCli = 'gh' | 'glab';
+
 const opencodeStandIn = fileURLToPath(new URL('./stand-ins/opencode.mjs', import.meta.url));
+const forgeCliStandIn = fileURLToPath(new URL('./stand-ins/forge-cli.mjs', import.meta.url));
 
 /**
  * The user's machine as the native bridge sees it. The bridge is launched the
@@ -80,7 +89,10 @@ export class Machine {
 
   /** The bridge's environment, as a desktop launcher gives it. */
   bridgeEnv(): NodeJS.ProcessEnv {
-    if (process.platform === 'win32') return { ...process.env, PATH: [...this.shellPath, process.env.PATH].join(delimiter) };
+    if (process.platform === 'win32') {
+      const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+      return { ...process.env, PATH: [...this.shellPath, dirname(onHostPath('git')), join(systemRoot, 'System32'), systemRoot].join(delimiter) };
+    }
     const shell = join(this.dir, 'login-shell');
     writeFileSync(
       shell,
@@ -109,37 +121,101 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
 
   /** Installs the scripted `opencode` stand-in into `binDir`. */
   installOpencode(script: OpencodeScript, binDir = this.binDir()): void {
-    const scriptPath = join(binDir, 'opencode.json');
-    writeFileSync(scriptPath, JSON.stringify(script));
-    this.scripts.push(scriptPath);
-    if (process.platform === 'win32') {
-      writeFileSync(join(binDir, 'opencode.cmd'), `@"${process.execPath}" "${opencodeStandIn}" "${scriptPath}" %*\r\n`);
-    } else {
-      writeFileSync(join(binDir, 'opencode'), `#!/bin/sh\nexec '${process.execPath}' '${opencodeStandIn}' '${scriptPath}' "$@"\n`, { mode: 0o755 });
-    }
+    this.installStandIn('opencode', opencodeStandIn, script, binDir);
   }
 
   /** Every argv the installed `opencode` stand-ins were run with. */
   opencodeInvocations(): string[][] {
-    return this.scripts.flatMap((script) => {
-      let log: string;
-      try {
-        log = readFileSync(`${script}.log`, 'utf8');
-      } catch {
-        return [];
-      }
-      return log.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[]);
-    });
+    return this.invocations('opencode');
+  }
+
+  /** Installs a scripted `gh` or `glab` stand-in into `binDir`. */
+  installForgeCli(cli: ForgeCli, script: ForgeCliScript, binDir = this.binDir()): void {
+    this.installStandIn(cli, forgeCliStandIn, script, binDir);
+  }
+
+  /** Every argv the installed `gh` or `glab` stand-ins were run with. */
+  forgeCliInvocations(cli: ForgeCli): string[][] {
+    return this.invocations(cli);
+  }
+
+  /**
+   * A real git repository in a new folder, with `origin` set to `origin` if
+   * given. Returns its path as git reports it.
+   */
+  gitRepo(name: string, options: { origin?: string } = {}): string {
+    const dir = this.folder(name);
+    execFileSync('git', ['init', '--quiet', dir]);
+    if (options.origin) execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', options.origin]);
+    return dir;
+  }
+
+  /** A new empty folder, with its real path (git reports real paths). */
+  folder(name: string): string {
+    const dir = join(this.dir, 'code', name);
+    mkdirSync(dir, { recursive: true });
+    const real = realpathSync.native(dir);
+    return process.platform === 'win32' ? real.replaceAll('\\', '/') : real;
+  }
+
+  private installStandIn(name: string, standIn: string, script: unknown, binDir: string): void {
+    const scriptPath = join(binDir, `${name}.json`);
+    writeFileSync(scriptPath, JSON.stringify(script));
+    this.scripts.push(scriptPath);
+    if (process.platform === 'win32') {
+      writeFileSync(join(binDir, `${name}.cmd`), `@"${process.execPath}" "${standIn}" "${scriptPath}" %*\r\n`);
+    } else {
+      writeFileSync(join(binDir, name), `#!/bin/sh\nexec '${process.execPath}' '${standIn}' '${scriptPath}' "$@"\n`, { mode: 0o755 });
+    }
+  }
+
+  private invocations(name: string): string[][] {
+    return this.scripts
+      .filter((script) => basename(script) === `${name}.json`)
+      .flatMap((script) => {
+        let log: string;
+        try {
+          log = readFileSync(`${script}.log`, 'utf8');
+        } catch {
+          return [];
+        }
+        return log.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[]);
+      });
   }
 
   private writeShellPath(): void {
-    // The rest of the PATH lets the stand-ins find /bin/sh and friends.
-    writeFileSync(join(this.dir, 'shell-path'), [...this.shellPath, '/usr/local/bin', '/usr/bin', '/bin'].join(':'));
+    writeFileSync(join(this.dir, 'shell-path'), [...this.shellPath, this.systemBin()].join(':'));
+  }
+
+  /**
+   * The rest of the login shell's PATH: links to the few system tools the
+   * bridge and the stand-ins need, and nothing else, so the host's own `gh`,
+   * `glab` or `opencode` are never found.
+   */
+  private systemBin(): string {
+    const dir = join(this.dir, 'system-bin');
+    if (!existsSync(dir)) {
+      mkdirSync(dir);
+      for (const tool of ['env', 'git', 'sh']) symlinkSync(onHostPath(tool), join(dir, tool));
+    }
+    return dir;
   }
 
   remove(): void {
     rmSync(this.dir, { recursive: true, force: true });
   }
+}
+
+/** Where `tool` is on the PATH this test process was started with. */
+function onHostPath(tool: string): string {
+  const names = process.platform === 'win32' ? [`${tool}.exe`, `${tool}.cmd`] : [tool];
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    for (const name of names) {
+      const candidate = join(dir, name);
+      if (dir && existsSync(candidate)) return candidate;
+    }
+  }
+  throw new Error(`${tool} is not on this machine's PATH`);
 }
 
 export interface MainHarness {

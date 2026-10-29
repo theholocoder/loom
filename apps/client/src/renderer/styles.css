@@ -10,6 +10,8 @@
 /* ---- themes ---- */
 [data-theme="midnight"] { --bg:#0f1117; --panel:#161922; --panel2:#1e2230; --hover:#232838; --line:#272c3b; --text:#e6e8ef; --muted:#8a92a6; --accent:#8b9dff; --accent-text:#0f1117;
   --wait:#f2b863; --work:#5fd3f3; --ok:#7ddc8f; --err:#ff7a90; --user:#26304d; --user-line:#34406a; --code:#0b0d12; --sel:#1f2740; --shadow:#000a; }
+/* project identity = categorical slots 1-3 (validated per surface, see dataviz validator) */
+[data-theme="midnight"], [data-theme="nord"], [data-theme="mocha"] { --p1:#3987e5; --p2:#d95926; --p3:#199e70; }
 
 
 * { box-sizing: border-box; }
@@ -129,3 +131,5 @@ button.diff-rail:hover { background: var(--panel); }
 .warn { color: var(--wait); font-size: 12px; max-width: 46ch; margin-top: 2px; }
 .ag-ready { color: var(--ok); } .ag-checking { color: var(--work); } .ag-signed-out, .ag-unsupported { color: var(--wait); }
 .ag-missing, .ag-error { color: var(--err); } .ag-unknown { color: var(--muted); }
+.fg-available { color: var(--ok); } .fg-checking { color: var(--work); } .fg-off { color: var(--wait); } .fg-unknown { color: var(--muted); }
+input.prefix { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; width: 16ch; }

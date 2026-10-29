@@ -11,7 +11,11 @@ ipcRenderer.on(IPC.topic, (_event, subscription: number, value: unknown) => {
 });
 
 const api: LoomApi = {
-  invoke: (command, ...params) => ipcRenderer.invoke(IPC.invoke, command, params[0]),
+  invoke: (command, ...params) =>
+    ipcRenderer.invoke(IPC.invoke, command, params[0]).catch((error: Error) => {
+      // Electron prefixes main's message with "Error invoking remote method …: Error: ".
+      throw new Error(error.message.replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, ''));
+    }),
   subscribe: (topic, listener) => {
     const subscription = nextSubscription++;
     listeners.set(subscription, listener as (value: unknown) => void);

@@ -2,6 +2,8 @@
 // Inbox sidebar, the main pane and the diff rail.
 import { Archive, ChartColumn, ChevronDown, ChevronRight, FileDiff, FolderGit2, Inbox, LoaderCircle, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
+import { useTopic } from './api';
+import { FORGE_NAME, Projects } from './Projects';
 import { Settings } from './Settings';
 
 type View = 'session' | 'projects' | 'dashboard' | 'settings';
@@ -9,6 +11,7 @@ type View = 'session' | 'projects' | 'dashboard' | 'settings';
 export function App() {
   const [view, setView] = useState<View>('session');
   const [diffOpen, setDiffOpen] = useState(false);
+  const projects = useTopic('projects') ?? [];
 
   return (
     <div className="app">
@@ -30,6 +33,17 @@ export function App() {
           <div className="section-head" style={{ borderTop: 0, cursor: 'default' }}>
             <Inbox className="sm" /> Inbox<span className="grow" />0
           </div>
+          {projects.map((project, index) => (
+            <div key={project.id} className="B-group-head" role="group" aria-label={project.name}>
+              <span className="proj-avatar" style={{ width: 26, height: 26, background: `var(--p${(index % 3) + 1})`, fontSize: 26 * 0.38 }}>
+                {project.name.slice(0, 2).toUpperCase()}
+              </span>
+              <b className="ellipsis">{project.name}</b>
+              {project.forge.kind && <span className="muted">{FORGE_NAME[project.forge.kind]}</span>}
+              <span className="grow" />
+              <span className="chip">0</span>
+            </div>
+          ))}
           <div className="empty">Nothing needs you right now.</div>
           <Section label="Working" icon={LoaderCircle} />
           <Section label="Archived" icon={Archive} />
@@ -43,6 +57,8 @@ export function App() {
       </aside>
       {view === 'settings' ? (
         <Settings />
+      ) : view === 'projects' ? (
+        <Projects />
       ) : (
         <main className="main" aria-label="Session">
           <div className="empty">No Session selected.</div>

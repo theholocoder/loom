@@ -1,8 +1,8 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { AgentStatus, EnvironmentStatus } from '../../src/shared/api';
+import type { AgentStatus, EnvironmentStatus, ForgeStatus, Project } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -135,5 +135,130 @@ describe('Settings: the agent in each Environment', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'Reload' }));
 
     expect(main.invoked).toContainEqual({ command: 'environments.reload', params: { id: 'native' } });
+  });
+});
+
+describe('Projects', () => {
+  const project = (name: string, forge: Partial<ForgeStatus> = {}, id = 1): Project => ({
+    id,
+    name,
+    branchPrefix: 'loom',
+    checkout: { environmentId: 'native', path: `/home/dev/code/${name}` },
+    forge: { state: 'available', checking: false, kind: 'github', host: 'github.com', repository: `acme/${name}`, ...forge },
+  });
+
+  function openProjects(main: FakeMain) {
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    return main;
+  }
+
+  it('lists each Project with its checkout, Environment and branch prefix', () => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('billing-api')] }));
+
+    const row = screen.getByRole('row', { name: /billing-api/ });
+    expect(within(row).getByText('/home/dev/code/billing-api')).toBeTruthy();
+    expect(within(row).getByText('Native')).toBeTruthy();
+    expect((within(row).getByRole('textbox', { name: 'Branch prefix for billing-api' }) as HTMLInputElement).value).toBe('loom');
+  });
+
+  it('shows Forge features available, with the repository', () => {
+    openProjects(new FakeMain({ projects: [project('loom', { repository: 'theholocoder/loom' })] }));
+
+    const row = screen.getByRole('row', { name: /loom/ });
+    expect(within(row).getByText('GitHub')).toBeTruthy();
+    expect(within(row).getByText('theholocoder/loom')).toBeTruthy();
+    expect(within(row).queryByRole('alert')).toBeNull();
+  });
+
+  it.each([
+    [{ state: 'no-remote', kind: undefined, host: undefined }, /no origin remote/],
+    [{ state: 'unsupported', kind: undefined, host: 'bitbucket.org', remote: 'https://bitbucket.org/acme/x.git' }, /https:\/\/bitbucket\.org\/acme\/x\.git.*isn't on GitHub or GitLab/],
+    [{ state: 'cli-missing', kind: 'gitlab', host: 'gitlab.com' }, /glab isn't installed in Native/],
+    [{ state: 'signed-out', kind: 'github', host: 'github.com' }, /gh isn't signed in to github\.com.*gh auth login --hostname github\.com/],
+    [{ state: 'error', error: 'bridge did not answer' }, /couldn't check.*bridge did not answer/],
+  ] as const)('shows Forge features off and why when the Forge is %o', (forge, reason) => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('loom', forge)] }));
+
+    const row = screen.getByRole('row', { name: /loom/ });
+    expect(within(row).getByText('off')).toBeTruthy();
+    expect(within(row).getByRole('alert').textContent).toMatch(reason);
+  });
+
+  it('checks the Forges again when Projects opens', () => {
+    const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+
+    expect(main.invoked.map((i) => i.command)).toContain('projects.check');
+  });
+
+  it('links the folder chosen with "Use existing clone…"', async () => {
+    const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => project('loom') }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
+  });
+
+  it('links nothing when the folder picker is cancelled', async () => {
+    const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => null }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+
+    await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));
+    expect(main.invoked.map((i) => i.command)).not.toContain('projects.link');
+  });
+
+  it('says why a folder was rejected', async () => {
+    openProjects(
+      new FakeMain(
+        {},
+        {
+          'dialogs.chooseFolder': () => '/home/dev/notes',
+          'projects.link': () => {
+            throw new Error('/home/dev/notes is not a git repository');
+          },
+        },
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+
+    expect((await screen.findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
+  });
+
+  it('saves a new branch prefix', async () => {
+    const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
+
+    fireEvent.change(input, { target: { value: 'feat' } });
+    fireEvent.submit(input);
+
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.setBranchPrefix', params: { id: 1, branchPrefix: 'feat' } }));
+  });
+
+  it('says why a branch prefix was refused', async () => {
+    openProjects(
+      new FakeMain(
+        { projects: [project('loom')] },
+        {
+          'projects.setBranchPrefix': () => {
+            throw new Error(`"a b" can't be a branch prefix: it contains a space`);
+          },
+        },
+      ),
+    );
+    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
+
+    fireEvent.change(input, { target: { value: 'a b' } });
+    fireEvent.submit(input);
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/can't be a branch prefix/);
+  });
+
+  it('groups the sidebar by Project', () => {
+    renderApp(new FakeMain({ projects: [project('billing-api', {}, 1), project('loom', { state: 'no-remote', kind: undefined }, 2)] }));
+
+    const inbox = screen.getByRole('complementary', { name: 'Inbox' });
+    expect(within(inbox).getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual(['billing-api', 'loom']);
   });
 });
