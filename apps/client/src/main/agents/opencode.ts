@@ -5,8 +5,12 @@
 // user's shared background service.
 import { OPENCODE_MIN_VERSION, type AgentStatus } from '../../shared/api';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
+import type { AcpProfile } from './acp-adapter';
 
 export const OPENCODE_NAME = 'OpenCode';
+
+/** Sessions run on `opencode acp`, one process each. */
+export const OPENCODE_ACP: AcpProfile = { name: OPENCODE_NAME, command: 'opencode', args: ['acp'] };
 const VERSION_TIMEOUT_MS = 10_000;
 // The bridge gives the probe 15 s; this leaves it room to answer.
 const PROBE_REQUEST_TIMEOUT_MS = 20_000;

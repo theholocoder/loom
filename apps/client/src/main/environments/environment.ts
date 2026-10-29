@@ -3,6 +3,7 @@ import type { BridgeInfo, EnvironmentStatus, ShellEnvironmentSource } from '../.
 import { detectOpenCode, OPENCODE_NAME } from '../agents/opencode';
 import type { Clock, TimerHandle } from '../clock';
 import { BridgeConnection } from './bridge-connection';
+import type { Channel, ChannelParams } from './channel';
 
 export type SpawnBridge = (command: string, args: string[]) => ChildProcess;
 
@@ -117,6 +118,13 @@ export class Environment {
     const connection = this.connected();
     if (!connection) return Promise.reject(new Error(`${this.options.label} is not connected`));
     return connection.request<T>(method, timeoutMs, params);
+  }
+
+  /** Starts a process on a channel; rejects unless the Environment is connected. */
+  openChannel(params: ChannelParams): Promise<Channel> {
+    const connection = this.connected();
+    if (!connection) return Promise.reject(new Error(`${this.options.label} is not connected`));
+    return connection.openChannel(params);
   }
 
   private connected(): BridgeConnection | undefined {

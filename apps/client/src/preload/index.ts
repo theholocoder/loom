@@ -16,10 +16,10 @@ const api: LoomApi = {
       // Electron prefixes main's message with "Error invoking remote method …: Error: ".
       throw new Error(error.message.replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, ''));
     }),
-  subscribe: (topic, listener) => {
+  subscribe: (topic, listener, ...params) => {
     const subscription = nextSubscription++;
     listeners.set(subscription, listener as (value: unknown) => void);
-    ipcRenderer.send(IPC.subscribe, subscription, topic);
+    ipcRenderer.send(IPC.subscribe, subscription, topic, params[0]);
     return () => {
       listeners.delete(subscription);
       ipcRenderer.send(IPC.unsubscribe, subscription);

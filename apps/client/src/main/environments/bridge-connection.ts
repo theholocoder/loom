@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { Clock, TimerHandle } from '../clock';
+import { Channel, type ChannelExit, type ChannelParams } from './channel';
 import { encodeFrame, FrameDecoder } from './frames';
 
 interface Response {
@@ -7,6 +8,14 @@ interface Response {
   result?: unknown;
   error?: { code: string; message: string };
 }
+
+/** A frame with no id: what a channel's process printed, or its exit. */
+type BridgeEvent =
+  | { event: 'channel.data'; params: { channel: number; data: string } }
+  | { event: 'channel.exit'; params: { channel: number; exitCode: number; stderr: string } };
+
+/** The bridge answers channel.open once the process has started. */
+const CHANNEL_OPEN_TIMEOUT_MS = 30_000;
 
 interface Pending {
   resolve: (result: unknown) => void;
@@ -23,10 +32,16 @@ export class BridgeRequestError extends Error {
   }
 }
 
-/** Request/response over one bridge process's stdio. */
+/** Request/response, and channels, over one bridge process's stdio. */
 export class BridgeConnection {
   private nextId = 1;
   private pending = new Map<number, Pending>();
+  private channels = new Map<number, Channel>();
+  /**
+   * Events for channels whose channel.open answer hasn't been handled yet:
+   * the bridge may send a process's first output before that answer.
+   */
+  private unclaimed = new Map<number, BridgeEvent[]>();
   private closedReason: Error | undefined;
   private closeListeners: Array<(reason: Error) => void> = [];
 
@@ -44,7 +59,10 @@ export class BridgeConnection {
         child.kill();
         return;
       }
-      for (const message of messages) this.receive(message as Response);
+      for (const message of messages) {
+        if ('event' in (message as object)) this.dispatch(message as BridgeEvent);
+        else this.receive(message as Response);
+      }
     });
     child.stdin!.on('error', () => {});
     child.on('error', (error) => this.fail(error));
@@ -62,6 +80,20 @@ export class BridgeConnection {
       this.pending.set(id, { resolve: resolve as (r: unknown) => void, reject, timer });
       this.child.stdin!.write(encodeFrame(params === undefined ? { id, method } : { id, method, params }));
     });
+  }
+
+  /** Starts a process on a new channel. */
+  async openChannel(params: ChannelParams): Promise<Channel> {
+    const { channel: id, path } = await this.request<{ channel: number; path: string }>('channel.open', CHANNEL_OPEN_TIMEOUT_MS, params);
+    const channel = new Channel(id, path, this);
+    if (this.closedReason) {
+      channel.receiveExit({ stderr: '', error: this.closedReason.message });
+      return channel;
+    }
+    this.channels.set(id, channel);
+    for (const event of this.unclaimed.get(id) ?? []) this.dispatch(event);
+    this.unclaimed.delete(id);
+    return channel;
   }
 
   onClose(listener: (reason: Error) => void): void {
@@ -82,6 +114,22 @@ export class BridgeConnection {
     clearTimeout(kill);
   }
 
+  private dispatch(event: BridgeEvent): void {
+    const channel = this.channels.get(event.params.channel);
+    if (!channel) {
+      const waiting = this.unclaimed.get(event.params.channel) ?? [];
+      waiting.push(event);
+      this.unclaimed.set(event.params.channel, waiting);
+      return;
+    }
+    if (event.event === 'channel.data') {
+      channel.receiveData(Buffer.from(event.params.data, 'base64'));
+    } else {
+      this.channels.delete(event.params.channel);
+      channel.receiveExit({ exitCode: event.params.exitCode, stderr: event.params.stderr });
+    }
+  }
+
   private receive(response: Response): void {
     const pending = this.pending.get(response.id);
     if (!pending) return;
@@ -99,6 +147,10 @@ export class BridgeConnection {
       reject(reason);
     }
     this.pending.clear();
+    const exit: ChannelExit = { stderr: '', error: reason.message };
+    for (const channel of this.channels.values()) channel.receiveExit(exit);
+    this.channels.clear();
+    this.unclaimed.clear();
     for (const listener of this.closeListeners) listener(reason);
   }
 }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { LoomApi, TopicName, Topics } from '../shared/api';
+import type { LoomApi, TopicArgs, TopicName, Topics } from '../shared/api';
 
 const ApiContext = createContext<LoomApi | null>(null);
 
@@ -15,9 +15,15 @@ export function useApi(): LoomApi {
 }
 
 /** The current value of a main topic, kept up to date. */
-export function useTopic<T extends TopicName>(topic: T): Topics[T] | undefined {
+export function useTopic<T extends TopicName>(topic: T, ...params: TopicArgs<T>): Topics[T] | undefined {
   const api = useApi();
-  const [value, setValue] = useState<Topics[T]>();
-  useEffect(() => api.subscribe(topic, setValue), [api, topic]);
-  return value;
+  const [value, setValue] = useState<{ key: string; value: Topics[T] }>();
+  const key = JSON.stringify([topic, params]);
+  useEffect(
+    () => api.subscribe(topic, (value) => setValue({ key, value }), ...params),
+    // params are compared by value, through key.
+    [api, key],
+  );
+  // A value from before the params changed belongs to the other subscription.
+  return value?.key === key ? value.value : undefined;
 }

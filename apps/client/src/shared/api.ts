@@ -126,6 +126,56 @@ export interface Project {
 /** The branch prefix a new Project gets. */
 export const DEFAULT_BRANCH_PREFIX = 'loom';
 
+/**
+ * - `working`: the agent is running; the Session doesn't need the user.
+ * - `waiting`: the Session needs the user; `waitingReason` says why.
+ * - `archived`: closed, kept for history.
+ */
+export type SessionStatus = 'working' | 'waiting' | 'archived';
+
+export type WaitingReason = 'finished' | 'stopped' | 'question' | 'approval' | 'stuck' | 'error' | 'interrupted' | 'feedback';
+
+/**
+ * - `worktree`: the Session's own git worktree.
+ * - `checkout`: the Project's checkout itself, on whatever branch it has.
+ */
+export type WorkingCopyKind = 'worktree' | 'checkout';
+
+/** Where a Session's agent works. */
+export interface WorkingCopy {
+  kind: WorkingCopyKind;
+  /** The working copy's folder, in its Project's Environment. */
+  path: string;
+}
+
+export interface Session {
+  id: number;
+  projectId: number;
+  title: string;
+  workingCopy: WorkingCopy;
+  /** The agent the Session runs on, e.g. `OpenCode`. */
+  agent: string;
+  /** The agent's own id for the conversation (OpenCode's `ses_…`), once it has one. */
+  agentSessionId?: string;
+  status: SessionStatus;
+  /** Why the Session is `waiting`. */
+  waitingReason?: WaitingReason;
+  /** What went wrong, when waiting on an `error`. */
+  error?: string;
+  /** Clock time the Session was started. */
+  createdAt: number;
+  /** Clock time its status last changed. */
+  updatedAt: number;
+}
+
+/** One entry of a Session's conversation, in order. */
+export type TranscriptItem =
+  | { kind: 'user'; id: number; text: string }
+  /** `streaming` while the agent is still adding to it. */
+  | { kind: 'agent'; id: number; text: string; streaming: boolean }
+  /** A run that failed, with the agent's message. */
+  | { kind: 'error'; id: number; message: string };
+
 /** Commands the renderer can invoke, with their parameters and results. */
 export interface Commands {
   'environments.list': { params: void; result: EnvironmentStatus[] };
@@ -153,6 +203,18 @@ export interface Commands {
   'projects.setBranchPrefix': { params: { id: number; branchPrefix: string }; result: Project };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
+  'sessions.list': { params: void; result: Session[] };
+  /**
+   * Starts a Session on a Project and sends it its first prompt. Resolves with
+   * the new Session, Working, once its record exists; the run goes on after.
+   * Only checkout Sessions, which stay on the checkout's current branch, so far.
+   */
+  'sessions.create': { params: { projectId: number; workingCopy: 'checkout'; prompt: string }; result: Session };
+  /**
+   * Sends a prompt to a Waiting Session, which becomes Working. Rejects while
+   * the Session is Working.
+   */
+  'sessions.send': { params: { id: number; prompt: string }; result: void };
 }
 
 /** Topics the renderer can subscribe to, with the value each one carries. */
@@ -160,10 +222,21 @@ export interface Topics {
   environments: EnvironmentStatus[];
   /** Every Project, by name. */
   projects: Project[];
+  /** Every Session, newest first. */
+  sessions: Session[];
+  /** One Session's conversation, as it streams in. */
+  transcript: TranscriptItem[];
+}
+
+/** What the topics that need one are subscribed with. */
+export interface TopicParams {
+  transcript: { sessionId: number };
 }
 
 export type CommandName = keyof Commands;
 export type TopicName = keyof Topics;
+/** The arguments after the listener that subscribing to `T` takes. */
+export type TopicArgs<T extends TopicName> = T extends keyof TopicParams ? [params: TopicParams[T]] : [];
 
 export type Unsubscribe = () => void;
 
@@ -176,5 +249,5 @@ export interface LoomApi {
    * Calls `listener` with the topic's current value right away, then with
    * every new value until unsubscribed.
    */
-  subscribe<T extends TopicName>(topic: T, listener: (value: Topics[T]) => void): Unsubscribe;
+  subscribe<T extends TopicName>(topic: T, listener: (value: Topics[T]) => void, ...params: TopicArgs<T>): Unsubscribe;
 }

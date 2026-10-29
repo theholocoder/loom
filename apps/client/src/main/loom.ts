@@ -1,10 +1,13 @@
 // Main's core, with no Electron in it: the Electron entry point and seam A
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
-import type { Commands, EnvironmentStatus, LoomApi, Project, Topics } from '../shared/api';
+import type { Commands, EnvironmentStatus, LoomApi, Project, Session, TopicParams, Topics } from '../shared/api';
+import { AcpAdapter } from './agents/acp-adapter';
+import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
 import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
+import { Sessions } from './sessions/sessions';
 import { openDatabase } from './storage/database';
 import { Topic } from './topic';
 
@@ -57,9 +60,23 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
   });
   projects.set(projectService.list());
 
+  const sessions = new Topic<Session[]>([]);
+  const sessionService = await Sessions.load({
+    db,
+    clock: options.clock,
+    adapter: new AcpAdapter(OPENCODE_ACP, options.appVersion),
+    project: (id) => projectService.list().find((p) => p.id === id),
+    environment: (id) => (id === native.status.id ? { label: native.status.label, openChannel: (params) => native.openChannel(params) } : undefined),
+    onChange: (list) => sessions.set(list),
+  });
+  sessions.set(sessionService.list());
+
   void native.start();
 
-  const topics: { [T in keyof Topics]: Topic<Topics[T]> } = { environments, projects };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, sessions };
+  const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
+    transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
+  };
   const commands: { [C in keyof Commands]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> } = {
     'environments.list': () => environments.value,
     'environments.detect': async () => {
@@ -75,6 +92,9 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'projects.link': (params) => projectService.link(params),
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
     'projects.check': () => projectService.checkForges(),
+    'sessions.list': () => sessions.value,
+    'sessions.create': (params) => sessionService.create(params),
+    'sessions.send': (params) => sessionService.send(params),
   };
 
   const api: LoomApi = {
@@ -82,15 +102,20 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
       if (!Object.hasOwn(commands, command)) throw new Error(`unknown command "${command}"`);
       return commands[command](params[0] as never) as never;
     },
-    subscribe: (topic, listener) => {
+    subscribe: (topic, listener, ...params) => {
+      if (Object.hasOwn(paramTopics, topic)) {
+        if (!params[0]) throw new Error(`topic "${topic}" needs parameters`);
+        return paramTopics[topic as keyof TopicParams](params[0] as never, listener as never);
+      }
       if (!Object.hasOwn(topics, topic)) throw new Error(`unknown topic "${topic}"`);
-      return topics[topic].subscribe(listener as never);
+      return topics[topic as keyof typeof topics].subscribe(listener as never);
     },
   };
 
   return {
     api,
     close: async () => {
+      await sessionService.shutdown();
       await native.stop();
       await db.destroy();
     },

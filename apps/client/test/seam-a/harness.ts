@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach } from 'vitest';
 import { createLoom, type Loom } from '../../src/main/loom';
 import type { Clock, TimerHandle } from '../../src/main/clock';
-import type { LoomApi, TopicName, Topics } from '../../src/shared/api';
+import type { LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
 import { bridgeBinaryPath } from '../../src/main/environments/bridge-path';
 import clientPackage from '../../package.json';
 
@@ -59,6 +59,28 @@ export interface OpencodeScript {
   version: string;
   /** What `GET /api/integration` lists. */
   integrations?: Array<{ id: string; name: string; connections: unknown[] }>;
+  /** What `opencode acp` does. */
+  acp?: {
+    /** Each process plays one turn per `session/prompt`, in order; past the end, a turn that says nothing. */
+    turns: AcpTurn[];
+  };
+}
+
+/** One run of the `opencode acp` stand-in. */
+export interface AcpTurn {
+  /** The agent's reply, sent as one `agent_message_chunk` each. */
+  chunks?: string[];
+  /** After the chunks, the run holds until the test calls `machine.release(hold)`. */
+  hold?: string;
+  /** The run fails with this JSON-RPC error message, as a provider error does. */
+  error?: string;
+}
+
+/** An ACP message the `opencode acp` stand-in received. */
+export interface AcpMessage {
+  pid: number;
+  cwd: string;
+  message: { id?: number; method?: string; params?: Record<string, unknown> };
 }
 
 /** What a scripted `gh` or `glab` stand-in reports (see stand-ins/forge-cli.mjs). */
@@ -129,6 +151,18 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
     return this.invocations('opencode');
   }
 
+  /** Every ACP message the `opencode acp` stand-ins received, in order. */
+  acpMessages(): AcpMessage[] {
+    return this.scripts
+      .filter((script) => basename(script) === 'opencode.json')
+      .flatMap((script) => readLines(`${script}.acp.log`).map((line) => JSON.parse(line) as AcpMessage));
+  }
+
+  /** Lets an `opencode acp` stand-in run holding on `name` finish. */
+  release(name: string): void {
+    for (const script of this.scripts) writeFileSync(join(dirname(script), `release-${name}`), '');
+  }
+
   /** Installs a scripted `gh` or `glab` stand-in into `binDir`. */
   installForgeCli(cli: ForgeCli, script: ForgeCliScript, binDir = this.binDir()): void {
     this.installStandIn(cli, forgeCliStandIn, script, binDir);
@@ -172,15 +206,7 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   private invocations(name: string): string[][] {
     return this.scripts
       .filter((script) => basename(script) === `${name}.json`)
-      .flatMap((script) => {
-        let log: string;
-        try {
-          log = readFileSync(`${script}.log`, 'utf8');
-        } catch {
-          return [];
-        }
-        return log.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[]);
-      });
+      .flatMap((script) => readLines(`${script}.log`).map((line) => JSON.parse(line) as string[]));
   }
 
   private writeShellPath(): void {
@@ -204,6 +230,17 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   remove(): void {
     rmSync(this.dir, { recursive: true, force: true });
   }
+}
+
+/** The non-empty lines of a log file, none if it doesn't exist yet. */
+function readLines(file: string): string[] {
+  let log: string;
+  try {
+    log = readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  return log.split('\n').filter(Boolean);
 }
 
 /** Where `tool` is on the PATH this test process was started with. */
@@ -292,8 +329,9 @@ export function waitFor<T extends TopicName>(
   api: LoomApi,
   topic: T,
   predicate: (value: Topics[T]) => boolean,
-  timeoutMs = 5000,
+  ...params: TopicArgs<T>
 ): Promise<Topics[T]> {
+  const timeoutMs = 5000;
   return new Promise((resolve, reject) => {
     let last: Topics[T] | undefined;
     let unsubscribe = () => {};
@@ -302,14 +340,18 @@ export function waitFor<T extends TopicName>(
       reject(new Error(`timed out waiting on "${topic}"; last value: ${JSON.stringify(last)}`));
     }, timeoutMs);
     let done = false;
-    unsubscribe = api.subscribe(topic, (value) => {
-      last = value;
-      if (done || !predicate(value)) return;
-      done = true;
-      clearTimeout(timer);
-      queueMicrotask(() => unsubscribe());
-      resolve(value);
-    });
+    unsubscribe = api.subscribe(
+      topic,
+      (value) => {
+        last = value;
+        if (done || !predicate(value)) return;
+        done = true;
+        clearTimeout(timer);
+        queueMicrotask(() => unsubscribe());
+        resolve(value);
+      },
+      ...params,
+    );
     if (done) unsubscribe();
   });
 }

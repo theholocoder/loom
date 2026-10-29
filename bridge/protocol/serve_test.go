@@ -12,12 +12,17 @@ import (
 )
 
 // peer is main's side of the bridge's stdio, speaking raw frames: a 4-byte
-// big-endian length followed by that many bytes of JSON.
+// big-endian length followed by that many bytes of JSON. A goroutine reads
+// every frame the bridge sends; responses and events can then be taken in
+// whatever order a test needs.
 type peer struct {
-	t      *testing.T
-	stdin  *io.PipeWriter
-	stdout *io.PipeReader
-	done   chan error
+	t         *testing.T
+	stdin     *io.PipeWriter
+	stdout    *io.PipeReader
+	done      chan error
+	frames    chan map[string]any
+	events    []map[string]any
+	responses map[float64]map[string]any
 }
 
 func startBridge(t *testing.T) *peer {
@@ -29,11 +34,29 @@ func startBridgeOn(t *testing.T, machine protocol.Machine) *peer {
 	t.Helper()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	p := &peer{t: t, stdin: inW, stdout: outR, done: make(chan error, 1)}
+	p := &peer{t: t, stdin: inW, stdout: outR, done: make(chan error, 1), frames: make(chan map[string]any, 1024), responses: map[float64]map[string]any{}}
 	go func() {
 		err := protocol.Serve(inR, outW, protocol.Info{Version: "1.2.3"}, machine)
 		outW.Close()
 		p.done <- err
+	}()
+	go func() {
+		defer close(p.frames)
+		for {
+			header := make([]byte, 4)
+			if _, err := io.ReadFull(outR, header); err != nil {
+				return
+			}
+			payload := make([]byte, binary.BigEndian.Uint32(header))
+			if _, err := io.ReadFull(outR, payload); err != nil {
+				return
+			}
+			var msg map[string]any
+			if err := json.Unmarshal(payload, &msg); err != nil {
+				msg = map[string]any{"unparsable": string(payload)}
+			}
+			p.frames <- msg
+		}
 	}()
 	t.Cleanup(func() { inW.Close(); outR.Close() })
 	return p
@@ -57,36 +80,84 @@ func (p *peer) send(msg any) {
 	p.sendRaw(payload)
 }
 
+// frameWithin is the next frame the bridge sent, if one arrives within d.
+func (p *peer) frameWithin(d time.Duration) (map[string]any, bool) {
+	p.t.Helper()
+	select {
+	case msg, ok := <-p.frames:
+		if !ok {
+			p.t.Fatal("the bridge closed its stdout")
+		}
+		return msg, true
+	case <-time.After(d):
+		return nil, false
+	}
+}
+
+// receive is the next frame the bridge sends, whatever it is.
 func (p *peer) receive() map[string]any {
 	p.t.Helper()
-	type frame struct {
-		msg map[string]any
-		err error
-	}
-	got := make(chan frame, 1)
-	go func() {
-		header := make([]byte, 4)
-		if _, err := io.ReadFull(p.stdout, header); err != nil {
-			got <- frame{err: err}
-			return
-		}
-		payload := make([]byte, binary.BigEndian.Uint32(header))
-		if _, err := io.ReadFull(p.stdout, payload); err != nil {
-			got <- frame{err: err}
-			return
-		}
-		var msg map[string]any
-		got <- frame{msg: msg, err: json.Unmarshal(payload, &msg)}
-	}()
-	select {
-	case f := <-got:
-		if f.err != nil {
-			p.t.Fatalf("read frame: %v", f.err)
-		}
-		return f.msg
-	case <-time.After(5 * time.Second):
+	msg, ok := p.frameWithin(5 * time.Second)
+	if !ok {
 		p.t.Fatal("timed out waiting for a frame from the bridge")
-		return nil
+	}
+	return msg
+}
+
+// response is the response to request id, keeping events that arrive first.
+func (p *peer) response(id float64) map[string]any {
+	p.t.Helper()
+	for {
+		if msg, ok := p.responses[id]; ok {
+			delete(p.responses, id)
+			return msg
+		}
+		p.keep(p.receive())
+	}
+}
+
+// call sends a request and returns its result, failing the test on an error.
+func (p *peer) call(id int, method string, params any) map[string]any {
+	p.t.Helper()
+	p.send(map[string]any{"id": id, "method": method, "params": params})
+	reply := p.response(float64(id))
+	result, ok := reply["result"].(map[string]any)
+	if !ok {
+		p.t.Fatalf("%s replied %v", method, reply)
+	}
+	return result
+}
+
+// eventWithin is the next event the bridge sends, if one arrives within d.
+func (p *peer) eventWithin(d time.Duration) (map[string]any, bool) {
+	p.t.Helper()
+	deadline := time.Now().Add(d)
+	for len(p.events) == 0 {
+		msg, ok := p.frameWithin(time.Until(deadline))
+		if !ok {
+			return nil, false
+		}
+		p.keep(msg)
+	}
+	event := p.events[0]
+	p.events = p.events[1:]
+	return event, true
+}
+
+func (p *peer) nextEvent() map[string]any {
+	p.t.Helper()
+	event, ok := p.eventWithin(5 * time.Second)
+	if !ok {
+		p.t.Fatal("timed out waiting for an event from the bridge")
+	}
+	return event
+}
+
+func (p *peer) keep(msg map[string]any) {
+	if id, ok := msg["id"].(float64); ok {
+		p.responses[id] = msg
+	} else {
+		p.events = append(p.events, msg)
 	}
 }
 
