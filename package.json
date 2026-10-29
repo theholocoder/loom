@@ -1,0 +1,13 @@
+{
+  "name": "loom",
+  "private": true,
+  "packageManager": "pnpm@10.30.2",
+  "scripts": {
+    "bridge:build": "node scripts/build-bridge.mjs",
+    "bridge:test": "cd bridge && go test ./...",
+    "dev": "pnpm bridge:build && pnpm --filter @loom/client dev",
+    "typecheck": "pnpm --filter @loom/client typecheck",
+    "test": "pnpm bridge:test && pnpm bridge:build && pnpm --filter @loom/client test",
+    "test:e2e": "pnpm bridge:build && pnpm --filter @loom/client test:e2e"
+  }
+}

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go, Node and pnpm at the versions pinned in mise.toml.
+      - uses: jdx/mise-action@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Seam C (bridge protocol)
+        working-directory: bridge
+        run: go test ./...
+
+      - name: Build the bridge
+        run: pnpm bridge:build -- --all
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Seams A and B
+        run: pnpm --filter @loom/client test
+
+      - name: Electron smoke tests
+        run: pnpm --filter @loom/client test:e2e
+        env:
+          LOOM_SMOKE_HEADLESS: ${{ runner.os == 'Linux' && '1' || '' }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: apps/client/playwright-report
