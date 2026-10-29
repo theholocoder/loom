@@ -3,32 +3,46 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project } from '../shared/api';
 import { useApi, useTopic } from './api';
 
-export const FORGE_NAME: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
+const FORGE_NAME: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
 
-// Laid out like Settings: a .dash page with a card holding a data table.
-export function Projects() {
+/** Adding a Project from a folder the user chooses, and how the last attempt went. */
+export interface ExistingCloneLinker {
+  linking: boolean;
+  /** Why the last attempt failed. */
+  error?: string;
+  /** Asks for a folder and links its checkout; does nothing if the user cancels. */
+  link(): Promise<void>;
+}
+
+export function useExistingCloneLinker(): ExistingCloneLinker {
   const api = useApi();
-  const projects = useTopic('projects') ?? [];
-  const environments = useTopic('environments') ?? [];
   const [linking, setLinking] = useState(false);
-  const [linkError, setLinkError] = useState<string>();
-  // Opening Projects checks the Forges again, so what it shows is current.
-  useEffect(() => {
-    api.invoke('projects.check').catch((error: unknown) => console.error('Forge detection failed:', error));
-  }, [api]);
-
-  const useExistingClone = async () => {
-    setLinkError(undefined);
+  const [error, setError] = useState<string>();
+  const link = async () => {
+    setError(undefined);
     setLinking(true);
     try {
       const path = await api.invoke('dialogs.chooseFolder');
       if (path) await api.invoke('projects.link', { path });
-    } catch (error) {
-      setLinkError((error as Error).message);
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setLinking(false);
     }
   };
+  return { linking, error, link };
+}
+
+// Laid out like Settings: a .dash page with a card holding a data table. The
+// linker is shared with the sidebar's + menu, whose result shows here.
+export function Projects({ linker }: { linker: ExistingCloneLinker }) {
+  const api = useApi();
+  const projects = useTopic('projects') ?? [];
+  const environments = useTopic('environments') ?? [];
+  // Opening Projects checks the Forges again, so what it shows is current.
+  useEffect(() => {
+    api.invoke('projects.check').catch((error: unknown) => console.error('Forge detection failed:', error));
+  }, [api]);
 
   const environmentLabel = (id: string) => environments.find((e) => e.id === id)?.label ?? id;
   return (
@@ -36,14 +50,14 @@ export function Projects() {
       <div className="row">
         <h1>Projects</h1>
         <span className="grow" />
-        <button className="primary" type="button" disabled={linking} onClick={() => void useExistingClone()}>
+        <button className="primary" type="button" disabled={linker.linking} onClick={() => void linker.link()}>
           <FolderOpen className="sm" />
           Use existing clone…
         </button>
       </div>
-      {linkError && (
+      {linker.error && (
         <div className="err" role="alert" style={{ marginTop: 8 }}>
-          {linkError}
+          {linker.error}
         </div>
       )}
       <div className="card" style={{ marginTop: 18 }}>

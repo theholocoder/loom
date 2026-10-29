@@ -1,9 +1,8 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
 // Inbox sidebar, the main pane and the diff rail.
-import { Archive, ChartColumn, ChevronDown, ChevronRight, FileDiff, FolderGit2, Inbox, LoaderCircle, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
-import { useState } from 'react';
-import { useTopic } from './api';
-import { FORGE_NAME, Projects } from './Projects';
+import { Archive, ChartColumn, ChevronDown, ChevronRight, FileDiff, FolderGit2, FolderOpen, Inbox, LoaderCircle, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Projects, useExistingCloneLinker } from './Projects';
 import { Settings } from './Settings';
 
 type View = 'session' | 'projects' | 'dashboard' | 'settings';
@@ -11,7 +10,7 @@ type View = 'session' | 'projects' | 'dashboard' | 'settings';
 export function App() {
   const [view, setView] = useState<View>('session');
   const [diffOpen, setDiffOpen] = useState(false);
-  const projects = useTopic('projects') ?? [];
+  const linker = useExistingCloneLinker();
 
   return (
     <div className="app">
@@ -19,9 +18,12 @@ export function App() {
         <div className="side-top">
           <div className="brand">
             <Waypoints /> Loom<span className="grow" />
-            <button className="icon-btn" type="button" title="New Session (N)" aria-label="New Session">
-              <Plus />
-            </button>
+            <NewMenu
+              onAddExistingClone={() => {
+                setView('projects');
+                void linker.link();
+              }}
+            />
           </div>
           <button className="search" type="button" aria-label="Search Sessions and actions">
             <Search />
@@ -33,17 +35,6 @@ export function App() {
           <div className="section-head" style={{ borderTop: 0, cursor: 'default' }}>
             <Inbox className="sm" /> Inbox<span className="grow" />0
           </div>
-          {projects.map((project) => (
-            <div key={project.id} className="B-group-head" role="group" aria-label={project.name}>
-              <span className="proj-avatar" style={{ width: 26, height: 26, background: `var(--p${((project.id - 1) % 3) + 1})`, fontSize: 26 * 0.38 }}>
-                {project.name.slice(0, 2).toUpperCase()}
-              </span>
-              <b className="ellipsis">{project.name}</b>
-              {project.forge.kind && <span className="muted">{FORGE_NAME[project.forge.kind]}</span>}
-              <span className="grow" />
-              <span className="chip">0</span>
-            </div>
-          ))}
           <div className="empty">Nothing needs you right now.</div>
           <Section label="Working" icon={LoaderCircle} />
           <Section label="Archived" icon={Archive} />
@@ -58,7 +49,7 @@ export function App() {
       {view === 'settings' ? (
         <Settings />
       ) : view === 'projects' ? (
-        <Projects />
+        <Projects linker={linker} />
       ) : (
         <main className="main" aria-label="Session">
           <div className="empty">No Session selected.</div>
@@ -83,6 +74,45 @@ export function App() {
           <FileDiff />
           <span>CHANGES</span>
         </button>
+      )}
+    </div>
+  );
+}
+
+/** The + button's menu of things to start: Projects now, Sessions later. */
+function NewMenu({ onAddExistingClone }: { onAddExistingClone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  const firstItem = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    firstItem.current?.focus();
+    const closeOutside = (event: MouseEvent) => {
+      if (!container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOutside);
+    return () => document.removeEventListener('mousedown', closeOutside);
+  }, [open]);
+  return (
+    <div className="menu-anchor" ref={container}>
+      <button className="icon-btn" type="button" title="New" aria-label="New" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Plus />
+      </button>
+      {open && (
+        <div className="menu" role="menu" onKeyDown={(event) => event.key === 'Escape' && setOpen(false)}>
+          <button
+            ref={firstItem}
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onAddExistingClone();
+            }}
+          >
+            <FolderOpen className="sm" />
+            Add Project from existing clone…
+          </button>
+        </div>
       )}
     </div>
   );

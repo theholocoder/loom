@@ -29,7 +29,7 @@ describe('the window', () => {
     renderApp();
 
     const inbox = screen.getByRole('complementary', { name: 'Inbox' });
-    expect(within(inbox).getByRole('button', { name: 'New Session' })).toBeTruthy();
+    expect(within(inbox).getByRole('button', { name: 'New' }).getAttribute('aria-expanded')).toBe('false');
     expect(within(inbox).getByRole('button', { name: 'Search Sessions and actions' })).toBeTruthy();
     expect(within(inbox).getByText('Nothing needs you right now.')).toBeTruthy();
     for (const section of ['Working', 'Archived']) {
@@ -266,10 +266,74 @@ describe('Projects', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch(/can't be a branch prefix/);
   });
 
-  it('groups the sidebar by Project', () => {
-    renderApp(new FakeMain({ projects: [project('billing-api', {}, 1), project('loom', { state: 'no-remote', kind: undefined }, 2)] }));
+  it("doesn't list Projects in the Inbox when they have no Sessions", () => {
+    renderApp(new FakeMain({ projects: [project('billing-api', {}, 1), project('loom', {}, 2)] }));
 
     const inbox = screen.getByRole('complementary', { name: 'Inbox' });
-    expect(within(inbox).getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual(['billing-api', 'loom']);
+    expect(within(inbox).queryByText('billing-api')).toBeNull();
+    expect(within(inbox).getByText('Nothing needs you right now.')).toBeTruthy();
+  });
+});
+
+describe('the + menu', () => {
+  const linked: Project = {
+    id: 1,
+    name: 'loom',
+    branchPrefix: 'loom',
+    checkout: { environmentId: 'native', path: '/home/dev/code/loom' },
+    forge: { state: 'no-remote', checking: false },
+  };
+
+  function openMenu(main: FakeMain) {
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    return main;
+  }
+
+  it('adds a Project from an existing clone, then shows Projects', async () => {
+    const main = openMenu(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => linked }));
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
+
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
+    expect(screen.getByRole('main', { name: 'Projects' })).toBeTruthy();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('says on Projects why the folder was rejected', async () => {
+    openMenu(
+      new FakeMain(
+        {},
+        {
+          'dialogs.chooseFolder': () => '/home/dev/notes',
+          'projects.link': () => {
+            throw new Error('/home/dev/notes is not a git repository');
+          },
+        },
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
+
+    const page = screen.getByRole('main', { name: 'Projects' });
+    expect((await within(page).findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
+  });
+
+  it('closes on Escape', () => {
+    openMenu(new FakeMain());
+    expect(screen.getByRole('menu')).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('button', { name: 'New' }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('closes when clicking elsewhere', () => {
+    openMenu(new FakeMain());
+
+    fireEvent.mouseDown(screen.getByRole('main', { name: 'Session' }));
+
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });
