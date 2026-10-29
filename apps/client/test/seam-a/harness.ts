@@ -229,10 +229,26 @@ export interface MainHarness {
   close(): Promise<void>;
 }
 
+// Undone last first after each test, so a folder is removed only once every
+// main started after it has closed: Windows can't remove a database in use.
 const open: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (open.length) await open.pop()!();
 });
+
+/** A temporary folder for a test, removed after the mains started after it close. */
+export function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  open.push(async () => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+/** A Machine a test shares between mains, removed after they close. */
+export function tempMachine(): Machine {
+  const machine = new Machine();
+  open.push(async () => machine.remove());
+  return machine;
+}
 
 export async function startMain(
   options: { userDataDir?: string; bridgePath?: string; appVersion?: string; machine?: Machine } = {},
