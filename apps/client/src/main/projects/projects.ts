@@ -1,17 +1,15 @@
 // The Projects service: the git checkouts the user has added to Loom, kept in
 // the database, and what each one's Environment reports about them.
 import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Project } from '../../shared/api';
-import type { BridgeCall } from '../agents/opencode';
-import { BridgeRequestError } from '../environments/bridge-connection';
 import type { Clock } from '../clock';
+import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { LoomDatabase } from '../storage/database';
-import { detectForge } from './forge';
-
-const GIT_TIMEOUT_MS = 10_000;
+import { detectForge, GIT_TIMEOUT_MS } from './forge';
 
 /** What the Projects service needs from an Environment. */
 export interface ProjectEnvironment {
   label: string;
+  connected(): boolean;
   request: BridgeCall;
 }
 
@@ -20,12 +18,6 @@ export interface ProjectsOptions {
   clock: Clock;
   environment: (id: string) => ProjectEnvironment | undefined;
   onChange: (projects: Project[]) => void;
-}
-
-interface ExecResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
 }
 
 const UNCHECKED: ForgeStatus = { state: 'unknown', checking: false };
@@ -64,10 +56,12 @@ export class Projects {
   async link({ path, environmentId = 'native' }: { path: string; environmentId?: string }): Promise<Project> {
     const environment = this.environment(environmentId);
     const topLevel = await topLevelOf(environment, path);
-    const existing = this.list().find((p) => p.checkout.environmentId === environmentId && p.checkout.path === topLevel);
-    if (existing) throw new Error(`${topLevel} is already the Project "${existing.name}"`);
-
     const name = topLevel.split('/').filter(Boolean).pop() ?? topLevel;
+    // Asked before and after inserting: a link of the same checkout running
+    // alongside this one may get there first.
+    const linked = () => this.list().find((p) => p.checkout.environmentId === environmentId && p.checkout.path === topLevel);
+    const alreadyLinked = () => new Error(`${topLevel} is already the Project "${linked()?.name ?? name}"`);
+    if (linked()) throw alreadyLinked();
     const id = await this.options.db.transaction().execute(async (trx) => {
       const { id } = await trx
         .insertInto('projects')
@@ -76,6 +70,9 @@ export class Projects {
         .executeTakeFirstOrThrow();
       await trx.insertInto('checkouts').values({ project_id: id, environment_id: environmentId, path: topLevel }).execute();
       return id;
+    }).catch((error: unknown) => {
+      if ((error as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') throw alreadyLinked();
+      throw error;
     });
     this.projects.set(id, { id, name, branchPrefix: DEFAULT_BRANCH_PREFIX, checkout: { environmentId, path: topLevel }, forge: UNCHECKED });
     this.publish();
@@ -94,8 +91,9 @@ export class Projects {
   }
 
   /**
-   * Checks a Project's Forge again, unless its Environment is unknown. A check
-   * already running is joined rather than repeated.
+   * Checks a Project's Forge again, unless its Environment is unknown or not
+   * connected (it is checked when it connects). A check already running is
+   * joined rather than repeated.
    */
   checkForge(id: number): Promise<void> {
     const running = this.checking.get(id);
@@ -103,7 +101,7 @@ export class Projects {
     const check = (async () => {
       const project = this.projects.get(id);
       const environment = project && this.options.environment(project.checkout.environmentId);
-      if (!project || !environment) return;
+      if (!project || !environment?.connected()) return;
       this.update(id, { forge: { ...project.forge, checking: true } });
       const forge = await detectForge(environment.request, project.checkout.path);
       this.update(id, { forge: { ...forge, checking: false } });
@@ -142,13 +140,9 @@ export class Projects {
 async function topLevelOf(environment: ProjectEnvironment, path: string): Promise<string> {
   let result: ExecResult;
   try {
-    result = await environment.request<ExecResult>('exec', GIT_TIMEOUT_MS + 5_000, {
-      command: 'git',
-      args: ['-C', path, 'rev-parse', '--show-toplevel'],
-      timeoutMs: GIT_TIMEOUT_MS,
-    });
+    result = await exec(environment.request, 'git', ['-C', path, 'rev-parse', '--show-toplevel'], GIT_TIMEOUT_MS);
   } catch (error) {
-    if (error instanceof BridgeRequestError && error.code === 'not_found') {
+    if (isNotFound(error)) {
       throw new Error(`git isn't installed in ${environment.label}, or isn't on your shell's PATH`);
     }
     throw error;

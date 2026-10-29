@@ -86,6 +86,17 @@ describe('linking an existing checkout', () => {
     expect(await main.api.invoke('projects.list')).toHaveLength(1);
   });
 
+  it('rejects the second of two links of the same checkout made at once', async () => {
+    const machine = newMachine();
+    const path = machine.gitRepo('billing-api');
+    const main = await started(machine);
+
+    const results = await Promise.allSettled([main.api.invoke('projects.link', { path }), main.api.invoke('projects.link', { path })]);
+
+    expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(String((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason)).toMatch(/already the Project "billing-api"/);
+  });
+
   it('publishes the Projects as they are added', async () => {
     const machine = newMachine();
     const main = await started(machine);
@@ -222,6 +233,21 @@ describe('detecting the Forge of a linked checkout', () => {
 
     const projects = await waitFor(second.api, 'projects', (p) => p[0]?.forge.state === 'available' && !p[0].forge.checking);
     expect(projects[0]?.forge).toMatchObject({ kind: 'github', host: 'github.com', repository: 'theholocoder/loom' });
+  });
+});
+
+describe('a Project whose Environment is not connected', () => {
+  it('keeps its last Forge status rather than reporting the check failed', async () => {
+    const machine = newMachine();
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'] });
+    const main = await started(machine);
+    await main.api.invoke('projects.link', { path: machine.gitRepo('loom', { origin: 'https://github.com/theholocoder/loom.git' }) });
+    main.bridge().kill();
+    await waitFor(main.api, 'environments', (e) => e[0]?.state === 'disconnected');
+
+    await main.api.invoke('projects.check');
+
+    expect((await main.api.invoke('projects.list'))[0]?.forge).toMatchObject({ state: 'available', checking: false });
   });
 });
 

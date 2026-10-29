@@ -236,6 +236,17 @@ describe('Projects', () => {
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.setBranchPrefix', params: { id: 1, branchPrefix: 'feat' } }));
   });
 
+  it('saves a branch prefix once when Enter is followed by leaving the field', async () => {
+    const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
+
+    fireEvent.change(input, { target: { value: 'feat' } });
+    fireEvent.submit(input);
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.setBranchPrefix')).toHaveLength(1));
+  });
+
   it('says why a branch prefix was refused', async () => {
     openProjects(
       new FakeMain(

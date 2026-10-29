@@ -33,9 +33,9 @@ export function App() {
           <div className="section-head" style={{ borderTop: 0, cursor: 'default' }}>
             <Inbox className="sm" /> Inbox<span className="grow" />0
           </div>
-          {projects.map((project, index) => (
+          {projects.map((project) => (
             <div key={project.id} className="B-group-head" role="group" aria-label={project.name}>
-              <span className="proj-avatar" style={{ width: 26, height: 26, background: `var(--p${(index % 3) + 1})`, fontSize: 26 * 0.38 }}>
+              <span className="proj-avatar" style={{ width: 26, height: 26, background: `var(--p${((project.id - 1) % 3) + 1})`, fontSize: 26 * 0.38 }}>
                 {project.name.slice(0, 2).toUpperCase()}
               </span>
               <b className="ellipsis">{project.name}</b>

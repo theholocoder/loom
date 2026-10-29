@@ -1,5 +1,5 @@
 import { CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project } from '../shared/api';
 import { useApi, useTopic } from './api';
 
@@ -166,11 +166,19 @@ function BranchPrefix({ project }: { project: Project }) {
   const [error, setError] = useState<string>();
   useEffect(() => setValue(project.branchPrefix), [project.branchPrefix]);
 
+  // Enter submits, then leaving the field blurs it: save each value once.
+  const sent = useRef<string>(undefined);
   const save = (event?: FormEvent) => {
     event?.preventDefault();
-    if (value === project.branchPrefix) return;
+    if (value === project.branchPrefix || value === sent.current) return;
+    sent.current = value;
     setError(undefined);
-    api.invoke('projects.setBranchPrefix', { id: project.id, branchPrefix: value }).catch((e: unknown) => setError((e as Error).message));
+    api
+      .invoke('projects.setBranchPrefix', { id: project.id, branchPrefix: value })
+      // Main trims the prefix, which may leave it as it was.
+      .then((saved) => setValue(saved.branchPrefix))
+      .catch((e: unknown) => setError((e as Error).message))
+      .finally(() => (sent.current = undefined));
   };
   return (
     <form onSubmit={save}>

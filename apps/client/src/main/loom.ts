@@ -40,6 +40,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     onChange: (status) => {
       environments.set([status]);
       // The Projects' Forges are checked whenever their Environment connects.
+      // onChange only fires once start() runs, after projectService exists.
       const isConnected = status.state === 'connected';
       if (isConnected && !wasConnected) void projectService.checkForges(status.id);
       wasConnected = isConnected;
@@ -51,7 +52,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
   const projectService = await Projects.load({
     db,
     clock: options.clock,
-    environment: (id) => (id === native.status.id ? { label: native.status.label, request: (...args) => native.request(...args) } : undefined),
+    environment: (id) => (id === native.status.id ? { label: native.status.label, connected: () => native.status.state === 'connected', request: (...args) => native.request(...args) } : undefined),
     onChange: (list) => projects.set(list),
   });
   projects.set(projectService.list());

@@ -3,17 +3,10 @@
 // is installed and signed in to its host (`gh`/`glab auth status --hostname`).
 // Loom reaches the Forge only through that login (ADR 0002).
 import { FORGE_CLI, type ForgeKind, type ForgeStatus } from '../../shared/api';
-import type { BridgeCall } from '../agents/opencode';
-import { BridgeRequestError } from '../environments/bridge-connection';
+import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 
-const GIT_TIMEOUT_MS = 10_000;
+export const GIT_TIMEOUT_MS = 10_000;
 const AUTH_STATUS_TIMEOUT_MS = 15_000;
-
-interface ExecResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
 
 export async function detectForge(call: BridgeCall, checkoutPath: string): Promise<Omit<ForgeStatus, 'checking'>> {
   let remote: ExecResult;
@@ -38,15 +31,11 @@ export async function detectForge(call: BridgeCall, checkoutPath: string): Promi
   try {
     status = await exec(call, cli, ['auth', 'status', '--hostname', parsed.host], AUTH_STATUS_TIMEOUT_MS);
   } catch (error) {
-    if (error instanceof BridgeRequestError && error.code === 'not_found') return { ...found, state: 'cli-missing' };
+    if (isNotFound(error)) return { ...found, state: 'cli-missing' };
     return { ...found, state: 'error', error: `${cli} auth status failed: ${(error as Error).message}` };
   }
   if (status.exitCode !== 0) return { ...found, state: 'signed-out', error: (status.stderr || status.stdout).trim() || undefined };
   return { ...found, state: 'available' };
-}
-
-function exec(call: BridgeCall, command: string, args: string[], timeoutMs: number): Promise<ExecResult> {
-  return call<ExecResult>('exec', timeoutMs + 5_000, { command, args, timeoutMs });
 }
 
 /**

@@ -10,8 +10,6 @@
 /* ---- themes ---- */
 [data-theme="midnight"] { --bg:#0f1117; --panel:#161922; --panel2:#1e2230; --hover:#232838; --line:#272c3b; --text:#e6e8ef; --muted:#8a92a6; --accent:#8b9dff; --accent-text:#0f1117;
   --wait:#f2b863; --work:#5fd3f3; --ok:#7ddc8f; --err:#ff7a90; --user:#26304d; --user-line:#34406a; --code:#0b0d12; --sel:#1f2740; --shadow:#000a; }
-/* project identity = categorical slots 1-3 (validated per surface, see dataviz validator) */
-[data-theme="midnight"], [data-theme="nord"], [data-theme="mocha"] { --p1:#3987e5; --p2:#d95926; --p3:#199e70; }
 
 
 * { box-sizing: border-box; }
@@ -116,6 +114,8 @@ table.data tr.click { cursor: pointer; } table.data tr.click:hover td { backgrou
 
 /* ---- Loom additions (not in the prototype) ---- */
 #root { height: 100%; }
+/* Project identity colours, Midnight's from the prototype's categorical slots 1-3. */
+[data-theme="midnight"] { --p1:#3987e5; --p2:#d95926; --p3:#199e70; }
 /* Section heads and the rail are buttons here, for keyboard access. */
 button.section-head { width: 100%; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 button.section-head:hover { background: none; }
