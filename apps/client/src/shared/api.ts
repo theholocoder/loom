@@ -21,6 +21,42 @@ export interface BridgeInfo {
  */
 export type EnvironmentState = 'starting' | 'connected' | 'unresponsive' | 'disconnected' | 'failed';
 
+/**
+ * Where the bridge got the environment it runs the agent and git with:
+ * - `interactive`: the user's interactive login shell (`$SHELL -ilc`);
+ * - `login`: their login shell (`$SHELL -lc`), when the interactive one failed;
+ * - `bridge`: the bridge's own environment, when there is no shell to ask
+ *   (native Windows) or both attempts failed.
+ */
+export type ShellEnvironmentSource = 'interactive' | 'login' | 'bridge';
+
+/** The oldest OpenCode Loom drives. V1 OpenCode (`opencode-ai` 1.x) is refused. */
+export const OPENCODE_MIN_VERSION = '2.1.4';
+
+/**
+ * - `unknown`: not checked yet.
+ * - `missing`: not on the Environment's PATH.
+ * - `unsupported`: older than the minimum version, V1 OpenCode included.
+ * - `signed-out`: installed, but signed in to no model provider.
+ * - `ready`: installed, recent enough and signed in.
+ * - `error`: the check itself failed.
+ */
+export type AgentState = 'unknown' | 'missing' | 'unsupported' | 'signed-out' | 'ready' | 'error';
+
+/** Whether an Environment's agent is ready to run Sessions. */
+export interface AgentStatus {
+  name: string;
+  state: AgentState;
+  /** Whether a check is running; the other fields are from the last one. */
+  checking: boolean;
+  /** The version the agent reported, as `major.minor.patch`. */
+  version?: string;
+  /** Where the agent was found. */
+  path?: string;
+  /** Why the check failed, when `error`. */
+  error?: string;
+}
+
 export interface EnvironmentStatus {
   id: string;
   label: string;
@@ -31,11 +67,22 @@ export interface EnvironmentStatus {
   error?: string;
   /** Clock time of the last answered ping or handshake. */
   lastSeenAt?: number;
+  /** Present once the bridge has resolved its shell environment. */
+  shellEnvironment?: ShellEnvironmentSource;
+  /** Present once the Environment is connected. */
+  agent?: AgentStatus;
 }
 
 /** Commands the renderer can invoke, with their parameters and results. */
 export interface Commands {
   'environments.list': { params: void; result: EnvironmentStatus[] };
+  /** Checks the agent again in every connected Environment, and resolves once done. */
+  'environments.detect': { params: void; result: void };
+  /**
+   * Re-reads an Environment's shell environment, for processes started from
+   * now on, then checks its agent again.
+   */
+  'environments.reload': { params: { id: string }; result: void };
 }
 
 /** Topics the renderer can subscribe to, with the value each one carries. */

@@ -41,6 +41,13 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
   const topics: { [T in keyof Topics]: Topic<Topics[T]> } = { environments };
   const commands: { [C in keyof Commands]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> } = {
     'environments.list': () => environments.value,
+    'environments.detect': async () => {
+      await native.detectAgent();
+    },
+    'environments.reload': async ({ id }) => {
+      if (id !== native.status.id) throw new Error(`unknown Environment "${id}"`);
+      await native.reload();
+    },
   };
 
   const api: LoomApi = {

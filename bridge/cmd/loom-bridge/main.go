@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/theholocoder/loom/bridge/protocol"
 )
@@ -15,7 +16,13 @@ import (
 var version = "dev"
 
 func main() {
-	if err := protocol.Serve(os.Stdin, os.Stdout, protocol.Info{Version: version}); err != nil {
+	host := protocol.Host{Shell: os.Getenv("SHELL"), Environ: os.Environ()}
+	// Native Windows has no login shell to ask; a $SHELL there comes from
+	// something like Git Bash and isn't the Environment's.
+	if runtime.GOOS == "windows" {
+		host.Shell = ""
+	}
+	if err := protocol.Serve(os.Stdin, os.Stdout, protocol.Info{Version: version}, host); err != nil {
 		fmt.Fprintln(os.Stderr, "loom-bridge:", err)
 		os.Exit(1)
 	}

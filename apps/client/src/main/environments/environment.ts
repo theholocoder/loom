@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
-import type { BridgeInfo, EnvironmentStatus } from '../../shared/api';
+import type { BridgeInfo, EnvironmentStatus, ShellEnvironmentSource } from '../../shared/api';
+import { detectOpenCode } from '../agents/opencode';
 import type { Clock, TimerHandle } from '../clock';
 import { BridgeConnection } from './bridge-connection';
 
@@ -8,6 +9,8 @@ export type SpawnBridge = (command: string, args: string[]) => ChildProcess;
 export const HANDSHAKE_TIMEOUT_MS = 20_000;
 export const PING_INTERVAL_MS = 30_000;
 export const PING_TIMEOUT_MS = 10_000;
+/** Resolving the shell environment runs the shell twice at most, 5 s each. */
+export const SHELL_ENVIRONMENT_TIMEOUT_MS = 15_000;
 /** The bridge protocol version this Client speaks. */
 export const PROTOCOL_VERSION = 1;
 
@@ -28,6 +31,7 @@ export class Environment {
   private current: EnvironmentStatus;
   private pingTimer: TimerHandle | undefined;
   private stopped = false;
+  private detecting: Promise<void> | undefined;
 
   constructor(private readonly options: EnvironmentOptions) {
     this.current = { id: options.id, label: options.label, state: 'starting' };
@@ -68,7 +72,46 @@ export class Environment {
     } catch (error) {
       this.update({ state: 'failed', error: (error as Error).message });
       child.kill();
+      return;
     }
+    try {
+      const { source } = await connection.request<{ source: ShellEnvironmentSource }>('environment.get', SHELL_ENVIRONMENT_TIMEOUT_MS);
+      this.update({ shellEnvironment: source });
+    } catch {
+      // The bridge went away; its close listener has reported it.
+      return;
+    }
+    await this.detectAgent();
+  }
+
+  /**
+   * Checks the Environment's agent, unless the bridge isn't connected. A
+   * check already running is joined rather than repeated.
+   */
+  detectAgent(): Promise<void> {
+    const connection = this.connection;
+    if (!connection || this.current.state !== 'connected') return Promise.resolve();
+    this.detecting ??= (async () => {
+      const previous = this.current.agent ?? { name: 'OpenCode', state: 'unknown' as const };
+      this.update({ agent: { ...previous, checking: true } });
+      const agent = await detectOpenCode((method, timeoutMs, params) => connection.request(method, timeoutMs, params));
+      if (this.connection === connection) this.update({ agent: { ...agent, checking: false } });
+    })().finally(() => (this.detecting = undefined));
+    return this.detecting;
+  }
+
+  /**
+   * Re-reads the shell environment for processes started from now on (running
+   * ones keep theirs), then checks the agent again.
+   */
+  async reload(): Promise<void> {
+    const connection = this.connection;
+    if (!connection || this.current.state !== 'connected') throw new Error(`${this.options.label} is not connected`);
+    const { source } = await connection.request<{ source: ShellEnvironmentSource }>('environment.reload', SHELL_ENVIRONMENT_TIMEOUT_MS);
+    this.update({ shellEnvironment: source });
+    // A check started before the reload would report the old environment.
+    await this.detecting;
+    await this.detectAgent();
   }
 
   async stop(): Promise<void> {

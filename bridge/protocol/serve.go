@@ -5,6 +5,7 @@
 package protocol
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"runtime"
 	"sync"
+	"time"
 )
 
 // ProtocolVersion is bumped whenever the frames or messages change in a way
@@ -26,6 +28,19 @@ const MaxFrameSize = 16 << 20
 // bridge was built with.
 type Info struct {
 	Version string
+}
+
+// Host is what the bridge needs from the machine it runs on to resolve the
+// Environment's shell environment.
+type Host struct {
+	// Shell is the user's login shell ($SHELL), or empty when there is none to
+	// ask, as on native Windows.
+	Shell string
+	// Environ is the bridge's own environment, the fallback.
+	Environ []string
+	// ShellTimeout bounds each attempt at running Shell; zero means
+	// shellenv.DefaultTimeout.
+	ShellTimeout time.Duration
 }
 
 type request struct {
@@ -54,10 +69,17 @@ type handshakeResult struct {
 }
 
 // Serve answers requests read from r on w until r reaches EOF, which is how
-// main tells the bridge to shut down. It returns nil on a clean EOF and an
-// error if the stream breaks or a frame can't be read.
-func Serve(r io.Reader, w io.Writer, info Info) error {
+// main tells the bridge to shut down. Requests are handled concurrently, so a
+// slow command never holds up a ping. It returns nil on a clean EOF and an
+// error if the stream breaks or a frame can't be read; either way it first
+// stops whatever the requests in flight were running.
+func Serve(r io.Reader, w io.Writer, info Info, host Host) error {
 	out := &writer{w: w}
+	s := &server{info: info, env: newEnvironment(host)}
+	ctx, cancel := context.WithCancel(context.Background())
+	var inFlight sync.WaitGroup
+	defer inFlight.Wait()
+	defer cancel()
 	for {
 		payload, err := readFrame(r)
 		if errors.Is(err, io.EOF) {
@@ -73,26 +95,63 @@ func Serve(r io.Reader, w io.Writer, info Info) error {
 			}
 			continue
 		}
-		if err := out.write(handle(req, info)); err != nil {
-			return err
-		}
+		inFlight.Add(1)
+		go func() {
+			defer inFlight.Done()
+			// A reply that can't be written means main has gone; the read
+			// loop sees the same and ends Serve.
+			_ = out.write(s.handle(ctx, req))
+		}()
 	}
 }
 
-func handle(req request, info Info) response {
+type server struct {
+	info Info
+	env  *environment
+}
+
+func (s *server) handle(ctx context.Context, req request) response {
+	reply := func(result any, err *Error) response {
+		if err != nil {
+			return response{ID: req.ID, Error: err}
+		}
+		return response{ID: req.ID, Result: result}
+	}
 	switch req.Method {
 	case "handshake":
-		return response{ID: req.ID, Result: handshakeResult{
+		return reply(handshakeResult{
 			ProtocolVersion: ProtocolVersion,
-			Version:         info.Version,
+			Version:         s.info.Version,
 			OS:              runtime.GOOS,
 			Arch:            runtime.GOARCH,
-		}}
+		}, nil)
 	case "ping":
-		return response{ID: req.ID, Result: struct{}{}}
+		return reply(struct{}{}, nil)
+	case "environment.get":
+		return reply(environmentResult{Source: s.env.get().Source}, nil)
+	case "environment.reload":
+		return reply(environmentResult{Source: s.env.reload().Source}, nil)
+	case "exec":
+		var params execParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(runCommand(ctx, s.env.get(), params))
+	case "opencode.probe":
+		return reply(probeOpencode(ctx, s.env.get()))
 	default:
-		return response{ID: req.ID, Error: &Error{Code: "unknown_method", Message: fmt.Sprintf("unknown method %q", req.Method)}}
+		return reply(nil, &Error{Code: "unknown_method", Message: fmt.Sprintf("unknown method %q", req.Method)})
 	}
+}
+
+func decodeParams(raw json.RawMessage, into any) *Error {
+	if len(raw) == 0 {
+		raw = json.RawMessage("{}")
+	}
+	if err := json.Unmarshal(raw, into); err != nil {
+		return &Error{Code: "bad_params", Message: err.Error()}
+	}
+	return nil
 }
 
 func readFrame(r io.Reader) ([]byte, error) {
