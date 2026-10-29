@@ -126,3 +126,6 @@ button.diff-rail:hover { background: var(--panel); }
 .st-connected { color: var(--ok); } .st-starting { color: var(--work); } .st-unresponsive { color: var(--wait); }
 .st-disconnected, .st-failed { color: var(--err); }
 .err { color: var(--err); font-size: 12px; }
+.warn { color: var(--wait); font-size: 12px; max-width: 46ch; margin-top: 2px; }
+.ag-ready { color: var(--ok); } .ag-checking { color: var(--work); } .ag-signed-out, .ag-unsupported { color: var(--wait); }
+.ag-missing, .ag-error { color: var(--err); } .ag-unknown { color: var(--muted); }

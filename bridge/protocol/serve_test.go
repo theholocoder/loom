@@ -22,11 +22,16 @@ type peer struct {
 
 func startBridge(t *testing.T) *peer {
 	t.Helper()
+	return startBridgeOn(t, protocol.Machine{})
+}
+
+func startBridgeOn(t *testing.T, machine protocol.Machine) *peer {
+	t.Helper()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	p := &peer{t: t, stdin: inW, stdout: outR, done: make(chan error, 1)}
 	go func() {
-		err := protocol.Serve(inR, outW, protocol.Info{Version: "1.2.3"})
+		err := protocol.Serve(inR, outW, protocol.Info{Version: "1.2.3"}, machine)
 		outW.Close()
 		p.done <- err
 	}()

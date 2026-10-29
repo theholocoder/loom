@@ -14,6 +14,8 @@ export class FakeMain implements LoomApi {
     this.values = { environments: [], ...initial };
     this.handlers = {
       'environments.list': () => this.values.environments,
+      'environments.detect': () => {},
+      'environments.reload': () => {},
     };
   }
 
