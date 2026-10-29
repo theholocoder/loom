@@ -84,6 +84,43 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .main-head h1 { font-size: 16px; margin: 0; font-weight: 650; }
 .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .chat { flex: 1; overflow: auto; padding: 20px 28px; }
+.msg { display: flex; gap: 12px; margin: 16px 0; }
+.msg.user { justify-content: flex-end; }
+.msg .who { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none; background: var(--panel2); color: var(--accent); }
+.msg .body { min-width: 0; }
+.msg.agent .body { flex: 1; }
+.msg.user .bubble { max-width: 85%; background: var(--user); border: 1px solid var(--user-line); padding: 8px 14px; border-radius: 16px 16px 4px 16px; }
+.msg.agent .bubble { background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; border-radius: 4px 16px 16px 16px; }
+.bubble p { margin: 6px 0; } .bubble ul { margin: 6px 0; padding-left: 20px; }
+.msg .name { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.tools { margin-left: 42px; }
+.tool { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 6px 0; overflow: hidden; }
+.tool-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+.tool-head .name { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.tool-body { border-top: 1px solid var(--line); padding: 8px 10px; }
+.tool.question { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent); }
+.tool.question .name { color: var(--wait); }
+.opts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* composer */
+.composer-wrap { padding: 8px 28px 18px; }
+.composer { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 2px 12px var(--shadow); }
+.composer:focus-within { border-color: var(--accent); }
+.attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px 0; }
+.att { display: inline-flex; align-items: center; gap: 6px; background: var(--panel2); border-radius: 8px; padding: 4px 6px 4px 8px; font-size: 12px; }
+.composer textarea { width: 100%; border: 0; outline: none; background: none; resize: none; padding: 12px 14px 4px; min-height: 52px; max-height: 200px; }
+.ctoolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; }
+.pick { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 8px; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.pick:hover { background: var(--hover); color: var(--text); }
+.pick select { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.pick b { color: var(--text); font-weight: 500; }
+.sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg span { padding: 2px 9px; font-size: 12px; cursor: pointer; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+.seg span.on { background: var(--panel2); color: var(--text); }
+.gauge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); padding: 0 6px; }
+.send { border-radius: 10px; padding: 6px 12px; }
+.hint { font-size: 11.5px; color: var(--muted); padding: 6px 4px 0; display: flex; gap: 12px; }
 
 /* diff */
 .diff-rail { width: 44px; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 10px; cursor: pointer; color: var(--muted); }
@@ -136,3 +173,9 @@ input.prefix { background: var(--panel2); border: 1px solid var(--line); border-
 .menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 10; min-width: 260px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); padding: 4px; display: flex; flex-direction: column; }
 .menu [role="menuitem"] { background: none; border: 0; border-radius: 6px; padding: 6px 10px; font-weight: 400; font-size: 13px; text-align: left; white-space: nowrap; }
 .menu [role="menuitem"]:hover, .menu [role="menuitem"]:focus-visible { background: var(--hover); outline: none; }
+/* Sidebar rows and status are buttons here. */
+button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-align: left; }
+.st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }
+.bubble { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool.failed { border-color: var(--err); } .tool.failed .name { color: var(--err); }
+.composer-wrap button.send:disabled { opacity: .5; cursor: default; filter: none; }

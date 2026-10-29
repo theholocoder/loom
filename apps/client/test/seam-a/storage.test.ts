@@ -38,7 +38,7 @@ describe('the local database', () => {
     await main.close();
 
     expect(existsSync(join(userDataDir, 'loom.db'))).toBe(true);
-    expect(inspect(userDataDir)).toEqual({ journalMode: 'wal', userVersion: 2, tables: ['checkouts', 'projects', 'settings', 'sqlite_sequence'] });
+    expect(inspect(userDataDir)).toEqual({ journalMode: 'wal', userVersion: 3, tables: ['checkouts', 'projects', 'sessions', 'settings', 'sqlite_sequence'] });
   });
 
   it('keeps its data and schema version when main starts again', async () => {
@@ -52,7 +52,7 @@ describe('the local database', () => {
 
     const after = new Database(join(userDataDir, 'loom.db'), { readonly: true });
     expect(after.prepare("select value from settings where key = 'marker'").get()).toEqual({ value: '"kept"' });
-    expect(after.pragma('user_version', { simple: true })).toBe(2);
+    expect(after.pragma('user_version', { simple: true })).toBe(3);
     after.close();
   });
 });

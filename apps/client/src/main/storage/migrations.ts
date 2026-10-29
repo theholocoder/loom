@@ -31,4 +31,22 @@ export const migrations: Migration[] = [
       .addUniqueConstraint('checkouts_environment_path', ['environment_id', 'path'])
       .execute();
   },
+  async (db) => {
+    await db.schema
+      .createTable('sessions')
+      .addColumn('id', 'integer', (c) => c.primaryKey().autoIncrement())
+      .addColumn('project_id', 'integer', (c) => c.notNull().references('projects.id').onDelete('cascade'))
+      .addColumn('title', 'text', (c) => c.notNull())
+      .addColumn('working_copy_kind', 'text', (c) => c.notNull())
+      .addColumn('working_copy_path', 'text', (c) => c.notNull())
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('agent_session_id', 'text')
+      .addColumn('status', 'text', (c) => c.notNull())
+      .addColumn('waiting_reason', 'text')
+      .addColumn('error', 'text')
+      .addColumn('created_at', 'integer', (c) => c.notNull())
+      .addColumn('updated_at', 'integer', (c) => c.notNull())
+      .execute();
+    await db.schema.createIndex('sessions_project').on('sessions').column('project_id').execute();
+  },
 ];
