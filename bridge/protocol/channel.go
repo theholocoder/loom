@@ -193,7 +193,7 @@ func (cs *channels) ack(params ackParams) (any, *Error) {
 		return nil, err
 	}
 	if params.Bytes < 0 {
-		return nil, &Error{Code: "bad_params", Message: "channel.ack needs a positive byte count"}
+		return nil, &Error{Code: "bad_params", Message: "channel.ack needs a byte count of zero or more"}
 	}
 	c.mu.Lock()
 	c.credit += params.Bytes

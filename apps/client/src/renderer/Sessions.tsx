@@ -2,11 +2,8 @@
 // docs/prototypes/ui-layout.html.
 import { Archive, ArrowUp, Bot, CircleAlert, CircleCheckBig, FolderTree, LoaderCircle, OctagonX, Pause, SquareTerminal, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import type { Session, WaitingReason } from '../shared/api';
+import { OPENCODE_NAME, type Session, type WaitingReason } from '../shared/api';
 import { useApi, useTopic } from './api';
-
-/** The agent Sessions run on; a label, not a picker, in v1. */
-const AGENT_NAME = 'OpenCode';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -72,7 +69,8 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
       </div>
       {chosen && (
         <Composer
-          placeholder={`Tell ${AGENT_NAME} what to do…`}
+          agent={OPENCODE_NAME}
+          placeholder={`Tell ${OPENCODE_NAME} what to do…`}
           onSend={start}
           tools={
             <>
@@ -113,6 +111,8 @@ export function SessionView({ session }: { session: Session }) {
   const [error, setError] = useState<string>();
   const status = statusOf(session);
   const working = session.status === 'working';
+  // The conversation lives only while the Client runs; the error is stored.
+  const unshownError = session.waitingReason === 'error' && session.error && !items.some((i) => i.kind === 'error') ? session.error : undefined;
 
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => end.current?.scrollIntoView?.({ block: 'end' }), [items]);
@@ -167,17 +167,10 @@ export function SessionView({ session }: { session: Session }) {
               </div>
             </div>
           ) : (
-            <div key={item.id} className="tools">
-              <div className="tool failed" role="alert">
-                <div className="tool-head">
-                  <OctagonX className="sm" />
-                  <span className="name">error</span>
-                  <span className="grow">{item.message}</span>
-                </div>
-              </div>
-            </div>
+            <ErrorCard key={item.id} message={item.message} />
           ),
         )}
+        {unshownError && <ErrorCard message={unshownError} />}
         {error && (
           <div className="err" role="alert">
             {error}
@@ -186,6 +179,7 @@ export function SessionView({ session }: { session: Session }) {
         <div ref={end} />
       </div>
       <Composer
+        agent={session.agent}
         placeholder={working ? `${session.agent} is working…` : `Reply to ${session.agent}…`}
         disabled={working}
         onSend={send}
@@ -194,11 +188,39 @@ export function SessionView({ session }: { session: Session }) {
   );
 }
 
+/** A run that failed, with the agent's message. */
+function ErrorCard({ message }: { message: string }) {
+  return (
+    <div className="tools">
+      <div className="tool failed" role="alert">
+        <div className="tool-head">
+          <OctagonX className="sm" />
+          <span className="name">error</span>
+          <span className="grow">{message}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The prompt box, with the agent's label and `tools` in its toolbar. Enter
  * sends, Shift+Enter adds a line. `onSend` resolves to whether to clear it.
  */
-function Composer({ placeholder, disabled = false, tools, onSend }: { placeholder: string; disabled?: boolean; tools?: ReactNode; onSend: (prompt: string) => Promise<boolean> }) {
+function Composer({
+  agent,
+  placeholder,
+  disabled = false,
+  tools,
+  onSend,
+}: {
+  /** The agent Sessions run on; a label, not a picker, in v1. */
+  agent: string;
+  placeholder: string;
+  disabled?: boolean;
+  tools?: ReactNode;
+  onSend: (prompt: string) => Promise<boolean>;
+}) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const canSend = !disabled && !sending && draft.trim() !== '';
@@ -224,7 +246,7 @@ function Composer({ placeholder, disabled = false, tools, onSend }: { placeholde
         <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>
             <SquareTerminal className="sm" />
-            <b>{AGENT_NAME}</b>
+            <b>{agent}</b>
           </span>
           {tools}
           <span className="grow" />

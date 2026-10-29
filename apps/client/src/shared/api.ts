@@ -30,6 +30,9 @@ export type EnvironmentState = 'starting' | 'connected' | 'unresponsive' | 'disc
  */
 export type ShellEnvironmentSource = 'interactive' | 'login' | 'bridge';
 
+/** The agent v1 runs Sessions on. */
+export const OPENCODE_NAME = 'OpenCode';
+
 /** The oldest OpenCode Loom drives. V1 OpenCode (`opencode-ai` 1.x) is refused. */
 export const OPENCODE_MIN_VERSION = '2.1.4';
 

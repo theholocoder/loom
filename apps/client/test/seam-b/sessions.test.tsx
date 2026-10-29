@@ -179,6 +179,13 @@ describe('a Session', () => {
     expect(within(screen.getByRole('log', { name: 'Conversation' })).getByRole('alert').textContent).toContain('Insufficient credits');
   });
 
+  it('shows why it is Waiting on an error when its conversation is not loaded', () => {
+    const failed: Session = { ...working, status: 'waiting', waitingReason: 'error', error: 'Insufficient credits' };
+    open(renderApp(new FakeMain({ projects: [project], sessions: [failed] })), failed);
+
+    expect(within(screen.getByRole('log', { name: 'Conversation' })).getByRole('alert').textContent).toContain('Insufficient credits');
+  });
+
   it('is listed in the Inbox while Waiting, and under Working while Working', () => {
     const main = renderApp(new FakeMain({ projects: [project], sessions: [finished] }));
     const inbox = screen.getByRole('complementary', { name: 'Inbox' });

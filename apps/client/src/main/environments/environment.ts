@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
-import type { BridgeInfo, EnvironmentStatus, ShellEnvironmentSource } from '../../shared/api';
-import { detectOpenCode, OPENCODE_NAME } from '../agents/opencode';
+import { OPENCODE_NAME, type BridgeInfo, type EnvironmentStatus, type ShellEnvironmentSource } from '../../shared/api';
+import { detectOpenCode } from '../agents/opencode';
 import type { Clock, TimerHandle } from '../clock';
 import { BridgeConnection } from './bridge-connection';
 import type { Channel, ChannelParams } from './channel';
