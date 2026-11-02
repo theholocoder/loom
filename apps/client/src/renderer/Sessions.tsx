@@ -1,8 +1,9 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, ArrowUp, Bot, CircleCheckBig, CirclePause, FolderTree, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { OPENCODE_NAME, type Session, type WaitingReason } from '../shared/api';
+import { OPENCODE_NAME, type Session, type WaitingReason, type WorkingCopyKind } from '../shared/api';
+import { suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
@@ -40,13 +41,19 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
   const projects = useTopic('projects') ?? [];
   const [projectId, setProjectId] = useState<number>();
   const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
+  const [workingCopy, setWorkingCopy] = useState<WorkingCopyKind>('worktree');
+  const [draft, setDraft] = useState('');
+  // The branch the user typed; until then, the one suggested from the prompt.
+  const [editedBranch, setEditedBranch] = useState<string>();
   const [error, setError] = useState<string>();
+  const suggested = chosen && draft.trim() ? suggestBranch(chosen.branchPrefix, draft) : '';
 
   const start = async (prompt: string) => {
     if (!chosen) return false;
     setError(undefined);
+    const branch = workingCopy === 'worktree' && editedBranch?.trim() ? { branch: editedBranch } : {};
     try {
-      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, workingCopy: 'checkout', prompt }));
+      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, workingCopy, ...branch, prompt }));
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -72,12 +79,21 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
           agent={OPENCODE_NAME}
           placeholder={`Tell ${OPENCODE_NAME} what to do…`}
           onSend={start}
+          onDraftChange={setDraft}
           tools={
             <>
               <label className="pick" title="Project">
                 <FolderTree className="sm" />
                 <b>{chosen.name}</b>
-                <select aria-label="Project" value={chosen.id} onChange={(event) => setProjectId(Number(event.target.value))}>
+                <select
+                  aria-label="Project"
+                  value={chosen.id}
+                  onChange={(event) => {
+                    setProjectId(Number(event.target.value));
+                    // An edited name has the old Project's prefix.
+                    setEditedBranch(undefined);
+                  }}
+                >
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
@@ -86,15 +102,24 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
                 </select>
               </label>
               <label className="pick" title="Working copy">
-                <b>Stay on current branch</b>
-                {/* New worktrees, Loom's default, are not built yet. */}
-                <select aria-label="Working copy" value="checkout" onChange={() => {}}>
+                <b>{workingCopy === 'worktree' ? 'New worktree' : 'Stay on current branch'}</b>
+                <select aria-label="Working copy" value={workingCopy} onChange={(event) => setWorkingCopy(event.target.value as WorkingCopyKind)}>
+                  <option value="worktree">New worktree</option>
                   <option value="checkout">Stay on current branch</option>
-                  <option value="worktree" disabled>
-                    New worktree
-                  </option>
                 </select>
               </label>
+              {workingCopy === 'worktree' && (
+                <label className="pick" title="Branch">
+                  <GitBranch className="sm" />
+                  <input
+                    className="branch tech"
+                    aria-label="Branch"
+                    placeholder={`${chosen.branchPrefix}/…`}
+                    value={editedBranch ?? suggested}
+                    onChange={(event) => setEditedBranch(event.target.value)}
+                  />
+                </label>
+              )}
             </>
           }
         />
@@ -143,10 +168,21 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
 
   return (
     <main className="main" aria-label="Session">
-      <div className="main-head">
+      <div className="main-head" role="region" aria-label="Session header">
         <div className="grow" style={{ minWidth: 0 }}>
           <div className="crumb">
             {project && <span>{project.name}</span>}
+            {project?.forge.repository && <span className="tech">{project.forge.repository}</span>}
+            {session.branch && (
+              <>
+                <ChevronRight className="sm" />
+                <GitBranch className="sm" />
+                <span className="tech ellipsis" title="Branch">
+                  {session.branch}
+                </span>
+              </>
+            )}
+            <ChevronRight className="sm" />
             <span className="chip" title={session.workingCopy.path}>
               <FolderTree className="sm" />
               {session.workingCopy.kind}
@@ -228,6 +264,7 @@ function Composer({
   tools,
   focusRequest = 0,
   onSend,
+  onDraftChange,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -237,8 +274,14 @@ function Composer({
   /** Changing it focuses the prompt box. */
   focusRequest?: number;
   onSend: (prompt: string) => Promise<boolean>;
+  /** Called with the prompt as the user types it. */
+  onDraftChange?: (draft: string) => void;
 }) {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraftState] = useState('');
+  const setDraft = (value: string) => {
+    setDraftState(value);
+    onDraftChange?.(value);
+  };
   const prompt = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (focusRequest) prompt.current?.focus();

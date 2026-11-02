@@ -1,13 +1,14 @@
 // Main's core, with no Electron in it: the Electron entry point and seam A
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
-import type { Commands, EnvironmentStatus, LoomApi, Project, Session, TopicParams, Topics } from '../shared/api';
+import type { Commands, EnvironmentStatus, LoomApi, Project, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
 import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
-import { Sessions } from './sessions/sessions';
+import { Sessions, type SessionEnvironment } from './sessions/sessions';
+import { Settings } from './settings';
 import { openDatabase } from './storage/database';
 import { Topic } from './topic';
 
@@ -47,7 +48,11 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
       // The Projects' Forges are checked whenever their Environment connects.
       // onChange only fires once start() runs, after projectService exists.
       const isConnected = status.state === 'connected';
-      if (isConnected && !wasConnected) void projectService.checkForges(status.id);
+      if (isConnected && !wasConnected) {
+        void projectService.checkForges(status.id);
+        // Branches may have changed while Loom wasn't looking.
+        void sessionService.lookUpBranches(status.id);
+      }
       wasConnected = isConnected;
     },
   });
@@ -62,23 +67,30 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
   });
   projects.set(projectService.list());
 
+  const settingsService = await Settings.load(db, (value) => settings.set(value));
+  const settings = new Topic<SettingsValues>(settingsService.value);
+
+  const nativeForSessions: SessionEnvironment = {
+    label: native.status.label,
+    request: (...args) => native.request(...args),
+    home: () => native.status.bridge?.home || undefined,
+    openChannel: (params) => native.openChannel(params),
+  };
   const sessions = new Topic<Session[]>([]);
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
     adapter: new AcpAdapter(OPENCODE_ACP, options.appVersion),
     project: (id) => projectService.list().find((p) => p.id === id),
-    environment: (id) =>
-      id === native.status.id
-        ? { label: native.status.label, openChannel: (params) => native.openChannel(params), request: (...args) => native.request(...args) }
-        : undefined,
+    environment: (id) => (id === native.status.id ? nativeForSessions : undefined),
+    worktreeRoot: () => settingsService.value.worktreeRoot,
     onChange: (list) => sessions.set(list),
   });
   sessions.set(sessionService.list());
 
   void native.start();
 
-  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, sessions };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, settings, sessions };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
   };
@@ -101,6 +113,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'projects.link': (params) => projectService.link(params),
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
     'projects.check': () => projectService.checkForges(),
+    'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
     'sessions.send': (params) => sessionService.send(params),

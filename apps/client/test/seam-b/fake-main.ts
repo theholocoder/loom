@@ -1,13 +1,13 @@
 // Seam B: a fake main implementing the same typed API the real one does, so
 // renderer tests control exactly what main reports.
-import type { CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
+import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
 
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
-type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'sessions'>;
+type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'settings' | 'sessions'>;
 
-const EMPTY: { [T in TopicName]: Topics[T] } = { environments: [], projects: [], sessions: [], transcript: [] };
+const EMPTY: { [T in TopicName]: Topics[T] } = { environments: [], projects: [], settings: DEFAULT_SETTINGS, sessions: [], transcript: [] };
 
 export class FakeMain implements LoomApi {
   /** Each topic's value, by topic and parameters. */
@@ -31,6 +31,11 @@ export class FakeMain implements LoomApi {
       },
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       'projects.check': () => {},
+      'settings.setWorktreeRoot': ({ worktreeRoot }) => {
+        const settings = { ...this.value('settings'), worktreeRoot };
+        this.publish('settings', settings);
+        return settings;
+      },
       'sessions.list': () => this.value('sessions'),
       'sessions.create': () => {
         throw new Error('sessions.create is not scripted');

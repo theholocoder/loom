@@ -16,7 +16,9 @@ import (
 var version = "dev"
 
 func main() {
-	machine := protocol.Machine{Shell: os.Getenv("SHELL"), Environ: os.Environ()}
+	// Without a home, main can't expand `~` and says so.
+	home, _ := os.UserHomeDir()
+	machine := protocol.Machine{Shell: os.Getenv("SHELL"), Environ: os.Environ(), Home: home}
 	// Native Windows has no login shell to ask; a $SHELL there comes from
 	// something like Git Bash and isn't the Environment's.
 	if runtime.GOOS == "windows" {

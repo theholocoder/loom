@@ -10,6 +10,8 @@ export interface BridgeInfo {
   version: string;
   os: string;
   arch: string;
+  /** The user's home folder in the Environment, which `~` means there. */
+  home: string;
 }
 
 /**
@@ -175,8 +177,9 @@ export interface Session {
   agentSessionId?: string;
   /**
    * The branch its working copy had checked out when Loom last looked: at
-   * start and after each turn. Absent until known; a detached HEAD shows as
-   * its short commit id.
+   * start, after each turn, when the Session is opened and when its
+   * Environment connects. Absent until known; a detached HEAD shows as its
+   * short commit id.
    */
   branch?: string;
   /** The issue the Session works on, once linked. */
@@ -198,6 +201,18 @@ export interface Session {
   /** Clock time its status last changed. */
   updatedAt: number;
 }
+
+/** Loom's own settings, the same for every Project. */
+export interface Settings {
+  /**
+   * Where new worktrees go, as `<root>/<project>/<session>`, the Session's
+   * folder named after its branch without the prefix. A leading `~` is the
+   * user's home in the Project's Environment.
+   */
+  worktreeRoot: string;
+}
+
+export const DEFAULT_SETTINGS: Settings = { worktreeRoot: '~/loom/worktrees' };
 
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
@@ -236,13 +251,25 @@ export interface Commands {
   'projects.setBranchPrefix': { params: { id: number; branchPrefix: string }; result: Project };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
+  /**
+   * Sets where new worktrees go. Rejects a root that is neither absolute nor
+   * under `~`.
+   */
+  'settings.setWorktreeRoot': { params: { worktreeRoot: string }; result: Settings };
   'sessions.list': { params: void; result: Session[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with
    * the new Session, Working, once its record exists; the run goes on after.
-   * Only checkout Sessions, which stay on the checkout's current branch, so far.
+   *
+   * A `worktree` Session gets its own git worktree: Loom fetches `origin` and
+   * branches from `origin/<default branch>` as `branch` (by default
+   * `<prefix>/<slug of the prompt>`, see suggestBranch), adding `-2`, `-3`, …
+   * if that is taken, in a new folder under the worktree root. Files the
+   * checkout's `.worktreeinclude` lists that git ignores are copied in. It
+   * rejects if any of that fails. A `checkout` Session stays on whatever
+   * branch the Project's checkout has.
    */
-  'sessions.create': { params: { projectId: number; workingCopy: 'checkout'; prompt: string }; result: Session };
+  'sessions.create': { params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; prompt: string }; result: Session };
   /**
    * Sends a prompt to a Waiting Session, which becomes Working. Rejects while
    * the Session is Working.
@@ -269,6 +296,7 @@ export interface Topics {
   environments: EnvironmentStatus[];
   /** Every Project, by name. */
   projects: Project[];
+  settings: Settings;
   /** Every Session, newest first. */
   sessions: Session[];
   /** One Session's conversation, as it streams in. */

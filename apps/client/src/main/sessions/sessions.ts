@@ -1,14 +1,16 @@
 // The Session service: every Session, its status, and its conversation with
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
-import { FORGE_CLI, type ForgeLink, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason } from '../../shared/api';
+import { FORGE_CLI, type ForgeLink, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock } from '../clock';
-import { exec, type BridgeCall, type ExecResult } from '../environments/exec';
+import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { LoomDatabase } from '../storage/database';
 import type { SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
+import { createWorktree, type GitEnvironment } from './working-copies';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -17,13 +19,13 @@ export interface SessionsOptions {
   project: (id: number) => Project | undefined;
   /** The Environment with this id, if Loom knows it. */
   environment: (id: string) => SessionEnvironment | undefined;
+  /** The worktree root setting. */
+  worktreeRoot: () => string;
   onChange: (sessions: Session[]) => void;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
-export interface SessionEnvironment extends AgentEnvironment {
-  request: BridgeCall;
-}
+export interface SessionEnvironment extends AgentEnvironment, GitEnvironment {}
 
 const MAX_TITLE_LENGTH = 80;
 
@@ -39,6 +41,8 @@ export class Sessions {
   /** Writes of status changes, one after another so they land in order. */
   private saving: Promise<void> = Promise.resolve();
   private shuttingDown = false;
+  /** Worktrees being made, by Project, one after another so names can't race. */
+  private creatingWorktree = new Map<number, Promise<unknown>>();
 
   private constructor(private readonly options: SessionsOptions) {}
 
@@ -63,24 +67,39 @@ export class Sessions {
     return [...this.sessions.values()].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
   }
 
-  async create({ projectId, workingCopy, prompt }: { projectId: number; workingCopy: 'checkout'; prompt: string }): Promise<Session> {
+  async create(params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; prompt: string }): Promise<Session> {
+    const { projectId, workingCopy } = params;
     const project = this.options.project(projectId);
     if (!project) throw new Error(`unknown Project ${projectId}`);
-    if (workingCopy !== 'checkout') throw new Error(`unsupported working copy "${workingCopy as string}"`);
-    const text = promptText(prompt);
+    if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
+    const text = promptText(params.prompt);
+    let path = project.checkout.path;
+    let branch: string | null = null;
+    if (workingCopy === 'worktree') {
+      const environment = this.environmentOf({ projectId });
+      ({ path, branch } = await this.oneAtATime(projectId, () =>
+        createWorktree(environment, {
+          checkout: project.checkout.path,
+          projectName: project.name,
+          branchPrefix: project.branchPrefix,
+          branch: params.branch?.trim() || suggestBranch(project.branchPrefix, text),
+          root: this.options.worktreeRoot(),
+        }),
+      ));
+    }
     const now = this.options.clock.now();
     const values = {
       project_id: projectId,
       title: titleOf(text),
-      working_copy_kind: 'checkout' as const,
-      working_copy_path: project.checkout.path,
+      working_copy_kind: workingCopy,
+      working_copy_path: path,
       agent: this.options.adapter.name,
       agent_session_id: null,
       status: 'working' as const,
       waiting_reason: null,
       error: null,
       unread: 0,
-      branch: null,
+      branch,
       issue_number: null,
       issue_url: null,
       merge_request_number: null,
@@ -139,9 +158,23 @@ export class Sessions {
     this.save(id, { unread: unread ? 1 : 0 });
   }
 
-  /** Calls `listener` with the Session's conversation now and as it changes. */
+  /**
+   * Reads again which branch each Session's working copy has, for the
+   * Sessions that aren't archived in the Environment `environmentId`.
+   */
+  async lookUpBranches(environmentId: string): Promise<void> {
+    const ids = this.list()
+      .filter((s) => s.status !== 'archived' && this.options.project(s.projectId)?.checkout.environmentId === environmentId)
+      .map((s) => s.id);
+    await Promise.all(ids.map((id) => this.lookUpBranch(id)));
+  }
+
+  /**
+   * Calls `listener` with the Session's conversation now and as it changes.
+   * Opening it also reads its branch again, which the user may have switched.
+   */
   subscribeTranscript(id: number, listener: (items: TranscriptItem[]) => void): () => void {
-    this.get(id);
+    if (this.get(id).status !== 'archived') void this.lookUpBranch(id);
     return this.transcript(id).subscribe(listener);
   }
 
@@ -245,8 +278,15 @@ export class Sessions {
     return exec(this.environmentOf(session).request, 'git', ['-C', session.workingCopy.path, ...args], GIT_TIMEOUT_MS);
   }
 
+  /** Runs `task` once the Project's earlier ones have finished. */
+  private oneAtATime<T>(projectId: number, task: () => Promise<T>): Promise<T> {
+    const run = (this.creatingWorktree.get(projectId) ?? Promise.resolve()).catch(() => {}).then(task);
+    this.creatingWorktree.set(projectId, run);
+    return run;
+  }
+
   /** The Environment the Session's agent and git run in: its Project's checkout's. */
-  private environmentOf(session: Session): SessionEnvironment {
+  private environmentOf(session: Pick<Session, 'projectId'>): SessionEnvironment {
     const environmentId = this.options.project(session.projectId)?.checkout.environmentId;
     const environment = environmentId === undefined ? undefined : this.options.environment(environmentId);
     if (!environment) throw new Error(`unknown Environment "${environmentId}"`);
