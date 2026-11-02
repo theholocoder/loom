@@ -1,7 +1,9 @@
 // Package protocol is the bridge's side of the protocol main speaks over the
 // bridge's stdio: frames of a 4-byte big-endian length followed by a JSON
 // message. Main sends requests ({id, method, params}); the bridge answers each
-// with a response carrying the same id and either a result or an error.
+// with a response carrying the same id and either a result or an error. The
+// bridge also sends events ({event, params}), which have no id: what its
+// channels' processes print, and their exits (see channel).
 package protocol
 
 import (
@@ -76,8 +78,9 @@ type handshakeResult struct {
 func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 	out := &writer{w: w}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &server{info: info, env: newEnvironment(ctx, machine)}
+	s := &server{info: info, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out)}
 	var inFlight sync.WaitGroup
+	defer s.channels.wait()
 	defer inFlight.Wait()
 	defer cancel()
 	for {
@@ -106,8 +109,9 @@ func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 }
 
 type server struct {
-	info Info
-	env  *environment
+	info     Info
+	env      *environment
+	channels *channels
 }
 
 func (s *server) handle(ctx context.Context, req request) response {
@@ -139,6 +143,36 @@ func (s *server) handle(ctx context.Context, req request) response {
 		return reply(runCommand(ctx, s.env.get(), params))
 	case "opencode.probe":
 		return reply(probeOpencode(ctx, s.env.get()))
+	case "channel.open":
+		var params openParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.channels.start(s.env.get(), params))
+	case "channel.write":
+		var params writeParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.channels.write(params))
+	case "channel.ack":
+		var params ackParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.channels.ack(params))
+	case "channel.close":
+		var params channelParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.channels.closeStdin(params))
+	case "channel.kill":
+		var params channelParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.channels.kill(params))
 	default:
 		return reply(nil, &Error{Code: "unknown_method", Message: fmt.Sprintf("unknown method %q", req.Method)})
 	}

@@ -1,5 +1,5 @@
 import { ipcMain, type WebContents } from 'electron';
-import type { CommandName, LoomApi, TopicName, Unsubscribe } from '../shared/api';
+import type { CommandName, LoomApi, TopicArgs, TopicName, Unsubscribe } from '../shared/api';
 import { IPC } from '../shared/ipc-channels';
 
 /** Serves `api` to every renderer over IPC. */
@@ -9,7 +9,7 @@ export function serveApi(api: LoomApi): void {
   );
 
   const subscriptions = new Map<WebContents, Map<number, Unsubscribe>>();
-  ipcMain.on(IPC.subscribe, (event, subscription: number, topic: TopicName) => {
+  ipcMain.on(IPC.subscribe, (event, subscription: number, topic: TopicName, params: unknown) => {
     const sender = event.sender;
     let forSender = subscriptions.get(sender);
     if (!forSender) {
@@ -24,9 +24,13 @@ export function serveApi(api: LoomApi): void {
     try {
       forSender.set(
         subscription,
-        api.subscribe(topic, (value) => {
-          if (!sender.isDestroyed()) sender.send(IPC.topic, subscription, value);
-        }),
+        api.subscribe(
+          topic,
+          (value) => {
+            if (!sender.isDestroyed()) sender.send(IPC.topic, subscription, value);
+          },
+          ...((params === undefined ? [] : [params]) as TopicArgs<TopicName>),
+        ),
       );
     } catch (error) {
       console.error(`renderer subscription to "${topic}" refused:`, error);
