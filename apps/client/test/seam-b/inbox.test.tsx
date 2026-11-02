@@ -240,9 +240,9 @@ describe('the Inbox', () => {
     expect(main.invoked.filter((i) => i.command === 'sessions.requestMergeRequest')).toEqual([{ command: 'sessions.requestMergeRequest', params: { id: unlinked.id } }]);
   });
 
-  it('says why a row action failed', async () => {
+  it('says why a row action failed, until the Session changes', async () => {
     const waiting = session({ title: 'Stubborn' });
-    renderApp(
+    const main = renderApp(
       new FakeMain({ projects: [loom], sessions: [waiting] }, {
         'sessions.requestMergeRequest': () => {
           throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
@@ -254,6 +254,8 @@ describe('the Inbox', () => {
     fireEvent.click(row.getByRole('button', { name: 'Create Merge request' }));
 
     expect((await row.findByRole('alert')).textContent).toBe("This Session's agent has stopped, and Loom can't resume it yet.");
+    act(() => main.publish('sessions', [{ ...waiting, waitingReason: 'error', updatedAt: waiting.updatedAt + 1_000 }]));
+    expect(within(within(inbox()).getByRole('listitem', { name: 'Stubborn' })).queryByRole('alert')).toBeNull();
   });
 });
 

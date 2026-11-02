@@ -302,6 +302,46 @@ describe('Merge requests and links', () => {
     expect(machine.acpMessages().filter((m) => m.message.method === 'session/prompt')).toHaveLength(1);
   });
 
+  it('refuses to ask for a Merge request on the default branch, or off any branch', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['Done.'] }] } });
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'] });
+    const checkout = machine.gitRepo('loom', { origin: 'https://github.com/theholocoder/loom.git' });
+    const git = (...args: string[]) => execFileSync('git', ['-C', checkout, '-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', ...args]);
+    git('symbolic-ref', 'HEAD', 'refs/heads/main');
+    git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+    git('commit', '--quiet', '--allow-empty', '-m', 'Start');
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look around' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+
+    await expect(main.api.invoke('sessions.requestMergeRequest', { id })).rejects.toThrow(
+      "This Session is on main, the default branch. A Merge request needs a branch of its own.",
+    );
+    git('checkout', '--quiet', '--detach');
+    await expect(main.api.invoke('sessions.requestMergeRequest', { id })).rejects.toThrow("This Session's working copy isn't on a branch.");
+    git('checkout', '--quiet', '-b', 'loom/31-mr-button');
+    await main.api.invoke('sessions.requestMergeRequest', { id });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
+    expect(machine.acpMessages().filter((m) => m.message.method === 'session/prompt')).toHaveLength(2);
+  });
+
+  it("says when the Project's Forge hasn't been checked yet", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-sessions-');
+    const first = await withProject(machine, checkout, userDataDir);
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Go' });
+    await waitFor(first.main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await first.main.close();
+    // With no bridge, the Environment never connects, so no Forge is checked.
+    const again = await startMain({ machine, userDataDir, bridgePath: '/nonexistent/loom-bridge' });
+    await waitFor(again.api, 'environments', (envs) => envs[0]?.state === 'failed');
+    expect((await again.api.invoke('projects.list'))[0]?.forge.state).toBe('unknown');
+
+    await expect(again.api.invoke('sessions.requestMergeRequest', { id })).rejects.toThrow("Loom hasn't checked this Project's Forge yet.");
+  });
+
   it("reports a Session's linked issue and Merge request", async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
     const userDataDir = tempDir('loom-sessions-');

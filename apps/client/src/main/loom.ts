@@ -20,7 +20,7 @@ export interface LoomOptions {
   /** Shows the folder picker; resolves to null if the user cancels. */
   chooseFolder?: () => Promise<string | null>;
   /** Opens a URL in the user's browser. */
-  openExternal?: (url: string) => Promise<void>;
+  openExternal: (url: string) => Promise<void>;
 }
 
 export interface Loom {
@@ -94,7 +94,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     },
     'links.open': async ({ url }) => {
       if (!isWebLink(url)) throw new Error('Loom only opens web links.');
-      await options.openExternal?.(url);
+      await options.openExternal(url);
     },
     'dialogs.chooseFolder': () => (options.chooseFolder ? options.chooseFolder() : null),
     'projects.list': () => projects.value,

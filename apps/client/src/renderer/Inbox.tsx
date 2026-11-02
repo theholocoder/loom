@@ -3,7 +3,7 @@
 // collapsed sections below.
 import { Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { ForgeKind, Project, Session } from '../shared/api';
+import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
 import { StatusIcon } from './Sessions';
 
@@ -94,11 +94,13 @@ interface InboxRowProps {
 function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxRowProps) {
   const api = useApi();
   const [error, setError] = useState<string>();
+  // A failure is about the Session as it was; once its status changes, it's stale.
+  useEffect(() => setError(undefined), [session.updatedAt]);
   const at = new Date(session.updatedAt);
   const { issue, mergeRequest, branch } = session;
-  const mergeRequestRef = mergeRequest && `${project.forge.kind === 'gitlab' ? '!' : '#'}${mergeRequest.number}`;
-  /** Runs a row action, saying in the row why it failed. */
-  const run = (action: () => Promise<void>) => () => {
+  const mergeRequestNumber = mergeRequest && mergeRequestRef(project.forge.kind, mergeRequest.number);
+  /** A click handler running a row action, saying in the row why it failed. */
+  const withRowError = (action: () => Promise<void>) => () => {
     setError(undefined);
     action().catch((e: unknown) => setError((e as Error).message));
   };
@@ -116,7 +118,7 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
         {(issue || mergeRequest || branch) && (
           <div className="l2">
             {issue && <Ref title="Issue" icon={CircleDot} text={`#${issue.number}`} />}
-            {mergeRequestRef && <Ref title="Merge request" icon={GitPullRequest} text={mergeRequestRef} />}
+            {mergeRequestNumber && <Ref title="Merge request" icon={GitPullRequest} text={mergeRequestNumber} />}
             {branch && <Ref title="Branch" icon={GitBranch} text={branch} />}
           </div>
         )}
@@ -129,12 +131,12 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
       <div className="hover-actions">
         <Action label="Reply" icon={Reply} onClick={() => onReply(session)} />
         {mergeRequest ? (
-          <Action label={`Open Merge request ${mergeRequestRef}`} icon={ExternalLink} onClick={run(() => api.invoke('links.open', { url: mergeRequest.url }))} />
+          <Action label={`Open Merge request ${mergeRequestNumber}`} icon={ExternalLink} onClick={withRowError(() => api.invoke('links.open', { url: mergeRequest.url }))} />
         ) : (
-          project.forge.state === 'available' && <Action label="Create Merge request" icon={GitPullRequestCreate} onClick={run(() => api.invoke('sessions.requestMergeRequest', { id: session.id }))} />
+          project.forge.state === 'available' && <Action label="Create Merge request" icon={GitPullRequestCreate} onClick={withRowError(() => api.invoke('sessions.requestMergeRequest', { id: session.id }))} />
         )}
-        <Action label="Archive" icon={Archive} onClick={run(() => api.invoke('sessions.archive', { id: session.id }))} />
-        {!session.unread && <Action label="Mark unread" icon={Mail} onClick={run(() => api.invoke('sessions.setUnread', { id: session.id, unread: true }))} />}
+        <Action label="Archive" icon={Archive} onClick={withRowError(() => api.invoke('sessions.archive', { id: session.id }))} />
+        {!session.unread && <Action label="Mark unread" icon={Mail} onClick={withRowError(() => api.invoke('sessions.setUnread', { id: session.id, unread: true }))} />}
       </div>
     </div>
   );

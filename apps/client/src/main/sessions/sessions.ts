@@ -4,7 +4,7 @@
 import { FORGE_CLI, type ForgeLink, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason } from '../../shared/api';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock } from '../clock';
-import { exec, type BridgeCall } from '../environments/exec';
+import { exec, type BridgeCall, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { LoomDatabase } from '../storage/database';
 import type { SessionsTable } from '../storage/schema';
@@ -113,7 +113,13 @@ export class Sessions {
   /** Sends the agent the Merge request prompt shortcut. */
   async requestMergeRequest({ id }: { id: number }): Promise<void> {
     const forge = this.options.project(this.get(id).projectId)?.forge;
+    if (forge?.state === 'unknown') throw new Error("Loom hasn't checked this Project's Forge yet.");
     if (forge?.state !== 'available' || !forge.kind) throw new Error("Merge requests need the Project's Forge, which is off.");
+    const branch = await this.currentBranch(id);
+    if (!branch) throw new Error("This Session's working copy isn't on a branch.");
+    if (branch === (await this.defaultBranch(id))) {
+      throw new Error(`This Session is on ${branch}, the default branch. A Merge request needs a branch of its own.`);
+    }
     await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[forge.kind]) });
   }
 
@@ -164,12 +170,8 @@ export class Sessions {
   /** Starts the Session's agent in its working copy and records the agent's id for it. */
   private async open(id: number): Promise<AgentSession> {
     const session = this.get(id);
-    const project = this.options.project(session.projectId);
-    const environmentId = project?.checkout.environmentId;
-    const environment = environmentId === undefined ? undefined : this.options.environment(environmentId);
-    if (!environment) throw new Error(`unknown Environment "${environmentId}"`);
     const agent = await this.options.adapter.open({
-      environment,
+      environment: this.environmentOf(session),
       workingCopy: session.workingCopy.path,
       onEvent: (event) => this.onAgentEvent(id, event),
     });
@@ -206,21 +208,15 @@ export class Sessions {
 
   /**
    * Records the branch the Session's working copy has checked out, which the
-   * agent or the user may have changed. Keeps the last one known if git can't say.
+   * agent or the user may have changed, or its short commit id on a detached
+   * HEAD. Keeps the last one known if git can't say.
    */
   private async lookUpBranch(id: number): Promise<void> {
-    const session = this.get(id);
-    const environmentId = this.options.project(session.projectId)?.checkout.environmentId;
-    const environment = environmentId === undefined ? undefined : this.options.environment(environmentId);
-    if (!environment) return;
-    const git = (...args: string[]) => exec(environment.request, 'git', ['-C', session.workingCopy.path, ...args], GIT_TIMEOUT_MS);
     let branch: string | undefined;
     try {
-      const symbolic = await git('symbolic-ref', '--quiet', '--short', 'HEAD');
-      if (symbolic.exitCode === 0) {
-        branch = symbolic.stdout.trim();
-      } else {
-        const detached = await git('rev-parse', '--short', 'HEAD');
+      branch = await this.currentBranch(id);
+      if (!branch) {
+        const detached = await this.git(id, 'rev-parse', '--short', 'HEAD');
         if (detached.exitCode === 0) branch = detached.stdout.trim();
       }
     } catch {
@@ -229,6 +225,32 @@ export class Sessions {
     if (!branch || this.shuttingDown || branch === this.get(id).branch) return;
     this.update(id, { branch });
     this.save(id, { branch });
+  }
+
+  /** The branch the Session's working copy has checked out; undefined on a detached HEAD. */
+  private async currentBranch(id: number): Promise<string | undefined> {
+    const result = await this.git(id, 'symbolic-ref', '--quiet', '--short', 'HEAD');
+    return result.exitCode === 0 ? result.stdout.trim() : undefined;
+  }
+
+  /** The default branch, as the working copy's `origin/HEAD` names it; undefined if git doesn't know it. */
+  private async defaultBranch(id: number): Promise<string | undefined> {
+    const result = await this.git(id, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD');
+    return result.exitCode === 0 ? result.stdout.trim().replace(/^origin\//, '') : undefined;
+  }
+
+  /** Runs git in the Session's working copy. */
+  private git(id: number, ...args: string[]): Promise<ExecResult> {
+    const session = this.get(id);
+    return exec(this.environmentOf(session).request, 'git', ['-C', session.workingCopy.path, ...args], GIT_TIMEOUT_MS);
+  }
+
+  /** The Environment the Session's agent and git run in: its Project's checkout's. */
+  private environmentOf(session: Session): SessionEnvironment {
+    const environmentId = this.options.project(session.projectId)?.checkout.environmentId;
+    const environment = environmentId === undefined ? undefined : this.options.environment(environmentId);
+    if (!environment) throw new Error(`unknown Environment "${environmentId}"`);
+    return environment;
   }
 
   /** Puts a Working Session in Waiting (error), showing why in its conversation. */
