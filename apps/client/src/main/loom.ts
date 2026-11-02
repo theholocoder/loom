@@ -19,6 +19,8 @@ export interface LoomOptions {
   spawnBridge?: SpawnBridge;
   /** Shows the folder picker; resolves to null if the user cancels. */
   chooseFolder?: () => Promise<string | null>;
+  /** Opens a URL in the user's browser. */
+  openExternal: (url: string) => Promise<void>;
 }
 
 export interface Loom {
@@ -90,6 +92,10 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
       await native.reload();
       await projectService.checkForges(id);
     },
+    'links.open': async ({ url }) => {
+      if (!isWebLink(url)) throw new Error('Loom only opens web links.');
+      await options.openExternal(url);
+    },
     'dialogs.chooseFolder': () => (options.chooseFolder ? options.chooseFolder() : null),
     'projects.list': () => projects.value,
     'projects.link': (params) => projectService.link(params),
@@ -99,6 +105,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'sessions.create': (params) => sessionService.create(params),
     'sessions.send': (params) => sessionService.send(params),
     'sessions.archive': (params) => sessionService.archive(params),
+    'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),
   };
 
@@ -125,4 +132,10 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
       await db.destroy();
     },
   };
+}
+
+function isWebLink(url: string): boolean {
+  if (!URL.canParse(url)) return false;
+  const { protocol } = new URL(url);
+  return protocol === 'https:' || protocol === 'http:';
 }

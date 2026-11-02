@@ -119,11 +119,15 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
   const unshownError = session.waitingReason === 'error' && session.error && !items.some((i) => i.kind === 'error') ? session.error : undefined;
 
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView?.({ block: 'end' }), [items]);
+  // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView?.({ block: 'end' });
+  }, [items]);
 
   // Not on `unread` itself, so that Mark unread sticks while the Session is shown.
   useEffect(() => {
-    if (session.unread) void api.invoke('sessions.setUnread', { id: session.id, unread: false });
+    // Failing to mark it read leaves it unread, which the Inbox already shows.
+    if (session.unread) api.invoke('sessions.setUnread', { id: session.id, unread: false }).catch(() => {});
   }, [session.id, session.updatedAt]);
 
   const send = async (prompt: string) => {

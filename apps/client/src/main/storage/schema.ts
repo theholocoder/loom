@@ -40,6 +40,12 @@ export interface SessionsTable {
   unread: number;
   /** The branch its working copy had checked out when last looked at. */
   branch: string | null;
+  /** The linked issue: both set, or both null. */
+  issue_number: number | null;
+  issue_url: string | null;
+  /** The linked Merge request: both set, or both null. */
+  merge_request_number: number | null;
+  merge_request_url: string | null;
   /** Clock times. */
   created_at: number;
   updated_at: number;

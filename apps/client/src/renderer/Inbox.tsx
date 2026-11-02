@@ -1,9 +1,9 @@
 // The sidebar's Inbox, following docs/prototypes/ui-layout.html (variant B):
 // Waiting Sessions grouped by Project, with Working and Archived Sessions in
 // collapsed sections below.
-import { Archive, ChevronDown, ChevronRight, GitBranch, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { ForgeKind, Project, Session } from '../shared/api';
+import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
 import { StatusIcon } from './Sessions';
 
@@ -52,7 +52,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
           </div>
           <div role="list">
             {sessions.map((session) => (
-              <InboxRow key={session.id} session={session} now={now} selected={session.id === selectedId} onSelect={onSelect} onReply={onReply} />
+              <InboxRow key={session.id} session={session} project={project} now={now} selected={session.id === selectedId} onSelect={onSelect} onReply={onReply} />
             ))}
           </div>
         </section>
@@ -82,9 +82,28 @@ function unknownProject(id: number): Project {
   return { id, name: `Project ${id}`, branchPrefix: '', checkout: { environmentId: '', path: '' }, forge: { state: 'unknown', checking: false } };
 }
 
-function InboxRow({ session, now, selected, onSelect, onReply }: { session: Session; now: number; selected: boolean; onSelect: (session: Session) => void; onReply: (session: Session) => void }) {
+interface InboxRowProps {
+  session: Session;
+  project: Project;
+  now: number;
+  selected: boolean;
+  onSelect: (session: Session) => void;
+  onReply: (session: Session) => void;
+}
+
+function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxRowProps) {
   const api = useApi();
+  const [error, setError] = useState<string>();
+  // A failure is about the Session as it was; once its status changes, it's stale.
+  useEffect(() => setError(undefined), [session.updatedAt]);
   const at = new Date(session.updatedAt);
+  const { issue, mergeRequest, branch } = session;
+  const mergeRequestNumber = mergeRequest && mergeRequestRef(project.forge.kind, mergeRequest.number);
+  /** A click handler running a row action, saying in the row why it failed. */
+  const withRowError = (action: () => Promise<void>) => () => {
+    setError(undefined);
+    action().catch((e: unknown) => setError((e as Error).message));
+  };
   return (
     <div role="listitem" aria-label={session.title} className={`item B-item${session.unread ? ' unread' : ''}${selected ? ' sel' : ''}`}>
       <button type="button" className="open" aria-label={session.title} aria-current={selected ? 'true' : undefined} onClick={() => onSelect(session)}>
@@ -96,30 +115,48 @@ function InboxRow({ session, now, selected, onSelect, onReply }: { session: Sess
             {timeOf(session.updatedAt, now)}
           </time>
         </div>
-        {session.branch && (
+        {(issue || mergeRequest || branch) && (
           <div className="l2">
-            <span className="row ellipsis" title="Branch">
-              <GitBranch className="sm" />
-              <span className="tech ellipsis">{session.branch}</span>
-            </span>
+            {issue && <Ref title="Issue" icon={CircleDot} text={`#${issue.number}`} />}
+            {mergeRequestNumber && <Ref title="Merge request" icon={GitPullRequest} text={mergeRequestNumber} />}
+            {branch && <Ref title="Branch" icon={GitBranch} text={branch} />}
           </div>
         )}
       </button>
+      {error && (
+        <div className="err row-error" role="alert">
+          {error}
+        </div>
+      )}
       <div className="hover-actions">
-        <button className="icon-btn sm" type="button" title="Reply" aria-label="Reply" onClick={() => onReply(session)}>
-          <Reply />
-        </button>
-        {/* Open or create Merge request joins these once Sessions link one. */}
-        <button className="icon-btn sm" type="button" title="Archive" aria-label="Archive" onClick={() => void api.invoke('sessions.archive', { id: session.id })}>
-          <Archive />
-        </button>
-        {!session.unread && (
-          <button className="icon-btn sm" type="button" title="Mark unread" aria-label="Mark unread" onClick={() => void api.invoke('sessions.setUnread', { id: session.id, unread: true })}>
-            <Mail />
-          </button>
+        <Action label="Reply" icon={Reply} onClick={() => onReply(session)} />
+        {mergeRequest ? (
+          <Action label={`Open Merge request ${mergeRequestNumber}`} icon={ExternalLink} onClick={withRowError(() => api.invoke('links.open', { url: mergeRequest.url }))} />
+        ) : (
+          project.forge.state === 'available' && <Action label="Create Merge request" icon={GitPullRequestCreate} onClick={withRowError(() => api.invoke('sessions.requestMergeRequest', { id: session.id }))} />
         )}
+        <Action label="Archive" icon={Archive} onClick={withRowError(() => api.invoke('sessions.archive', { id: session.id }))} />
+        {!session.unread && <Action label="Mark unread" icon={Mail} onClick={withRowError(() => api.invoke('sessions.setUnread', { id: session.id, unread: true }))} />}
       </div>
     </div>
+  );
+}
+
+/** One of a row's issue, Merge request and branch. */
+function Ref({ title, icon: Icon, text }: { title: string; icon: LucideIcon; text: string }) {
+  return (
+    <span className="row ellipsis" title={title}>
+      <Icon className="sm" />
+      <span className="tech ellipsis">{text}</span>
+    </span>
+  );
+}
+
+function Action({ label, icon: Icon, onClick }: { label: string; icon: LucideIcon; onClick: () => void }) {
+  return (
+    <button className="icon-btn sm" type="button" title={label} aria-label={label} onClick={onClick}>
+      <Icon />
+    </button>
   );
 }
 

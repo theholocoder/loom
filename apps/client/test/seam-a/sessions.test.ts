@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine } from './harness';
 import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
@@ -261,16 +263,140 @@ describe('Session status for the Inbox', () => {
   });
 });
 
+
+describe('Merge requests and links', () => {
+  it('asks the agent to open or update the Merge request, Working until it settles', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['Done.'] }, { chunks: ['Opened !12.'], hold: 'mr' }] } });
+    machine.installForgeCli('glab', { signedInHosts: ['gitlab.com'] });
+    const checkout = machine.gitRepo('billing-api', { origin: 'git@gitlab.com:acme/billing-api.git' });
+    const { main, project } = await withProject(machine, checkout);
+    expect(project.forge.state).toBe('available');
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix it' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+
+    await main.api.invoke('sessions.requestMergeRequest', { id });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'working'));
+    const prompts = await eventually(() => {
+      const sent = machine.acpMessages().filter((m) => m.message.method === 'session/prompt');
+      return sent.length === 2 ? sent : undefined;
+    });
+    expect(prompts[1]!.message.params?.prompt).toEqual([
+      {
+        type: 'text',
+        text: 'Open a Merge request for this branch with glab, or update it if one is already open: push the branch, then write its title and description from our conversation.',
+      },
+    ]);
+    machine.release('mr');
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
+  });
+
+  it("refuses to ask for a Merge request when the Project's Forge is off", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix it' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+
+    await expect(main.api.invoke('sessions.requestMergeRequest', { id })).rejects.toThrow("Merge requests need the Project's Forge, which is off.");
+    expect(machine.acpMessages().filter((m) => m.message.method === 'session/prompt')).toHaveLength(1);
+  });
+
+  it('refuses to ask for a Merge request on the default branch, or off any branch', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['Done.'] }] } });
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'] });
+    const checkout = machine.gitRepo('loom', { origin: 'https://github.com/theholocoder/loom.git' });
+    const git = (...args: string[]) => execFileSync('git', ['-C', checkout, '-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', ...args]);
+    git('symbolic-ref', 'HEAD', 'refs/heads/main');
+    git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+    git('commit', '--quiet', '--allow-empty', '-m', 'Start');
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look around' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+
+    await expect(main.api.invoke('sessions.requestMergeRequest', { id })).rejects.toThrow(
+      "This Session is on main, the default branch. A Merge request needs a branch of its own.",
+    );
+    git('checkout', '--quiet', '--detach');
+    await expect(main.api.invoke('sessions.requestMergeRequest', { id })).rejects.toThrow("This Session's working copy isn't on a branch.");
+    git('checkout', '--quiet', '-b', 'loom/31-mr-button');
+    await main.api.invoke('sessions.requestMergeRequest', { id });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
+    expect(machine.acpMessages().filter((m) => m.message.method === 'session/prompt')).toHaveLength(2);
+  });
+
+  it("says when the Project's Forge hasn't been checked yet", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-sessions-');
+    const first = await withProject(machine, checkout, userDataDir);
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Go' });
+    await waitFor(first.main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await first.main.close();
+    // With no bridge, the Environment never connects, so no Forge is checked.
+    const again = await startMain({ machine, userDataDir, bridgePath: '/nonexistent/loom-bridge' });
+    await waitFor(again.api, 'environments', (envs) => envs[0]?.state === 'failed');
+    expect((await again.api.invoke('projects.list'))[0]?.forge.state).toBe('unknown');
+
+    await expect(again.api.invoke('sessions.requestMergeRequest', { id })).rejects.toThrow("Loom hasn't checked this Project's Forge yet.");
+  });
+
+  it("reports a Session's linked issue and Merge request", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-sessions-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix it' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).not.toHaveProperty('issue');
+    await main.close();
+    // Linking issues and Merge requests comes later (#65, #66); until then, the database is the only way in.
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.prepare('update sessions set issue_number = 31, issue_url = ?, merge_request_number = 40, merge_request_url = ? where id = ?').run(
+      'https://github.com/theholocoder/loom/issues/31',
+      'https://github.com/theholocoder/loom/pull/40',
+      id,
+    );
+    db.close();
+
+    const again = await started(machine, userDataDir);
+
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({
+      issue: { number: 31, url: 'https://github.com/theholocoder/loom/issues/31' },
+      mergeRequest: { number: 40, url: 'https://github.com/theholocoder/loom/pull/40' },
+    });
+  });
+
+  it("opens web links in the user's browser, and nothing else", async () => {
+    const main = await startMain();
+
+    await main.api.invoke('links.open', { url: 'https://gitlab.com/acme/billing-api/-/merge_requests/87' });
+    await expect(main.api.invoke('links.open', { url: 'file:///etc/passwd' })).rejects.toThrow('Loom only opens web links.');
+    await expect(main.api.invoke('links.open', { url: 'not a url' })).rejects.toThrow('Loom only opens web links.');
+
+    expect(main.opened).toEqual(['https://gitlab.com/acme/billing-api/-/merge_requests/87']);
+  });
+});
+
 /** Resolves once the process with `pid` has exited. */
 async function processEnded(pid: number): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  for (;;) {
+  await eventually(() => {
     try {
       process.kill(pid, 0);
+      return undefined;
     } catch {
-      return;
+      return true;
     }
-    if (Date.now() > deadline) throw new Error(`process ${pid} is still running`);
+  });
+}
+
+/** Resolves with what `check` returns once it returns something. */
+async function eventually<T>(check: () => T | undefined): Promise<T> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const value = check();
+    if (value !== undefined) return value;
+    if (Date.now() > deadline) throw new Error('timed out waiting');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }

@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { Project, Session } from '../../src/shared/api';
@@ -141,6 +141,22 @@ describe('a Session', () => {
     const reply = within(chat()).getByText('Hello, world').closest('.msg')!;
     expect(reply.className).toContain('agent');
     expect(within(reply as HTMLElement).getByText('OpenCode')).toBeTruthy();
+  });
+
+  it('keeps showing the conversation where scrolling returns a promise, as in Electron', () => {
+    // Electron's Chromium resolves scrollIntoView with a promise; jsdom has none.
+    const scroll = vi.fn(() => Promise.resolve());
+    Element.prototype.scrollIntoView = scroll as unknown as Element['scrollIntoView'];
+    try {
+      const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
+      act(() => main.publish('transcript', [{ kind: 'user', id: 1, text: 'Say hello' }], { sessionId: 7 }));
+      act(() => main.publish('transcript', [{ kind: 'user', id: 1, text: 'Say hello' }, { kind: 'agent', id: 2, text: 'Hello', streaming: true }], { sessionId: 7 }));
+
+      expect(within(screen.getByRole('log', { name: 'Conversation' })).getByText('Hello')).toBeTruthy();
+      expect(scroll).toHaveBeenCalled();
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it("can't be sent a message while Working", () => {
