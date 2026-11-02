@@ -123,7 +123,8 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
 
   // Not on `unread` itself, so that Mark unread sticks while the Session is shown.
   useEffect(() => {
-    if (session.unread) void api.invoke('sessions.setUnread', { id: session.id, unread: false });
+    // Failing to mark it read leaves it unread, which the Inbox already shows.
+    if (session.unread) api.invoke('sessions.setUnread', { id: session.id, unread: false }).catch(() => {});
   }, [session.id, session.updatedAt]);
 
   const send = async (prompt: string) => {

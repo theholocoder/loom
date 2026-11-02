@@ -23,6 +23,7 @@ export class FakeMain implements LoomApi {
       'environments.list': () => this.value('environments'),
       'environments.detect': () => {},
       'environments.reload': () => {},
+      'links.open': () => {},
       'dialogs.chooseFolder': () => null,
       'projects.list': () => this.value('projects'),
       'projects.link': () => {
@@ -36,6 +37,7 @@ export class FakeMain implements LoomApi {
       },
       'sessions.send': () => {},
       'sessions.archive': () => {},
+      'sessions.requestMergeRequest': () => {},
       'sessions.setUnread': () => {},
       ...handlers,
     };

@@ -53,4 +53,10 @@ export const migrations: Migration[] = [
     await db.schema.alterTable('sessions').addColumn('unread', 'integer', (c) => c.notNull().defaultTo(0)).execute();
     await db.schema.alterTable('sessions').addColumn('branch', 'text').execute();
   },
+  async (db) => {
+    await db.schema.alterTable('sessions').addColumn('issue_number', 'integer').execute();
+    await db.schema.alterTable('sessions').addColumn('issue_url', 'text').execute();
+    await db.schema.alterTable('sessions').addColumn('merge_request_number', 'integer').execute();
+    await db.schema.alterTable('sessions').addColumn('merge_request_url', 'text').execute();
+  },
 ];

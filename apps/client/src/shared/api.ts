@@ -144,6 +144,14 @@ export type WaitingReason = 'finished' | 'stopped' | 'question' | 'approval' | '
  */
 export type WorkingCopyKind = 'worktree' | 'checkout';
 
+/** An issue or Merge request on the Project's Forge. */
+export interface ForgeLink {
+  /** Its number on the Forge: `#31` for an issue, `!87` (GitLab) or `#40` (GitHub) for a Merge request. */
+  number: number;
+  /** Its page on the Forge. */
+  url: string;
+}
+
 /** Where a Session's agent works. */
 export interface WorkingCopy {
   kind: WorkingCopyKind;
@@ -166,6 +174,10 @@ export interface Session {
    * its short commit id.
    */
   branch?: string;
+  /** The issue the Session works on, once linked. */
+  issue?: ForgeLink;
+  /** Its current branch's Merge request, once linked. */
+  mergeRequest?: ForgeLink;
   status: SessionStatus;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
@@ -200,6 +212,8 @@ export interface Commands {
    * now on, then checks its agent again.
    */
   'environments.reload': { params: { id: string }; result: void };
+  /** Opens an http(s) URL in the user's browser; rejects anything else. */
+  'links.open': { params: { url: string }; result: void };
   /** Asks the user to choose a folder; null if they cancel. */
   'dialogs.chooseFolder': { params: void; result: string | null };
   'projects.list': { params: void; result: Project[] };
@@ -234,6 +248,12 @@ export interface Commands {
    * Sessions so far, which archive without touching the checkout.
    */
   'sessions.archive': { params: { id: number }; result: void };
+  /**
+   * Asks a Waiting Session's agent to open its branch's Merge request, or
+   * update it, with a canned prompt; Loom never creates one itself. Rejects
+   * when the Project's Forge is off, and while the Session is Working.
+   */
+  'sessions.requestMergeRequest': { params: { id: number }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
 }

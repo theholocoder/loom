@@ -1,6 +1,6 @@
 // The Electron entry point: wires createLoom to the window and IPC.
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { serveApi } from './ipc';
@@ -62,6 +62,7 @@ if (!app.requestSingleInstanceLock()) {
           const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
           return result.canceled ? null : (result.filePaths[0] ?? null);
         },
+        openExternal: (url) => shell.openExternal(url),
       });
     } catch (error) {
       console.error('Loom could not start:', error);

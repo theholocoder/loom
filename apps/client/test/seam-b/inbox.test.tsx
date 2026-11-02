@@ -185,4 +185,75 @@ describe('the Inbox', () => {
     expect(within(inbox()).queryByRole('group')).toBeNull();
     expect(within(inbox()).getByRole('button', { name: 'Working' }).textContent).toContain('1');
   });
+
+  it('shows the linked issue and Merge request before the branch, numbered the way each Forge does', () => {
+    renderApp(
+      new FakeMain({
+        projects: [loom, billing],
+        sessions: [
+          session({
+            title: 'On GitHub',
+            projectId: loom.id,
+            branch: 'loom/28-flaky-cleanup',
+            issue: { number: 28, url: 'https://github.com/theholocoder/loom/issues/28' },
+            mergeRequest: { number: 40, url: 'https://github.com/theholocoder/loom/pull/40' },
+          }),
+          session({
+            title: 'On GitLab',
+            projectId: billing.id,
+            branch: 'billing/112-retry-limit',
+            issue: { number: 112, url: 'https://gitlab.com/acme/billing-api/-/issues/112' },
+            mergeRequest: { number: 87, url: 'https://gitlab.com/acme/billing-api/-/merge_requests/87' },
+          }),
+          session({ title: 'Unlinked', projectId: loom.id, branch: 'loom/spike' }),
+        ],
+      }),
+    );
+    const refs = (title: string) =>
+      ['Issue', 'Merge request', 'Branch'].map((what) => within(within(inbox()).getByRole('listitem', { name: title })).queryByTitle(what)?.textContent ?? null);
+
+    expect(refs('On GitHub')).toEqual(['#28', '#40', 'loom/28-flaky-cleanup']);
+    expect(refs('On GitLab')).toEqual(['#112', '!87', 'billing/112-retry-limit']);
+    expect(refs('Unlinked')).toEqual([null, null, 'loom/spike']);
+  });
+
+  it("opens a row's Merge request in the browser", () => {
+    const linked = session({ title: 'Linked', mergeRequest: { number: 40, url: 'https://github.com/theholocoder/loom/pull/40' } });
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [linked] }));
+    const row = within(within(inbox()).getByRole('listitem', { name: 'Linked' }));
+    expect(row.queryByRole('button', { name: 'Create Merge request' })).toBeNull();
+
+    fireEvent.click(row.getByRole('button', { name: 'Open Merge request #40' }));
+
+    expect(main.invoked.filter((i) => i.command === 'links.open')).toEqual([{ command: 'links.open', params: { url: 'https://github.com/theholocoder/loom/pull/40' } }]);
+  });
+
+  it('asks the agent to create a Merge request when the Forge is on and none is linked', () => {
+    const unlinked = session({ title: 'Unlinked' });
+    const offline = { ...billing, forge: { state: 'signed-out', checking: false, kind: 'gitlab', host: 'gitlab.com' } } satisfies Project;
+    const main = renderApp(new FakeMain({ projects: [loom, offline], sessions: [unlinked, session({ title: 'Forge off', projectId: offline.id })] }));
+    const row = (title: string) => within(within(inbox()).getByRole('listitem', { name: title }));
+    expect(row('Forge off').queryByRole('button', { name: /Merge request/ })).toBeNull();
+
+    fireEvent.click(row('Unlinked').getByRole('button', { name: 'Create Merge request' }));
+
+    expect(main.invoked.filter((i) => i.command === 'sessions.requestMergeRequest')).toEqual([{ command: 'sessions.requestMergeRequest', params: { id: unlinked.id } }]);
+  });
+
+  it('says why a row action failed', async () => {
+    const waiting = session({ title: 'Stubborn' });
+    renderApp(
+      new FakeMain({ projects: [loom], sessions: [waiting] }, {
+        'sessions.requestMergeRequest': () => {
+          throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
+        },
+      }),
+    );
+    const row = within(within(inbox()).getByRole('listitem', { name: 'Stubborn' }));
+
+    fireEvent.click(row.getByRole('button', { name: 'Create Merge request' }));
+
+    expect((await row.findByRole('alert')).textContent).toBe("This Session's agent has stopped, and Loom can't resume it yet.");
+  });
 });
+

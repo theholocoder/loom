@@ -1,7 +1,7 @@
 // The Session service: every Session, its status, and its conversation with
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
-import type { Project, Session, SessionStatus, TranscriptItem, WaitingReason } from '../../shared/api';
+import { FORGE_CLI, type ForgeLink, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason } from '../../shared/api';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock } from '../clock';
 import { exec, type BridgeCall } from '../environments/exec';
@@ -81,6 +81,10 @@ export class Sessions {
       error: null,
       unread: 0,
       branch: null,
+      issue_number: null,
+      issue_url: null,
+      merge_request_number: null,
+      merge_request_url: null,
       created_at: now,
       updated_at: now,
     };
@@ -104,6 +108,13 @@ export class Sessions {
     this.addItem(id, { kind: 'user', id: this.nextItemId++, text });
     this.setStatus(id, { status: 'working' });
     void this.run(id, text);
+  }
+
+  /** Sends the agent the Merge request prompt shortcut. */
+  async requestMergeRequest({ id }: { id: number }): Promise<void> {
+    const forge = this.options.project(this.get(id).projectId)?.forge;
+    if (forge?.state !== 'available' || !forge.kind) throw new Error("Merge requests need the Project's Forge, which is off.");
+    await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[forge.kind]) });
   }
 
   /** Archives the Session and stops its agent; its checkout is left as it is. */
@@ -295,6 +306,11 @@ function promptText(prompt: string): string {
   return text;
 }
 
+/** The prompt shortcut asking the agent to open or update its branch's Merge request. */
+function mergeRequestPrompt(cli: string): string {
+  return `Open a Merge request for this branch with ${cli}, or update it if one is already open: push the branch, then write its title and description from our conversation.`;
+}
+
 /** A Session's title: the first line of its first prompt, shortened. */
 function titleOf(prompt: string): string {
   const line = prompt.split('\n', 1)[0]!.trim();
@@ -310,6 +326,8 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     agent: row.agent,
     agentSessionId: row.agent_session_id ?? undefined,
     branch: row.branch ?? undefined,
+    issue: linkOf(row.issue_number, row.issue_url),
+    mergeRequest: linkOf(row.merge_request_number, row.merge_request_url),
     status: row.status,
     waitingReason: row.waiting_reason ?? undefined,
     error: row.error ?? undefined,
@@ -317,6 +335,10 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+}
+
+function linkOf(number: number | null, url: string | null): ForgeLink | undefined {
+  return number === null || url === null ? undefined : { number, url };
 }
 
 /** Drops absent optional fields, so a Session compares equal however it was built. */

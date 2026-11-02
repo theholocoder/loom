@@ -186,3 +186,4 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .B-item { padding: 0; }
 .B-item > button.open { display: block; width: 100%; background: none; border: 0; border-radius: 0; padding: 7px 12px 7px 46px; text-align: left; }
 .B-item > button.open:hover { background: none; }
+.B-item .row-error { padding: 0 12px 7px 46px; }
