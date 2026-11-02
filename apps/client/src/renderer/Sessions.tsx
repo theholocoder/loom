@@ -119,7 +119,10 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
   const unshownError = session.waitingReason === 'error' && session.error && !items.some((i) => i.kind === 'error') ? session.error : undefined;
 
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView?.({ block: 'end' }), [items]);
+  // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView?.({ block: 'end' });
+  }, [items]);
 
   // Not on `unread` itself, so that Mark unread sticks while the Session is shown.
   useEffect(() => {
