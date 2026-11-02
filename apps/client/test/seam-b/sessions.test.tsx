@@ -31,6 +31,7 @@ const working: Session = {
   workingCopy: { kind: 'checkout', path: '/home/dev/billing-api' },
   agent: 'OpenCode',
   status: 'working',
+  unread: false,
   createdAt: 1,
   updatedAt: 1,
 };

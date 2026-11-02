@@ -160,11 +160,22 @@ export interface Session {
   agent: string;
   /** The agent's own id for the conversation (OpenCode's `ses_…`), once it has one. */
   agentSessionId?: string;
+  /**
+   * The branch its working copy had checked out when Loom last looked: at
+   * start and after each turn. Absent until known; a detached HEAD shows as
+   * its short commit id.
+   */
+  branch?: string;
   status: SessionStatus;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
   error?: string;
+  /**
+   * Whether the Session has news the user hasn't opened yet. Set when it goes
+   * Waiting, cleared when the user opens or replies to it.
+   */
+  unread: boolean;
   /** Clock time the Session was started. */
   createdAt: number;
   /** Clock time its status last changed. */
@@ -218,6 +229,13 @@ export interface Commands {
    * the Session is Working.
    */
   'sessions.send': { params: { id: number; prompt: string }; result: void };
+  /**
+   * Archives a Session, stopping its agent, mid-run if Working. Only checkout
+   * Sessions so far, which archive without touching the checkout.
+   */
+  'sessions.archive': { params: { id: number }; result: void };
+  /** Marks a Session read (the user opened it) or unread again. */
+  'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
 }
 
 /** Topics the renderer can subscribe to, with the value each one carries. */

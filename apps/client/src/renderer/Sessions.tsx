@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, ArrowUp, Bot, CircleAlert, CircleCheckBig, FolderTree, LoaderCircle, OctagonX, Pause, SquareTerminal, type LucideIcon } from 'lucide-react';
+import { Archive, ArrowUp, Bot, CircleCheckBig, CirclePause, FolderTree, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { OPENCODE_NAME, type Session, type WaitingReason } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -8,12 +8,12 @@ import { useApi, useTopic } from './api';
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
   stopped: { label: 'Stopped', icon: Pause },
-  question: { label: 'Asked a question', icon: CircleAlert },
-  approval: { label: 'Needs approval', icon: CircleAlert },
-  stuck: { label: 'Stuck', icon: CircleAlert },
+  question: { label: 'Asked a question', icon: MessageCircleQuestionMark },
+  approval: { label: 'Needs approval', icon: ShieldAlert },
+  stuck: { label: 'Stuck', icon: TriangleAlert },
   error: { label: 'Error', icon: OctagonX },
-  interrupted: { label: 'Interrupted', icon: CircleAlert },
-  feedback: { label: 'Feedback', icon: CircleAlert },
+  interrupted: { label: 'Interrupted', icon: CirclePause },
+  feedback: { label: 'Feedback', icon: MessageSquareWarning },
 };
 
 /** What the Session's status says, in words and as an icon. */
@@ -28,7 +28,7 @@ export function StatusIcon({ session }: { session: Session }) {
   const { label, icon: Icon, className } = statusOf(session);
   const icon = <Icon className="sm" />;
   return (
-    <span className={className} title={label}>
+    <span className={className} title={label} role="img" aria-label={label}>
       {session.status === 'working' ? <span className="spin">{icon}</span> : icon}
     </span>
   );
@@ -103,8 +103,12 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
   );
 }
 
-/** One Session: its header, its conversation and the composer. */
-export function SessionView({ session }: { session: Session }) {
+/**
+ * One Session: its header, its conversation and the composer. Showing it
+ * marks it read, as does a status change while it is shown. Changing
+ * `replyRequest` focuses the composer.
+ */
+export function SessionView({ session, replyRequest = 0 }: { session: Session; replyRequest?: number }) {
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
@@ -116,6 +120,11 @@ export function SessionView({ session }: { session: Session }) {
 
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => end.current?.scrollIntoView?.({ block: 'end' }), [items]);
+
+  // Not on `unread` itself, so that Mark unread sticks while the Session is shown.
+  useEffect(() => {
+    if (session.unread) void api.invoke('sessions.setUnread', { id: session.id, unread: false });
+  }, [session.id, session.updatedAt]);
 
   const send = async (prompt: string) => {
     setError(undefined);
@@ -182,6 +191,7 @@ export function SessionView({ session }: { session: Session }) {
         agent={session.agent}
         placeholder={working ? `${session.agent} is working…` : `Reply to ${session.agent}…`}
         disabled={working}
+        focusRequest={replyRequest}
         onSend={send}
       />
     </main>
@@ -212,6 +222,7 @@ function Composer({
   placeholder,
   disabled = false,
   tools,
+  focusRequest = 0,
   onSend,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
@@ -219,9 +230,15 @@ function Composer({
   placeholder: string;
   disabled?: boolean;
   tools?: ReactNode;
+  /** Changing it focuses the prompt box. */
+  focusRequest?: number;
   onSend: (prompt: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState('');
+  const prompt = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusRequest) prompt.current?.focus();
+  }, [focusRequest]);
   const [sending, setSending] = useState(false);
   const canSend = !disabled && !sending && draft.trim() !== '';
 
@@ -242,7 +259,7 @@ function Composer({
   return (
     <form className="composer-wrap" onSubmit={send}>
       <div className="composer">
-        <textarea aria-label="Prompt" rows={2} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} />
+        <textarea ref={prompt} aria-label="Prompt" rows={2} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} />
         <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>
             <SquareTerminal className="sm" />

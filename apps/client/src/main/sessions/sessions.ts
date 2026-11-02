@@ -4,6 +4,8 @@
 import type { Project, Session, SessionStatus, TranscriptItem, WaitingReason } from '../../shared/api';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock } from '../clock';
+import { exec, type BridgeCall } from '../environments/exec';
+import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { LoomDatabase } from '../storage/database';
 import type { SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
@@ -14,8 +16,13 @@ export interface SessionsOptions {
   adapter: AgentAdapter;
   project: (id: number) => Project | undefined;
   /** The Environment with this id, if Loom knows it. */
-  environment: (id: string) => AgentEnvironment | undefined;
+  environment: (id: string) => SessionEnvironment | undefined;
   onChange: (sessions: Session[]) => void;
+}
+
+/** What the Session service needs from an Environment: its agent's, and git. */
+export interface SessionEnvironment extends AgentEnvironment {
+  request: BridgeCall;
 }
 
 const MAX_TITLE_LENGTH = 80;
@@ -72,6 +79,8 @@ export class Sessions {
       status: 'working' as const,
       waiting_reason: null,
       error: null,
+      unread: 0,
+      branch: null,
       created_at: now,
       updated_at: now,
     };
@@ -79,6 +88,7 @@ export class Sessions {
     this.sessions.set(id, fromRow({ id, ...values }));
     this.addItem(id, { kind: 'user', id: this.nextItemId++, text });
     this.publish();
+    void this.lookUpBranch(id);
     void this.run(id, text);
     return this.sessions.get(id)!;
   }
@@ -94,6 +104,22 @@ export class Sessions {
     this.addItem(id, { kind: 'user', id: this.nextItemId++, text });
     this.setStatus(id, { status: 'working' });
     void this.run(id, text);
+  }
+
+  /** Archives the Session and stops its agent; its checkout is left as it is. */
+  async archive({ id }: { id: number }): Promise<void> {
+    if (this.get(id).status === 'archived') return;
+    this.endAgentText(id);
+    this.setStatus(id, { status: 'archived' });
+    const agent = this.live.get(id);
+    this.live.delete(id);
+    await agent?.close();
+  }
+
+  setUnread({ id, unread }: { id: number; unread: boolean }): void {
+    this.get(id);
+    this.update(id, { unread });
+    this.save(id, { unread: unread ? 1 : 0 });
   }
 
   /** Calls `listener` with the Session's conversation now and as it changes. */
@@ -136,6 +162,10 @@ export class Sessions {
       workingCopy: session.workingCopy.path,
       onEvent: (event) => this.onAgentEvent(id, event),
     });
+    if (this.get(id).status === 'archived') {
+      await agent.close();
+      throw new Error('This Session is archived.');
+    }
     this.live.set(id, agent);
     this.update(id, { agentSessionId: agent.id });
     this.save(id, { agent_session_id: agent.id });
@@ -151,13 +181,42 @@ export class Sessions {
         return this.appendAgentText(id, event.text);
       case 'run-settled':
         this.endAgentText(id);
-        return this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
+        this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
+        return void this.lookUpBranch(id);
       case 'run-failed':
-        return this.fail(id, event.error);
+        this.fail(id, event.error);
+        return void this.lookUpBranch(id);
       case 'closed':
         this.live.delete(id);
         return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
     }
+  }
+
+  /**
+   * Records the branch the Session's working copy has checked out, which the
+   * agent or the user may have changed. Keeps the last one known if git can't say.
+   */
+  private async lookUpBranch(id: number): Promise<void> {
+    const session = this.get(id);
+    const environmentId = this.options.project(session.projectId)?.checkout.environmentId;
+    const environment = environmentId === undefined ? undefined : this.options.environment(environmentId);
+    if (!environment) return;
+    const git = (...args: string[]) => exec(environment.request, 'git', ['-C', session.workingCopy.path, ...args], GIT_TIMEOUT_MS);
+    let branch: string | undefined;
+    try {
+      const symbolic = await git('symbolic-ref', '--quiet', '--short', 'HEAD');
+      if (symbolic.exitCode === 0) {
+        branch = symbolic.stdout.trim();
+      } else {
+        const detached = await git('rev-parse', '--short', 'HEAD');
+        if (detached.exitCode === 0) branch = detached.stdout.trim();
+      }
+    } catch {
+      return;
+    }
+    if (!branch || this.shuttingDown || branch === this.get(id).branch) return;
+    this.update(id, { branch });
+    this.save(id, { branch });
   }
 
   /** Puts a Working Session in Waiting (error), showing why in its conversation. */
@@ -197,10 +256,12 @@ export class Sessions {
     return topic;
   }
 
+  /** Changes the Session's status. Going Waiting brings news for the user; anything else means they've seen it. */
   private setStatus(id: number, { status, waitingReason, error }: StatusChange): void {
     const updatedAt = this.options.clock.now();
-    this.update(id, { status, waitingReason, error, updatedAt });
-    this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, updated_at: updatedAt });
+    const unread = status === 'waiting';
+    this.update(id, { status, waitingReason, error, unread, updatedAt });
+    this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt });
   }
 
   private update(id: number, change: Partial<Session>): void {
@@ -247,9 +308,11 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     workingCopy: { kind: row.working_copy_kind, path: row.working_copy_path },
     agent: row.agent,
     agentSessionId: row.agent_session_id ?? undefined,
+    branch: row.branch ?? undefined,
     status: row.status,
     waitingReason: row.waiting_reason ?? undefined,
     error: row.error ?? undefined,
+    unread: row.unread !== 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
