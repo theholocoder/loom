@@ -1,11 +1,12 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
 // Inbox sidebar, the main pane and the diff rail.
-import { Archive, ChartColumn, ChevronDown, ChevronRight, FileDiff, FolderGit2, FolderOpen, Inbox, LoaderCircle, MessageSquarePlus, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
+import { ChartColumn, FileDiff, FolderGit2, FolderOpen, MessageSquarePlus, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Session } from '../shared/api';
 import { useTopic } from './api';
 import { Projects, useExistingCloneLinker } from './Projects';
-import { NewSession, SessionView, StatusIcon } from './Sessions';
+import { InboxList } from './Inbox';
+import { NewSession, SessionView } from './Sessions';
 import { Settings } from './Settings';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
@@ -15,13 +16,19 @@ export function App() {
   const [diffOpen, setDiffOpen] = useState(false);
   const linker = useExistingCloneLinker();
   const sessions = useTopic('sessions') ?? [];
+  const projects = useTopic('projects') ?? [];
   const [selectedId, setSelectedId] = useState<number>();
+  /** Bumped to focus the open Session's composer. */
+  const [replyRequest, setReplyRequest] = useState(0);
   const selected = sessions.find((s) => s.id === selectedId);
   const select = (session: Session) => {
     setSelectedId(session.id);
     setView('session');
   };
-  const waiting = sessions.filter((s) => s.status === 'waiting');
+  const reply = (session: Session) => {
+    select(session);
+    setReplyRequest((n) => n + 1);
+  };
 
   return (
     <div className="app">
@@ -44,13 +51,7 @@ export function App() {
           </button>
         </div>
         <div className="side-list">
-          <div className="section-head" style={{ borderTop: 0, cursor: 'default' }}>
-            <Inbox className="sm" /> Inbox<span className="grow" />
-            {waiting.length}
-          </div>
-          {waiting.length === 0 ? <div className="empty">Nothing needs you right now.</div> : <SessionRows sessions={waiting} selectedId={view === 'session' ? selectedId : undefined} onSelect={select} />}
-          <Section label="Working" icon={LoaderCircle} sessions={sessions.filter((s) => s.status === 'working')} selectedId={view === 'session' ? selectedId : undefined} onSelect={select} />
-          <Section label="Archived" icon={Archive} sessions={sessions.filter((s) => s.status === 'archived')} selectedId={view === 'session' ? selectedId : undefined} onSelect={select} />
+          <InboxList sessions={sessions} projects={projects} selectedId={view === 'session' ? selectedId : undefined} onSelect={select} onReply={reply} />
         </div>
         <nav className="side-foot">
           <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => setView('projects')} />
@@ -66,7 +67,7 @@ export function App() {
       ) : view === 'new-session' ? (
         <NewSession onStarted={select} />
       ) : selected ? (
-        <SessionView key={selected.id} session={selected} />
+        <SessionView key={selected.id} session={selected} replyRequest={replyRequest} />
       ) : (
         <main className="main" aria-label="Session">
           <div className="empty">No Session selected.</div>
@@ -144,40 +145,6 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: () => voi
       )}
     </div>
   );
-}
-
-interface SessionListProps {
-  sessions: Session[];
-  selectedId: number | undefined;
-  onSelect: (session: Session) => void;
-}
-
-/** A collapsible sidebar section (Working, Archived) below the Inbox. */
-function Section({ label, icon: Icon, ...list }: { label: string; icon: LucideIcon } & SessionListProps) {
-  const [open, setOpen] = useState(false);
-  const Chevron = open ? ChevronDown : ChevronRight;
-  return (
-    <>
-      <button className="section-head" type="button" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}>
-        <Chevron className="sm" />
-        <Icon className="sm" />
-        {label}
-        <span className="grow" />
-        {list.sessions.length}
-      </button>
-      {open && <SessionRows {...list} />}
-    </>
-  );
-}
-
-/** Sessions as one-line rows: status and title. */
-function SessionRows({ sessions, selectedId, onSelect }: SessionListProps) {
-  return sessions.map((session) => (
-    <button key={session.id} type="button" className={`mini${session.id === selectedId ? ' sel' : ''}`} aria-label={session.title} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => onSelect(session)}>
-      <StatusIcon session={session} />
-      <span className="grow ellipsis">{session.title}</span>
-    </button>
-  ));
 }
 
 function FootButton({ label, icon: Icon, current, onClick }: { label: string; icon: LucideIcon; current: boolean; onClick: () => void }) {

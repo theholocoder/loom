@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine } from './harness';
 import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
@@ -168,3 +169,108 @@ describe('a checkout Session', () => {
     expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting', waitingReason: 'interrupted' });
   });
 });
+
+describe('Session status for the Inbox', () => {
+  it('is unread once it goes Waiting, until the user marks it read, and stays as marked after a restart', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-sessions-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Go' });
+    expect(created.unread).toBe(false);
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting' && s.unread));
+
+    await main.api.invoke('sessions.setUnread', { id: created.id, unread: false });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => !s.unread));
+    await main.api.invoke('sessions.setUnread', { id: created.id, unread: true });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.unread));
+    await main.api.invoke('sessions.setUnread', { id: created.id, unread: false });
+    await main.close();
+
+    const again = await started(machine, userDataDir);
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === created.id)).toMatchObject({ status: 'waiting', unread: false });
+  });
+
+  it('is unread when it comes back interrupted after a restart', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Halfway'], hold: 'never' }]);
+    const userDataDir = tempDir('loom-sessions-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Go' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
+    await main.close();
+
+    const again = await started(machine, userDataDir);
+
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ waitingReason: 'interrupted', unread: true });
+  });
+
+  it('is read again once the user replies', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['First.'] }, { chunks: ['Second.'], hold: 'second' }]);
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'First' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.unread));
+
+    await main.api.invoke('sessions.send', { id, prompt: 'Second' });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'working' && !s.unread));
+    machine.release('second');
+  });
+
+  it("shows its working copy's branch, following it after each turn", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['First.'] }, { chunks: ['Second.'] }]);
+    execFileSync('git', ['-C', checkout, 'checkout', '--quiet', '-b', 'loom/31-mr-button']);
+    const { main, project } = await withProject(machine, checkout);
+
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'First' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.branch === 'loom/31-mr-button'));
+
+    execFileSync('git', ['-C', checkout, 'checkout', '--quiet', '-b', 'loom/32-other']);
+    await main.api.invoke('sessions.send', { id, prompt: 'Second' });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.branch === 'loom/32-other'));
+  });
+
+  it('archives a checkout Session: read, its agent stopped, no more messages, and kept after a restart', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-sessions-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Go' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+
+    await main.api.invoke('sessions.archive', { id });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'archived' && s.waitingReason === undefined && !s.unread));
+    await processEnded(machine.acpMessages()[0]!.pid);
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'More' })).rejects.toThrow('This Session is archived.');
+    await main.close();
+    const again = await started(machine, userDataDir);
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived', unread: false });
+  });
+
+  it('archives a Working Session, stopping its run', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Working on it'], hold: 'never' }]);
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Go' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
+
+    await main.api.invoke('sessions.archive', { id });
+
+    await processEnded(machine.acpMessages()[0]!.pid);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived' });
+    expect((await waitFor(main.api, 'transcript', () => true, { sessionId: id })).some((i) => i.kind === 'error')).toBe(false);
+  });
+});
+
+/** Resolves once the process with `pid` has exited. */
+async function processEnded(pid: number): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() > deadline) throw new Error(`process ${pid} is still running`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}

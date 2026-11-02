@@ -66,7 +66,10 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     clock: options.clock,
     adapter: new AcpAdapter(OPENCODE_ACP, options.appVersion),
     project: (id) => projectService.list().find((p) => p.id === id),
-    environment: (id) => (id === native.status.id ? { label: native.status.label, openChannel: (params) => native.openChannel(params) } : undefined),
+    environment: (id) =>
+      id === native.status.id
+        ? { label: native.status.label, openChannel: (params) => native.openChannel(params), request: (...args) => native.request(...args) }
+        : undefined,
     onChange: (list) => sessions.set(list),
   });
   sessions.set(sessionService.list());
@@ -95,6 +98,8 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
     'sessions.send': (params) => sessionService.send(params),
+    'sessions.archive': (params) => sessionService.archive(params),
+    'sessions.setUnread': (params) => sessionService.setUnread(params),
   };
 
   const api: LoomApi = {

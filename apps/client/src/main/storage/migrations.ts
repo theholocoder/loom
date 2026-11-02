@@ -49,4 +49,8 @@ export const migrations: Migration[] = [
       .execute();
     await db.schema.createIndex('sessions_project').on('sessions').column('project_id').execute();
   },
+  async (db) => {
+    await db.schema.alterTable('sessions').addColumn('unread', 'integer', (c) => c.notNull().defaultTo(0)).execute();
+    await db.schema.alterTable('sessions').addColumn('branch', 'text').execute();
+  },
 ];

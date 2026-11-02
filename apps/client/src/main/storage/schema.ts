@@ -36,6 +36,10 @@ export interface SessionsTable {
   status: SessionStatus;
   waiting_reason: WaitingReason | null;
   error: string | null;
+  /** 1 while the Session has news the user hasn't opened, else 0. */
+  unread: number;
+  /** The branch its working copy had checked out when last looked at. */
+  branch: string | null;
   /** Clock times. */
   created_at: number;
   updated_at: number;
