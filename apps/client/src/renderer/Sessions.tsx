@@ -189,8 +189,8 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
       </div>
       <Composer
         agent={session.agent}
-        placeholder={working ? `${session.agent} is working…` : `Reply to ${session.agent}…`}
-        disabled={working}
+        placeholder={working ? `${session.agent} is working…` : session.status === 'archived' ? 'This Session is archived.' : `Reply to ${session.agent}…`}
+        disabled={session.status !== 'waiting'}
         focusRequest={replyRequest}
         onSend={send}
       />

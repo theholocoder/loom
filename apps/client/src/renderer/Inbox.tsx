@@ -127,7 +127,7 @@ function InboxRow({ session, now, selected, onSelect, onReply }: { session: Sess
  * When a row's Session last changed status: "now" within the minute, the
  * time today, "Yesterday", then the date.
  */
-export function timeOf(at: number, now: number): string {
+function timeOf(at: number, now: number): string {
   if (now - at < 60_000) return 'now';
   const day = (time: number) => new Date(time).setHours(0, 0, 0, 0);
   const days = Math.round((day(now) - day(at)) / 86_400_000);
@@ -145,7 +145,7 @@ function useNow(): number {
   return now;
 }
 
-export function ProjectAvatar({ project, size }: { project: Project; size: number }) {
+function ProjectAvatar({ project, size }: { project: Project; size: number }) {
   const background = PROJECT_COLORS[project.id % PROJECT_COLORS.length];
   return (
     <span className="proj-avatar" aria-hidden style={{ width: size, height: size, background, fontSize: size * 0.38 }}>

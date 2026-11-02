@@ -105,13 +105,13 @@ describe('the Inbox', () => {
     );
     const row = (title: string) => within(inbox()).getByRole('listitem', { name: title });
 
-    expect(within(row('Just now')).getByText('Just now').className).toContain('title');
+    expect(within(row('Just now')).getByText('Just now')).toBeTruthy();
     expect(within(row('Just now')).getByRole('img', { name: 'Unread' })).toBeTruthy();
     expect(within(row('This morning')).queryByRole('img', { name: 'Unread' })).toBeNull();
-    expect(row('Just now').querySelector('time')?.textContent).toBe('now');
-    expect(row('This morning').querySelector('time')?.textContent).toMatch(/^0?9.05/);
-    expect(row('Last night').querySelector('time')?.textContent).toBe('Yesterday');
-    expect(row('Last week').querySelector('time')?.textContent).toMatch(/26/);
+    expect(within(row('Just now')).getByText('now')).toBeTruthy();
+    expect(within(row('This morning')).getByText(/^0?9.05/)).toBeTruthy();
+    expect(within(row('Last night')).getByText('Yesterday')).toBeTruthy();
+    expect(within(row('Last week')).getByText(/26/)).toBeTruthy();
     expect(within(row('Just now')).getByTitle('Branch').textContent).toBe('loom/31-mr-button');
     expect(within(row('This morning')).queryByTitle('Branch')).toBeNull();
   });

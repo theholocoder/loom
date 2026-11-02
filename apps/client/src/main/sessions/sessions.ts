@@ -173,7 +173,8 @@ export class Sessions {
   }
 
   private onAgentEvent(id: number, event: AgentEvent): void {
-    if (this.shuttingDown) return;
+    // An archived Session's agent is on its way out; nothing it says counts.
+    if (this.shuttingDown || this.get(id).status === 'archived') return;
     switch (event.type) {
       case 'run-started':
         return;
