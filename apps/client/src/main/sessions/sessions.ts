@@ -181,16 +181,24 @@ export class Sessions {
     }
   }
 
+  private async worktreeLeftOver(session: Session): Promise<boolean> {
+    if (session.workingCopy.kind !== 'worktree') return false;
+    try {
+      return await worktreeExists(this.environmentOf(session), session.workingCopy.path);
+    } catch {
+      return false; // Environment gone or offline: nothing left to do
+    }
+  }
+
   private async archiveSession(id: number, discard: boolean): Promise<ArchiveResult> {
     // Ending the agent's text needs the transcript, so it is read first.
     this.get(id);
     await this.loadTranscript(id);
     const session = this.get(id);
     const worktree = session.workingCopy.kind === 'worktree' ? session.workingCopy.path : undefined;
+    // An archived Session is only retried while its worktree is still on disk; never fail on one.
+    if (session.status === 'archived' && !(await this.worktreeLeftOver(session))) return { archived: true };
     const environment = worktree === undefined ? undefined : this.environmentOf(session);
-    if (session.status === 'archived' && !(environment && worktree !== undefined && (await worktreeExists(environment, worktree)))) {
-      return { archived: true };
-    }
     if (!environment || worktree === undefined) {
       this.markArchived(id);
       await this.stopAgent(id);

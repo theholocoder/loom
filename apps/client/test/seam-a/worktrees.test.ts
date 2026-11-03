@@ -354,6 +354,16 @@ describe('archiving a worktree Session whose agent is working', () => {
     expect(await statusOf(main, id)).toBe('archived');
   });
 
+  it('archiving an archived Session again resolves and changes nothing', async () => {
+    const { main, id } = await workingSession();
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
+    const before = await waitFor(main.api, 'transcript', () => true, { sessionId: id });
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
+    expect(await waitFor(main.api, 'transcript', () => true, { sessionId: id })).toEqual(before);
+    expect(await statusOf(main, id)).toBe('archived');
+  });
+
   it('holds back on work the stopped agent left, without archiving', async () => {
     const { main, id, path } = await workingSession();
     writeFileSync(join(path, 'README.md'), 'half done\n');
