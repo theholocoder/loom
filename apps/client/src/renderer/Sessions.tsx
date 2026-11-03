@@ -40,10 +40,10 @@ export function StatusIcon({ session }: { session: Session }) {
 }
 
 /** Starting a Session: which Project, which working copy, and the first prompt. */
-export function NewSession({ onStarted }: { onStarted: (session: Session) => void }) {
+export function NewSession({ initialProjectId, onStarted }: { initialProjectId?: number; onStarted: (session: Session) => void }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
-  const [projectId, setProjectId] = useState<number>();
+  const [projectId, setProjectId] = useState(initialProjectId);
   const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
   const [workingCopy, setWorkingCopy] = useState<WorkingCopyKind>('worktree');
   const [draft, setDraft] = useState('');

@@ -44,6 +44,9 @@ const fromIssue: Session = {
 function startNewSession() {
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
+  // With Projects, the Project picker comes first: take the highlighted one.
+  const filter = screen.queryByRole('combobox', { name: 'Filter Projects' });
+  if (filter) fireEvent.keyDown(filter, { key: 'Enter' });
   return screen.getByRole('main', { name: 'New Session' });
 }
 

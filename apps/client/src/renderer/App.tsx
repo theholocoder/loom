@@ -2,11 +2,12 @@
 // Inbox sidebar, the main pane and the diff rail.
 import { ChartColumn, FileDiff, FolderGit2, FolderOpen, MessageSquarePlus, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { Session } from '../shared/api';
+import type { Project, Session } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
 import { DatabaseProblem } from './DatabaseProblem';
 import { Popover } from './Popover';
+import { ProjectPicker } from './ProjectPicker';
 import { Projects, useExistingCloneLinker } from './Projects';
 import { InboxList } from './Inbox';
 import { NewSession, SessionView } from './Sessions';
@@ -41,6 +42,8 @@ function Workspace() {
   const [selectedId, setSelectedId] = useState<number>();
   /** Bumped to focus the open Session's composer. */
   const [replyRequest, setReplyRequest] = useState(0);
+  /** The Project picked for the New Session view; each pick starts it afresh. */
+  const [newSession, setNewSession] = useState<{ projectId?: number; generation: number }>({ generation: 0 });
   const selected = sessions.find((s) => s.id === selectedId);
   const select = (session: Session) => {
     setSelectedId(session.id);
@@ -58,7 +61,11 @@ function Workspace() {
           <div className="brand">
             <Waypoints /> Loom<span className="grow" />
             <NewMenu
-              onNewSession={() => setView('new-session')}
+              projects={projects}
+              onNewSession={(project) => {
+                setNewSession((n) => ({ projectId: project?.id, generation: n.generation + 1 }));
+                setView('new-session');
+              }}
               onAddExistingClone={() => {
                 setView('projects');
                 void linker.link();
@@ -86,7 +93,7 @@ function Workspace() {
       ) : view === 'projects' ? (
         <Projects linker={linker} />
       ) : view === 'new-session' ? (
-        <NewSession onStarted={select} />
+        <NewSession key={newSession.generation} initialProjectId={newSession.projectId} onStarted={select} />
       ) : selected ? (
         <SessionView key={selected.id} session={selected} replyRequest={replyRequest} />
       ) : (
@@ -118,10 +125,19 @@ function Workspace() {
   );
 }
 
-/** The + button's menu of things to start: a Session or a Project. */
-function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: () => void; onAddExistingClone: () => void }) {
+/**
+ * The + button's menu of things to start: a Session (in the Project picked
+ * from the Project picker) or a Project. With no Project to pick, New Session
+ * goes straight to its view, which asks for one.
+ */
+function NewMenu({ projects, onNewSession, onAddExistingClone }: { projects: Project[]; onNewSession: (project?: Project) => void; onAddExistingClone: () => void }) {
   const [open, setOpen] = useState(false);
+  const [picking, setPicking] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const closePicker = () => {
+    setPicking(false);
+    trigger.current?.focus();
+  };
   return (
     <>
       <button ref={trigger} className="icon-btn" type="button" title="New" aria-label="New" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -134,7 +150,8 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: () => voi
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              onNewSession();
+              if (projects.length) setPicking(true);
+              else onNewSession();
             }}
           >
             <MessageSquarePlus className="sm" />
@@ -152,6 +169,16 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: () => voi
             Add Project from existing clone…
           </button>
         </Popover>
+      )}
+      {picking && (
+        <ProjectPicker
+          projects={projects}
+          onClose={closePicker}
+          onPick={(project) => {
+            setPicking(false);
+            onNewSession(project);
+          }}
+        />
       )}
     </>
   );

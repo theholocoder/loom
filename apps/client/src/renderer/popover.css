@@ -16,3 +16,14 @@ button.select-field { justify-content: space-between; min-width: 170px; padding:
 button.select-field:hover { background: var(--hover); border-color: var(--muted); }
 button.select-field[aria-expanded="true"] { border-color: var(--accent); }
 button.select-field:focus-visible { border-color: var(--accent); }
+/* A popover centred on the window over the app's `.scrim`: the Project picker. */
+.popover.picker-modal { position: relative; width: min(520px, calc(100vw - 32px)); max-height: 60vh; padding: 6px; gap: 6px; overflow: hidden; }
+.picker-modal input { flex-shrink: 0; padding: 8px 10px; font-size: 14px; }
+.picker-modal [role="listbox"] { overflow-y: auto; }
+.picker-modal [role="option"] { gap: 10px; padding: 6px 8px; cursor: pointer; }
+.picker-modal [role="option"]:hover { background: none; }
+.picker-modal [role="option"][aria-selected="true"] { color: var(--text); background: var(--sel); }
+.picker-text { display: flex; flex-direction: column; min-width: 0; }
+.picker-name { font-weight: 600; }
+.picker-path { font-size: 12px; }
+.picker-empty { padding: 6px 8px; }

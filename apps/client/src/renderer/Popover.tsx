@@ -47,13 +47,18 @@ export function placePopover(trigger: Rect, viewport: { width: number; height: n
 
 const ITEMS = '[role="option"], [role="menuitem"]';
 
+/** The item an arrow key lands on: popovers stop at the first and last item rather than wrapping. */
+export function stepIndex(index: number, length: number): number {
+  return Math.max(0, Math.min(length - 1, index));
+}
+
 /** Arrow keys, Home/End move between items (and from an input into the list); Enter/Space pick the focused item. */
 function navigate(event: KeyboardEvent<HTMLElement>) {
   const target = event.target as HTMLElement;
   const inInput = target.tagName === 'INPUT';
   const items = [...event.currentTarget.querySelectorAll<HTMLElement>(ITEMS)];
   const at = items.indexOf(target);
-  const focus = (index: number) => items[Math.max(0, Math.min(items.length - 1, index))]?.focus();
+  const focus = (index: number) => items[stepIndex(index, items.length)]?.focus();
   if (event.key === 'ArrowDown') focus(inInput ? 0 : at + 1);
   else if (event.key === 'ArrowUp') {
     const input = event.currentTarget.querySelector('input');
