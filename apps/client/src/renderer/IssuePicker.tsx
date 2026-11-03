@@ -2,9 +2,10 @@
 // Project's open issues, listed by main through the Forge's CLI. Only offered
 // when the Project's Forge features are on.
 import { CircleDot, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Issue, Project } from '../shared/api';
 import { useApi } from './api';
+import { Popover } from './Popover';
 
 const SEARCH_DELAY_MS = 250;
 
@@ -14,6 +15,7 @@ export function IssuePicker({ project, issue, onChange }: { project: Project; is
   const [search, setSearch] = useState('');
   const [issues, setIssues] = useState<Issue[]>();
   const [error, setError] = useState<string>();
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -49,15 +51,19 @@ export function IssuePicker({ project, issue, onChange }: { project: Project; is
     );
   }
 
+  const close = () => {
+    setOpen(false);
+    setSearch('');
+  };
   return (
-    <span className="menu-anchor">
-      <button type="button" className="pick" aria-expanded={open} onClick={() => setOpen(!open)}>
+    <>
+      <button ref={trigger} type="button" className="pick" aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
         <CircleDot className="sm" />
         Issue
       </button>
       {open && (
-        <div className="menu issue-menu" role="dialog" aria-label="Pick an issue">
-          <input aria-label="Search issues" placeholder="Search open issues…" autoFocus value={search} onChange={(event) => setSearch(event.target.value)} />
+        <Popover anchor={trigger} role="dialog" label="Pick an issue" className="issue-popover" onClose={close}>
+          <input aria-label="Search issues" placeholder="Search open issues…" data-autofocus value={search} onChange={(event) => setSearch(event.target.value)} />
           {error && (
             <div className="err" role="alert">
               {error}
@@ -73,16 +79,15 @@ export function IssuePicker({ project, issue, onChange }: { project: Project; is
                 aria-selected={false}
                 onClick={() => {
                   onChange(found);
-                  setOpen(false);
-                  setSearch('');
+                  close();
                 }}
               >
                 <span className="tech">#{found.number}</span> {found.title}
               </button>
             ))}
           </div>
-        </div>
+        </Popover>
       )}
-    </span>
+    </>
   );
 }

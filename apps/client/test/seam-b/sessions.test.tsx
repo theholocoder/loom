@@ -63,15 +63,16 @@ describe('starting a Session', () => {
 
     const pane = startNewSession();
 
-    const workingCopy = within(pane).getByRole('combobox', { name: 'Working copy' }) as HTMLSelectElement;
-    expect(workingCopy.value).toBe('worktree');
-    expect(workingCopy.selectedOptions[0]!.textContent).toBe('New worktree');
-    expect([...workingCopy.options].map((o) => [o.value, o.textContent, o.disabled])).toEqual([
-      ['worktree', 'New worktree', false],
-      ['checkout', 'Stay on current branch', false],
+    const workingCopy = within(pane).getByRole('button', { name: 'Working copy' });
+    expect(workingCopy.textContent).toBe('New worktree');
+    fireEvent.click(workingCopy);
+    const choices = within(screen.getByRole('listbox', { name: 'Working copy' })).getAllByRole('option');
+    expect(choices.map((o) => [o.textContent, o.getAttribute('aria-selected')])).toEqual([
+      ['New worktree', 'true'],
+      ['Stay on current branch', 'false'],
     ]);
     expect(within(pane).getByTitle('Agent').textContent).toBe('OpenCode');
-    expect((within(pane).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe('1');
+    expect(within(pane).getByRole('button', { name: 'Project' }).textContent).toBe(project.name);
   });
 
   it('starts a checkout Session with the prompt, then shows it', async () => {
@@ -85,7 +86,8 @@ describe('starting a Session', () => {
     );
     const pane = startNewSession();
 
-    fireEvent.change(within(pane).getByRole('combobox', { name: 'Working copy' }), { target: { value: 'checkout' } });
+    fireEvent.click(within(pane).getByRole('button', { name: 'Working copy' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Stay on current branch' }));
     expect(within(pane).queryByRole('textbox', { name: 'Branch' })).toBeNull();
     fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Say hello' } });
     fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));

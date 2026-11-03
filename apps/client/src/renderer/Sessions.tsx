@@ -7,6 +7,7 @@ import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
+import { Select } from './Popover';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -88,33 +89,27 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
           canSendEmpty={!!issue}
           tools={
             <>
-              <label className="pick" title="Project">
-                <FolderTree className="sm" />
-                <b>{chosen.name}</b>
-                <select
-                  aria-label="Project"
-                  value={chosen.id}
-                  onChange={(event) => {
-                    setProjectId(Number(event.target.value));
-                    // An edited name has the old Project's prefix; the issue is the old Project's.
-                    setEditedBranch(undefined);
-                    setIssue(undefined);
-                  }}
-                >
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="pick" title="Working copy">
-                <b>{workingCopy === 'worktree' ? 'New worktree' : 'Stay on current branch'}</b>
-                <select aria-label="Working copy" value={workingCopy} onChange={(event) => setWorkingCopy(event.target.value as WorkingCopyKind)}>
-                  <option value="worktree">New worktree</option>
-                  <option value="checkout">Stay on current branch</option>
-                </select>
-              </label>
+              <Select
+                label="Project"
+                icon={<FolderTree className="sm" />}
+                value={chosen.id}
+                options={projects.map((p) => ({ value: p.id, label: p.name }))}
+                onChange={(id) => {
+                  setProjectId(id);
+                  // An edited name has the old Project's prefix; the issue is the old Project's.
+                  setEditedBranch(undefined);
+                  setIssue(undefined);
+                }}
+              />
+              <Select<WorkingCopyKind>
+                label="Working copy"
+                value={workingCopy}
+                options={[
+                  { value: 'worktree', label: 'New worktree' },
+                  { value: 'checkout', label: 'Stay on current branch' },
+                ]}
+                onChange={setWorkingCopy}
+              />
               <IssuePicker
                 project={chosen}
                 issue={issue}
