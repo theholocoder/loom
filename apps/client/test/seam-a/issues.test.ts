@@ -63,7 +63,9 @@ describe('the issue picker', () => {
 
     expect(await main.api.invoke('projects.issues', { id: project.id, search: 'login' })).toEqual([loginBug]);
     const list = machine.forgeCliInvocations('glab').find((args) => args[0] === 'issue')!;
-    expect(list).toEqual(expect.arrayContaining(['issue', 'list', '--repo', 'https://gitlab.example.org/acme/loom', '--per-page', '100', '--search', 'login']));
+    expect(list).toEqual(expect.arrayContaining(['issue', 'list', '--per-page', '100', '--search', 'login']));
+    expect(list).not.toContain('--repo');
+    expect(machine.forgeCliCwds('glab')[machine.forgeCliInvocations('glab').findIndex((args) => args[0] === 'issue')]).toBe(checkout);
   });
 
   it("is refused when the Project's Forge is off", async () => {

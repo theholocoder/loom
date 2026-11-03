@@ -93,6 +93,7 @@ describe('starting a Session from an issue', () => {
     [{ state: 'signed-out', kind: 'gitlab', host: 'git.acme.dev' }, 'Run `glab auth login --hostname git.acme.dev`'],
     [{ state: 'signed-out', kind: 'github', host: 'github.com' }, 'Run `gh auth login --hostname github.com`'],
     [{ state: 'unsupported', host: 'git.acme.dev' }, 'needs an origin on GitHub or GitLab; git.acme.dev'],
+    [{ state: 'unsupported', host: 'gitlab-ssh.axiocode.net', error: 'none of the git remotes point to a known GitLab host' }, 'glab said: none of the git remotes point to a known GitLab host'],
     [{ state: 'no-remote' }, 'needs an origin remote'],
     [{ state: 'error', error: 'boom' }, 'boom'],
   ] as const)('is off with a hint when the Forge is %o', (forge, hint) => {
@@ -101,6 +102,12 @@ describe('starting a Session from an issue', () => {
     expect(button.disabled).toBe(true);
     expect(button.title).toContain(hint);
     expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toContain(hint);
+  });
+
+  it('is on for a GitLab glab resolved from the checkout, whose web host differs from the SSH one', () => {
+    const forge = { state: 'available', checking: false, kind: 'gitlab', host: 'gitlab.axiocode.net', repository: 'axio/team/app', remote: 'git@gitlab-ssh.axiocode.net:axio/team/app.git' } as const;
+    renderApp(new FakeMain({ projects: [{ ...project, forge }] }));
+    expect((within(startNewSession()).getByRole('button', { name: 'Issue' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("isn't shown before the Forge is checked", () => {

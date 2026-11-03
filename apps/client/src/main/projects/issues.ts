@@ -7,7 +7,7 @@ import { exec, type BridgeCall } from '../environments/exec';
 
 const ISSUE_LIST_TIMEOUT_MS = 20_000;
 
-export async function listIssues(call: BridgeCall, forge: ForgeStatus, search?: string): Promise<Issue[]> {
+export async function listIssues(call: BridgeCall, forge: ForgeStatus, checkoutPath?: string, search?: string): Promise<Issue[]> {
   if (forge.state === 'unknown') throw new Error("Loom hasn't checked this Project's Forge yet.");
   if (forge.state !== 'available' || !forge.kind || !forge.host || !forge.repository) throw new Error("Issues need the Project's Forge, which is off.");
   const query = search?.trim() ? ['--search', search.trim()] : [];
@@ -15,8 +15,9 @@ export async function listIssues(call: BridgeCall, forge: ForgeStatus, search?: 
   const args =
     forge.kind === 'github'
       ? ['issue', 'list', '--repo', `${forge.host}/${forge.repository}`, '--state', 'open', '--json', 'number,title,body,url', '--limit', '100', ...query]
-      : ['issue', 'list', '--repo', `https://${forge.host}/${forge.repository}`, '--output', 'json', '--per-page', '100', ...query];
-  const result = await exec(call, cli, args, ISSUE_LIST_TIMEOUT_MS);
+      : ['issue', 'list', ...(checkoutPath ? [] : ['--repo', `https://${forge.host}/${forge.repository}`]), '--output', 'json', '--per-page', '100', ...query];
+  // glab resolves the repository from the checkout when given one; it knows the SSH/web host mapping.
+  const result = await exec(call, cli, args, ISSUE_LIST_TIMEOUT_MS, forge.kind === 'gitlab' ? checkoutPath : undefined);
   if (result.exitCode !== 0) {
     throw new Error(`${cli} issue list exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);
   }

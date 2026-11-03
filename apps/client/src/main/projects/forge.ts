@@ -7,6 +7,30 @@ import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environme
 
 export const GIT_TIMEOUT_MS = 10_000;
 const AUTH_STATUS_TIMEOUT_MS = 15_000;
+const PROBE_TIMEOUT_MS = 8_000;
+
+type RepoView = { kind: 'found'; host: string; repository: string } | { kind: 'missing' } | { kind: 'error'; error: string };
+
+/** What `glab repo view --output json` says of the checkout's repository, run in it. */
+async function glabRepoView(call: BridgeCall, checkoutPath: string): Promise<RepoView> {
+  let result: ExecResult;
+  try {
+    result = await exec(call, 'glab', ['repo', 'view', '--output', 'json'], PROBE_TIMEOUT_MS, checkoutPath);
+  } catch (error) {
+    if (isNotFound(error)) return { kind: 'missing' };
+    return { kind: 'error', error: `glab repo view failed: ${(error as Error).message}` };
+  }
+  if (result.exitCode !== 0) return { kind: 'error', error: (result.stderr || result.stdout).trim() || `glab repo view exited with code ${result.exitCode}` };
+  try {
+    const view = JSON.parse(result.stdout) as { path_with_namespace?: unknown; web_url?: unknown };
+    const host = new URL(String(view.web_url)).host.toLowerCase();
+    const repository = String(view.path_with_namespace ?? '');
+    if (host && repository) return { kind: 'found', host, repository };
+  } catch {
+    // falls through
+  }
+  return { kind: 'error', error: `glab repo view printed something unexpected: ${result.stdout.slice(0, 200)}` };
+}
 
 export async function detectForge(call: BridgeCall, checkoutPath: string): Promise<Omit<ForgeStatus, 'checking'>> {
   let remote: ExecResult;
@@ -25,15 +49,18 @@ export async function detectForge(call: BridgeCall, checkoutPath: string): Promi
   if (!parsed) return { state: 'unsupported', remote: url };
   let kind = forgeKind(parsed.host);
   let host = parsed.host;
+  let repository = parsed.repository;
   if (!kind) {
-    // A self-hosted GitLab not named after GitLab: glab knows it once signed in.
-    const known = await glabHostFor(call, parsed.host);
-    if (!known) return { state: 'unsupported', remote: url, host: parsed.host };
-    kind = 'gitlab';
-    host = known;
+    // A self-hosted GitLab not named after GitLab, or reached over a different
+    // (SSH) host than its web one: glab resolves the repository from the checkout.
+    const repo = await glabRepoView(call, checkoutPath);
+    if (repo.kind === 'missing') return { state: 'unsupported', remote: url, host: parsed.host };
+    if (repo.kind === 'error') return { state: 'unsupported', remote: url, host: parsed.host, error: repo.error };
+    // glab just talked to the host, so it's signed in.
+    return { state: 'available', kind: 'gitlab', host: repo.host, repository: repo.repository, remote: url };
   }
 
-  const found = { kind, host, repository: parsed.repository, remote: url };
+  const found = { kind, host, repository, remote: url };
   const cli = FORGE_CLI[kind];
   let status: ExecResult;
   try {
@@ -61,66 +88,6 @@ export function authState(output: string, host: string): 'signed-in' | 'signed-o
   if (/has not been authenticated|not logged in|not authenticated|no token|\b401\b|unauthorized/i.test(output)) return 'signed-out';
   if (new RegExp(`^\\s*[x✗×]\\s+${h}\\b`, 'im').test(output)) return 'signed-out';
   return 'signed-in';
-}
-
-/**
- * The GitLab host glab is configured for that `host` is, or whose alternate
- * SSH hostname (`ssh_host`) it is; none when glab isn't installed or doesn't
- * know it. Hosts are listed with `glab auth status --all --output json` where
- * supported, else from the plain `glab auth status` listing. Never asks for
- * tokens.
- */
-async function glabHostFor(call: BridgeCall, host: string): Promise<string | undefined> {
-  const run = async (args: string[]): Promise<ExecResult | undefined> => {
-    try {
-      return await exec(call, 'glab', args, AUTH_STATUS_TIMEOUT_MS);
-    } catch {
-      return undefined;
-    }
-  };
-  let known = jsonHosts((await run(['auth', 'status', '--all', '--output', 'json']))?.stdout);
-  if (!known) {
-    const listing = await run(['auth', 'status']);
-    if (!listing) return undefined;
-    known = listedHosts(`${listing.stdout}\n${listing.stderr}`);
-  }
-  if (known.includes(host)) return host;
-  for (const candidate of known) {
-    const ssh = await run(['config', 'get', 'ssh_host', '--host', candidate]);
-    if (ssh?.exitCode === 0 && ssh.stdout.trim().toLowerCase() === host) return candidate;
-  }
-  return undefined;
-}
-
-/** The hosts in `glab auth status --all --output json`, if it printed JSON. */
-function jsonHosts(stdout: string | undefined): string[] | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout ?? '');
-  } catch {
-    return undefined;
-  }
-  const hosts = new Set<string>();
-  const entries = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? Object.entries(parsed).map(([key, value]) => ({ host: key, ...(value as object) })) : [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') continue;
-    const e = entry as Record<string, unknown>;
-    const name = [e.host, e.hostname, e.Host, e.Hostname].find((v) => typeof v === 'string' && v.includes('.')) as string | undefined;
-    if (name) hosts.add(name.toLowerCase());
-  }
-  return [...hosts];
-}
-
-/** The hosts in the plain `glab auth status` listing: a header line per host. */
-function listedHosts(output: string): string[] {
-  const hosts = new Set<string>();
-  for (const line of output.split(/\r?\n/)) {
-    const header = /^([a-z0-9][a-z0-9.-]*\.[a-z0-9-]+(?::\d+)?)\s*$/i.exec(line.trim());
-    if (header && !/^\s/.test(line)) hosts.add(header[1]!.toLowerCase().replace(/:\d+$/, ''));
-    const status = /^\s*(?:[✓x✗×!]\s+)?(?:logged in to\s+)?([a-z0-9][a-z0-9.-]*\.[a-z0-9-]+)(?::|\s+as\b)/i.exec(line);
-    if (status && /logged in to|^\s*[x✗×]\s/i.test(line)) hosts.add(status[1]!.toLowerCase());
-  }
-  return [...hosts];
 }
 
 function escapeRegExp(text: string): string {

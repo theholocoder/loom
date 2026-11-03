@@ -117,7 +117,7 @@ export class Projects {
     if (!project) throw new Error(`unknown Project ${id}`);
     const environment = this.environment(project.checkout.environmentId);
     if (!environment.connected()) throw new Error(`${environment.label} isn't connected.`);
-    return listIssues(environment.request, project.forge, search);
+    return listIssues(environment.request, project.forge, project.checkout.path, search);
   }
 
   /** Checks the Forge of every Project, or of those in the Environment `environmentId`. */

@@ -5,6 +5,9 @@
 //
 // It fakes what Loom's Forge detection uses: `auth status --hostname <host>`,
 // which exits 0 when signed in to that host and 1 otherwise, as both CLIs do.
+// `repo view --output json`, answered from the script's `repoView` (the
+// CLI resolving the repository from the working directory); each
+// invocation's cwd is appended to <script.json>.cwd.
 // And the issue picker's `issue list`: the script's open `issues`, filtered by
 // `--search` (case-insensitive, in title or body), printed as JSON the way the
 // CLI it stands in for (named by the script file, gh.json or glab.json) does.
@@ -14,26 +17,20 @@ import { basename } from 'node:path';
 const [scriptPath, ...args] = process.argv.slice(2);
 const script = JSON.parse(readFileSync(scriptPath, 'utf8'));
 appendFileSync(`${scriptPath}.log`, JSON.stringify(args) + '\n');
+appendFileSync(`${scriptPath}.cwd`, process.cwd() + '\n');
 
 const hostname = args[args.indexOf('--hostname') + 1];
-const configHosts = script.configHosts ?? [];
 if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') && script.authStatus?.[hostname]) {
   const { stdout = '', stderr = '', exitCode } = script.authStatus[hostname];
   process.stdout.write(stdout);
   process.stderr.write(stderr);
   process.exit(exitCode);
-} else if (args[0] === 'auth' && args[1] === 'status' && args.includes('--output')) {
-  if (script.jsonListing === false) {
-    process.stderr.write('ERROR: unknown flag: --all\n');
-    process.exit(1);
-  }
-  process.stdout.write(JSON.stringify(configHosts.map((h) => ({ host: h.host, user: 'octocat', status: 'logged_in' }))));
-} else if (args[0] === 'auth' && args[1] === 'status' && args.length === 2) {
-  // Older glab: every configured host as a header, on stderr.
-  process.stderr.write(configHosts.map((h) => `${h.host}\n  ✓ Logged in to ${h.host} as octocat (/home/u/.config/glab-cli/config.yml)\n`).join(''));
-} else if (args[0] === 'config' && args[1] === 'get' && args[2] === 'ssh_host') {
-  const known = configHosts.find((h) => h.host === args[args.indexOf('--host') + 1]);
-  process.stdout.write(known?.sshHost ? `${known.sshHost}\n` : '\n');
+} else if (args[0] === 'repo' && args[1] === 'view') {
+  // What the CLI resolves from the checkout it runs in; exits like the real one on failure.
+  const { stdout = '', stderr = '', exitCode = 0 } = script.repoView ?? { exitCode: 1, stderr: 'fatal: not a git repository' };
+  process.stdout.write(typeof stdout === 'string' ? stdout : JSON.stringify(stdout));
+  process.stderr.write(stderr);
+  process.exit(exitCode);
 } else if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname')) {
   if (script.signedInHosts.includes(hostname)) {
     process.stdout.write(`${hostname}\n  ✓ Logged in to ${hostname} account octocat\n`);

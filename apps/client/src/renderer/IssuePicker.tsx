@@ -118,7 +118,7 @@ function unavailableHint(forge: ForgeStatus): string {
     case 'no-remote':
       return 'Starting from an issue needs an origin remote on GitHub or GitLab.';
     case 'unsupported':
-      return `Starting from an issue needs an origin on GitHub or GitLab${forge.host ? `; ${forge.host} isn't one gh or glab is signed in to` : ''}.`;
+      return `Starting from an issue needs an origin on GitHub or GitLab${forge.host ? `; ${forge.host} isn't one gh or glab is signed in to` : ''}${forge.error ? `. glab said: ${forge.error}` : '.'}`;
     default:
       return `Couldn't check the Forge${forge.error ? `: ${forge.error}` : '.'}`;
   }

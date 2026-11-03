@@ -269,35 +269,40 @@ describe("a Project's branch prefix", () => {
 describe("a Project's Forge on GitLab, as glab reports it", () => {
   const link = async (machine: Machine, origin: string) => (await started(machine)).api.invoke('projects.link', { path: machine.gitRepo('app', { origin }) });
 
-  it.each([
-    ['https://git.acme.dev/platform/tools/app.git', true],
-    ['ssh://git@git.acme.dev:2222/platform/tools/app.git', true],
-    ['git@git.acme.dev:platform/tools/app.git', false],
-  ])('recognises a self-hosted GitLab glab knows from %s, nested groups included (JSON listing: %s)', async (origin, jsonListing) => {
+  const repoView = { stdout: { path_with_namespace: 'axio/team/app', web_url: 'https://gitlab.axiocode.net/axio/team/app' } };
+
+  it('lets glab resolve a GitLab on a different SSH host, from the checkout', async () => {
     const machine = tempMachine();
-    machine.installForgeCli('glab', { signedInHosts: ['git.acme.dev'], configHosts: [{ host: 'git.acme.dev' }], jsonListing });
+    machine.installForgeCli('glab', { signedInHosts: ['gitlab.axiocode.net'], repoView });
+    const checkout = machine.gitRepo('app', { origin: 'git@gitlab-ssh.axiocode.net:axio/team/app.git' });
 
-    const project = await link(machine, origin);
+    const project = await (await started(machine)).api.invoke('projects.link', { path: checkout });
 
-    expect(project.forge).toMatchObject({ state: 'available', kind: 'gitlab', host: 'git.acme.dev', repository: 'platform/tools/app' });
-    expect(machine.forgeCliInvocations('glab').flat()).not.toContain('--show-token');
+    expect(project.forge).toMatchObject({ state: 'available', kind: 'gitlab', host: 'gitlab.axiocode.net', repository: 'axio/team/app' });
+    const index = machine.forgeCliInvocations('glab').findIndex((args) => args[0] === 'repo');
+    expect(machine.forgeCliInvocations('glab')[index]).toEqual(['repo', 'view', '--output', 'json']);
+    expect(machine.forgeCliCwds('glab')[index]).toBe(checkout);
   });
 
-  it("maps a remote on a host's alternate SSH hostname to that host", async () => {
+  it('keeps the port of the web URL glab reports', async () => {
     const machine = tempMachine();
-    machine.installForgeCli('glab', { signedInHosts: ['git.acme.dev'], configHosts: [{ host: 'other.example' }, { host: 'git.acme.dev', sshHost: 'ssh.acme.dev' }] });
+    machine.installForgeCli('glab', { signedInHosts: [], repoView: { stdout: { path_with_namespace: 'a/b', web_url: 'https://git.acme.dev:8443/a/b' } } });
 
-    const project = await link(machine, 'git@ssh.acme.dev:platform/app.git');
-
-    expect(project.forge).toMatchObject({ state: 'available', kind: 'gitlab', host: 'git.acme.dev', repository: 'platform/app' });
-    expect(machine.forgeCliInvocations('glab')).toContainEqual(['auth', 'status', '--hostname', 'git.acme.dev']);
+    expect((await link(machine, 'ssh://git@git.acme.dev:2222/a/b.git')).forge).toMatchObject({ state: 'available', kind: 'gitlab', host: 'git.acme.dev:8443', repository: 'a/b' });
   });
 
-  it("leaves a host glab doesn't know unsupported", async () => {
+  it("leaves a host glab can't resolve unsupported, with glab's reason", async () => {
     const machine = tempMachine();
-    machine.installForgeCli('glab', { signedInHosts: [], configHosts: [{ host: 'git.acme.dev' }] });
+    machine.installForgeCli('glab', { signedInHosts: [], repoView: { exitCode: 1, stderr: 'ERROR: none of the git remotes configured for this repository point to a known GitLab host.\n' } });
 
-    expect((await link(machine, 'git@git.internal:acme/app.git')).forge).toMatchObject({ state: 'unsupported', host: 'git.internal' });
+    const { forge } = await link(machine, 'git@git.internal:acme/app.git');
+
+    expect(forge).toMatchObject({ state: 'unsupported', host: 'git.internal' });
+    expect(forge.error).toMatch(/known GitLab host/);
+  });
+
+  it('leaves a host unsupported when glab is not installed', async () => {
+    expect((await link(tempMachine(), 'git@git.internal:acme/app.git')).forge).toMatchObject({ state: 'unsupported', host: 'git.internal' });
   });
 
   const H = 'gitlab.acme.dev';
