@@ -102,6 +102,17 @@ test('the composer pickers open inside the window, themed', async () => {
   await window.getByRole('menuitem', { name: 'Add Project from existing clone…' }).click();
   await window.getByRole('button', { name: 'New' }).click();
   await window.getByRole('menuitem', { name: 'New Session' }).click();
+  const picker = window.getByRole('dialog', { name: 'Pick a Project' });
+  await expect(picker).toBeVisible();
+  const filter = picker.getByRole('combobox', { name: 'Filter Projects' });
+  await expect(filter).toBeFocused();
+  const pickerBox = (await picker.boundingBox())!;
+  const windowWidth = await window.evaluate(() => globalThis.innerWidth);
+  expect(Math.abs(pickerBox.x + pickerBox.width / 2 - windowWidth / 2)).toBeLessThan(2);
+  await filter.fill('picker');
+  await expect(picker.getByRole('option', { name: /picker-repo/ })).toHaveAttribute('aria-selected', 'true');
+  await filter.press('Enter');
+  await expect(picker).toBeHidden();
   const pane = window.getByRole('main', { name: 'New Session' });
   await expect(pane.getByRole('button', { name: 'Project' })).toHaveText('picker-repo');
 
