@@ -93,10 +93,8 @@ export interface ForgeCliScript {
    * and some versions exit 0 when signed out or 1 on a mere warning).
    */
   authStatus?: Record<string, { stdout?: string; stderr?: string; exitCode: number }>;
-  /** glab's configured hosts, with their `ssh_host`; listed by `auth status`. */
-  configHosts?: { host: string; sshHost?: string }[];
-  /** Whether `auth status --all --output json` works (newer glab); default true. */
-  jsonListing?: boolean;
+  /** What `repo view --output json` prints and exits with (default: fails, not a repository). */
+  repoView?: { stdout?: string | object; stderr?: string; exitCode?: number };
   /** The open issues `issue list` lists. */
   issues?: { number: number; title: string; body: string; url: string }[];
 }
@@ -202,6 +200,11 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   /** Every argv the installed `gh` or `glab` stand-ins were run with. */
   forgeCliInvocations(cli: ForgeCli): string[][] {
     return this.invocations(cli);
+  }
+
+  /** The working directory of every run of the `gh` or `glab` stand-in, in order. */
+  forgeCliCwds(cli: ForgeCli): string[] {
+    return readLines(join(this.binDir(), `${cli}.json.cwd`));
   }
 
   /**
