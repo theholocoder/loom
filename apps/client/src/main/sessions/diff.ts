@@ -1,10 +1,10 @@
 // The Diff service: what a Session's branch changed, against the merge-base of
-// its HEAD and its start base, `origin/<default branch>` as the local ref has
-// it. Runs git in the Session's Environment through its bridge (ADR 0008) and
+// its HEAD and its start base, an `origin/…` branch as the local ref has it:
+// recorded, else the one the branch was created from, else origin's default. Runs git in the Session's Environment through its bridge (ADR 0008) and
 // never fetches.
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
-import type { DiffFile, DiffStat, DiffSummary, FileDiff } from '../../shared/api';
+import type { DiffBaseSource, DiffFile, DiffStat, DiffSummary, FileDiff } from '../../shared/api';
 import type { GitEnvironment } from './working-copies';
 
 /** A file's diff text is cut short past this many characters. */
@@ -40,8 +40,8 @@ export class WorkingCopyDiff {
   async summary(uncommittedOnly = false): Promise<DiffSummary> {
     const head = uncommittedOnly && !this.target.branch;
     // The start base is only resolved when something is compared with it.
-    const base = head ? 'HEAD' : await this.base();
-    const from = head ? 'HEAD' : await this.mergeBase(base);
+    const base = head ? undefined : await this.base();
+    const from = base ? await this.mergeBase(base.ref) : 'HEAD';
     const range = this.range(from);
     const listed = parseNumstat((await this.gitOrThrow(['diff', '--numstat', '-z', '-M', ...BASE_FLAGS, ...range])).stdout);
     const files: DiffFile[] = [];
@@ -55,7 +55,7 @@ export class WorkingCopyDiff {
       files.push(...(await this.untracked()));
     }
     files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    return { available: true, readOnly: !!this.target.branch, base, files };
+    return { available: true, readOnly: !!this.target.branch, ...(base ? { base: base.ref, baseSource: base.source } : { base: 'HEAD' }), files };
   }
 
   /** The Session header changes control's numbers, from a summary of the whole diff. */
@@ -72,7 +72,7 @@ export class WorkingCopyDiff {
     if (file.status === 'untracked' && !this.target.branch) {
       result = await this.git([...BIG_FILE, 'diff', '--no-index', ...BASE_FLAGS, '--', '/dev/null', file.path]);
     } else {
-      const from = uncommittedOnly && !this.target.branch ? 'HEAD' : await this.mergeBase(await this.base());
+      const from = uncommittedOnly && !this.target.branch ? 'HEAD' : await this.mergeBase((await this.base()).ref);
       const paths = file.oldPath ? [file.oldPath, file.path] : [file.path];
       result = await this.git(['--literal-pathspecs', 'diff', '-M', ...BASE_FLAGS, ...this.range(from), '--', ...paths]);
     }
@@ -83,25 +83,78 @@ export class WorkingCopyDiff {
   }
 
   /**
-   * The start base: the one `createWorktree` recorded for the branch, else
-   * `origin/HEAD`'s branch as the local ref names it, else `origin/main` or
-   * `origin/master`.
+   * The `origin/…` branches a diff can be against, as the local refs have
+   * them, by name; `origin/HEAD` left out.
    */
-  private async base(): Promise<string> {
-    const branch = this.target.branch ?? (await this.git(['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim();
+  async bases(): Promise<string[]> {
+    const refs = await this.gitOrThrow(['for-each-ref', '--format=%(refname:strip=2)', 'refs/remotes/origin']);
+    return refs.stdout.split('\n').filter((ref) => ref && ref !== 'origin/HEAD').sort();
+  }
+
+  /**
+   * Records `base`, an `origin/…` branch the local refs have, as the start
+   * base of the working copy's branch, in the repository's local config.
+   */
+  async setBase(base: string): Promise<void> {
+    if (!base.startsWith('origin/') || !(await this.hasRemoteRef(base)) || base === 'origin/HEAD') {
+      throw new Error(`${base} isn't one of origin's branches here; fetch origin if it is new.`);
+    }
+    const branch = await this.branch();
+    if (!branch) throw new Error("This Session's working copy isn't on a branch, so its diff has no base to keep.");
+    await this.gitOrThrow(['config', '--local', `branch.${branch}.loomBase`, base]);
+  }
+
+  /**
+   * The start base, and where it came from: the one recorded for the branch
+   * (by `createWorktree` or setBase), else the `origin` branch its reflog
+   * says it was created from, else `origin/HEAD`'s branch as the local ref
+   * names it, else `origin/main` or `origin/master`.
+   */
+  private async base(): Promise<{ ref: string; source: DiffBaseSource }> {
+    const branch = await this.branch();
     const recorded = branch ? await this.git(['config', '--get', `branch.${branch}.loomBase`]) : undefined;
-    const head = await this.git(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
-    const candidates = [
-      ...(recorded?.exitCode === 0 && recorded.stdout.trim() ? [recorded.stdout.trim()] : []),
-      ...(head.exitCode === 0 ? [head.stdout.trim()] : []),
-      'origin/main',
-      'origin/master',
+    const head = await this.originHead();
+    const candidates: Array<{ ref: string; source: DiffBaseSource }> = [
+      ...(recorded?.exitCode === 0 && recorded.stdout.trim() ? [{ ref: recorded.stdout.trim(), source: 'recorded' as const }] : []),
+      ...(branch ? (await this.createdFrom(branch, head)).map((ref) => ({ ref, source: 'created-from' as const })) : []),
+      ...[head, 'origin/main', 'origin/master'].flatMap((ref) => (ref ? [{ ref, source: 'default' as const }] : [])),
     ];
-    for (const ref of candidates) {
-      const found = await this.git(['rev-parse', '--verify', '--quiet', `refs/remotes/${ref}^{commit}`]);
-      if (found.exitCode === 0) return ref;
+    for (const candidate of candidates) {
+      if (await this.hasRemoteRef(candidate.ref)) return candidate;
     }
     throw new Error("There's no local origin/main or origin/master to compare with; fetch origin to see this diff.");
+  }
+
+  /** The branch compared: the archived one, else the working copy's; undefined on a detached HEAD. */
+  private async branch(): Promise<string | undefined> {
+    return this.target.branch ?? ((await this.git(['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim() || undefined);
+  }
+
+  /** `origin/HEAD`'s branch as the local ref names it, e.g. `origin/main`. */
+  private async originHead(): Promise<string | undefined> {
+    const head = await this.git(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+    return head.exitCode === 0 ? head.stdout.trim() : undefined;
+  }
+
+  /**
+   * The `origin` branch the branch's reflog says it was created from (`git
+   * branch`, `switch -c`, `worktree add -b` all note it), while that entry
+   * lasts: `origin/HEAD` as its branch, a local branch as its `origin`
+   * namesake. None when it was created from HEAD or a commit, or from its
+   * own `origin` branch, which it tracks rather than started from.
+   */
+  private async createdFrom(branch: string, originHead: string | undefined): Promise<string[]> {
+    const reflog = await this.git(['reflog', 'show', '--format=%gs', `refs/heads/${branch}`, '--']);
+    if (reflog.exitCode !== 0) return [];
+    const first = reflog.stdout.trim().split('\n').at(-1) ?? '';
+    const from = /^branch: Created from (.+)$/.exec(first)?.[1]?.replace(/^refs\/(remotes\/|heads\/)?/, '');
+    if (!from || from === 'HEAD') return [];
+    const base = from === 'origin/HEAD' ? originHead : from.startsWith('origin/') ? from : `origin/${from}`;
+    return base && base !== `origin/${branch}` ? [base] : [];
+  }
+
+  private async hasRemoteRef(ref: string): Promise<boolean> {
+    return (await this.git(['rev-parse', '--verify', '--quiet', `refs/remotes/${ref}^{commit}`])).exitCode === 0;
   }
 
   private async mergeBase(base: string): Promise<string> {

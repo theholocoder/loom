@@ -31,6 +31,7 @@ export class FakeMain implements LoomApi {
       },
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       'projects.issues': () => [],
+      'projects.branches': () => ({ defaultBranch: 'main', remote: ['main'], existing: [], worktrees: [] }),
       'projects.check': () => {},
       'sessions.check': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
@@ -70,6 +71,8 @@ export class FakeMain implements LoomApi {
       'sessions.openInTerminal': () => {},
       'sessions.diff': () => ({ available: false, reason: 'No diff available' }),
       'sessions.diffFile': () => ({ text: '', truncated: false }),
+      'sessions.diffBases': () => [],
+      'sessions.setDiffBase': () => {},
       'sessions.retry': () => {},
       'sessions.answer': () => {},
       'sessions.trust': () => {},

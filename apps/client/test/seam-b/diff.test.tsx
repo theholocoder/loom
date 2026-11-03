@@ -169,3 +169,50 @@ describe('the diff panel', () => {
     expect((await within(panel()).findByRole('alert')).textContent).toMatch(/no local origin\/main/);
   });
 });
+
+describe("the diff's base", () => {
+  it("shows what the diff is against, says when it is only origin's default, and sets another, refreshing the diff", async () => {
+    let base = { base: 'origin/main', baseSource: 'default' as const };
+    const main = renderOpen(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        {
+          'sessions.diff': () => ({ ...summary, ...base }),
+          'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
+          'sessions.diffBases': () => ['origin/main', 'origin/release/1.2'],
+          'sessions.setDiffBase': ({ base: chosen }) => {
+            base = { base: chosen, baseSource: 'recorded' as never };
+          },
+        },
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    const panel = await screen.findByRole('region', { name: 'Changes' });
+
+    const picker = await within(panel).findByRole('button', { name: 'Compared with' });
+    expect(picker.textContent).toBe('origin/main');
+    expect(within(panel).getByText(/origin's default branch: where this branch started isn't known/)).toBeTruthy();
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole('option', { name: 'origin/release/1.2' }));
+
+    await waitFor(() => expect(within(panel).getByRole('button', { name: 'Compared with' }).textContent).toBe('origin/release/1.2'));
+    expect(main.invoked.filter((i) => i.command === 'sessions.setDiffBase')).toEqual([{ command: 'sessions.setDiffBase', params: { id: 7, base: 'origin/release/1.2' } }]);
+    expect(within(panel).queryByText(/isn't known/)).toBeNull();
+  });
+
+  it('has no base control on an archived read-only diff, nor for uncommitted changes only', async () => {
+    renderOpen(fakeMain({ ...summary, readOnly: true, baseSource: 'recorded' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    const panel = await screen.findByRole('region', { name: 'Changes' });
+    await waitFor(() => expect(panel.textContent).toContain('login.ts'));
+    expect(within(panel).queryByRole('button', { name: 'Compared with' })).toBeNull();
+    cleanup();
+
+    renderOpen(fakeMain({ ...summary, baseSource: 'recorded' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    const live = await screen.findByRole('region', { name: 'Changes' });
+    await within(live).findByRole('button', { name: 'Compared with' });
+    fireEvent.click(within(live).getByRole('button', { name: 'Uncommitted only' }));
+    await waitFor(() => expect(within(live).queryByRole('button', { name: 'Compared with' })).toBeNull());
+  });
+});

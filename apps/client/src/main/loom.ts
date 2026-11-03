@@ -196,6 +196,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.link': (params) => projectService.link(params),
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
+    'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
@@ -207,6 +208,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
+    'sessions.diffBases': ({ id }) => sessionService.diffBases(id),
+    'sessions.setDiffBase': ({ id, base }) => sessionService.setDiffBase(id, base),
     'sessions.send': (params) => sessionService.send(params),
     'sessions.archive': (params) => sessionService.archive(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),

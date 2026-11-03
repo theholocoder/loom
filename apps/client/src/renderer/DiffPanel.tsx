@@ -1,9 +1,10 @@
 // The diff panel: what the open Session's branch changed, as a file tree and
 // unified per-file diffs loaded as they are expanded or scrolled to.
-import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon, Folder, PanelRightClose, RefreshCw, SquarePen } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon, Folder, GitBranch, PanelRightClose, RefreshCw, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DiffFile, DiffSummary, FileDiff, Session } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 
 /** Files with more changed lines than this start collapsed. */
 export const LARGE_FILE_LINES = 1000;
@@ -85,6 +86,7 @@ function SessionDiff({ session, onClose }: { session: Session; onClose: () => vo
         </button>
       </DiffHeader>
       <div className="scroll">
+        {summary?.available && !summary.readOnly && !uncommittedOnly && summary.baseSource && <DiffBase session={session} summary={summary} onChanged={() => setRefreshes((r) => r + 1)} />}
         {loaded.state === 'loading' ? (
           <div className="diff-loading" role="status">
             Working out the changes…
@@ -110,6 +112,54 @@ function SessionDiff({ session, onClose }: { session: Session; onClose: () => vo
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * What a live Session's diff is against, and a picker to set another
+ * `origin` branch as its base, kept with the branch. Says when the base is
+ * only `origin`'s default, a guess.
+ */
+function DiffBase({ session, summary, onChanged }: { session: Session; summary: Extract<DiffSummary, { available: true }>; onChanged: () => void }) {
+  const api = useApi();
+  const [bases, setBases] = useState<LoadedList<PickerOption<string>[]>>();
+  const [error, setError] = useState<string>();
+  const load = () => {
+    api.invoke('sessions.diffBases', { id: session.id }).then(
+      (found) => setBases({ value: found.map((base) => ({ key: base, label: base, value: base })) }),
+      (e: unknown) => setBases({ error: (e as Error).message }),
+    );
+  };
+  const choose = async (base: string) => {
+    setError(undefined);
+    try {
+      await api.invoke('sessions.setDiffBase', { id: session.id, base });
+      onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <div className="diff-base">
+      <span className="muted">Compared with</span>
+      <SearchPicker
+        label="Compared with"
+        placeholder={summary.base}
+        icon={<GitBranch className="sm" />}
+        noun="branches"
+        loading="Listing origin's branches…"
+        options={bases}
+        selected={{ key: summary.base, label: summary.base }}
+        onOpen={load}
+        onChange={(base) => void choose(base)}
+      />
+      {summary.baseSource === 'default' && <span className="muted">origin's default branch: where this branch started isn't known, so pick its base if it isn't this one.</span>}
+      {error && (
+        <div className="err" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

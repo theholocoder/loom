@@ -99,13 +99,14 @@ describe('keyboard', () => {
     const button = within(pane).getByRole('button', { name: 'Working copy' });
     expect(button.getAttribute('aria-haspopup')).toBe('listbox');
     fireEvent.click(button);
-    const [worktree, checkout] = screen.getAllByRole('option');
+    const [worktree, existing, checkout] = screen.getAllByRole('option');
     expect(document.activeElement).toBe(worktree);
     fireEvent.keyDown(worktree!, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(checkout);
-    fireEvent.keyDown(checkout!, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(existing);
+    fireEvent.keyDown(existing!, { key: 'ArrowUp' });
     expect(document.activeElement).toBe(worktree);
     fireEvent.keyDown(worktree!, { key: 'End' });
+    expect(document.activeElement).toBe(checkout);
     fireEvent.keyDown(checkout!, { key: 'Enter' });
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(button.textContent).toBe('Stay on current branch');

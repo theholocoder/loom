@@ -167,6 +167,48 @@ export interface Issue extends ForgeLink {
   body: string;
 }
 
+/**
+ * What a worktree Session can start from, as `projects.branches` lists it
+ * after fetching `origin`: a base for a new branch, an existing worktree to
+ * work in, or an existing branch to check out in a new worktree.
+ */
+export interface Branches {
+  /** `origin`'s default branch, as `origin` itself says, without `origin/`. */
+  defaultBranch: string;
+  /** `origin`'s branches, without `origin/`, by name: what a new branch can start from. */
+  remote: string[];
+  /**
+   * The branches git can still check out in a new worktree, local ones first,
+   * each by name: local branches not checked out in the checkout or any
+   * worktree, and `origin`'s branches with no same-named local branch (one
+   * there would be reused, so is listed instead).
+   */
+  existing: ExistingBranch[];
+  /**
+   * The worktrees a Session can work in, in `git worktree list` order: the
+   * checkout's linked worktrees but the Project's own, leaving out bare,
+   * missing and locked ones, and those a Session that isn't archived works in.
+   */
+  worktrees: ExistingWorktree[];
+}
+
+/** A git worktree of the Project's checkout that already exists. */
+export interface ExistingWorktree {
+  /** Its folder, as git reports it. */
+  path: string;
+  /** The branch it has checked out; absent on a detached HEAD. */
+  branch?: string;
+}
+
+/** An existing branch a worktree Session checks out: a local one, or one on `origin` by its name there. */
+export interface ExistingBranch {
+  name: string;
+  remote: boolean;
+}
+
+/** What a worktree Session starts on instead of a new branch: an existing branch, in a new worktree, or an existing worktree, by its path. */
+export type ExistingWorkingCopy = { branch: ExistingBranch } | { worktree: string };
+
 /** Where a Session's agent works. */
 export interface WorkingCopy {
   kind: WorkingCopyKind;
@@ -261,13 +303,23 @@ export interface DiffFile {
 
 /**
  * A Session's diff: its working tree against the merge-base of HEAD and its
- * start base (`origin/<default branch>`, as the local ref has it), or against
+ * start base (an `origin/…` branch as the local ref has it; see
+ * DiffBaseSource for which), or against
  * HEAD for uncommitted changes only. An archived worktree Session's is its
  * branch's commits, read-only.
  */
 export type DiffSummary =
   | { available: false; reason: string }
-  | { available: true; readOnly: boolean; base: string; files: DiffFile[] };
+  | { available: true; readOnly: boolean; base: string; baseSource?: DiffBaseSource; files: DiffFile[] };
+
+/**
+ * Where a diff's start base came from (none for an uncommitted-only diff, against `HEAD`):
+ * - `recorded`: Loom recorded it when it made the branch, or the user set it
+ *   (`sessions.setDiffBase`), in the repository's local git config;
+ * - `created-from`: the branch's reflog says it was created from it;
+ * - `default`: neither says, so it is `origin`'s default branch, a guess.
+ */
+export type DiffBaseSource = 'recorded' | 'created-from' | 'default';
 
 /** One file's unified diff text, cut short past a size limit. */
 export interface FileDiff {
@@ -458,6 +510,13 @@ export interface Commands {
    * Rejects when the Project's Forge is off.
    */
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
+  /**
+   * Fetches the Project's `origin`, then lists what a worktree Session can
+   * start from (see Branches): `origin`'s branches to branch from, the
+   * branches git can still check out, and the worktrees a Session can work
+   * in. Rejects if `origin` can't be fetched.
+   */
+  'projects.branches': { params: { id: number }; result: Branches };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
   /** The Loom window got focus: read every Session's branch and worktree again. */
@@ -488,12 +547,36 @@ export interface Commands {
    * rejects if any of that fails. A `checkout` Session stays on whatever
    * branch the Project's checkout has.
    *
+   * `base` names another `origin` branch to branch from instead, without
+   * `origin/`; it rejects if `origin` has no such branch.
+   *
+   * A `worktree` Session given an `existing` working copy names no new
+   * branch (`branch` and `base` are not allowed):
+   * - `{ branch }` checks that branch out as-is in a new worktree, in a
+   *   folder named after it: a local one, or for one on `origin`, its
+   *   same-named local branch, created to track it if there is none.
+   *   `.worktreeinclude` files are copied in all the same. It rejects a
+   *   branch checked out in another worktree, naming it.
+   * - `{ worktree }`, the path of a worktree Branches lists, works in it as
+   *   it is, on whatever it has checked out; nothing is fetched or copied.
+   *   It rejects a locked worktree, and one a Session that isn't archived
+   *   works in. Archiving the Session removes the worktree, as for any
+   *   worktree Session.
+   *
    * Started from an `issue`, the Session is linked to it, its first prompt
    * starts with the issue's number, title, URL and body (`prompt` may then be
    * empty), and the branch suggested is `<prefix>/<issue#>-<slug of the title>`.
    */
   'sessions.create': {
-    params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; issue?: Issue; prompt: string };
+    params: {
+      projectId: number;
+      workingCopy: WorkingCopyKind;
+      branch?: string;
+      base?: string;
+      existing?: ExistingWorkingCopy;
+      issue?: Issue;
+      prompt: string;
+    };
     result: Session;
   };
   /**
@@ -530,6 +613,18 @@ export interface Commands {
    * Session, or an archived worktree Session whose branch is gone.
    */
   'sessions.diff': { params: { id: number; uncommittedOnly?: boolean }; result: DiffSummary };
+  /**
+   * The `origin/…` branches the Session's diff can be against, as the local
+   * refs have them, by name. Never fetches.
+   */
+  'sessions.diffBases': { params: { id: number }; result: string[] };
+  /**
+   * Sets the start base the Session's diff is against, `origin/<branch>`,
+   * for its current branch, in the repository's local git config; it stays
+   * with the branch. Rejects one the local refs don't have, a Session that
+   * isn't on a branch, and an archived Session.
+   */
+  'sessions.setDiffBase': { params: { id: number; base: string }; result: void };
   /** One file of the Session's diff, as `sessions.diff` listed it. */
   'sessions.diffFile': { params: { id: number; path: string; uncommittedOnly?: boolean }; result: FileDiff };
   /**
