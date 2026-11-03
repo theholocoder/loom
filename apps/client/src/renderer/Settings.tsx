@@ -1,6 +1,6 @@
-import { CircleCheckBig, CircleX, FolderTree, LoaderCircle, RotateCw, Server, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { OPENCODE_MIN_VERSION, type AgentStatus, type EnvironmentState, type EnvironmentStatus } from '../shared/api';
+import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, RotateCw, Server, TriangleAlert } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { OPENCODE_MIN_VERSION, type AgentStatus, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { useApi, useTopic } from './api';
 
 // The prototype has no Settings page; it uses the layout of its other full
@@ -46,14 +46,70 @@ export function Settings() {
         </div>
         <WorktreeRoot />
       </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <CodeXml className="sm" />
+          <h3>Editor and terminal</h3>
+        </div>
+        <OpenCommands />
+      </div>
     </main>
   );
 }
 
 /** Where new worktrees go; `~` is the home in each Project's Environment. */
 function WorktreeRoot() {
-  const api = useApi();
   const saved = useTopic('settings')?.worktreeRoot ?? '';
+  return (
+    <TextSetting label="Worktree root" saved={saved} width="32ch" save={(api, worktreeRoot) => api.invoke('settings.setWorktreeRoot', { worktreeRoot }).then((s) => s.worktreeRoot)}>
+      Each worktree Session gets a folder named after its branch: <span className="tech">{`${saved || '<root>'}/<project>/<session>`}</span>.
+    </TextSetting>
+  );
+}
+
+/** How Loom runs the user's editor and terminal, in each Session's Environment. */
+function OpenCommands() {
+  const settings = useTopic('settings');
+  return (
+    <>
+      <TextSetting
+        label="Editor command"
+        saved={settings?.editorCommand ?? ''}
+        width="40ch"
+        save={(api, editorCommand) => api.invoke('settings.setEditorCommand', { editorCommand }).then((s) => s.editorCommand)}
+      >
+        Run in the Session's Environment with your shell's full PATH. <span className="tech">{'{path}'}</span> is the folder or file to open; without it, the path
+        goes last.
+      </TextSetting>
+      <TextSetting
+        label="Terminal command"
+        saved={settings?.terminalCommand ?? ''}
+        width="40ch"
+        save={(api, terminalCommand) => api.invoke('settings.setTerminalCommand', { terminalCommand }).then((s) => s.terminalCommand)}
+      >
+        Runs in the working copy's folder, which it also gets wherever you write <span className="tech">{'{path}'}</span>, as in{' '}
+        <span className="tech">{'wt -d {path}'}</span> or <span className="tech">{'kitty --directory {path}'}</span>.
+      </TextSetting>
+    </>
+  );
+}
+
+/** One text setting, saved on Enter or on leaving the field; shows why main rejected it. */
+function TextSetting({
+  label,
+  saved,
+  width,
+  save: send,
+  children,
+}: {
+  label: string;
+  saved: string;
+  width: string;
+  /** Sends the new value to main; resolves with the value as main kept it. */
+  save: (api: LoomApi, value: string) => Promise<string>;
+  children: ReactNode;
+}) {
+  const api = useApi();
   const [value, setValue] = useState(saved);
   const [error, setError] = useState<string>();
   useEffect(() => setValue(saved), [saved]);
@@ -65,29 +121,26 @@ function WorktreeRoot() {
     if (value === saved || value === sent.current) return;
     sent.current = value;
     setError(undefined);
-    api
-      .invoke('settings.setWorktreeRoot', { worktreeRoot: value })
-      .then((settings) => setValue(settings.worktreeRoot))
+    send(api, value)
+      .then(setValue)
       .catch((e: unknown) => setError((e as Error).message))
       .finally(() => (sent.current = undefined));
   };
   return (
     <form onSubmit={save} style={{ padding: '10px 14px' }}>
       <label className="row">
-        <span>Worktree root</span>
+        <span>{label}</span>
         <input
           className="tech prefix"
-          style={{ width: '32ch' }}
-          aria-label="Worktree root"
+          style={{ width }}
+          aria-label={label}
           value={value}
           spellCheck={false}
           onChange={(event) => setValue(event.target.value)}
           onBlur={() => save()}
         />
       </label>
-      <div className="muted">
-        Each worktree Session gets a folder named after its branch: <span className="tech">{`${saved || '<root>'}/<project>/<session>`}</span>.
-      </div>
+      <div className="muted">{children}</div>
       {error && (
         <div className="err" role="alert">
           {error}
