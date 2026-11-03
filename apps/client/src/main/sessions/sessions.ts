@@ -26,7 +26,15 @@ export interface SessionsOptions {
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
-export interface SessionEnvironment extends AgentEnvironment, GitEnvironment {}
+export interface SessionEnvironment extends AgentEnvironment, GitEnvironment {
+  /** Resolves once the Environment is connected, waiting while it starts; rejects if it can't start. */
+  ready(): Promise<void>;
+  /** Starts the Environment again if it failed to start. */
+  restart(): Promise<void>;
+}
+
+/** What a Session whose agent ended with its Environment's bridge shows. */
+export const ENVIRONMENT_RESTARTED = 'Environment restarted';
 
 const MAX_TITLE_LENGTH = 80;
 
@@ -50,6 +58,8 @@ export class Sessions {
   private live = new Map<number, AgentSession>();
   /** Sessions being archived: an agent opening for one is closed again, and its closing isn't a failure. */
   private readonly archiving = new Set<number>();
+  /** Sessions whose agent ended with its Environment's bridge: their next prompt starts it again. */
+  private restarted = new Set<number>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -143,12 +153,31 @@ export class Sessions {
     if (session.status === 'working') throw new Error('The agent is still working on this Session.');
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
-    if (!this.live.has(id) && session.agentSessionId) {
-      throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
-    }
+    this.assertCanPrompt(id);
     this.addItem(id, { kind: 'user', text });
     this.setStatus(id, { status: 'working' });
     void this.run(id, text);
+  }
+
+  /**
+   * Sends a Session Waiting on an error its last prompt again, if that went
+   * unanswered, starting its Environment again first if that failed to start.
+   */
+  async retry({ id }: { id: number }): Promise<void> {
+    this.get(id);
+    const items = (await this.loadTranscript(id)).value;
+    const session = this.get(id);
+    const [prompt, error] = items.slice(-2);
+    if (session.status !== 'waiting' || session.waitingReason !== 'error' || prompt?.kind !== 'user' || error?.kind !== 'error') {
+      throw new Error('There is nothing to retry: send a new prompt instead.');
+    }
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
+    this.assertCanPrompt(id);
+    const environment = this.environmentOf(session);
+    this.setStatus(id, { status: 'working' });
+    // Starting again sets the Environment starting at once, so the run waits for it.
+    environment.restart().catch(() => {});
+    void this.run(id, prompt.text);
   }
 
   /** Sends the agent the Merge request prompt shortcut. */
@@ -162,6 +191,13 @@ export class Sessions {
       throw new Error(`This Session is on ${branch}, the default branch. A Merge request needs a branch of its own.`);
     }
     await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[forge.kind]) });
+  }
+
+  /** Throws if the Session's agent has stopped for good: Loom can't resume agents yet. */
+  private assertCanPrompt(id: number): void {
+    if (!this.live.has(id) && this.get(id).agentSessionId && !this.restarted.has(id)) {
+      throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
+    }
   }
 
   /**
@@ -287,6 +323,21 @@ export class Sessions {
   }
 
   /**
+   * The bridge of the Environment `environmentId` died, and with it the
+   * agents running there: their Sessions go Waiting (error), and their next
+   * prompt starts the agent again.
+   */
+  environmentRestarted(environmentId: string): void {
+    if (this.shuttingDown) return;
+    for (const id of [...this.live.keys()]) {
+      if (this.options.project(this.get(id).projectId)?.checkout.environmentId !== environmentId) continue;
+      this.live.delete(id);
+      this.restarted.add(id);
+      this.fail(id, ENVIRONMENT_RESTARTED, { evenIfWaiting: true });
+    }
+  }
+
+  /**
    * Stops reacting to agents, whose processes end with their Environment,
    * and waits for status changes and transcripts, streaming text included,
    * to be written.
@@ -313,16 +364,25 @@ export class Sessions {
   /** Starts the Session's agent in its working copy and records the agent's id for it. */
   private async open(id: number): Promise<AgentSession> {
     const session = this.get(id);
+    const environment = this.environmentOf(session);
+    await environment.ready();
+    let opened: AgentSession | undefined;
     const agent = await this.options.adapter.open({
-      environment: this.environmentOf(session),
+      environment,
       workingCopy: session.workingCopy.path,
-      onEvent: (event) => this.onAgentEvent(id, event),
+      // An agent the Session has moved on from, as after a restart, no longer counts.
+      onEvent: (event) => {
+        if (opened && this.live.get(id) !== opened) return;
+        this.onAgentEvent(id, event);
+      },
     });
+    opened = agent;
     if (this.get(id).status === 'archived' || this.archiving.has(id)) {
       await agent.close();
       throw new Error('This Session is archived.');
     }
     this.live.set(id, agent);
+    this.restarted.delete(id);
     this.update(id, { agentSessionId: agent.id });
     this.save(id, { agent_session_id: agent.id });
     return agent;
@@ -419,9 +479,10 @@ export class Sessions {
     return environment;
   }
 
-  /** Puts a Working Session in Waiting (error), showing why in its conversation. */
-  private fail(id: number, error: string): void {
-    if (this.get(id).status !== 'working') return;
+  /** Puts a Working Session (or, `evenIfWaiting`, a Waiting one) in Waiting (error), showing why in its conversation. */
+  private fail(id: number, error: string, { evenIfWaiting = false } = {}): void {
+    const { status } = this.get(id);
+    if (status !== 'working' && !(evenIfWaiting && status === 'waiting')) return;
     this.endAgentText(id);
     this.addItem(id, { kind: 'error', message: error });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });

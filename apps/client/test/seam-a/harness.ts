@@ -16,6 +16,9 @@ import clientPackage from '../../package.json';
 
 export const appVersion = clientPackage.version;
 
+/** The loom-bridge binary built for this machine. */
+export const realBridgePath = bridgeBinaryPath(fileURLToPath(new URL('../../../../bridge/dist', import.meta.url)));
+
 /** A clock that only moves when the test calls `advance`. */
 export class ManualClock implements Clock {
   private time = 1_000_000;
@@ -395,7 +398,7 @@ export async function startMain(
     userDataDir,
     appVersion: options.appVersion ?? appVersion,
     clock,
-    bridgePath: options.bridgePath ?? bridgeBinaryPath(fileURLToPath(new URL('../../../../bridge/dist', import.meta.url))),
+    bridgePath: options.bridgePath ?? realBridgePath,
     spawnBridge: (command, args) => {
       bridgeStarts++;
       return (bridge = spawn(bridgePath ?? command, args, { stdio: 'pipe', env: machine.bridgeEnv() }));

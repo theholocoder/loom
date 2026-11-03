@@ -142,6 +142,9 @@ export class BridgeConnection {
   private fail(reason: Error): void {
     if (this.closedReason) return;
     this.closedReason = reason;
+    // Listeners hear of it first, before the channels' processes report
+    // their exits, so they can tell those exits came from the bridge's.
+    for (const listener of this.closeListeners) listener(reason);
     for (const { reject, timer } of this.pending.values()) {
       this.clock.clearTimeout(timer);
       reject(reason);
@@ -151,6 +154,5 @@ export class BridgeConnection {
     for (const channel of this.channels.values()) channel.receiveExit(exit);
     this.channels.clear();
     this.unclaimed.clear();
-    for (const listener of this.closeListeners) listener(reason);
   }
 }

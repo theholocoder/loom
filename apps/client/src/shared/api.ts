@@ -363,6 +363,12 @@ export interface Commands {
    * Environment. Rejects when no terminal command is set.
    */
   'sessions.openInTerminal': { params: { id: number }; result: void };
+  /**
+   * Sends a Session Waiting on an error its last prompt again, starting its
+   * Environment again first if that failed to start. Rejects unless the
+   * prompt went unanswered: its conversation ends with the error right after it.
+   */
+  'sessions.retry': { params: { id: number }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
 }
