@@ -33,6 +33,12 @@ func TestMain(m *testing.M) {
 	case "hang":
 		fmt.Print("ready")
 		time.Sleep(time.Minute)
+	case "record":
+		// Writes where it ran and its PATH to $LOOM_RECORD, all at once.
+		cwd, _ := os.Getwd()
+		to := os.Getenv("LOOM_RECORD")
+		_ = os.WriteFile(to+".tmp", []byte(cwd+"\n"+os.Getenv("PATH")), 0o644)
+		_ = os.Rename(to+".tmp", to)
 	case "fail":
 		fmt.Fprint(os.Stderr, "something broke")
 		os.Exit(7)

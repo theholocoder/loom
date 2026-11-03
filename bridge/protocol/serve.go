@@ -146,6 +146,12 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(runCommand(ctx, s.env.get(), params))
+	case "launch":
+		var params launchParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(launch(s.env.get(), params))
 	case "files.exists":
 		var params existsParams
 		if err := decodeParams(req.Params, &params); err != nil {
