@@ -5,6 +5,7 @@ package proc
 import (
 	"os/exec"
 	"strconv"
+	"syscall"
 )
 
 // Isolate makes cancelling cmd's context kill cmd's whole process tree.
@@ -23,4 +24,10 @@ func Kill(cmd *exec.Cmd) error {
 		return cmd.Process.Kill()
 	}
 	return nil
+}
+
+// Detach starts cmd in its own process group, so that it outlives the bridge
+// and doesn't get the bridge's console signals.
+func Detach(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }

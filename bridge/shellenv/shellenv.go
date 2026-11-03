@@ -104,8 +104,23 @@ func (e Env) ForTools() []string {
 	return out
 }
 
+// Full is the whole environment, PATH included as the shell has it: for the
+// user's own editor and terminal, which in WSL may be Windows programs.
+func (e Env) Full() []string {
+	return append([]string(nil), e.vars...)
+}
+
 // LookPath finds name on the PATH of ForTools, the way a shell would.
 func (e Env) LookPath(name string) (string, error) {
+	return e.lookPath(name, stripMnt(e.get("PATH")))
+}
+
+// LookPathFull finds name on the PATH of Full.
+func (e Env) LookPathFull(name string) (string, error) {
+	return e.lookPath(name, e.get("PATH"))
+}
+
+func (e Env) lookPath(name, pathList string) (string, error) {
 	exts := []string{""}
 	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
 		exts = strings.Split(strings.ToLower(e.get("PATHEXT")), string(os.PathListSeparator))
@@ -117,7 +132,7 @@ func (e Env) LookPath(name string) (string, error) {
 		return firstExecutable([]string{name}, exts)
 	}
 	var candidates []string
-	for _, dir := range filepath.SplitList(stripMnt(e.get("PATH"))) {
+	for _, dir := range filepath.SplitList(pathList) {
 		if dir != "" {
 			candidates = append(candidates, filepath.Join(dir, name))
 		}

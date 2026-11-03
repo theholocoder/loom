@@ -23,3 +23,9 @@ func Kill(cmd *exec.Cmd) error {
 	}
 	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
+
+// Detach puts cmd in a new session, away from the bridge's terminal and
+// process group, so that it outlives the bridge.
+func Detach(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+}

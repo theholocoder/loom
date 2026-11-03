@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type R
 import { OPENCODE_NAME, type Session, type WaitingReason, type WorkingCopyKind } from '../shared/api';
 import { suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
+import { OpenActions } from './OpenActions';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -196,6 +197,7 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
             </span>
           </div>
         </div>
+        <OpenActions session={session} onError={setError} />
       </div>
       <div className="chat" role="log" aria-label="Conversation">
         {items.map((item) =>

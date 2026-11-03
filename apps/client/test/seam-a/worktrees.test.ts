@@ -143,16 +143,16 @@ describe('a worktree Session', () => {
     const { machine, checkout } = machineWithClone();
     const userDataDir = tempDir('loom-worktrees-');
     const { main } = await withProject(machine, checkout, userDataDir);
-    expect(await waitFor(main.api, 'settings', () => true)).toEqual({ worktreeRoot: '~/loom/worktrees' });
+    expect(await waitFor(main.api, 'settings', () => true)).toMatchObject({ worktreeRoot: '~/loom/worktrees' });
     const root = machine.folder('elsewhere');
 
-    expect(await main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: `${root}/` })).toEqual({ worktreeRoot: `${root}/` });
+    expect(await main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: `${root}/` })).toMatchObject({ worktreeRoot: `${root}/` });
     await expect(main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: 'relative/path' })).rejects.toThrow('must be an absolute path or start with ~');
     await main.close();
 
     const again = await startMain({ machine, userDataDir });
     await waitFor(again.api, 'environments', ready);
-    expect(await waitFor(again.api, 'settings', () => true)).toEqual({ worktreeRoot: `${root}/` });
+    expect(await waitFor(again.api, 'settings', () => true)).toMatchObject({ worktreeRoot: `${root}/` });
     const [project] = await again.api.invoke('projects.list');
     const created = await again.api.invoke('sessions.create', { projectId: project!.id, workingCopy: 'worktree', prompt: 'Go' });
     expect(created.workingCopy.path).toBe(`${root}/billing-api/go`);

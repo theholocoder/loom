@@ -7,6 +7,7 @@ import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
 import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
+import { openIn, type Opener } from './sessions/open-in';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Settings } from './settings';
 import { openDatabase } from './storage/database';
@@ -90,6 +91,21 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
 
   void native.start();
 
+  /** Opens a Session's working copy in the user's editor or terminal, in its Environment. */
+  const openInSession = (id: number, opener: Opener, file?: string) => {
+    const session = sessionService.list().find((s) => s.id === id);
+    if (!session) throw new Error(`unknown Session ${id}`);
+    const environmentId = projectService.list().find((p) => p.id === session.projectId)?.checkout.environmentId;
+    if (environmentId !== native.status.id) throw new Error(`unknown Environment "${environmentId}"`);
+    const { editorCommand, terminalCommand } = settingsService.value;
+    return openIn(nativeForSessions, {
+      opener,
+      command: opener === 'editor' ? editorCommand : terminalCommand,
+      workingCopy: session.workingCopy.path,
+      file,
+    });
+  };
+
   const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, settings, sessions };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
@@ -114,12 +130,16 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
     'projects.check': () => projectService.checkForges(),
     'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
+    'settings.setEditorCommand': ({ editorCommand }) => settingsService.setEditorCommand(editorCommand),
+    'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
     'sessions.send': (params) => sessionService.send(params),
     'sessions.archive': (params) => sessionService.archive(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),
+    'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
+    'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
   };
 
   const api: LoomApi = {

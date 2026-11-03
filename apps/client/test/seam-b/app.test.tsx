@@ -372,3 +372,40 @@ describe('the + menu', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 });
+
+describe('Settings: editor and terminal', () => {
+  const field = (main: FakeMain, name: string) => {
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    return screen.getByRole('textbox', { name }) as HTMLInputElement;
+  };
+
+  it('shows the editor command, code by default, and saves a new one', async () => {
+    const main = new FakeMain();
+    const input = field(main, 'Editor command');
+    expect(input.value).toBe('code');
+
+    fireEvent.change(input, { target: { value: 'zed' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'settings.setEditorCommand')).toEqual([{ command: 'settings.setEditorCommand', params: { editorCommand: 'zed' } }]));
+  });
+
+  it('saves the terminal command, empty by default, and shows a rejection', async () => {
+    const main = new FakeMain(
+      {},
+      {
+        'settings.setTerminalCommand': () => {
+          throw new Error('"wt -d "{path}" has an unclosed quote');
+        },
+      },
+    );
+    const input = field(main, 'Terminal command');
+    expect(input.value).toBe('');
+
+    fireEvent.change(input, { target: { value: 'wt -d "{path}' } });
+    fireEvent.submit(input);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('unclosed quote');
+  });
+});

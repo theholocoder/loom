@@ -284,3 +284,47 @@ describe('a Session', () => {
     expect(within(inbox).getByRole('button', { name: 'Say hello' })).toBeTruthy();
   });
 });
+
+describe('open in editor and terminal', () => {
+  const header = () => screen.getByRole('region', { name: 'Session header' });
+
+  it("opens the Session's working copy in the editor and in a terminal from its header", async () => {
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [finished] })), finished);
+
+    fireEvent.click(within(header()).getByRole('button', { name: 'Open in editor' }));
+    fireEvent.click(within(header()).getByRole('button', { name: 'Open in terminal' }));
+
+    await waitFor(() =>
+      expect(main.invoked.filter((i) => i.command.startsWith('sessions.openIn'))).toEqual([
+        { command: 'sessions.openInEditor', params: { id: 7 } },
+        { command: 'sessions.openInTerminal', params: { id: 7 } },
+      ]),
+    );
+  });
+
+  it("shows why the editor didn't open", async () => {
+    const main = new FakeMain(
+      { projects: [project], sessions: [finished] },
+      {
+        'sessions.openInEditor': () => {
+          throw new Error("code isn't installed in Native, or isn't on your shell's PATH. Check the editor command in Settings.");
+        },
+      },
+    );
+    open(renderApp(main), finished);
+
+    fireEvent.click(within(header()).getByRole('button', { name: 'Open in editor' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain("code isn't installed in Native");
+  });
+
+  it('drops the open actions once the Session is archived', () => {
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [finished] })), finished);
+    expect(within(header()).getByRole('button', { name: 'Open in editor' })).toBeTruthy();
+
+    act(() => main.publish('sessions', [{ ...finished, status: 'archived' }]));
+
+    expect(within(header()).queryByRole('button', { name: 'Open in editor' })).toBeNull();
+    expect(within(header()).queryByRole('button', { name: 'Open in terminal' })).toBeNull();
+  });
+});

@@ -210,9 +210,21 @@ export interface Settings {
    * user's home in the Project's Environment.
    */
   worktreeRoot: string;
+  /**
+   * How to run the user's editor, in the Session's Environment with its full
+   * PATH: a program and its arguments, quoted as in a shell. `{path}` is the
+   * folder or file to open; without it, the path goes last.
+   */
+  editorCommand: string;
+  /**
+   * How to run the user's terminal, in the working copy's folder: like
+   * editorCommand, but the path is only passed where `{path}` says. Empty
+   * until the user sets it.
+   */
+  terminalCommand: string;
 }
 
-export const DEFAULT_SETTINGS: Settings = { worktreeRoot: '~/loom/worktrees' };
+export const DEFAULT_SETTINGS: Settings = { worktreeRoot: '~/loom/worktrees', editorCommand: 'code', terminalCommand: '' };
 
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
@@ -256,6 +268,10 @@ export interface Commands {
    * under `~`.
    */
   'settings.setWorktreeRoot': { params: { worktreeRoot: string }; result: Settings };
+  /** Sets the editor command. Rejects an empty one, or one with an unclosed quote. */
+  'settings.setEditorCommand': { params: { editorCommand: string }; result: Settings };
+  /** Sets the terminal command; empty turns "Open in terminal" off. Rejects an unclosed quote. */
+  'settings.setTerminalCommand': { params: { terminalCommand: string }; result: Settings };
   'sessions.list': { params: void; result: Session[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with
@@ -287,6 +303,18 @@ export interface Commands {
    * is on the default branch or on no branch, and while the Session is Working.
    */
   'sessions.requestMergeRequest': { params: { id: number }; result: void };
+  /**
+   * Runs the editor command on the Session's working copy, or on `file`, a
+   * path relative to it, in the Session's Environment. Resolves once the
+   * editor has started. Rejects a file outside the working copy, and when the
+   * editor isn't on the Environment's PATH.
+   */
+  'sessions.openInEditor': { params: { id: number; file?: string }; result: void };
+  /**
+   * Runs the terminal command in the Session's working copy, in its
+   * Environment. Rejects when no terminal command is set.
+   */
+  'sessions.openInTerminal': { params: { id: number }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
 }

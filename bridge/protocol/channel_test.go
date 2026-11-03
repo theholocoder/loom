@@ -32,7 +32,20 @@ func TestMain(m *testing.M) {
 		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), size))
 	case "hang":
 		fmt.Print("ready")
-		time.Sleep(time.Minute)
+		time.Sleep(10 * time.Second)
+	case "linger":
+		// A launched copy that nobody stops. It must end within liveDir's
+		// cleanup retry window (5s), and says so at $LOOM_RECORD when it does.
+		time.Sleep(2 * time.Second)
+		if to := os.Getenv("LOOM_RECORD"); to != "" {
+			_ = os.WriteFile(to, []byte("finished"), 0o644)
+		}
+	case "record":
+		// Writes where it ran and its PATH to $LOOM_RECORD, all at once.
+		cwd, _ := os.Getwd()
+		to := os.Getenv("LOOM_RECORD")
+		_ = os.WriteFile(to+".tmp", []byte(cwd+"\n"+os.Getenv("PATH")), 0o644)
+		_ = os.Rename(to+".tmp", to)
 	case "fail":
 		fmt.Fprint(os.Stderr, "something broke")
 		os.Exit(7)
