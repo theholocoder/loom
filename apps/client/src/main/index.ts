@@ -74,16 +74,24 @@ if (!app.requestSingleInstanceLock()) {
     }
     serveApi(loom.api);
     // A topic gives its current value as soon as it's subscribed to, so the
-    // saved theme is known before the window opens.
+    // saved theme is known before the window opens. A damaged database serves
+    // no settings: the window opens with the default theme, and follows the
+    // settings once a snapshot is restored.
     let theme: Theme | undefined;
-    const stopWatchingTheme = loom.api.subscribe('settings', (settings) => {
-      if (window && settings.theme !== theme) window.setBackgroundColor(THEMES[settings.theme].background);
-      theme = settings.theme;
+    let stopWatchingTheme: (() => void) | undefined;
+    const api = loom.api;
+    const stopWatchingDatabase = api.subscribe('database', (database) => {
+      if (database.state !== 'ok' || stopWatchingTheme) return;
+      stopWatchingTheme = api.subscribe('settings', (settings) => {
+        if (window && settings.theme !== theme) window.setBackgroundColor(THEMES[settings.theme].background);
+        theme = settings.theme;
+      });
     });
     window = createWindow(theme ?? 'midnight');
     window.on('closed', () => {
       window = undefined;
-      stopWatchingTheme();
+      stopWatchingDatabase();
+      stopWatchingTheme?.();
     });
   });
 }
