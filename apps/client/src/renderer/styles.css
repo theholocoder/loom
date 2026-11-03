@@ -202,7 +202,7 @@ table.data tr.click { cursor: pointer; } table.data tr.click:hover td { backgrou
 button.section-head { width: 100%; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 button.section-head:hover { background: none; }
 button.search { border: 0; width: 100%; text-align: left; }
-buttonbutton.side-foot .icon-btn[aria-current="page"] { color: var(--accent); }
+.side-foot .icon-btn[aria-current="page"] { color: var(--accent); }
 /* Empty states, styled like the prototype's diff loading line. */
 .empty { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; align-items: center; }
 .st-connected { color: var(--ok); } .st-starting { color: var(--work); } .st-unresponsive { color: var(--wait); }

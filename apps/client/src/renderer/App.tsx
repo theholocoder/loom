@@ -1,5 +1,5 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
-// Inbox sidebar, the main pane and the diff rail.
+// Inbox sidebar, the main pane and the Session header's changes control.
 import { ChartColumn, FolderGit2, FolderOpen, MessageSquarePlus, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Project, Session } from '../shared/api';

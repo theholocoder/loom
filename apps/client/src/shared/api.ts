@@ -216,7 +216,7 @@ export interface Session {
   worktreeMissing?: boolean;
   /**
    * What its branch changed against the merge-base with its start base, for
-   * the diff rail's badge: worked out after each turn and when the Session is
+   * the Session header's changes control: worked out after each turn and when the Session is
    * opened, kept in memory only. Absent until known.
    */
   diffStat?: DiffStat;
@@ -464,7 +464,7 @@ export interface Commands {
    */
   'sessions.openInEditor': { params: { id: number; file?: string }; result: void };
   /**
-   * Works out the Session's diff (and its rail badge) again, in its
+   * Works out the Session's diff (and the Session header's changes control) again, in its
    * Environment. Never fetches. Not available for an archived checkout
    * Session, or an archived worktree Session whose branch is gone.
    */

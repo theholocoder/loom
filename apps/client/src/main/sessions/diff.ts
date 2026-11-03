@@ -58,7 +58,7 @@ export class WorkingCopyDiff {
     return { available: true, readOnly: !!this.target.branch, base, files };
   }
 
-  /** The rail badge's numbers, from a summary of the whole diff. */
+  /** The Session header changes control's numbers, from a summary of the whole diff. */
   static stat(files: DiffFile[]): DiffStat {
     return { files: files.length, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0) };
   }

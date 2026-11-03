@@ -448,7 +448,7 @@ export class Sessions {
     this.save(id, { branch });
   }
 
-  /** Works out the Session's diff, and its rail badge with it. */
+  /** Works out the Session's diff, and the Session header's changes control with it. */
   async diff(id: number, uncommittedOnly = false): Promise<DiffSummary> {
     const diff = await this.diffOf(id);
     if (!diff) return { available: false, reason: 'No diff available' };
@@ -490,7 +490,7 @@ export class Sessions {
     return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }, this.options.maxUntrackedCounted) : undefined;
   }
 
-  /** Records the rail badge; keeps the last one known if git can't say. */
+  /** Records the Session header's changes control; keeps the last one known if git can't say. */
   private async lookUpDiffStat(id: number): Promise<void> {
     try {
       const session = this.get(id);

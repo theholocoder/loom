@@ -89,12 +89,12 @@ describe("a Session's diff", () => {
     expect(renamed.text).toContain('rename to READ ME.md');
     expect(await main.api.invoke('sessions.diffFile', { id, path: 'logo.png' })).toEqual({ text: '', truncated: false });
 
-    // Working out the diff updates the rail badge: 6 files, untracked ones' lines as additions.
+    // Working out the diff updates the Session header changes control: 6 files, untracked ones' lines as additions.
     await waitFor(main.api, 'sessions', session(id, (s) => s.diffStat?.files === 6 && s.diffStat.added === 1 + 2 + 2 + 3 && s.diffStat.removed === 1));
     expect(git(checkout, 'log', '--oneline', 'origin/main').split('\n')).toHaveLength(3);
   });
 
-  it('shows the rail badge from git diff --shortstat at the end of each turn', async () => {
+  it('shows the Session header changes control from git diff --shortstat at the end of each turn', async () => {
     const { machine, main, id, path } = await started('worktree', 2);
     machine.commit(path, 'a.txt', 'a\nb\n');
     writeFileSync(join(path, 'b.txt'), 'c\n');
