@@ -1,6 +1,5 @@
 // The diff panel: what the open Session's branch changed, as a file tree and
-// unified per-file diffs loaded as they are expanded or scrolled to; collapsed
-// to a rail with a files/+/− badge.
+// unified per-file diffs loaded as they are expanded or scrolled to.
 import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon, Folder, PanelRightClose, RefreshCw, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DiffFile, DiffSummary, FileDiff, Session } from '../shared/api';
@@ -12,26 +11,12 @@ export const LARGE_FILE_LINES = 1000;
 const STATUS_LABEL: Record<DiffFile['status'], string> = { committed: 'committed', modified: 'modified', untracked: 'untracked' };
 
 /**
- * The diff rail, or the open panel. `onToggle` opens or closes it, for the
- * rail, the close button and a future `d` shortcut alike.
+ * The open diff panel; nothing at all when closed (the Session header's
+ * DiffToggle opens it). `onToggle` closes it, for the close button and a
+ * future `d` shortcut alike.
  */
 export function DiffPanel({ session, open, onToggle }: { session?: Session; open: boolean; onToggle: () => void }) {
-  if (!open) {
-    const stat = session?.diffStat;
-    return (
-      <button className="diff-rail" type="button" title="Show changes" aria-label="Show changes" aria-expanded={false} aria-controls="diff-panel" onClick={onToggle}>
-        <FileDiffIcon />
-        <span>CHANGES</span>
-        {stat && stat.files > 0 ? (
-          <span className="diff-badge" aria-label={`${stat.files} files, ${stat.added} added, ${stat.removed} removed`}>
-            <b>{stat.files}</b>
-            <b className="add">+{stat.added}</b>
-            <b className="del">−{stat.removed}</b>
-          </span>
-        ) : null}
-      </button>
-    );
-  }
+  if (!open) return null;
   return (
     <section className="diff" id="diff-panel" aria-label="Changes">
       {session ? (

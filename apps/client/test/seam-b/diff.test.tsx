@@ -63,18 +63,28 @@ const panel = () => screen.getByRole('region', { name: 'Changes' });
 const diffCalls = (main: FakeMain, command: string) => main.invoked.filter((c) => c.command === command);
 
 describe('the diff panel', () => {
-  it('shows the files/+/− badge on the rail, and works out the diff only once opened', () => {
+  it('shows the files/+/− counts in the Session header control, with no rail, and works out the diff only once opened', () => {
     const main = renderOpen(fakeMain());
-    const rail = screen.getByRole('button', { name: 'Show changes' });
-    expect(within(rail).getByLabelText('4 files, 1210 added, 3 removed')).toBeTruthy();
-    expect(rail.querySelector('.add')?.textContent).toBe('+1210');
-    expect(rail.querySelector('.del')?.textContent).toBe('−3');
+    const header = screen.getByRole('main', { name: 'Session' });
+    const control = within(header).getByRole('button', { name: 'Show changes: 4 files, 1210 added, 3 removed' });
+    expect(control.getAttribute('aria-expanded')).toBe('false');
+    expect(control.getAttribute('aria-controls')).toBe('diff-panel');
+    expect(control.getAttribute('title')).toBe('Show changes: 4 files, 1210 added, 3 removed');
+    expect(control.querySelector('.files')?.textContent).toBe('4');
+    expect(control.querySelector('.add')?.textContent).toBe('+1210');
+    expect(control.querySelector('.del')?.textContent).toBe('−3');
+    expect(document.querySelector('.diff-rail, .diff-badge')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
     expect(diffCalls(main, 'sessions.diff')).toHaveLength(0);
+
+    fireEvent.click(control);
+    expect(within(header).getByRole('button', { name: /^Hide changes: 4 files/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(panel()).toBeTruthy();
   });
 
   it('shows a file tree and per-file sections, large, binary and lockfiles collapsed, loading a diff on expand', async () => {
     const main = renderOpen(fakeMain());
-    fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
     await waitFor(() => expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy());
     const tree = within(panel()).getByRole('navigation', { name: 'Changed files' });
     expect(within(tree).getByRole('button', { name: 'src' }).getAttribute('aria-expanded')).toBe('true');
@@ -101,7 +111,7 @@ describe('the diff panel', () => {
 
   it('toggles to uncommitted changes only, and refreshes', async () => {
     const main = renderOpen(fakeMain());
-    fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
     const only = await within(panel()).findByRole('button', { name: 'Uncommitted only' });
     fireEvent.click(only);
     await waitFor(() => expect(within(panel()).queryByRole('region', { name: 'src/auth/login.ts' })).toBeNull());
@@ -115,7 +125,7 @@ describe('the diff panel', () => {
 
   it('refreshes at the end of a turn and on reopening', async () => {
     const main = renderOpen(fakeMain());
-    fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(1));
     act(() => main.publish('sessions', [{ ...session, status: 'working' }]));
     act(() => main.publish('sessions', [{ ...session, status: 'waiting', updatedAt: 5 }]));
@@ -123,7 +133,7 @@ describe('the diff panel', () => {
     // An update that isn't a turn ending doesn't refresh it.
     act(() => main.publish('sessions', [{ ...session, status: 'waiting', updatedAt: 6, unread: true }]));
     fireEvent.click(within(panel()).getByRole('button', { name: 'Hide changes' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
   });
 
@@ -155,7 +165,7 @@ describe('the diff panel', () => {
       },
     );
     renderOpen(main);
-    fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
     expect((await within(panel()).findByRole('alert')).textContent).toMatch(/no local origin\/main/);
   });
 });

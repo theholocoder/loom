@@ -98,7 +98,7 @@ function Workspace() {
       ) : view === 'new-session' ? (
         <NewSession key={newSession.generation} initialProjectId={newSession.projectId} onStarted={select} />
       ) : selected ? (
-        <SessionView key={selected.id} session={selected} replyRequest={replyRequest} />
+        <SessionView key={selected.id} session={selected} replyRequest={replyRequest} diffOpen={diffOpen} onToggleDiff={toggleDiff} />
       ) : (
         <main className="main" aria-label="Session">
           <div className="empty">No Session selected.</div>
