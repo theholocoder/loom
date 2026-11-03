@@ -296,6 +296,8 @@ export interface Commands {
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
+  /** The Loom window got focus: read every Session's branch and worktree again. */
+  'sessions.check': { params: void; result: void };
   /**
    * Sets where new worktrees go. Rejects a root that is neither absolute nor
    * under `~`.

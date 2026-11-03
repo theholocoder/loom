@@ -32,6 +32,7 @@ export class FakeMain implements LoomApi {
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       'projects.issues': () => [],
       'projects.check': () => {},
+      'sessions.check': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
         const settings = { ...this.value('settings'), worktreeRoot };
         this.publish('settings', settings);

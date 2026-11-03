@@ -130,6 +130,9 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
     'projects.check': () => projectService.checkForges(),
+    'sessions.check': async () => {
+      await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
+    },
     'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
     'settings.setEditorCommand': ({ editorCommand }) => settingsService.setEditorCommand(editorCommand),
     'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),

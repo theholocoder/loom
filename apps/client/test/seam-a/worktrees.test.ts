@@ -295,6 +295,19 @@ describe('archiving a worktree Session', () => {
     expect(branches(checkout)).toContain('loom/fix-the-login-bug');
   });
 
+  it('flags a worktree deleted outside Loom as missing when asked to check', async () => {
+    const { machine, checkout } = machineWithClone();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['Done.'] }] } });
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix it' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    rmSync(created.workingCopy.path, { recursive: true, force: true });
+
+    await main.api.invoke('sessions.check');
+
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.worktreeMissing === true));
+  });
+
   it('flags a missing worktree when Loom starts again', async () => {
     const { machine, checkout } = machineWithClone();
     const userDataDir = tempDir('loom-archive-');
