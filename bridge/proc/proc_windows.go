@@ -5,6 +5,7 @@ package proc
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -49,9 +50,15 @@ type Group struct {
 
 	mu sync.Mutex
 	// job is zero once Wait has closed it, or when the command could not be
-	// put in one, in which case Stop falls back to Kill.
+	// put in one, in which case Stop falls back to Kill until it has exited.
 	job windows.Handle
+	// done is set once the command has exited. Its PID may be reused by an
+	// unrelated process from then on, so Stop must not kill by PID.
+	done bool
 }
+
+// killTree is Kill, replaceable by tests.
+var killTree = Kill
 
 // Start starts cmd as a new Group. It starts cmd suspended and only resumes
 // it once it is in its Job Object, so nothing it starts escapes the job.
@@ -74,6 +81,11 @@ func Start(cmd *exec.Cmd, grace time.Duration) (*Group, error) {
 	pid := uint32(cmd.Process.Pid)
 	if jobErr == nil {
 		if err := assign(job, pid); err != nil {
+			// Deliberate fallback: run without a job rather than fail the
+			// command. Stop then walks the tree with taskkill, which is
+			// weaker (nothing kills the tree if the bridge crashes), so say
+			// so in the bridge's log.
+			fmt.Fprintf(os.Stderr, "loom-bridge: could not put %s in a Job Object, running without one: %v\n", cmd.Path, err)
 			_ = windows.CloseHandle(job)
 			job = 0
 		}
@@ -96,11 +108,14 @@ func Start(cmd *exec.Cmd, grace time.Duration) (*Group, error) {
 func (g *Group) Stop() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.done {
+		return
+	}
 	if g.job != 0 {
 		_ = windows.TerminateJobObject(g.job, 1)
 		return
 	}
-	_ = Kill(g.cmd)
+	_ = killTree(g.cmd)
 }
 
 // Wait waits for the command to exit, then ends whatever it left running in
@@ -109,6 +124,7 @@ func (g *Group) Wait() error {
 	err := g.cmd.Wait()
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.done = true
 	if g.job != 0 {
 		_ = windows.TerminateJobObject(g.job, 1)
 		_ = windows.CloseHandle(g.job)
