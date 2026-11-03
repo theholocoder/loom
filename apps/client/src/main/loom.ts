@@ -37,6 +37,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
 
   const environments = new Topic<EnvironmentStatus[]>([]);
   let wasConnected = false;
+  let lastState: EnvironmentStatus['state'] = 'starting';
   const native = new Environment({
     id: 'native',
     label: 'Native',
@@ -55,6 +56,9 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
         void sessionService.lookUpBranches(status.id);
       }
       wasConnected = isConnected;
+      // A bridge that was up and died took its agents with it.
+      if (status.state === 'disconnected' && (lastState === 'connected' || lastState === 'unresponsive')) sessionService.environmentRestarted(status.id);
+      lastState = status.state;
     },
   });
   environments.set([native.status]);
@@ -76,6 +80,8 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     request: (...args) => native.request(...args),
     home: () => native.status.bridge?.home || undefined,
     openChannel: (params) => native.openChannel(params),
+    ready: () => native.ready(),
+    restart: () => native.restart(),
   };
   const sessions = new Topic<Session[]>([]);
   const sessionService = await Sessions.load({
@@ -145,6 +151,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
+    'sessions.retry': (params) => sessionService.retry(params),
   };
 
   const api: LoomApi = {

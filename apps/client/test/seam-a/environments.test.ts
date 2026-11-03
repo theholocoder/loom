@@ -38,21 +38,23 @@ describe('pinging the native bridge', () => {
   });
 
   // Freezing the bridge needs SIGSTOP, which Windows doesn't have.
-  it.skipIf(process.platform === 'win32')('marks the bridge unresponsive when a ping goes unanswered for 10 seconds, and connected again once it answers', async () => {
+  it.skipIf(process.platform === 'win32')('restarts the bridge when a ping goes unanswered for 10 seconds', async () => {
     const main = await startMain();
     await waitFor(main.api, 'environments', (e) => native(e)?.state === 'connected');
-    main.bridge().kill('SIGSTOP');
+    const frozen = main.bridge();
+    const exited = new Promise((resolve) => frozen.once('exit', resolve));
+    frozen.kill('SIGSTOP');
 
     main.clock.advance(30_000);
     main.clock.advance(9_999);
     expect(native(await main.api.invoke('environments.list'))?.state).toBe('connected');
     main.clock.advance(1);
-    await waitFor(main.api, 'environments', (e) => native(e)?.state === 'unresponsive');
+    await exited;
+    await waitFor(main.api, 'environments', (e) => native(e)?.state === 'disconnected');
 
-    // Pings keep their 30 s cadence from the one that went unanswered.
-    main.bridge().kill('SIGCONT');
-    main.clock.advance(20_000);
+    main.clock.advance(1_000);
     await waitFor(main.api, 'environments', (e) => native(e)?.state === 'connected');
+    expect(main.bridge()).not.toBe(frozen);
   });
 
   it('reports the Environment disconnected when its bridge exits', async () => {

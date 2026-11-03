@@ -63,6 +63,7 @@ export class FakeMain implements LoomApi {
       'sessions.setUnread': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
+      'sessions.retry': () => {},
       ...handlers,
     };
   }
