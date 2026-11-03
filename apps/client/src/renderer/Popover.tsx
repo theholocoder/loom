@@ -2,6 +2,7 @@
 // selects. It is placed against the viewport (fixed), so it never drops off
 // the bottom of the window; it is themed by `.popover` in popover.css.
 import './popover.css';
+import { ChevronDown } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 
 export interface Rect {
@@ -156,6 +157,7 @@ export function Select<T extends string | number>({
   onChange,
   icon,
   className,
+  variant = 'field',
 }: {
   label: string;
   value: T;
@@ -164,15 +166,18 @@ export function Select<T extends string | number>({
   icon?: ReactNode;
   /** Extra classes for the trigger, and for its popover. */
   className?: string;
+  /** `field` (default): a bordered field; `compact`: borderless, for a dense toolbar. */
+  variant?: 'field' | 'compact';
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const current = options.find((option) => option.value === value);
   return (
     <>
-      <button ref={trigger} type="button" className={['pick', className].filter(Boolean).join(' ')} title={label} aria-label={label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button ref={trigger} type="button" className={['pick', 'select', `select-${variant}`, className].filter(Boolean).join(' ')} title={label} aria-label={label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
         {icon}
         <b>{current?.label}</b>
+        <ChevronDown className="chev" aria-hidden />
       </button>
       {open && (
         <Popover anchor={trigger} role="listbox" label={label} className={className} onClose={() => setOpen(false)}>

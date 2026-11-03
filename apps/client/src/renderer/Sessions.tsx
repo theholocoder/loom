@@ -90,6 +90,7 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
           tools={
             <>
               <Select
+                variant="compact"
                 label="Project"
                 icon={<FolderTree className="sm" />}
                 value={chosen.id}
@@ -102,6 +103,7 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
                 }}
               />
               <Select<WorkingCopyKind>
+                variant="compact"
                 label="Working copy"
                 value={workingCopy}
                 options={[

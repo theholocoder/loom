@@ -81,16 +81,16 @@ function AppearancePickers() {
     api.invoke('settings.setAppearance', change).catch((e: unknown) => setError((e as Error).message));
   };
   return (
-    <div className="row" style={{ padding: '10px 14px', gap: 18, flexWrap: 'wrap' }}>
-      <div className="row">
+    <div className="settings-fields">
+      <div className="field-row">
         <span>Theme</span>
         <Select label="Theme" value={settings.theme} options={THEME_OPTIONS} onChange={(theme) => save({ theme })} />
       </div>
-      <div className="row">
+      <div className="field-row">
         <span>UI font</span>
         <Select label="UI font" value={settings.uiFont} options={UI_FONT_OPTIONS} onChange={(uiFont) => save({ uiFont })} />
       </div>
-      <div className="row">
+      <div className="field-row">
         <span>Monospace font</span>
         <Select label="Monospace font" className="tech" value={settings.monoFont} options={MONO_FONT_OPTIONS} onChange={(monoFont) => save({ monoFont })} />
       </div>

@@ -1,7 +1,7 @@
 // Picking the open issue a new Session starts from: a searchable list of the
 // Project's open issues, listed by main through the Forge's CLI. Only offered
 // when the Project's Forge features are on.
-import { CircleDot, X } from 'lucide-react';
+import { ChevronDown, CircleDot, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { FORGE_CLI, type ForgeStatus, type Issue, type Project } from '../shared/api';
 import { useApi } from './api';
@@ -74,6 +74,7 @@ export function IssuePicker({ project, issue, onChange }: { project: Project; is
       <button ref={trigger} type="button" className="pick" aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
         <CircleDot className="sm" />
         Issue
+        <ChevronDown className="chev" aria-hidden />
       </button>
       {open && (
         <Popover anchor={trigger} role="dialog" label="Pick an issue" className="issue-popover" onClose={close}>
