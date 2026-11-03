@@ -14,8 +14,8 @@ export async function listIssues(call: BridgeCall, forge: ForgeStatus, search?: 
   const cli = FORGE_CLI[forge.kind];
   const args =
     forge.kind === 'github'
-      ? ['issue', 'list', '--repo', `${forge.host}/${forge.repository}`, '--state', 'open', '--json', 'number,title,body,url', ...query]
-      : ['issue', 'list', '--repo', `https://${forge.host}/${forge.repository}`, '--output', 'json', ...query];
+      ? ['issue', 'list', '--repo', `${forge.host}/${forge.repository}`, '--state', 'open', '--json', 'number,title,body,url', '--limit', '100', ...query]
+      : ['issue', 'list', '--repo', `https://${forge.host}/${forge.repository}`, '--output', 'json', '--per-page', '100', ...query];
   const result = await exec(call, cli, args, ISSUE_LIST_TIMEOUT_MS);
   if (result.exitCode !== 0) {
     throw new Error(`${cli} issue list exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);

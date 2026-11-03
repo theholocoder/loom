@@ -87,6 +87,16 @@ export interface AcpMessage {
 export interface ForgeCliScript {
   /** The hosts `auth status --hostname <host>` says it is signed in to. */
   signedInHosts: string[];
+  /**
+   * Exactly what `auth status --hostname <host>` prints and exits with, per
+   * host, overriding `signedInHosts` (real CLIs vary: glab writes to stderr,
+   * and some versions exit 0 when signed out or 1 on a mere warning).
+   */
+  authStatus?: Record<string, { stdout?: string; stderr?: string; exitCode: number }>;
+  /** glab's configured hosts, with their `ssh_host`; listed by `auth status`. */
+  configHosts?: { host: string; sshHost?: string }[];
+  /** Whether `auth status --all --output json` works (newer glab); default true. */
+  jsonListing?: boolean;
   /** The open issues `issue list` lists. */
   issues?: { number: number; title: string; body: string; url: string }[];
 }

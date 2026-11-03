@@ -52,7 +52,7 @@ describe('the issue picker', () => {
     expect(await main.api.invoke('projects.issues', { id: project.id, search: 'SSO' })).toEqual([loginBug]);
 
     const lists = machine.forgeCliInvocations('gh').filter((args) => args[0] === 'issue');
-    expect(lists[0]).toEqual(expect.arrayContaining(['issue', 'list', '--repo', 'github.com/theholocoder/loom', '--state', 'open']));
+    expect(lists[0]).toEqual(expect.arrayContaining(['issue', 'list', '--repo', 'github.com/theholocoder/loom', '--state', 'open', '--limit', '100']));
     expect(lists[0]).not.toContain('--assignee');
     expect(lists[1]).toEqual(expect.arrayContaining(['--search', 'SSO']));
   });
@@ -63,7 +63,7 @@ describe('the issue picker', () => {
 
     expect(await main.api.invoke('projects.issues', { id: project.id, search: 'login' })).toEqual([loginBug]);
     const list = machine.forgeCliInvocations('glab').find((args) => args[0] === 'issue')!;
-    expect(list).toEqual(expect.arrayContaining(['issue', 'list', '--repo', 'https://gitlab.example.org/acme/loom', '--search', 'login']));
+    expect(list).toEqual(expect.arrayContaining(['issue', 'list', '--repo', 'https://gitlab.example.org/acme/loom', '--per-page', '100', '--search', 'login']));
   });
 
   it("is refused when the Project's Forge is off", async () => {

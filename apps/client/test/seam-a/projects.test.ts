@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { startMain, tempDir, tempMachine, waitFor } from './harness';
+import { startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus } from '../../src/shared/api';
 
 const connected = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.state === 'connected';
@@ -263,5 +263,69 @@ describe("a Project's branch prefix", () => {
     const main = await started();
 
     await expect(main.api.invoke('projects.setBranchPrefix', { id: 42, branchPrefix: 'feat' })).rejects.toThrow(/unknown Project 42/);
+  });
+});
+
+describe("a Project's Forge on GitLab, as glab reports it", () => {
+  const link = async (machine: Machine, origin: string) => (await started(machine)).api.invoke('projects.link', { path: machine.gitRepo('app', { origin }) });
+
+  it.each([
+    ['https://git.acme.dev/platform/tools/app.git', true],
+    ['ssh://git@git.acme.dev:2222/platform/tools/app.git', true],
+    ['git@git.acme.dev:platform/tools/app.git', false],
+  ])('recognises a self-hosted GitLab glab knows from %s, nested groups included (JSON listing: %s)', async (origin, jsonListing) => {
+    const machine = tempMachine();
+    machine.installForgeCli('glab', { signedInHosts: ['git.acme.dev'], configHosts: [{ host: 'git.acme.dev' }], jsonListing });
+
+    const project = await link(machine, origin);
+
+    expect(project.forge).toMatchObject({ state: 'available', kind: 'gitlab', host: 'git.acme.dev', repository: 'platform/tools/app' });
+    expect(machine.forgeCliInvocations('glab').flat()).not.toContain('--show-token');
+  });
+
+  it("maps a remote on a host's alternate SSH hostname to that host", async () => {
+    const machine = tempMachine();
+    machine.installForgeCli('glab', { signedInHosts: ['git.acme.dev'], configHosts: [{ host: 'other.example' }, { host: 'git.acme.dev', sshHost: 'ssh.acme.dev' }] });
+
+    const project = await link(machine, 'git@ssh.acme.dev:platform/app.git');
+
+    expect(project.forge).toMatchObject({ state: 'available', kind: 'gitlab', host: 'git.acme.dev', repository: 'platform/app' });
+    expect(machine.forgeCliInvocations('glab')).toContainEqual(['auth', 'status', '--hostname', 'git.acme.dev']);
+  });
+
+  it("leaves a host glab doesn't know unsupported", async () => {
+    const machine = tempMachine();
+    machine.installForgeCli('glab', { signedInHosts: [], configHosts: [{ host: 'git.acme.dev' }] });
+
+    expect((await link(machine, 'git@git.internal:acme/app.git')).forge).toMatchObject({ state: 'unsupported', host: 'git.internal' });
+  });
+
+  const H = 'gitlab.acme.dev';
+  it.each([
+    ['logged in, exit 0', { stderr: `${H}\n  ✓ Logged in to ${H} as loic (/home/loic/.config/glab-cli/config.yml)\n  ✓ Git operations for ${H} configured to use ssh protocol.\n  ✓ Token: **************************\n`, exitCode: 0 }, 'available'],
+    ['logged in with a warning, exit 1', { stderr: `${H}\n  ✓ Logged in to ${H} as loic (/home/loic/.config/glab-cli/config.yml)\n  ! Git operations for ${H} configured to use ssh protocol but no ssh key found.\n`, exitCode: 1 }, 'available'],
+    ['not logged in, exit 0', { stderr: `x ${H} has not been authenticated with glab. Run \`glab auth login --hostname ${H}\` to authenticate.\n`, exitCode: 0 }, 'signed-out'],
+    ['not logged in, exit 1', { stderr: `x ${H} has not been authenticated with glab. Run \`glab auth login --hostname ${H}\` to authenticate.\n`, exitCode: 1 }, 'signed-out'],
+    ['an invalid token', { stderr: `${H}\n  x ${H}: API call failed: GET https://${H}/api/v4/user: 401 {message: 401 Unauthorized}\n  ✓ Token: **************************\n`, exitCode: 1 }, 'signed-out'],
+    ['no token', { stderr: `${H}\n  x No token provided\n`, exitCode: 0 }, 'signed-out'],
+    ['something unexpected, exit 1', { stderr: 'glab: some new message\n', exitCode: 1 }, 'available'],
+  ] as const)('reads glab auth status from its output, not its exit code: %s', async (_, status, state) => {
+    const machine = tempMachine();
+    machine.installForgeCli('glab', { signedInHosts: [], authStatus: { [H]: status } });
+
+    expect((await link(machine, `git@${H}:team/app.git`)).forge.state).toBe(state);
+  });
+
+  it('finds gh and glab through the same login-shell PATH lookup', async () => {
+    const machine = tempMachine();
+    // Both live only on the login shell's PATH, not on the bridge's own.
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'] });
+    machine.installForgeCli('glab', { signedInHosts: ['gitlab.com'] });
+    const main = await started(machine);
+
+    const github = await main.api.invoke('projects.link', { path: machine.gitRepo('a', { origin: 'git@github.com:acme/a.git' }) });
+    const gitlab = await main.api.invoke('projects.link', { path: machine.gitRepo('b', { origin: 'git@gitlab.com:acme/b.git' }) });
+
+    expect([github.forge.state, gitlab.forge.state]).toEqual(['available', 'available']);
   });
 });
