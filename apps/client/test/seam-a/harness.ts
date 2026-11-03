@@ -202,9 +202,10 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
     return this.invocations(cli);
   }
 
-  /** The working directory of every run of the `gh` or `glab` stand-in, in order. */
+  /** The working directory of every run of the `gh` or `glab` stand-in, in order, written like `folder()` paths. */
   forgeCliCwds(cli: ForgeCli): string[] {
-    return readLines(join(this.binDir(), `${cli}.json.cwd`));
+    const cwds = readLines(join(this.binDir(), `${cli}.json.cwd`));
+    return process.platform === 'win32' ? cwds.map((cwd) => cwd.replaceAll('\\', '/')) : cwds;
   }
 
   /**
