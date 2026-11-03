@@ -2,6 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
+import type { ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -32,7 +33,7 @@ export interface ToolCall {
   toolCallId: string;
   /** What sort of tool, such as read, edit or execute. */
   toolKind?: string;
-  status?: 'running' | 'completed' | 'failed';
+  status?: ToolStatus;
   input?: string;
   output?: string;
 }

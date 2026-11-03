@@ -403,6 +403,8 @@ export class Sessions {
         return this.appendText(id, 'thinking', event.text);
       case 'tool-started':
       case 'tool-updated':
+        // A run's cards are settled when it ends; what comes after can't reopen them.
+        if (this.get(id).status !== 'working') return;
         return this.recordTool(id, event);
       case 'run-settled':
         this.endRun(id);
@@ -515,7 +517,7 @@ export class Sessions {
   private checkpoint(id: number): void {
     this.cancelCheckpoint(id);
     const last = this.transcript(id).value.at(-1);
-    if ((last?.kind === 'agent' || last?.kind === 'thinking') && last.streaming) this.writeItem(id, last);
+    if (isStreamingText(last)) this.writeItem(id, last);
   }
 
   private cancelCheckpoint(id: number): void {
@@ -529,7 +531,7 @@ export class Sessions {
   private endStreaming(id: number): void {
     const items = this.transcript(id).value;
     const last = items.at(-1);
-    if ((last?.kind !== 'agent' && last?.kind !== 'thinking') || !last.streaming) return;
+    if (!isStreamingText(last)) return;
     this.cancelCheckpoint(id);
     const ended = { ...last, streaming: false };
     this.transcript(id).set([...items.slice(0, -1), ended]);
@@ -724,6 +726,11 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+}
+
+/** Text the agent is still adding to: its reply or its thinking. */
+function isStreamingText(item: TranscriptItem | undefined): item is Extract<TranscriptItem, { kind: 'agent' | 'thinking' }> {
+  return (item?.kind === 'agent' || item?.kind === 'thinking') && item.streaming;
 }
 
 function itemOf(row: EventsTable): TranscriptItem {

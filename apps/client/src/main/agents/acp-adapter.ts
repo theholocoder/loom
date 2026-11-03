@@ -1,6 +1,7 @@
 // An AgentAdapter for any agent that speaks ACP v1 over stdio, one process per
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
+import type { ToolStatus } from '../../shared/api';
 import type { AgentAdapter, AgentEvent, AgentSession, OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection } from './acp';
@@ -119,7 +120,7 @@ interface AcpToolCall {
   rawOutput?: unknown;
 }
 
-const STATUSES: Record<string, 'running' | 'completed' | 'failed'> = { pending: 'running', in_progress: 'running', completed: 'completed', failed: 'failed' };
+const STATUSES: Record<string, ToolStatus> = { pending: 'running', in_progress: 'running', completed: 'completed', failed: 'failed' };
 
 /** The tool's output as text: its content blocks, or else its raw output. */
 function outputOf({ content, rawOutput }: AcpToolCall): string | undefined {

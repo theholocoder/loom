@@ -76,6 +76,7 @@ export function ToolCard({ item }: { item: Tool }) {
               {status.icon}
             </span>
             <span className="grow tool-title">{item.title}</span>
+            {item.truncated && <span className="chip">truncated</span>}
             {item.toolKind && <span className="chip">{item.toolKind}</span>}
           </>
         }
@@ -86,9 +87,7 @@ export function ToolCard({ item }: { item: Tool }) {
             <pre className="tool-output">{item.input}</pre>
           </>
         )}
-        <div className="tool-label">
-          Output{item.truncated && <span className="chip">truncated</span>}
-        </div>
+        <div className="tool-label">Output</div>
         {item.output ? <pre className="tool-output">{item.output}</pre> : <div className="muted">{item.status === 'running' ? 'No output yet.' : 'No output.'}</div>}
       </Fold>
     </div>
