@@ -14,12 +14,28 @@ export interface AgentEnvironment {
 export type AgentEvent =
   | { type: 'run-started' }
   | { type: 'text-delta'; text: string }
+  /** More of the agent's thinking, shown apart from its reply. */
+  | { type: 'thinking-delta'; text: string }
+  /** The agent called a tool: one of its own, or one from the user's MCP servers and plugins. */
+  | ({ type: 'tool-started'; title: string } & ToolCall)
+  /** What changed of a tool call; what's left out is as it was. `input` and `output` are given whole. */
+  | ({ type: 'tool-updated'; title?: string } & ToolCall)
   /** The run ended normally. */
   | { type: 'run-settled' }
   /** The run ended in an error, such as a provider's (no credit, exhausted quota). */
   | { type: 'run-failed'; error: string }
   /** The agent's process ended; the session can't be used any more. */
   | { type: 'closed'; error?: string };
+
+/** A tool call as an agent reports it, by the agent's id for it. */
+export interface ToolCall {
+  toolCallId: string;
+  /** What sort of tool, such as read, edit or execute. */
+  toolKind?: string;
+  status?: 'running' | 'completed' | 'failed';
+  input?: string;
+  output?: string;
+}
 
 export interface OpenOptions {
   environment: AgentEnvironment;

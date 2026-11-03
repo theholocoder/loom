@@ -22,8 +22,13 @@ export interface OpencodeScript {
 
 /** One run of the `opencode acp` stand-in. */
 export interface AcpTurn {
-  /** The agent's reply, sent as one `agent_message_chunk` each; a `{ hold }` waits for `machine.release(hold)`. */
-  chunks?: Array<string | { hold: string }>;
+  /**
+   * The agent's reply, sent as one `agent_message_chunk` each; a `{ hold }`
+   * waits for `machine.release(hold)`, an `{ update }` is sent as a
+   * `session/update` as is, and a `{ bigOutput }` completes a tool call with
+   * an output of that many bytes, `HEAD>` x's `<TAIL`.
+   */
+  chunks?: Array<string | { hold: string } | { update: Record<string, unknown> } | { bigOutput: { toolCallId: string; bytes: number } }>;
   /** After the chunks, the run holds until the test calls `machine.release(hold)`. */
   hold?: string;
   /** The run fails with this JSON-RPC error message, as a provider error does. */
