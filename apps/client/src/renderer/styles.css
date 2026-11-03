@@ -110,6 +110,17 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tool-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; font-size: 13px; }
 .tool-head .name { font-family: var(--mono); font-size: 12px; color: var(--accent); }
 .tool-body { border-top: 1px solid var(--line); padding: 8px 10px; }
+.fold > .tool-head { width: 100%; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; }
+.fold > .tool-head:hover { background: var(--hover); }
+.fold > .tool-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fold .chev { color: var(--muted); flex: none; transition: transform .15s; } .fold .chev.open { transform: rotate(90deg); }
+.tool.thinking { background: transparent; border-style: dashed; color: var(--muted); }
+.thinking-text { white-space: pre-wrap; font-size: 13px; font-style: italic; color: var(--muted); }
+.tool-status { display: inline-flex; flex: none; } .tool-status.running { color: var(--work); } .tool-status.completed { color: var(--ok); } .tool-status.failed { color: var(--err); }
+.tool.tool-call.failed { border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+.tool-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-label { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 4px 0; }
+.tool-output { margin: 0 0 8px; max-height: 320px; overflow: auto; background: var(--code); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; }
 .tool.question { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent); }
 .tool.question .name { color: var(--wait); }
 .opts { display: flex; gap: 6px; flex-wrap: wrap; }
