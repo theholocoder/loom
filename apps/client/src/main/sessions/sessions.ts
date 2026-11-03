@@ -48,6 +48,8 @@ export class Sessions {
   private checkpoints = new Map<number, TimerHandle>();
   /** The agent conversation of each Session whose agent process is running. */
   private live = new Map<number, AgentSession>();
+  /** Sessions being archived: an agent opening for one is closed again, and its closing isn't a failure. */
+  private readonly archiving = new Set<number>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -194,24 +196,31 @@ export class Sessions {
       await this.stopAgent(id);
       return { archived: true };
     }
-    // A working agent may still be writing, so it stops before the check.
-    if (session.status === 'working') await this.stopAgent(id);
+    // The check runs with the agent alive, so Cancel on the warning leaves the Session as it was.
     if (!discard && (await worktreeExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
       if (work) return { archived: false, unsavedWork: work };
     }
+    // Confirmed: stop the agent, then look again in case it wrote in its last moment.
     await this.stopAgent(id);
+    if (!discard && (await worktreeExists(environment, worktree))) {
+      const work = await unsavedWork(environment, worktree);
+      if (work) {
+        this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.');
+        return { archived: false, unsavedWork: work };
+      }
+    }
     const checkout = this.options.project(session.projectId)!.checkout.path;
     try {
       await removeWorktree(environment, { checkout, path: worktree, force: discard });
     } catch (error) {
-      throw new Error(`The worktree at ${worktree} is still there, so the Session isn't archived. ${(error as Error).message}`);
+      const message = `The worktree at ${worktree} is still there, so the Session isn't archived. ${(error as Error).message}`;
+      this.fail(id, `Loom stopped the agent to archive this Session. ${message}`);
+      throw new Error(message);
     }
     this.markArchived(id);
     return { archived: true };
   }
-
-  private readonly archiving = new Set<number>();
 
   private markArchived(id: number): void {
     // Also guards a concurrent archive of the same Session: it was archived while this one waited.
@@ -312,6 +321,8 @@ export class Sessions {
   }
 
   private onAgentEvent(id: number, event: AgentEvent): void {
+    // The agent closing is Archive's own doing; Archive reports it if the Session stays.
+    if (event.type === 'closed' && this.archiving.has(id)) return void this.live.delete(id);
     // An archived Session's agent is on its way out; nothing it says counts.
     if (this.shuttingDown || this.get(id).status === 'archived') return;
     switch (event.type) {

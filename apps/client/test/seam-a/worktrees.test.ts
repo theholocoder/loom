@@ -308,7 +308,12 @@ describe('archiving a worktree Session whose agent is working', () => {
     const { main, project } = await withProject(machine, checkout);
     const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
     await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'working'));
-    while (machine.acpMessages().length < 3) await new Promise((r) => setTimeout(r, 20)); // the agent is running
+    // The agent is running once it has received its 3 messages: initialize, session/new, prompt.
+    const deadline = Date.now() + 5000;
+    while (machine.acpMessages().length < 3) {
+      if (Date.now() > deadline) throw new Error('the agent never received its prompt');
+      await new Promise((r) => setTimeout(r, 20));
+    }
     return { machine, checkout, main, id: created.id, path: created.workingCopy.path };
   }
   const statusOf = async (main: Awaited<ReturnType<typeof workingSession>>['main'], id: number) =>
@@ -346,7 +351,9 @@ describe('archiving a worktree Session whose agent is working', () => {
 
     expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } });
     expect(existsSync(path)).toBe(true);
-    expect(await statusOf(main, id)).not.toBe('archived');
+    // Cancel keeps the agent: the Session is still working, with its run going.
+    expect(await statusOf(main, id)).toBe('working');
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'more' })).rejects.toThrow(/still working/);
     expect(await main.api.invoke('sessions.archive', { id, discard: true })).toEqual({ archived: true });
     expect(existsSync(path)).toBe(false);
   });
