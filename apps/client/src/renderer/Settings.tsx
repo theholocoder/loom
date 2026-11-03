@@ -1,7 +1,9 @@
-import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, RotateCw, Server, TriangleAlert } from 'lucide-react';
+import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, Palette, RotateCw, Server, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { OPENCODE_MIN_VERSION, type AgentStatus, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
+import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { Select } from './Popover';
 
 // The prototype has no Settings page; it uses the layout of its other full
 // page, the Dashboard: a .dash page with a card holding a data table.
@@ -16,6 +18,13 @@ export function Settings() {
     <main className="dash" aria-label="Settings">
       <div className="row">
         <h1>Settings</h1>
+      </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <Palette className="sm" />
+          <h3>Appearance</h3>
+        </div>
+        <AppearancePickers />
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
@@ -54,6 +63,43 @@ export function Settings() {
         <OpenCommands />
       </div>
     </main>
+  );
+}
+
+const THEME_OPTIONS = (Object.keys(THEMES) as Appearance['theme'][]).map((value) => ({ value, label: THEMES[value].label }));
+const UI_FONT_OPTIONS = (Object.keys(UI_FONTS) as Appearance['uiFont'][]).map((value) => ({ value, label: value }));
+const MONO_FONT_OPTIONS = (Object.keys(MONO_FONTS) as Appearance['monoFont'][]).map((value) => ({ value, label: value }));
+
+/** The theme and fonts, which the window takes on as soon as they're saved. */
+function AppearancePickers() {
+  const api = useApi();
+  const settings = useTopic('settings');
+  const [error, setError] = useState<string>();
+  if (!settings) return null;
+  const save = (change: Partial<Appearance>) => {
+    setError(undefined);
+    api.invoke('settings.setAppearance', change).catch((e: unknown) => setError((e as Error).message));
+  };
+  return (
+    <div className="settings-fields">
+      <div className="field-row">
+        <span>Theme</span>
+        <Select label="Theme" value={settings.theme} options={THEME_OPTIONS} onChange={(theme) => save({ theme })} />
+      </div>
+      <div className="field-row">
+        <span>UI font</span>
+        <Select label="UI font" value={settings.uiFont} options={UI_FONT_OPTIONS} onChange={(uiFont) => save({ uiFont })} />
+      </div>
+      <div className="field-row">
+        <span>Monospace font</span>
+        <Select label="Monospace font" className="tech" value={settings.monoFont} options={MONO_FONT_OPTIONS} onChange={(monoFont) => save({ monoFont })} />
+      </div>
+      {error && (
+        <div className="err" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -8,3 +8,11 @@
 .popover [role="listbox"] { display: flex; flex-direction: column; gap: 2px; }
 button.pick { background: none; border: 0; border-radius: 8px; }
 button.pick:hover { background: var(--hover); }
+button.pick .chev { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
+button.pick:hover .chev, button.pick[aria-expanded="true"] .chev { color: var(--text); }
+button.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The field look: a bordered control, value left, chevron right. */
+button.select-field { justify-content: space-between; min-width: 170px; padding: 5px 10px; color: var(--text); background: var(--panel2); border: 1px solid var(--line); cursor: pointer; }
+button.select-field:hover { background: var(--hover); border-color: var(--muted); }
+button.select-field[aria-expanded="true"] { border-color: var(--accent); }
+button.select-field:focus-visible { border-color: var(--accent); }

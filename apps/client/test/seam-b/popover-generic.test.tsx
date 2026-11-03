@@ -38,6 +38,8 @@ describe('Select', () => {
     const trigger = screen.getByRole('button', { name: 'Letter' });
     expect(trigger.classList).toContain('pick');
     expect(trigger.classList).toContain('custom');
+    expect(trigger.classList).toContain('select-field');
+    expect(trigger.querySelector('svg.chev')).not.toBeNull();
     fireEvent.click(trigger);
     const [alpha, beta] = screen.getAllByRole('option');
     expect(document.activeElement).toBe(alpha);
@@ -46,6 +48,16 @@ describe('Select', () => {
     expect(document.activeElement).toBe(beta);
     fireEvent.keyDown(beta!, { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('b');
+  });
+});
+
+describe('Select variants', () => {
+  it('a compact Select still carries the chevron, without the field class', () => {
+    render(<Select label="Tight" variant="compact" value="a" options={[{ value: 'a', label: 'Alpha' }]} onChange={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: 'Tight' });
+    expect(trigger.classList).toContain('select-compact');
+    expect(trigger.classList).not.toContain('select-field');
+    expect(trigger.querySelector('svg.chev')).not.toBeNull();
   });
 });
 

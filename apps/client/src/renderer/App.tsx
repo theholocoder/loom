@@ -4,6 +4,7 @@ import { ChartColumn, FileDiff, FolderGit2, FolderOpen, MessageSquarePlus, Panel
 import { useRef, useState } from 'react';
 import type { Session } from '../shared/api';
 import { useTopic } from './api';
+import { useAppearance } from './appearance';
 import { Popover } from './Popover';
 import { Projects, useExistingCloneLinker } from './Projects';
 import { InboxList } from './Inbox';
@@ -13,6 +14,7 @@ import { Settings } from './Settings';
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
 
 export function App() {
+  useAppearance();
   const [view, setView] = useState<View>('session');
   const [diffOpen, setDiffOpen] = useState(false);
   const linker = useExistingCloneLinker();

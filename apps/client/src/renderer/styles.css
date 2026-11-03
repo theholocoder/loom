@@ -1,17 +1,27 @@
 /* Copied from docs/prototypes/ui-layout.html, the settled layout. Keep the
    copied blocks verbatim so the two can be compared; Loom's own additions are
-   at the end. Themes other than Midnight arrive with theme settings. */
+   at the end. The theme and fonts are Loom's settings (shared/appearance.ts),
+   put on <html> as data-theme, --font and --mono by renderer/appearance.ts. */
 
 :root {
-  /* Midnight's fonts (the prototype sets these per theme). */
+  /* The default fonts, until the settings arrive. */
   --font: Inter, system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
   --radius: 8px;
 }
 /* ---- themes ---- */
 [data-theme="midnight"] { --bg:#0f1117; --panel:#161922; --panel2:#1e2230; --hover:#232838; --line:#272c3b; --text:#e6e8ef; --muted:#8a92a6; --accent:#8b9dff; --accent-text:#0f1117;
   --wait:#f2b863; --work:#5fd3f3; --ok:#7ddc8f; --err:#ff7a90; --user:#26304d; --user-line:#34406a; --code:#0b0d12; --sel:#1f2740; --shadow:#000a; }
+[data-theme="paper"] { --bg:#f6f3ec; --panel:#fbf9f4; --panel2:#efebe1; --hover:#ebe6da; --line:#ddd6c6; --text:#2a2823; --muted:#7a7465; --accent:#b4532a; --accent-text:#fff;
+  --wait:#b7791f; --work:#2b6cb0; --ok:#2f855a; --err:#c53030; --user:#efe2d2; --user-line:#e0cdb4; --code:#f1ede3; --sel:#f0e3d4; --shadow:#0003; }
+[data-theme="nord"] { --bg:#2e3440; --panel:#323945; --panel2:#3b4252; --hover:#434c5e; --line:#434c5e; --text:#eceff4; --muted:#a3adbf; --accent:#88c0d0; --accent-text:#2e3440;
+  --wait:#ebcb8b; --work:#81a1c1; --ok:#a3be8c; --err:#bf616a; --user:#3d4a5f; --user-line:#4c5a72; --code:#272c36; --sel:#3e4a5e; --shadow:#0008; }
+[data-theme="mocha"] { --bg:#1e1e2e; --panel:#232336; --panel2:#2a2a40; --hover:#313149; --line:#363650; --text:#cdd6f4; --muted:#9399b2; --accent:#cba6f7; --accent-text:#1e1e2e;
+  --wait:#f9e2af; --work:#89dceb; --ok:#a6e3a1; --err:#f38ba8; --user:#353457; --user-line:#45436e; --code:#181825; --sel:#33334d; --shadow:#000a; }
+[data-theme="daylight"] { --bg:#ffffff; --panel:#f6f8fc; --panel2:#eaf1fb; --hover:#e8eaed; --line:#e3e6ea; --text:#1f1f1f; --muted:#5f6368; --accent:#0b57d0; --accent-text:#fff;
+  --wait:#b06000; --work:#0b57d0; --ok:#137333; --err:#b3261e; --user:#d3e3fd; --user-line:#c2d6f8; --code:#f6f8fc; --sel:#d3e3fd; --shadow:#0002; }
 /* project identity = categorical slots 1-3 (validated per surface, see dataviz validator) */
-[data-theme="midnight"] { --p1:#3987e5; --p2:#d95926; --p3:#199e70; }
+[data-theme="midnight"], [data-theme="nord"], [data-theme="mocha"] { --p1:#3987e5; --p2:#d95926; --p3:#199e70; }
+[data-theme="paper"], [data-theme="daylight"] { --p1:#2a78d6; --p2:#eb6834; --p3:#1baf7a; }
 
 
 * { box-sizing: border-box; }
@@ -114,6 +124,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .ctoolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; }
 .pick { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 8px; color: var(--muted); font-size: 12.5px; cursor: pointer; }
 .pick:hover { background: var(--hover); color: var(--text); }
+.settings-fields { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; }
+.field-row { display: grid; grid-template-columns: 160px minmax(170px, 260px); align-items: center; gap: 12px; }
 .pick b { color: var(--text); font-weight: 500; }
 .pick input.branch { border: 0; background: transparent; color: var(--text); outline: none; width: 22ch; padding: 0; }
 .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }

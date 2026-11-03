@@ -47,6 +47,11 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setAppearance': (appearance) => {
+        const settings = { ...this.value('settings'), ...appearance };
+        this.publish('settings', settings);
+        return settings;
+      },
       'sessions.list': () => this.value('sessions'),
       'sessions.create': () => {
         throw new Error('sessions.create is not scripted');
