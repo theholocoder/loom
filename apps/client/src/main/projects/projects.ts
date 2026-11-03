@@ -99,11 +99,11 @@ export class Projects {
     return this.trust.get(id);
   }
 
-  /** Records whether the agent may trust the Project's local files, for all its Sessions. */
+  /** Records whether the agent may trust the Project's local files, for all its Sessions: at once, then in the database. */
   async setTrusted(id: number, trusted: boolean): Promise<void> {
     if (!this.projects.has(id)) throw new Error(`unknown Project ${id}`);
-    await this.options.db.updateTable('projects').set({ trusted: trusted ? 1 : 0 }).where('id', '=', id).execute();
     this.trust.set(id, trusted);
+    await this.options.db.updateTable('projects').set({ trusted: trusted ? 1 : 0 }).where('id', '=', id).execute();
   }
 
   /**

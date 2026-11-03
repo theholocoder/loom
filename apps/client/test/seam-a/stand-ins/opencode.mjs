@@ -15,7 +15,7 @@
 // `elicitation/create` request and waits for its response. Every message it
 // receives is appended to <script.json>.acp.log as {pid, cwd, message}. It
 // exits when its stdin closes.
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -112,7 +112,11 @@ function acp() {
       send({ id, error: { code: -32601, message: `opencode stand-in: unscripted method ${method}` } });
     }
   });
-  lines.on('close', () => process.exit(0));
+  lines.on('close', () => {
+    // An agent that writes in its last moment, as Loom stops it.
+    if (script.acp?.writeOnExit) writeFileSync(join(process.cwd(), script.acp.writeOnExit), 'written on the way out\n');
+    process.exit(0);
+  });
 }
 
 /** Resolves once the test releases the hold `name` (see Machine.release). */

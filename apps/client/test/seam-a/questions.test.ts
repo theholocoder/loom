@@ -158,4 +158,20 @@ describe("the agent's questions", () => {
     expect(questionCard(items)).toEqual({ ...card, state: 'expired' });
     await expect(again.api.invoke('sessions.answer', { id, itemId: card.id, answer: { q0: 'red' } })).rejects.toThrow('The agent is no longer asking this question.');
   });
+
+  it('shows why an archive stopped a Session waiting on a question but kept it', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: [colorQuestion] }], writeOnExit: 'late.txt' } });
+    const checkout = machine.gitClone(machine.gitOrigin('billing-api', 'main'), 'billing-api');
+    const main = await started(machine);
+    const project = await main.api.invoke('projects.link', { path: checkout });
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Add a button' });
+    await waitFor(main.api, 'sessions', asking(id));
+
+    // The agent writes as it stops, so the archive holds back.
+    expect(await main.api.invoke('sessions.archive', { id })).toMatchObject({ archived: false, unsavedWork: { uncommitted: true } });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.waitingReason === 'error'));
+    const items = await waitFor(main.api, 'transcript', (list) => list.at(-1)?.kind === 'error', { sessionId: id });
+    expect(questionCard(items)?.state).toBe('expired');
+  });
 });

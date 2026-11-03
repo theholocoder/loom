@@ -17,6 +17,8 @@ export interface OpencodeScript {
   acp?: {
     /** Each process plays one turn per `session/prompt`, in order; past the end, a turn that says nothing. */
     turns: AcpTurn[];
+    /** A file each process writes in its working copy as its stdin closes. */
+    writeOnExit?: string;
   };
 }
 

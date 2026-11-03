@@ -103,4 +103,28 @@ describe("trusting a Project's local files", () => {
     await waitFor(again.api, 'sessions', finished(last.id));
     expect(agent.answers).toEqual([true, true, true, true, false, false]);
   });
+
+  it('keeps the first answer when two Sessions of a Project are answered at once', async () => {
+    const machine = tempMachine();
+    const agent = new TrustAskingAgent();
+    const main = await started(machine, agent, tempDir('loom-trust-'));
+    const project = await main.api.invoke('projects.link', { path: machine.gitRepo('billing-api') });
+    const create = () => main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the tests' });
+    const sessions = [await create(), await create()];
+    const cards = [];
+    for (const { id } of sessions) {
+      await waitFor(main.api, 'sessions', asking(id));
+      cards.push(trustCard(await waitFor(main.api, 'transcript', (list) => !!trustCard(list), { sessionId: id }))!);
+    }
+
+    const [first, second] = await Promise.allSettled([
+      main.api.invoke('sessions.trust', { id: sessions[0]!.id, itemId: cards[0]!.id, trusted: true }),
+      main.api.invoke('sessions.trust', { id: sessions[1]!.id, itemId: cards[1]!.id, trusted: false }),
+    ]);
+    expect(first.status).toBe('fulfilled');
+    expect(second).toMatchObject({ status: 'rejected', reason: { message: 'The agent is no longer asking this.' } });
+    const later = await create();
+    await waitFor(main.api, 'sessions', finished(later.id));
+    expect(agent.answers).toEqual([true, true, true]);
+  });
 });

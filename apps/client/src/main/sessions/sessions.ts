@@ -30,6 +30,7 @@ export interface SessionsOptions {
   /** Whether each Project's local files are trusted, as the user last said; undefined until asked. */
   projectTrust: {
     get(projectId: number): boolean | undefined;
+    /** Takes effect for `get` at once; resolves once saved. */
     set(projectId: number, trusted: boolean): Promise<void>;
   };
 }
@@ -236,7 +237,8 @@ export class Sessions {
     if (item?.kind !== 'trust') throw new Error('There is no such trust request in this Session.');
     if (item.state !== 'asked' || !this.asks.get(id)?.has(itemId)) throw new Error('The agent is no longer asking this.');
     const { projectId } = this.get(id);
-    await this.options.projectTrust.set(projectId, trusted);
+    // Recorded before anything else can answer, so the Project keeps the answer its cards show.
+    const saved = this.options.projectTrust.set(projectId, trusted);
     for (const [other, asked] of [...this.asks.entries()]) {
       if (this.get(other).projectId !== projectId) continue;
       for (const [seq, requestId] of [...asked.entries()]) {
@@ -246,6 +248,7 @@ export class Sessions {
         this.live.get(other)?.answer(requestId, { kind: 'trust', trusted });
       }
     }
+    await saved;
   }
 
   /** Records the user's response to an ask; with nothing else asked, the Session is Working again. */
@@ -315,11 +318,13 @@ export class Sessions {
       if (work) return { archived: false, unsavedWork: work };
     }
     // Confirmed: stop the agent, then look again in case it wrote in its last moment.
+    // A run waiting on the user's answer ends here too, so it fails like a Working one.
+    const evenIfWaiting = this.inRun(id);
     await this.stopAgent(id);
     if (!discard && (await worktreeExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
       if (work) {
-        this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.');
+        this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.', { evenIfWaiting });
         return { archived: false, unsavedWork: work };
       }
     }
@@ -328,7 +333,7 @@ export class Sessions {
       await removeWorktree(environment, { checkout, path: worktree, force: discard });
     } catch (error) {
       const message = `The worktree at ${worktree} is still there, so the Session isn't archived. ${(error as Error).message}`;
-      this.fail(id, `Loom stopped the agent to archive this Session. ${message}`);
+      this.fail(id, `Loom stopped the agent to archive this Session. ${message}`, { evenIfWaiting });
       throw new Error(message);
     }
     this.markArchived(id);
