@@ -93,6 +93,14 @@ export type ForgeCli = 'gh' | 'glab';
 
 const opencodeStandIn = fileURLToPath(new URL('./stand-ins/opencode.mjs', import.meta.url));
 const forgeCliStandIn = fileURLToPath(new URL('./stand-ins/forge-cli.mjs', import.meta.url));
+const editorStandIn = fileURLToPath(new URL('./stand-ins/editor.mjs', import.meta.url));
+
+/** One run of a stub editor (see stand-ins/editor.mjs). */
+export interface EditorInvocation {
+  args: string[];
+  /** The folder it ran in, written like `folder()` paths. */
+  cwd: string;
+}
 
 /**
  * The user's machine as the native bridge sees it. The bridge is launched the
@@ -185,6 +193,19 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   }
 
   /**
+   * Installs a stub editor (or terminal) named `name` into `binDir`, which
+   * records how it was run and exits.
+   */
+  installEditor(name: string, binDir = this.binDir()): void {
+    this.installStandIn(name, editorStandIn, null, binDir);
+  }
+
+  /** Every run of the stub editor `name` so far, in order. */
+  editorInvocations(name: string): EditorInvocation[] {
+    return readLines(join(this.binDir(), `${name}.json.log`)).map((line) => JSON.parse(line) as EditorInvocation);
+  }
+
+  /**
    * A real git repository in a new folder, with `origin` set to `origin` if
    * given. Returns its path as git reports it.
    */
@@ -269,7 +290,8 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   }
 
   remove(): void {
-    rmSync(this.dir, { recursive: true, force: true });
+    // Retries: on Windows, a stub editor that has just exited may still hold its folder.
+    rmSync(this.dir, { recursive: true, force: true, maxRetries: 10 });
   }
 }
 

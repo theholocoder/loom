@@ -36,6 +36,16 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setEditorCommand': ({ editorCommand }) => {
+        const settings = { ...this.value('settings'), editorCommand };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setTerminalCommand': ({ terminalCommand }) => {
+        const settings = { ...this.value('settings'), terminalCommand };
+        this.publish('settings', settings);
+        return settings;
+      },
       'sessions.list': () => this.value('sessions'),
       'sessions.create': () => {
         throw new Error('sessions.create is not scripted');
@@ -44,6 +54,8 @@ export class FakeMain implements LoomApi {
       'sessions.archive': () => {},
       'sessions.requestMergeRequest': () => {},
       'sessions.setUnread': () => {},
+      'sessions.openInEditor': () => {},
+      'sessions.openInTerminal': () => {},
       ...handlers,
     };
   }
