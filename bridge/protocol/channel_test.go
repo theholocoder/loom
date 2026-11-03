@@ -33,6 +33,9 @@ func TestMain(m *testing.M) {
 	case "hang":
 		fmt.Print("ready")
 		time.Sleep(10 * time.Second)
+	case "linger":
+		// Like hang, but short-lived: a launched copy that nobody stops.
+		time.Sleep(2 * time.Second)
 	case "record":
 		// Writes where it ran and its PATH to $LOOM_RECORD, all at once.
 		cwd, _ := os.Getwd()

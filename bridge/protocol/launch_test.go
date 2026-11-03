@@ -14,15 +14,31 @@ import (
 // named mode, in cwd, and returns the result.
 func (p *peer) launchHelper(id int, mode, cwd, record string) map[string]any {
 	p.t.Helper()
-	self, err := os.Executable()
-	if err != nil {
-		p.t.Fatal(err)
-	}
 	return p.call(id, "launch", map[string]any{
-		"command": self,
+		"command": detachedCopyOfTestBinary(p.t),
 		"cwd":     cwd,
 		"env":     map[string]string{helperEnv: mode, "LOOM_RECORD": record},
 	})
+}
+
+// detachedCopyOfTestBinary copies this test binary into a folder of its own,
+// so a launched helper that outlives the test never holds the build's exe
+// (Windows can't delete a running one, which fails `go test` at the end).
+func detachedCopyOfTestBinary(t *testing.T) string {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyPath := filepath.Join(liveDir(t), filepath.Base(self))
+	if err := os.WriteFile(copyPath, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return copyPath
 }
 
 // liveDir makes a folder a launched program may still be using as its cwd when
@@ -78,7 +94,7 @@ func TestLaunchRepliesWithoutWaitingForTheProgram(t *testing.T) {
 
 	started := time.Now()
 	// The helper outlives the test, so it runs somewhere never deleted.
-	p.launchHelper(1, "hang", os.TempDir(), "")
+	p.launchHelper(1, "linger", os.TempDir(), "")
 
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Errorf("launch took %v, want a reply once the program started", elapsed)
