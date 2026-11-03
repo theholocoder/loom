@@ -3,7 +3,7 @@
 // when the Project's Forge features are on.
 import { CircleDot, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { Issue, Project } from '../shared/api';
+import { FORGE_CLI, type ForgeStatus, type Issue, type Project } from '../shared/api';
 import { useApi } from './api';
 import { Popover } from './Popover';
 
@@ -35,7 +35,21 @@ export function IssuePicker({ project, issue, onChange }: { project: Project; is
     };
   }, [api, open, project.id, search]);
 
-  if (project.forge.state !== 'available') return null;
+  if (project.forge.state === 'unknown') return null;
+  if (project.forge.state !== 'available') {
+    const hint = unavailableHint(project.forge);
+    return (
+      <>
+        <button type="button" className="pick" disabled aria-describedby={`issue-hint-${project.id}`} title={hint}>
+          <CircleDot className="sm" />
+          Issue
+        </button>
+        <span id={`issue-hint-${project.id}`} hidden>
+          {hint}
+        </span>
+      </>
+    );
+  }
 
   if (issue) {
     return (
@@ -90,4 +104,22 @@ export function IssuePicker({ project, issue, onChange }: { project: Project; is
       )}
     </>
   );
+}
+
+/** Why the Issue button is off, and what to do about it. */
+function unavailableHint(forge: ForgeStatus): string {
+  const cli = forge.kind ? FORGE_CLI[forge.kind] : 'gh or glab';
+  const host = forge.host ?? 'the host';
+  switch (forge.state) {
+    case 'cli-missing':
+      return `Install ${cli} and sign in to ${host} to start from an issue.`;
+    case 'signed-out':
+      return `Run \`${cli} auth login --hostname ${host}\` to start from an issue.`;
+    case 'no-remote':
+      return 'Starting from an issue needs an origin remote on GitHub or GitLab.';
+    case 'unsupported':
+      return `Starting from an issue needs an origin on GitHub or GitLab${forge.host ? `; ${forge.host} isn't one gh or glab is signed in to` : ''}.`;
+    default:
+      return `Couldn't check the Forge${forge.error ? `: ${forge.error}` : '.'}`;
+  }
 }

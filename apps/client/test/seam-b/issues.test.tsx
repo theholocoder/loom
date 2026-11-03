@@ -87,8 +87,24 @@ describe('starting a Session from an issue', () => {
     expect((within(pane).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("isn't offered when the Project's Forge features are off", () => {
-    renderApp(new FakeMain({ projects: [{ ...project, forge: { state: 'unsupported', checking: false } }] }));
+  it.each([
+    [{ state: 'cli-missing', kind: 'gitlab', host: 'git.acme.dev' }, 'Install glab and sign in to git.acme.dev'],
+    [{ state: 'cli-missing', kind: 'github', host: 'github.com' }, 'Install gh and sign in to github.com'],
+    [{ state: 'signed-out', kind: 'gitlab', host: 'git.acme.dev' }, 'Run `glab auth login --hostname git.acme.dev`'],
+    [{ state: 'signed-out', kind: 'github', host: 'github.com' }, 'Run `gh auth login --hostname github.com`'],
+    [{ state: 'unsupported', host: 'git.acme.dev' }, 'needs an origin on GitHub or GitLab; git.acme.dev'],
+    [{ state: 'no-remote' }, 'needs an origin remote'],
+    [{ state: 'error', error: 'boom' }, 'boom'],
+  ] as const)('is off with a hint when the Forge is %o', (forge, hint) => {
+    renderApp(new FakeMain({ projects: [{ ...project, forge: { ...forge, checking: false } }] }));
+    const button = within(startNewSession()).getByRole('button', { name: 'Issue' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain(hint);
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toContain(hint);
+  });
+
+  it("isn't shown before the Forge is checked", () => {
+    renderApp(new FakeMain({ projects: [{ ...project, forge: { state: 'unknown', checking: true } }] }));
     expect(within(startNewSession()).queryByRole('button', { name: 'Issue' })).toBeNull();
   });
 });
