@@ -180,6 +180,8 @@ export interface UnsavedWork {
   uncommitted: boolean;
   /** How many of its commits are on no remote branch. */
   unpushedCommits: number;
+  /** Whether HEAD is detached, so those commits are on no branch and archiving loses them. */
+  detached: boolean;
 }
 
 /** What `sessions.archive` did: archived, or held back by unsaved work. */

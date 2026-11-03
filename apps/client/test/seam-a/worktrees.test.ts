@@ -236,7 +236,7 @@ describe('archiving a worktree Session', () => {
     writeFileSync(join(path, 'README.md'), 'half done\n');
     writeFileSync(join(path, 'notes.txt'), 'untracked\n');
 
-    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0 } });
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } });
     expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('half done\n');
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting' });
     await main.api.invoke('sessions.send', { id, prompt: 'Keep going' });
@@ -253,7 +253,7 @@ describe('archiving a worktree Session', () => {
     const before = remoteRefs(origin);
     const commit = machine.commit(path, 'fix.txt', 'fixed\n');
 
-    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: false, unpushedCommits: 1 } });
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: false, unpushedCommits: 1, detached: false } });
     expect(await main.api.invoke('sessions.archive', { id, discard: true })).toEqual({ archived: true });
 
     expect(existsSync(path)).toBe(false);
@@ -298,5 +298,64 @@ describe('archiving a worktree Session', () => {
     const again = await startMain({ machine, userDataDir });
 
     await waitFor(again.api, 'sessions', session(created.id, (s) => s.worktreeMissing === true));
+  });
+});
+
+describe('archiving a worktree Session whose agent is working', () => {
+  async function workingSession() {
+    const { machine, checkout } = machineWithClone();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['On it.'], hold: 'run' }] } });
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'working'));
+    while (machine.acpMessages().length < 3) await new Promise((r) => setTimeout(r, 20)); // the agent is running
+    return { machine, checkout, main, id: created.id, path: created.workingCopy.path };
+  }
+  const statusOf = async (main: Awaited<ReturnType<typeof workingSession>>['main'], id: number) =>
+    (await main.api.invoke('sessions.list')).find((s) => s.id === id)!.status;
+
+  it('stops the agent and removes the worktree', async () => {
+    const { machine, checkout, main, id, path } = await workingSession();
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
+
+    expect(existsSync(path)).toBe(false);
+    expect(await statusOf(main, id)).toBe('archived');
+    expect(git(checkout, 'for-each-ref', '--format=%(refname:short)', 'refs/heads')).toContain('loom/fix-the-login-bug');
+    await processEnded(machine.acpMessages()[0]!.pid);
+  });
+
+  it('is not archived while its worktree is still on disk, and archiving again retries', async () => {
+    const { machine, checkout, main, id, path } = await workingSession();
+    git(checkout, 'worktree', 'lock', path);
+
+    await expect(main.api.invoke('sessions.archive', { id })).rejects.toThrow(/still there/);
+    expect(existsSync(path)).toBe(true);
+    expect(await statusOf(main, id)).not.toBe('archived');
+    await processEnded(machine.acpMessages()[0]!.pid);
+
+    git(checkout, 'worktree', 'unlock', path);
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
+    expect(existsSync(path)).toBe(false);
+    expect(await statusOf(main, id)).toBe('archived');
+  });
+
+  it('holds back on work the stopped agent left, without archiving', async () => {
+    const { main, id, path } = await workingSession();
+    writeFileSync(join(path, 'README.md'), 'half done\n');
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } });
+    expect(existsSync(path)).toBe(true);
+    expect(await statusOf(main, id)).not.toBe('archived');
+    expect(await main.api.invoke('sessions.archive', { id, discard: true })).toEqual({ archived: true });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('flags commits on a detached HEAD as lost with the worktree', async () => {
+    const { machine, main, id, path } = await workingSession();
+    git(path, 'checkout', '--detach');
+    machine.commit(path, 'fix.txt', 'fixed\n');
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: false, unpushedCommits: 1, detached: true } });
   });
 });

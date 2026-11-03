@@ -169,7 +169,7 @@ describe('the Inbox', () => {
   it('warns before archiving a row with unsaved work: Cancel keeps it, Discard archives it', async () => {
     const dirty = session({ title: 'Half done', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/loom/half' } });
     const main = renderApp(
-      new FakeMain({ projects: [loom], sessions: [dirty] }, { 'sessions.archive': ({ discard }) => (discard ? { archived: true } : { archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 2 } }) }),
+      new FakeMain({ projects: [loom], sessions: [dirty] }, { 'sessions.archive': ({ discard }) => (discard ? { archived: true } : { archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 2, detached: false } }) }),
     );
     const archive = () => fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Half done' })).getByRole('button', { name: 'Archive' }));
 

@@ -1,6 +1,6 @@
 // The Working copy service: making a worktree Session's git worktree, checking
-// it for unsaved work, and removing it on archive while keeping its branch. Everything runs in the
-// Project's Environment, through its bridge (ADR 0008).
+// it for unsaved work, and removing it on archive while keeping its branch.
+// Everything runs in the Project's Environment, through its bridge (ADR 0008).
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { UnsavedWork } from '../../shared/api';
@@ -64,12 +64,14 @@ export async function worktreeExists(environment: GitEnvironment, path: string):
 
 /**
  * What removing the worktree would lose or leave only on its local branch:
- * uncommitted changes and commits on no remote branch. Undefined if none.
+ * uncommitted changes and commits on no remote branch. Undefined if none. On a
+ * detached HEAD those commits are on no branch at all, and would be lost.
  */
 export async function unsavedWork(environment: GitEnvironment, path: string): Promise<UnsavedWork | undefined> {
   const status = await gitOrThrow(environment, ['-C', path, 'status', '--porcelain'], "Couldn't check the worktree for changes");
   const unpushed = await gitOrThrow(environment, ['-C', path, 'rev-list', '--count', 'HEAD', '--not', '--remotes'], "Couldn't check the worktree for unpushed commits");
-  const work = { uncommitted: status.stdout.trim() !== '', unpushedCommits: Number(unpushed.stdout.trim()) || 0 };
+  const branch = await git(environment, ['-C', path, 'symbolic-ref', '--quiet', 'HEAD']);
+  const work = { uncommitted: status.stdout.trim() !== '', unpushedCommits: Number(unpushed.stdout.trim()) || 0, detached: branch.exitCode !== 0 };
   return work.uncommitted || work.unpushedCommits > 0 ? work : undefined;
 }
 

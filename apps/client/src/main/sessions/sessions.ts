@@ -165,36 +165,68 @@ export class Sessions {
   /**
    * Archives the Session and stops its agent. A checkout Session's checkout is
    * left as it is. A worktree Session's worktree is removed and its branch
-   * kept; unsaved work there holds the archive back unless `discard`.
+   * kept; unsaved work there holds the archive back unless `discard`. The
+   * Session counts as archived only once its worktree is gone, so a removal
+   * that fails can be tried again.
    */
   async archive({ id, discard = false }: { id: number; discard?: boolean }): Promise<ArchiveResult> {
-    if (this.get(id).status === 'archived') return { archived: true };
+    // An agent still starting up for this Session is closed as soon as it is open.
+    this.archiving.add(id);
+    try {
+      return await this.archiveSession(id, discard);
+    } finally {
+      this.archiving.delete(id);
+    }
+  }
+
+  private async archiveSession(id: number, discard: boolean): Promise<ArchiveResult> {
+    // Ending the agent's text needs the transcript, so it is read first.
+    this.get(id);
     await this.loadTranscript(id);
-    // It may have been archived while its transcript was being read.
     const session = this.get(id);
-    if (session.status === 'archived') return { archived: true };
     const worktree = session.workingCopy.kind === 'worktree' ? session.workingCopy.path : undefined;
     const environment = worktree === undefined ? undefined : this.environmentOf(session);
-    if (environment && worktree !== undefined && !discard && (await worktreeExists(environment, worktree))) {
+    if (session.status === 'archived' && !(environment && worktree !== undefined && (await worktreeExists(environment, worktree)))) {
+      return { archived: true };
+    }
+    if (!environment || worktree === undefined) {
+      this.markArchived(id);
+      await this.stopAgent(id);
+      return { archived: true };
+    }
+    // A working agent may still be writing, so it stops before the check.
+    if (session.status === 'working') await this.stopAgent(id);
+    if (!discard && (await worktreeExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
       if (work) return { archived: false, unsavedWork: work };
     }
-    if (this.get(id).status === 'archived') return { archived: true };
+    await this.stopAgent(id);
+    const checkout = this.options.project(session.projectId)!.checkout.path;
+    try {
+      await removeWorktree(environment, { checkout, path: worktree, force: discard });
+    } catch (error) {
+      throw new Error(`The worktree at ${worktree} is still there, so the Session isn't archived. ${(error as Error).message}`);
+    }
+    this.markArchived(id);
+    return { archived: true };
+  }
+
+  private readonly archiving = new Set<number>();
+
+  private markArchived(id: number): void {
+    // Also guards a concurrent archive of the same Session: it was archived while this one waited.
+    if (this.get(id).status === 'archived') return;
     this.endAgentText(id);
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined });
+  }
+
+  /** Closes the Session's agent, if it has one. */
+  private async stopAgent(id: number): Promise<void> {
+    this.endAgentText(id);
     const agent = this.live.get(id);
     this.live.delete(id);
     await agent?.close();
-    if (environment && worktree !== undefined) {
-      const checkout = this.options.project(session.projectId)!.checkout.path;
-      try {
-        await removeWorktree(environment, { checkout, path: worktree, force: discard });
-      } catch (error) {
-        throw new Error(`The Session is archived, but its worktree at ${worktree} is still there. ${(error as Error).message}`);
-      }
-    }
-    return { archived: true };
   }
 
   setUnread({ id, unread }: { id: number; unread: boolean }): void {
@@ -269,7 +301,7 @@ export class Sessions {
       workingCopy: session.workingCopy.path,
       onEvent: (event) => this.onAgentEvent(id, event),
     });
-    if (this.get(id).status === 'archived') {
+    if (this.get(id).status === 'archived' || this.archiving.has(id)) {
       await agent.close();
       throw new Error('This Session is archived.');
     }
