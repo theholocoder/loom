@@ -10,7 +10,7 @@ import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
 import { useArchive, WorktreeMissing } from './Archive';
-import { freeAnswerField, QuestionCard, TrustCard } from './Questions';
+import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
@@ -167,7 +167,10 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   // The agent waits on an answer: the card takes it, and the composer only when it is the question's free answer.
   const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust') && i.state === 'asked') : undefined;
   const asked = firstAsked !== undefined;
-  const freeAnswer = firstAsked?.kind === 'question' ? freeAnswerField(firstAsked) : undefined;
+  // The question asked first is answered in a panel on the composer, one question at a time.
+  const { panel, freeAnswer } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (answer) =>
+    api.invoke('sessions.answer', { id: session.id, itemId: firstAsked!.id, answer }),
+  );
 
   const end = useRef<HTMLDivElement>(null);
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
@@ -184,8 +187,8 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const send = async (prompt: string) => {
     setError(undefined);
     try {
-      if (firstAsked && freeAnswer) await api.invoke('sessions.answer', { id: session.id, itemId: firstAsked.id, answer: { [freeAnswer.key]: prompt } });
-      else await api.invoke('sessions.send', { id: session.id, prompt });
+      if (freeAnswer) return await freeAnswer.send(prompt);
+      await api.invoke('sessions.send', { id: session.id, prompt });
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -196,7 +199,7 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   /** What the composer is for right now. */
   const composerPlaceholder = (): string => {
     if (working) return `${session.agent} is working…`;
-    if (freeAnswer) return `${freeAnswer.description ?? 'Type your own answer'}…`;
+    if (freeAnswer) return freeAnswer.placeholder;
     if (asked) return 'Answer the question above to go on.';
     if (session.status === 'archived') return 'This Session is archived.';
     if (session.worktreeMissing) return "This Session's worktree is missing; it can only be archived.";
@@ -292,7 +295,7 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
           ) : item.kind === 'tool' ? (
             <ToolCard key={item.id} item={item} />
           ) : item.kind === 'question' ? (
-            <QuestionCard key={item.id} item={item} composerAnswers={item === firstAsked && !!freeAnswer} onAnswer={(answer) => api.invoke('sessions.answer', { id: session.id, itemId: item.id, answer })} />
+            <QuestionCard key={item.id} item={item} />
           ) : item.kind === 'trust' ? (
             <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
           ) : (
@@ -323,6 +326,7 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
         agent={session.agent}
         placeholder={composerPlaceholder()}
         disabled={session.status !== 'waiting' || (asked && !freeAnswer) || !!session.worktreeMissing}
+        above={panel}
         focusRequest={replyRequest}
         onSend={send}
       />
@@ -366,6 +370,7 @@ function Composer({
   onSend,
   onDraftChange,
   canSendEmpty = false,
+  above,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -379,6 +384,8 @@ function Composer({
   onDraftChange?: (draft: string) => void;
   /** Whether an empty prompt can be sent. */
   canSendEmpty?: boolean;
+  /** What sits on the prompt box, part of it: the panel of a question it answers. */
+  above?: ReactNode;
 }) {
   const [draft, setDraftState] = useState('');
   const setDraft = (value: string) => {
@@ -407,8 +414,9 @@ function Composer({
   };
 
   return (
-    <form className="composer-wrap" onSubmit={send}>
-      <div className="composer">
+    <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
+      <div className={`composer${above ? ' docked' : ''}`}>
+        {above}
         <textarea ref={prompt} aria-label="Prompt" rows={2} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} />
         <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>

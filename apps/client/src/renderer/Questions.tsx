@@ -32,54 +32,92 @@ function AskCard({ label, icon, name, asked, state, children }: { label: string;
 type TextField = Extract<QuestionField, { type: 'text' }>;
 
 /**
- * The question's free answer, which the composer can give: its one text
- * field, when nothing else is needed (OpenCode's "type your own answer").
- * Undefined when the question needs more than a line of text.
+ * A question card in the transcript. While asked, it points at the panel on
+ * the composer, where it is answered (see useQuestionPanel); once settled,
+ * it shows what was answered.
  */
-export function freeAnswerField(item: Question): TextField | undefined {
-  const texts = item.fields.filter((f): f is TextField => f.type === 'text');
-  if (texts.length !== 1) return undefined;
-  const [text] = texts;
-  return item.fields.every((f) => f === text || !f.required) ? text : undefined;
-}
-
-/**
- * A question card. When it is one choice, with nothing else it needs, an
- * option answers in one click; otherwise the form is filled in and sent
- * with Answer. Dismiss declines it. With `composerAnswers`, its free answer
- * (see freeAnswerField) is typed in the composer instead of on the card.
- */
-export function QuestionCard({ item, composerAnswers = false, onAnswer }: { item: Question; composerAnswers?: boolean; onAnswer: (answer: Answer | null) => Promise<void> }) {
+export function QuestionCard({ item }: { item: Question }) {
   const asked = item.state === 'asked';
-  const free = composerAnswers ? freeAnswerField(item) : undefined;
   return (
     <AskCard label="Question" icon={<MessageCircleQuestionMark className="sm" />} name="question" asked={asked} state={QUESTION_STATES[item.state]}>
       {item.message && <p className="ask-message">{item.message}</p>}
-      {asked ? (
-        <>
-          <QuestionForm fields={item.fields.filter((f) => f !== free)} onAnswer={onAnswer} />
-          {free && <p className="muted ask-hint">Or type your own answer below.</p>}
-        </>
-      ) : (
-        item.answer && <AnswerSummary fields={item.fields} answer={item.answer} />
-      )}
+      {asked ? <p className="muted ask-hint">Answer below.</p> : item.answer && <AnswerSummary fields={item.fields} answer={item.answer} />}
     </AskCard>
   );
 }
 
-/** What a field holds while the user fills the form in: numbers as typed. */
+/**
+ * One question of a card, asked on its own: a field, with the text field
+ * holding an answer of one's own if it has one (OpenCode's `<key>_custom`).
+ * A text field alone is answered in the composer, as its own free answer.
+ */
+interface Step {
+  main: QuestionField;
+  free?: TextField;
+}
+
+/** The card's questions, in order. */
+function stepsOf(fields: QuestionField[]): Step[] {
+  const steps: Step[] = [];
+  for (const field of fields) {
+    const owner =
+      field.type === 'text' ? steps.find((s) => (s.main.type === 'select' || s.main.type === 'multiselect') && !s.free && `${s.main.key}_custom` === field.key) : undefined;
+    if (owner && field.type === 'text') owner.free = field;
+    else steps.push(field.type === 'text' ? { main: field, free: field } : { main: field });
+  }
+  return steps;
+}
+
+/** A question with one answer only: choosing it, or typing one's own, goes on to the next. */
+function singleAnswer(step: Step): boolean {
+  return step.main.type === 'select' || step.main.type === 'boolean' || step.main.type === 'text';
+}
+
+/** What a field holds while the user answers: numbers as typed. */
 type Draft = Record<string, AnswerValue | undefined>;
 
-function QuestionForm({ fields, onAnswer }: { fields: QuestionField[]; onAnswer: (answer: Answer | null) => Promise<void> }) {
-  const [draft, setDraft] = useState<Draft>(() => Object.fromEntries(fields.map((f) => [f.key, initial(f)])));
+const isBlank = (value: AnswerValue | undefined) => value === undefined || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0);
+
+/** Whether the user may go on from the question: it is answered, or needn't be. */
+function canLeave(step: Step, draft: Draft): boolean {
+  const answered = !isBlank(draft[step.main.key]) || (!!step.free && !isBlank(draft[step.free.key]));
+  if (step.main.type === 'number' && !isBlank(draft[step.main.key]) && !Number.isFinite(Number(draft[step.main.key]))) return false;
+  return answered || !(step.main.required || step.free?.required);
+}
+
+interface Flow {
+  itemId?: number;
+  /** The question shown. */
+  at: number;
+  /** The furthest question the user has reached; the ones up to it can be gone back to. */
+  reached: number;
+  draft: Draft;
+}
+
+const freshFlow = (item: Question | undefined): Flow => ({ itemId: item?.id, at: 0, reached: 0, draft: Object.fromEntries((item?.fields ?? []).map((f) => [f.key, f.type === 'number' && f.default !== undefined ? String(f.default) : f.default])) });
+
+/** What the composer does while a question is asked: give the current question's answer of one's own. */
+export interface FreeAnswer {
+  placeholder: string;
+  /** Takes the text as the answer of one's own; resolves to whether to clear the composer. */
+  send(text: string): Promise<boolean>;
+}
+
+/**
+ * The asked question's panel, which sits on the composer: its questions one
+ * by one, in order. Choosing the answer of a one-answer question, or typing
+ * one's own in the composer, goes on to the next; others go on with Next.
+ * Back and the question numbers return to earlier ones, keeping every
+ * answer. Going on from the last sends them all; Dismiss declines.
+ */
+export function useQuestionPanel(item: Question | undefined, onAnswer: (answer: Answer | null) => Promise<void>): { panel?: ReactNode; freeAnswer?: FreeAnswer } {
+  const [state, setState] = useState<Flow>(() => freshFlow(item));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const set = (key: string, value: AnswerValue | undefined) => setDraft((d) => ({ ...d, [key]: value }));
-  const selects = fields.filter((f) => f.type === 'select');
-  // One choice and nothing else needed: an option is the whole answer.
-  const quick = selects.length === 1 && fields.every((f) => f.type === 'select' || !f.required) ? selects[0] : undefined;
-  const answer = answerOf(fields, draft);
-  const complete = answer !== undefined && fields.every((f) => !f.required || answer[f.key] !== undefined);
+  const flow = state.itemId === item?.id ? state : freshFlow(item);
+  if (!item) return {};
+  const steps = stepsOf(item.fields);
+  const step = steps[flow.at];
 
   const send = async (response: Answer | null) => {
     setBusy(true);
@@ -92,136 +130,181 @@ function QuestionForm({ fields, onAnswer }: { fields: QuestionField[]; onAnswer:
       setBusy(false);
     }
   };
+  const go = (at: number, draft = flow.draft) => setState({ itemId: item.id, at, reached: Math.max(flow.reached, at), draft });
+  /** Moves on from the question with `draft`: to the next one, or sends the answer from the last. */
+  const onward = (draft: Draft) => {
+    if (flow.at + 1 < steps.length) return go(flow.at + 1, draft);
+    setState({ ...flow, itemId: item.id, draft });
+    void send(answerOf(item.fields, draft) ?? {});
+  };
+  const change = (values: Draft, goOn: boolean) => {
+    const draft = { ...flow.draft, ...values };
+    if (goOn) onward(draft);
+    else setState({ ...flow, itemId: item.id, draft });
+  };
 
-  return (
-    <form
-      className="ask-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (complete && !busy) void send(answer);
-      }}
-    >
-      {fields.map((field) => (
-        <Field
-          key={field.key}
-          field={field}
-          value={draft[field.key]}
-          disabled={busy}
-          onChange={(value) => set(field.key, value)}
-          onChoose={field === quick ? (value) => void send({ ...answerOf(fields, { ...draft, [field.key]: undefined }), [field.key]: value }) : undefined}
-        />
-      ))}
+  const last = flow.at + 1 >= steps.length;
+  const panel = (
+    <div className="ask-panel question" role="group" aria-label="Question">
+      <div className="ask-panel-head">
+        <MessageCircleQuestionMark className="sm" />
+        <span className="grow ask-message">{item.message}</span>
+        {steps.length > 0 && <span className="muted">{`Question ${flow.at + 1} of ${steps.length}`}</span>}
+      </div>
+      {steps.length > 1 && (
+        <div className="ask-steps">
+          {steps.map((s, i) => (
+            <button
+              key={s.main.key}
+              type="button"
+              className="ask-step-number"
+              aria-label={`Question ${i + 1}: ${s.main.title ?? s.main.key}`}
+              aria-current={i === flow.at ? 'step' : undefined}
+              disabled={busy || i > flow.reached}
+              onClick={() => go(i)}
+            >
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
+      {step && <StepBody step={step} draft={flow.draft} disabled={busy} onChange={change} />}
       {error && (
         <div className="err" role="alert">
           {error}
         </div>
       )}
       <div className="opts">
-        {!(quick && fields.length === 1) && (
-          <button className="primary" type="submit" disabled={!complete || busy}>
-            Answer
+        {flow.at > 0 && (
+          <button type="button" disabled={busy} onClick={() => go(flow.at - 1)}>
+            Back
           </button>
         )}
+        <button className="primary" type="button" disabled={busy || (step && !canLeave(step, flow.draft))} onClick={() => onward(flow.draft)}>
+          {last ? 'Answer' : 'Next'}
+        </button>
+        <span className="grow" />
         <button type="button" disabled={busy} onClick={() => void send(null)}>
           Dismiss
         </button>
       </div>
-    </form>
+    </div>
+  );
+  const free = step?.free;
+  const freeAnswer: FreeAnswer | undefined =
+    free && !busy
+      ? {
+          placeholder: `${free.description ?? (step.main === free ? 'Type your answer' : 'Type your own answer')}…`,
+          send: async (text) => {
+            // One's own answer replaces a choice where there is only one answer.
+            const values: Draft = singleAnswer(step) && step.main !== free ? { [free.key]: text, [step.main.key]: undefined } : { [free.key]: text };
+            change(values, singleAnswer(step));
+            return true;
+          },
+        }
+      : undefined;
+  return { panel, freeAnswer };
+}
+
+/** The question shown: its title and what answers it. */
+function StepBody({ step, draft, disabled, onChange }: { step: Step; draft: Draft; disabled: boolean; onChange: (values: Draft, goOn: boolean) => void }) {
+  const id = useId();
+  const { main, free } = step;
+  const value = draft[main.key];
+  const own = free && free !== main ? draft[free.key] : undefined;
+  const title = main.title ?? main.key;
+  let body: ReactNode;
+  switch (main.type) {
+    case 'select':
+      body = (
+        <div className="opts">
+          {main.options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className="ask-option"
+              aria-pressed={value === option.value}
+              disabled={disabled}
+              // A choice replaces an answer of one's own.
+              onClick={() => onChange({ [main.key]: option.value, ...(free ? { [free.key]: undefined } : {}) }, true)}
+            >
+              {option.label}
+              {option.description && <span className="muted"> {option.description}</span>}
+            </button>
+          ))}
+        </div>
+      );
+      break;
+    case 'boolean':
+      body = (
+        <div className="opts">
+          {([true, false] as const).map((yes) => (
+            <button key={String(yes)} type="button" className="ask-option" aria-pressed={value === yes} disabled={disabled} onClick={() => onChange({ [main.key]: yes }, true)}>
+              {yes ? 'Yes' : 'No'}
+            </button>
+          ))}
+        </div>
+      );
+      break;
+    case 'multiselect': {
+      const chosen = Array.isArray(value) ? value : [];
+      body = (
+        <div className="opts">
+          {main.options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className="ask-option"
+              aria-pressed={chosen.includes(option.value)}
+              disabled={disabled}
+              onClick={() => onChange({ [main.key]: chosen.includes(option.value) ? chosen.filter((v) => v !== option.value) : [...chosen, option.value] }, false)}
+            >
+              {option.label}
+              {option.description && <span className="muted"> {option.description}</span>}
+            </button>
+          ))}
+        </div>
+      );
+      break;
+    }
+    case 'number':
+      body = (
+        <input
+          id={id}
+          aria-label={title}
+          type="number"
+          step={main.integer ? 1 : 'any'}
+          min={main.minimum}
+          max={main.maximum}
+          value={typeof value === 'string' ? value : ''}
+          disabled={disabled}
+          onChange={(e) => onChange({ [main.key]: e.target.value }, false)}
+          // It sits in the composer's form: Enter mustn't send the prompt.
+          onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
+        />
+      );
+      break;
+    case 'text':
+      body = typeof value === 'string' && value.trim() ? <YourAnswer text={value} /> : <p className="muted ask-hint">Type your answer below.</p>;
+      break;
+  }
+  return (
+    <div className="ask-step">
+      <h3 className="ask-step-title">{title}</h3>
+      {main.description && <p className="ask-message">{main.description}</p>}
+      {body}
+      {typeof own === 'string' && own.trim() ? <YourAnswer text={own} /> : free && free !== main && <p className="muted ask-hint">Or type your own answer below.</p>}
+    </div>
   );
 }
 
-/** One field of a question. A select given `onChoose` answers with the option clicked; otherwise it only selects it. */
-function Field({ field, value, disabled, onChange, onChoose }: { field: QuestionField; value: AnswerValue | undefined; disabled: boolean; onChange: (value: AnswerValue | undefined) => void; onChoose?: (value: string) => void }) {
-  const id = useId();
-  const title = field.title ?? field.key;
-  const hint = field.description && <div className="muted ask-hint">{field.description}</div>;
-  switch (field.type) {
-    case 'boolean':
-      return (
-        <div className="ask-field">
-          <label className="ask-check">
-            <input type="checkbox" checked={value === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-            {title}
-          </label>
-          {hint}
-        </div>
-      );
-    case 'select':
-      return (
-        <fieldset className="ask-field">
-          <legend>{title}</legend>
-          {hint}
-          <div className="opts">
-            {field.options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className="ask-option"
-                aria-pressed={onChoose ? undefined : value === option.value}
-                disabled={disabled}
-                onClick={() => (onChoose ? onChoose(option.value) : onChange(value === option.value && !field.required ? undefined : option.value))}
-              >
-                {option.label}
-                {option.description && <span className="muted"> {option.description}</span>}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-      );
-    case 'multiselect': {
-      const chosen = Array.isArray(value) ? value : [];
-      return (
-        <fieldset className="ask-field">
-          <legend>{title}</legend>
-          {hint}
-          {field.options.map((option) => (
-            <label key={option.value} className="ask-check">
-              <input
-                type="checkbox"
-                checked={chosen.includes(option.value)}
-                disabled={disabled}
-                onChange={(e) => onChange(e.target.checked ? [...chosen, option.value] : chosen.filter((v) => v !== option.value))}
-              />
-              {option.label}
-              {option.description && <span className="muted"> {option.description}</span>}
-            </label>
-          ))}
-        </fieldset>
-      );
-    }
-    case 'number':
-      return (
-        <div className="ask-field">
-          <label htmlFor={id}>{title}</label>
-          {hint}
-          <input
-            id={id}
-            type="number"
-            step={field.integer ? 1 : 'any'}
-            min={field.minimum}
-            max={field.maximum}
-            value={typeof value === 'string' ? value : ''}
-            disabled={disabled}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        </div>
-      );
-    case 'text':
-      return (
-        <div className="ask-field">
-          <label htmlFor={id}>{title}</label>
-          {hint}
-          <textarea id={id} rows={1} maxLength={field.maxLength} value={typeof value === 'string' ? value : ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
-        </div>
-      );
-  }
-}
-
-/** A field's value before the user touches it: its default; a yes/no is no unless it says otherwise. */
-function initial(field: QuestionField): AnswerValue | undefined {
-  if (field.type === 'number') return field.default === undefined ? '' : String(field.default);
-  if (field.type === 'boolean') return field.default ?? false;
-  return field.default;
+function YourAnswer({ text }: { text: string }) {
+  return (
+    <p className="ask-hint">
+      <span className="muted">Your answer: </span>
+      <b>{text}</b>
+    </p>
+  );
 }
 
 /** The answer the draft makes, blank fields left out; undefined while a number isn't one. */
@@ -229,12 +312,12 @@ function answerOf(fields: QuestionField[], draft: Draft): Answer | undefined {
   const answer: Answer = {};
   for (const field of fields) {
     const value = draft[field.key];
+    if (isBlank(value)) continue;
     if (field.type === 'number') {
-      if (typeof value !== 'string' || value.trim() === '') continue;
       const number = Number(value);
       if (!Number.isFinite(number)) return undefined;
       answer[field.key] = number;
-    } else if (typeof value === 'string' ? value.trim() !== '' : Array.isArray(value) ? value.length > 0 : value !== undefined) {
+    } else {
       answer[field.key] = value!;
     }
   }

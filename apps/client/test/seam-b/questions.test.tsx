@@ -27,11 +27,15 @@ const asking: Session = {
   updatedAt: 1,
 };
 
-const colorFields: QuestionField[] = [
-  { type: 'select', key: 'q0', title: 'Color', required: false, options: [{ value: 'red', label: 'Red' }, { value: 'blue', label: 'Blue', description: 'Like the sky' }] },
+/** OpenCode's question tool asking three questions, each with room for an answer of one's own but the last. */
+const fields: QuestionField[] = [
+  { type: 'select', key: 'q0', title: 'Color', description: 'Which color should the button be?', required: false, options: [{ value: 'red', label: 'Red' }, { value: 'blue', label: 'Blue', description: 'Like the sky' }] },
   { type: 'text', key: 'q0_custom', title: 'Color (other)', description: 'Type your own answer', required: false },
+  { type: 'multiselect', key: 'q1', title: 'Sizes', required: false, options: [{ value: 's', label: 'Small' }, { value: 'm', label: 'Medium' }, { value: 'l', label: 'Large' }] },
+  { type: 'text', key: 'q1_custom', title: 'Sizes (other)', description: 'Add your own answer', required: false },
+  { type: 'select', key: 'q2', title: 'Shipping', required: false, options: [{ value: 'std', label: 'Standard' }, { value: 'exp', label: 'Express' }] },
 ];
-const colorQuestion: TranscriptItem = { kind: 'question', id: 1, message: 'Which color should the button be?', fields: colorFields, state: 'asked' };
+const questions: TranscriptItem = { kind: 'question', id: 1, message: 'A few questions', fields, state: 'asked' };
 
 /** The app with the Session open on `items` after its first prompt. */
 function openSession(items: TranscriptItem[], handlers: ConstructorParameters<typeof FakeMain>[1] = {}, session: Session = asking) {
@@ -43,122 +47,160 @@ function openSession(items: TranscriptItem[], handlers: ConstructorParameters<ty
     </ApiProvider>,
   );
   fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: session.title }));
-  const card = (name: string | RegExp = /question/i) => within(screen.getByRole('log', { name: 'Conversation' })).getByRole('group', { name });
+  const composer = () => screen.getByRole('form', { name: 'Composer' });
+  const panel = () => within(composer()).getByRole('group', { name: 'Question' });
+  const prompt = () => within(composer()).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+  const step = () => within(panel()).getByRole('heading').textContent;
+  const click = (name: string | RegExp) => act(async () => fireEvent.click(within(panel()).getByRole('button', { name })));
+  const type = async (text: string) => {
+    fireEvent.change(prompt(), { target: { value: text } });
+    await act(async () => fireEvent.keyDown(prompt(), { key: 'Enter' }));
+  };
   const answers = () => main.invoked.filter((i) => i.command === 'sessions.answer').map((i) => i.params);
-  return { main, card, answers };
+  return { main, composer, panel, prompt, step, click, type, answers };
 }
 
 describe("the agent's questions", () => {
-  it('shows a highlighted question card whose options answer in one click', async () => {
-    const { card, answers } = openSession([colorQuestion]);
-    expect(card().className).toContain('question');
-    expect(within(card()).getByText('Which color should the button be?')).toBeTruthy();
-    expect(within(card()).getByText('Like the sky')).toBeTruthy();
+  it('asks its questions one by one, in order, in a panel on the composer', async () => {
+    const { panel, prompt, step, click, answers } = openSession([questions]);
+    expect(panel().className).toContain('question');
+    expect(within(panel()).getByText('A few questions')).toBeTruthy();
+    expect(within(panel()).getByText('Question 1 of 3')).toBeTruthy();
+    expect(step()).toBe('Color');
+    expect(within(panel()).getByText('Which color should the button be?')).toBeTruthy();
+    expect(within(panel()).getByText('Like the sky')).toBeTruthy();
+    expect(prompt().placeholder).toBe('Type your own answer…');
+    // The conversation keeps a card pointing at the panel.
+    expect(within(screen.getByRole('log', { name: 'Conversation' })).getByRole('group', { name: 'Question' }).textContent).toContain('Answer below');
 
-    await act(async () => fireEvent.click(within(card()).getByRole('button', { name: /Blue/ })));
-    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0: 'blue' } }]);
+    // One answer only: choosing it goes on to the next question.
+    await click(/Blue/);
+    expect(step()).toBe('Sizes');
+    expect(within(panel()).getByText('Question 2 of 3')).toBeTruthy();
+    // Several answers: the user goes on with Next.
+    await click('Small');
+    await click('Medium');
+    expect(step()).toBe('Sizes');
+    await click('Next');
+    expect(step()).toBe('Shipping');
+    // No answer of one's own here: the composer is off.
+    expect(prompt().placeholder).toBe('Answer the question above to go on.');
+    expect(answers()).toEqual([]);
+
+    // Choosing the last answer sends them all.
+    await click('Express');
+    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0: 'blue', q1: ['s', 'm'], q2: 'exp' } }]);
   });
 
-  it("takes your own answer from the composer, where the question has room for one", async () => {
-    const { card, answers } = openSession([colorQuestion]);
-    // The free answer is the composer's, not a second box on the card.
-    expect(within(card()).queryByRole('textbox')).toBeNull();
-    expect(within(card()).queryByRole('button', { name: 'Answer' })).toBeNull();
-    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
-    expect(prompt.placeholder).toBe('Type your own answer…');
-
-    fireEvent.change(prompt, { target: { value: 'Green' } });
-    await act(async () => fireEvent.keyDown(prompt, { key: 'Enter' }));
-    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0_custom: 'Green' } }]);
-    expect(prompt.value).toBe('');
+  it("takes an answer of one's own from the composer, going on where the question has only one answer", async () => {
+    const { step, type, click, answers, prompt } = openSession([questions]);
+    await type('Green');
+    expect(prompt().value).toBe('');
+    expect(step()).toBe('Sizes');
+    // With several answers, one's own joins the choices and the user goes on with Next.
+    await click('Large');
+    await type('XL');
+    expect(step()).toBe('Sizes');
+    await click('Next');
+    await click('Standard');
+    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0_custom: 'Green', q1: ['l'], q1_custom: 'XL', q2: 'std' } }]);
   });
 
-  it("fills in a plugin's dialog as a form, Answer only once what it needs is given, or dismisses it", async () => {
+  it('goes back to an earlier question to change its answer, keeping the others', async () => {
+    const { panel, step, click, type, answers } = openSession([questions]);
+    await type('Green');
+    await click('Medium');
+    await click('Next');
+    expect(step()).toBe('Shipping');
+
+    await click('Back');
+    expect(step()).toBe('Sizes');
+    expect(within(panel()).getByRole('button', { name: 'Medium' }).getAttribute('aria-pressed')).toBe('true');
+    await click('Question 1: Color');
+    expect(step()).toBe('Color');
+    expect(within(panel()).getByText('Green')).toBeTruthy();
+    // A choice replaces the answer of one's own.
+    await click(/Red/);
+    expect(step()).toBe('Sizes');
+    await click('Next');
+    await click('Express');
+    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0: 'red', q1: ['m'], q2: 'exp' } }]);
+  });
+
+  it("steps through a plugin's dialog the same way, holding on until what it needs is given, or dismisses it", async () => {
     const form: TranscriptItem = {
       kind: 'question',
       id: 1,
       message: 'Deploy settings',
       state: 'asked',
       fields: [
-        { type: 'select', key: 'target', title: 'Target', required: true, default: 'staging', options: [{ value: 'staging', label: 'Staging' }, { value: 'production', label: 'Production' }] },
-        { type: 'text', key: 'notes', title: 'Release notes', required: false },
         { type: 'multiselect', key: 'regions', title: 'Regions', required: true, options: [{ value: 'eu', label: 'Europe' }, { value: 'us', label: 'Americas' }] },
         { type: 'number', key: 'replicas', title: 'Replicas', required: false, integer: true },
-        { type: 'boolean', key: 'confirm', title: 'Run migrations?', required: true, default: false },
+        { type: 'text', key: 'notes', title: 'Release notes', description: 'What changed', required: false },
+        { type: 'boolean', key: 'confirm', title: 'Run migrations?', required: true },
       ],
     };
-    const { card, answers } = openSession([form]);
-    const submit = () => within(card()).getByRole('button', { name: 'Answer' }) as HTMLButtonElement;
-    // The default is chosen; picking an option doesn't send yet, as there is more to fill in.
-    expect(within(card()).getByRole('button', { name: 'Staging' }).getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(within(card()).getByRole('button', { name: 'Production' }));
-    expect(within(card()).getByRole('button', { name: 'Production' }).getAttribute('aria-pressed')).toBe('true');
-    expect(answers()).toEqual([]);
-    expect(submit().disabled).toBe(true);
+    const { panel, step, click, type, answers, prompt } = openSession([form]);
+    const next = () => within(panel()).getByRole('button', { name: 'Next' }) as HTMLButtonElement;
+    expect(next().disabled).toBe(true);
+    await click('Americas');
+    expect(next().disabled).toBe(false);
+    await click('Next');
 
-    fireEvent.change(within(card()).getByRole('textbox', { name: 'Release notes' }), { target: { value: 'Faster invoices' } });
-    fireEvent.click(within(card()).getByRole('checkbox', { name: 'Europe' }));
-    fireEvent.click(within(card()).getByRole('checkbox', { name: 'Americas' }));
-    fireEvent.change(within(card()).getByRole('spinbutton', { name: 'Replicas' }), { target: { value: '3' } });
-    fireEvent.click(within(card()).getByRole('checkbox', { name: 'Run migrations?' }));
-    expect(submit().disabled).toBe(false);
-    await act(async () => fireEvent.click(submit()));
-    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { target: 'production', notes: 'Faster invoices', regions: ['eu', 'us'], replicas: 3, confirm: true } }]);
+    expect(step()).toBe('Replicas');
+    fireEvent.change(within(panel()).getByRole('spinbutton', { name: 'Replicas' }), { target: { value: '3' } });
+    await click('Next');
 
-    await act(async () => fireEvent.click(within(card()).getByRole('button', { name: 'Dismiss' })));
+    // A text answer is typed in the composer.
+    expect(step()).toBe('Release notes');
+    expect(prompt().placeholder).toBe('What changed…');
+    await type('Faster invoices');
+    expect(step()).toBe('Run migrations?');
+    await click('Yes');
+    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { regions: ['us'], replicas: 3, notes: 'Faster invoices', confirm: true } }]);
+
+    await click('Dismiss');
     expect(answers().at(-1)).toEqual({ id: 7, itemId: 1, answer: null });
   });
 
   it('shows why main refused an answer', async () => {
-    const { card } = openSession([colorQuestion], {
+    const one: TranscriptItem = { kind: 'question', id: 1, message: 'Pick one', state: 'asked', fields: [fields[0]!, fields[1]!] };
+    const { panel, click } = openSession([one], {
       'sessions.answer': () => {
         throw new Error('The agent is no longer asking this question.');
       },
     });
-    await act(async () => fireEvent.click(within(card()).getByRole('button', { name: /Red/ })));
-    expect(within(card()).getByRole('alert').textContent).toBe('The agent is no longer asking this question.');
+    await click(/Red/);
+    expect(within(panel()).getByRole('alert').textContent).toBe('The agent is no longer asking this question.');
   });
 
   it('keeps answered, dismissed and expired questions in the conversation, with nothing left to click', () => {
     openSession([
-      { ...colorQuestion, state: 'answered', answer: { q0: 'blue' } },
-      { ...colorQuestion, id: 2, state: 'dismissed' },
-      { ...colorQuestion, id: 3, state: 'expired' },
+      { ...questions, state: 'answered', answer: { q0: 'blue', q1: ['s', 'm'] } },
+      { ...questions, id: 2, state: 'dismissed' },
+      { ...questions, id: 3, state: 'expired' },
     ], {}, { ...asking, waitingReason: 'finished' });
     const chat = screen.getByRole('log', { name: 'Conversation' });
-    const cards = within(chat).getAllByRole('group', { name: /question/i });
+    const cards = within(chat).getAllByRole('group', { name: 'Question' });
     expect(cards).toHaveLength(3);
     expect(within(cards[0]!).getByText('Answered')).toBeTruthy();
     expect(within(cards[0]!).getByText('Blue')).toBeTruthy();
+    expect(within(cards[0]!).getByText('Small, Medium')).toBeTruthy();
     expect(within(cards[1]!).getByText('Dismissed')).toBeTruthy();
     expect(within(cards[2]!).getByText('No longer asked')).toBeTruthy();
     for (const card of cards) expect(within(card).queryAllByRole('button')).toEqual([]);
-  });
-
-  it('points the user at the card when the question needs more than the composer can give', () => {
-    const form: TranscriptItem = {
-      kind: 'question',
-      id: 1,
-      message: 'Deploy settings',
-      state: 'asked',
-      fields: [
-        { type: 'text', key: 'notes', title: 'Release notes', required: false },
-        { type: 'boolean', key: 'confirm', title: 'Run migrations?', required: true },
-      ],
-    };
-    openSession([form]);
-    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
-    expect(prompt.placeholder).toBe('Answer the question above to go on.');
-    fireEvent.change(prompt, { target: { value: 'Make it green' } });
-    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(screen.getByRole('form', { name: 'Composer' })).queryByRole('group', { name: 'Question' })).toBeNull();
   });
 });
 
 describe("trusting a Project's local files", () => {
   it("asks with a card of its own, for the Project, and shows the Project's answer after", async () => {
     const trust: TranscriptItem = { kind: 'trust', id: 1, message: 'Trust the plugins in .opencode/?', state: 'asked' };
-    const { main, card } = openSession([trust]);
-    const asked = card(/trust/i);
+    const { main, prompt } = openSession([trust]);
+    const card = () => within(screen.getByRole('log', { name: 'Conversation' })).getByRole('group', { name: 'Trust request' });
+    const asked = card();
+    // Answered on its card: the composer can't answer it.
+    expect(prompt().placeholder).toBe('Answer the question above to go on.');
     expect(within(asked).getByText('Trust the plugins in .opencode/?')).toBeTruthy();
     expect(within(asked).getByText(/billing-api/)).toBeTruthy();
     await act(async () => fireEvent.click(within(asked).getByRole('button', { name: "Don't trust" })));
@@ -169,7 +211,7 @@ describe("trusting a Project's local files", () => {
     ]);
 
     act(() => main.publish('transcript', [{ kind: 'user', id: 0, text: 'Add a button' }, { ...trust, state: 'trusted' }], { sessionId: 7 }));
-    expect(within(card(/trust/i)).getByText('Trusted')).toBeTruthy();
-    expect(within(card(/trust/i)).queryByRole('button')).toBeNull();
+    expect(within(card()).getByText('Trusted')).toBeTruthy();
+    expect(within(card()).queryByRole('button')).toBeNull();
   });
 });
