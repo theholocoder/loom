@@ -164,12 +164,12 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const starting = working && (environment?.state === 'starting' || environment?.state === 'disconnected');
   // The last prompt went unanswered, so it can be sent again.
   const retryable = session.status === 'waiting' && session.waitingReason === 'error' && items.at(-2)?.kind === 'user' && items.at(-1)?.kind === 'error' && !session.worktreeMissing;
-  // The agent waits on an answer: the card takes it, and the composer only when it is the question's free answer.
+  // The agent waits on an answer. A question is answered in a panel on the composer, one question
+  // at a time, the composer giving its answers of one's own; a trust request, on its card.
   const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust') && i.state === 'asked') : undefined;
   const asked = firstAsked !== undefined;
-  // The question asked first is answered in a panel on the composer, one question at a time.
-  const { panel, freeAnswer } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (answer) =>
-    api.invoke('sessions.answer', { id: session.id, itemId: firstAsked!.id, answer }),
+  const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
+    api.invoke('sessions.answer', { id: session.id, itemId, answer }),
   );
 
   const end = useRef<HTMLDivElement>(null);
@@ -326,7 +326,8 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
         agent={session.agent}
         placeholder={composerPlaceholder()}
         disabled={session.status !== 'waiting' || (asked && !freeAnswer) || !!session.worktreeMissing}
-        above={panel}
+        dock={panel}
+        clearKey={stepKey}
         focusRequest={replyRequest}
         onSend={send}
       />
@@ -370,7 +371,8 @@ function Composer({
   onSend,
   onDraftChange,
   canSendEmpty = false,
-  above,
+  dock,
+  clearKey,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -385,7 +387,9 @@ function Composer({
   /** Whether an empty prompt can be sent. */
   canSendEmpty?: boolean;
   /** What sits on the prompt box, part of it: the panel of a question it answers. */
-  above?: ReactNode;
+  dock?: ReactNode;
+  /** Changing it empties the prompt box: what was typed was for something else, such as another question. */
+  clearKey?: string;
 }) {
   const [draft, setDraftState] = useState('');
   const setDraft = (value: string) => {
@@ -396,6 +400,12 @@ function Composer({
   useEffect(() => {
     if (focusRequest) prompt.current?.focus();
   }, [focusRequest]);
+  const clearedFor = useRef(clearKey);
+  useEffect(() => {
+    if (clearedFor.current === clearKey) return;
+    clearedFor.current = clearKey;
+    setDraft('');
+  }, [clearKey]);
   const [sending, setSending] = useState(false);
   const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '');
 
@@ -415,8 +425,8 @@ function Composer({
 
   return (
     <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
-      <div className={`composer${above ? ' docked' : ''}`}>
-        {above}
+      <div className={`composer${dock ? ' docked' : ''}`}>
+        {dock}
         <textarea ref={prompt} aria-label="Prompt" rows={2} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} />
         <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>

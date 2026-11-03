@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type Answer, type ArchiveResult, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type QuestionField, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type Answer, type ArchiveResult, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -14,6 +14,7 @@ import { Topic } from '../topic';
 import { WorkingCopyDiff } from './diff';
 import { createWorktree, removeWorktree, unsavedWork, worktreeExists, type GitEnvironment } from './working-copies';
 import { capToolOutput } from './tool-output';
+import { checkAnswer } from '../../shared/answers';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -901,60 +902,6 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
 /** What a run leaves going until it ends: a tool call still running, or a question or trust request still asked. */
 function leftGoing(item: TranscriptItem): boolean {
   return (item.kind === 'tool' && item.status === 'running') || ((item.kind === 'question' || item.kind === 'trust') && item.state === 'asked');
-}
-
-/**
- * The answer, with blank fields left out, if it fits the question's fields:
- * every required one given, each value of its field's type, among its
- * options and within its bounds. Keys of no field are dropped.
- */
-function checkAnswer(fields: QuestionField[], answer: Answer): Answer {
-  const checked: Answer = {};
-  for (const field of fields) {
-    const value = answer[field.key];
-    const name = field.title ?? field.key;
-    const blank = value === undefined || value === null || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0);
-    if (blank) {
-      if (field.required) throw new Error(`"${name}" needs an answer.`);
-      continue;
-    }
-    const wrong = () => new Error(`"${name}" can't be ${JSON.stringify(value)}.`);
-    switch (field.type) {
-      case 'text':
-        if (typeof value !== 'string') throw wrong();
-        if (field.minLength !== undefined && value.length < field.minLength) throw new Error(`"${name}" needs at least ${field.minLength} characters.`);
-        if (field.maxLength !== undefined && value.length > field.maxLength) throw new Error(`"${name}" takes at most ${field.maxLength} characters.`);
-        if (field.pattern !== undefined && !matches(field.pattern, value)) throw new Error(`"${name}" isn't in the expected form.`);
-        break;
-      case 'select':
-        if (typeof value !== 'string' || !field.options.some((o) => o.value === value)) throw wrong();
-        break;
-      case 'multiselect':
-        if (!Array.isArray(value) || value.some((v) => !field.options.some((o) => o.value === v))) throw wrong();
-        if (field.minItems !== undefined && value.length < field.minItems) throw new Error(`"${name}" needs at least ${field.minItems} choices.`);
-        if (field.maxItems !== undefined && value.length > field.maxItems) throw new Error(`"${name}" takes at most ${field.maxItems} choices.`);
-        break;
-      case 'number':
-        if (typeof value !== 'number' || !Number.isFinite(value) || (field.integer && !Number.isInteger(value))) throw wrong();
-        if (field.minimum !== undefined && value < field.minimum) throw new Error(`"${name}" must be at least ${field.minimum}.`);
-        if (field.maximum !== undefined && value > field.maximum) throw new Error(`"${name}" must be at most ${field.maximum}.`);
-        break;
-      case 'boolean':
-        if (typeof value !== 'boolean') throw wrong();
-        break;
-    }
-    checked[field.key] = value;
-  }
-  return checked;
-}
-
-/** Whether `value` matches a JSON Schema `pattern`; one Loom can't read lets anything through, as the agent checks it too. */
-function matches(pattern: string, value: string): boolean {
-  try {
-    return new RegExp(pattern, 'u').test(value);
-  } catch {
-    return true;
-  }
 }
 
 /** Text the agent is still adding to: its reply or its thinking. */

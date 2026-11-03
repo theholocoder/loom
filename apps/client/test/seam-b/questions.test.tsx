@@ -52,8 +52,13 @@ function openSession(items: TranscriptItem[], handlers: ConstructorParameters<ty
   const prompt = () => within(composer()).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
   const step = () => within(panel()).getByRole('heading').textContent;
   const click = (name: string | RegExp) => act(async () => fireEvent.click(within(panel()).getByRole('button', { name })));
-  /** Picks a choice with the mouse (a click with a pointer has a `detail`; one from the keyboard doesn't). */
-  const pick = (name: string | RegExp, role: 'radio' | 'checkbox' = 'radio') => act(async () => fireEvent.click(within(panel()).getByRole(role, { name }), { detail: 1 }));
+  /** Picks a choice with the mouse. */
+  const pick = (name: string | RegExp, role: 'radio' | 'checkbox' = 'radio') =>
+    act(async () => {
+      const input = within(panel()).getByRole(role, { name });
+      fireEvent.pointerDown(input);
+      fireEvent.click(input);
+    });
   const choice = (name: string | RegExp, role: 'radio' | 'checkbox' = 'radio') => within(panel()).getByRole(role, { name }) as HTMLInputElement;
   const type = async (text: string) => {
     fireEvent.change(prompt(), { target: { value: text } });
@@ -66,7 +71,6 @@ function openSession(items: TranscriptItem[], handlers: ConstructorParameters<ty
 describe("the agent's questions", () => {
   it('asks its questions one by one, in order, in a panel on the composer', async () => {
     const { panel, prompt, step, click, pick, answers } = openSession([questions]);
-    expect(panel().className).toContain('question');
     expect(within(panel()).getByText('A few questions')).toBeTruthy();
     expect(within(panel()).getByText('Question 1 of 3')).toBeTruthy();
     expect(step()).toBe('Color');
@@ -226,12 +230,91 @@ describe("trusting a Project's local files", () => {
 describe('choosing with the keyboard', () => {
   it('selects with the arrow keys without going on, and goes on with Next', async () => {
     const { step, click, choice, answers } = openSession([questions]);
-    // A keyboard selection clicks the radio with no pointer detail.
+    // An arrow key moves the selection, which clicks the radio it lands on.
+    fireEvent.keyDown(choice('Blue'), { key: 'ArrowUp' });
     await act(async () => fireEvent.click(choice('Red')));
     expect(choice('Red').checked).toBe(true);
     expect(step()).toBe('Color');
     await click('Next');
     expect(step()).toBe('Sizes');
     expect(answers()).toEqual([]);
+  });
+
+  it('goes on when the pointer picks a choice anywhere on its row, its description too', async () => {
+    const { panel, step } = openSession([questions]);
+    const description = within(panel()).getByText('Like the sky');
+    fireEvent.pointerDown(description);
+    await act(async () => fireEvent.click(description));
+    expect(step()).toBe('Sizes');
+  });
+});
+
+describe('answering step by step', () => {
+  const form: TranscriptItem = {
+    kind: 'question',
+    id: 1,
+    message: 'Deploy settings',
+    state: 'asked',
+    fields: [
+      { type: 'number', key: 'replicas', title: 'Replicas', required: false, integer: true, minimum: 1, maximum: 5 },
+      { type: 'multiselect', key: 'regions', title: 'Regions', required: false, maxItems: 1, options: [{ value: 'eu', label: 'Europe' }, { value: 'us', label: 'Americas' }] },
+      { type: 'text', key: 'regions_custom', title: 'Regions (other)', required: false, maxLength: 5 },
+      { type: 'text', key: 'notes', title: 'Release notes', required: false },
+    ],
+  };
+
+  it("holds each question until its answer fits, saying why, before going on", async () => {
+    const { panel, step, click, pick, type } = openSession([form]);
+    const next = () => within(panel()).getByRole('button', { name: 'Next' }) as HTMLButtonElement;
+    fireEvent.change(within(panel()).getByRole('spinbutton', { name: 'Replicas' }), { target: { value: '9' } });
+    expect(next().disabled).toBe(true);
+    expect(within(panel()).getByRole('status').textContent).toBe('"Replicas" must be at most 5.');
+    fireEvent.change(within(panel()).getByRole('spinbutton', { name: 'Replicas' }), { target: { value: '2.5' } });
+    expect(within(panel()).getByRole('status').textContent).toBe('"Replicas" can\'t be 2.5.');
+    fireEvent.change(within(panel()).getByRole('spinbutton', { name: 'Replicas' }), { target: { value: '2' } });
+    expect(within(panel()).queryByRole('status')).toBeNull();
+    await click('Next');
+
+    expect(step()).toBe('Regions');
+    await pick('Europe', 'checkbox');
+    await pick('Americas', 'checkbox');
+    expect(within(panel()).getByRole('status').textContent).toBe('"Regions" takes at most 1 choices.');
+    await pick('Americas', 'checkbox');
+    // An answer of one's own that doesn't fit stays in the composer, with the reason.
+    await type('Antarctica');
+    expect(step()).toBe('Regions');
+    expect(within(panel()).getByRole('alert').textContent).toBe('"Regions (other)" takes at most 5 characters.');
+    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('Antarctica');
+  });
+
+  it("drops the error once the user moves on, and lets an answer of one's own be removed", async () => {
+    const { panel, step, click, type, answers } = openSession([form], {
+      'sessions.answer': () => {
+        throw new Error('The agent is no longer asking this question.');
+      },
+    });
+    await click('Next');
+    await type('Asia');
+    expect(step()).toBe('Release notes');
+    await type('Fast');
+    expect(within(panel()).getByRole('alert')).toBeTruthy();
+
+    await click('Back');
+    expect(within(panel()).queryByRole('alert')).toBeNull();
+    expect(step()).toBe('Regions');
+    expect(within(panel()).getByText('Asia')).toBeTruthy();
+    await click('Remove your answer');
+    expect(within(panel()).queryByText('Asia')).toBeNull();
+    await click('Next');
+    await click('Answer');
+    expect(answers().at(-1)).toEqual({ id: 7, itemId: 1, answer: { notes: 'Fast' } });
+  });
+
+  it('empties the composer when a choice moves on, so its text never answers the next question', async () => {
+    const { prompt, pick, step } = openSession([questions]);
+    fireEvent.change(prompt(), { target: { value: 'Gre' } });
+    await pick('Blue');
+    expect(step()).toBe('Sizes');
+    expect(prompt().value).toBe('');
   });
 });
