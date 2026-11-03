@@ -6,13 +6,11 @@ import { useEffect, useState } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
 import { useArchive, WorktreeMissing } from './Archive';
+import { ProjectAvatar } from './ProjectAvatar';
 import { StatusIcon } from './Sessions';
 
 /** How often the rows' times are brought up to date. */
 const TICK_MS = 60_000;
-
-/** Project avatar colours, the prototype's categorical slots, picked by Project id. */
-const PROJECT_COLORS = ['var(--p1)', 'var(--p2)', 'var(--p3)'];
 
 export interface InboxProps {
   sessions: Session[];
@@ -185,15 +183,6 @@ function useNow(): number {
     return () => clearInterval(timer);
   }, []);
   return now;
-}
-
-function ProjectAvatar({ project, size }: { project: Project; size: number }) {
-  const background = PROJECT_COLORS[project.id % PROJECT_COLORS.length];
-  return (
-    <span className="proj-avatar" aria-hidden style={{ width: size, height: size, background, fontSize: size * 0.38 }}>
-      {project.name.slice(0, 2).toUpperCase()}
-    </span>
-  );
 }
 
 const FORGE_MARK: Record<ForgeKind, { name: string; path: string }> = {
