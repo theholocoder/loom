@@ -27,3 +27,16 @@ With no display, run the smoke tests headless: `LOOM_SMOKE_HEADLESS=1 just test`
 - **Seam A** (`apps/client/test/seam-a`): main driven in-process through the typed API, with a temporary `userData`, the real bridge and a manual clock.
 - **Seam B** (`apps/client/test/seam-b`, `apps/client/e2e`): the renderer against a fake main, plus Electron smoke tests of the whole app.
 - **Seam C** (`bridge/protocol`): Go tests at the bridge protocol boundary.
+
+Seam A never runs the real `gh` or `glab`: it puts scripted stand-ins on the Environment's PATH (`apps/client/test/seam-a/stand-ins`).
+
+### Forge contract suite
+
+An opt-in suite (`apps/client/test/forge-contract`) checks those stand-ins against the real CLIs. It runs your own signed-in `gh` and `glab` against sandbox repositories (read-only, each with at least one open issue), checks Loom reads their output, records it under `apps/client/test/forge-contract/recordings/`, and checks the stand-in prints the same shape. It is skipped unless `LOOM_FORGE_CONTRACT=1`; each Forge also needs its sandbox as `host/owner/repo`:
+
+```sh
+LOOM_FORGE_CONTRACT=1 \
+LOOM_FORGE_CONTRACT_GITHUB=github.com/you/loom-sandbox \
+LOOM_FORGE_CONTRACT_GITLAB=gitlab.com/you/loom-sandbox \
+pnpm --filter @loom/client exec vitest run --project forge-contract
+```
