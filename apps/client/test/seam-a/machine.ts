@@ -19,6 +19,8 @@ export interface OpencodeScript {
     turns: AcpTurn[];
     /** A file each process writes in its working copy as its stdin closes. */
     writeOnExit?: string;
+    /** Each process answers `session/new` only once the test calls `machine.release(holdNew)`: an agent slow to start. */
+    holdNew?: string;
   };
 }
 
@@ -161,6 +163,13 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
     for (const script of this.scripts) writeFileSync(join(dirname(script), `release-${name}`), '');
   }
 
+  /** The file whose existence releases the hold `name` of the `opencode` stand-in, for a process other than the test to write. */
+  releaseFile(name: string): string {
+    const script = this.scripts.find((s) => basename(s) === 'opencode.json');
+    if (!script) throw new Error('no opencode stand-in installed');
+    return join(dirname(script), `release-${name}`);
+  }
+
   /** Installs a scripted `gh` or `glab` stand-in into `binDir`. */
   installForgeCli(cli: ForgeCli, script: ForgeCliScript, binDir = this.binDir()): void {
     this.installStandIn(cli, forgeCliStandIn, script, binDir);
@@ -242,7 +251,8 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   private installStandIn(name: string, standIn: string, script: unknown, binDir: string): void {
     const scriptPath = join(binDir, `${name}.json`);
     writeFileSync(scriptPath, JSON.stringify(script));
-    this.scripts.push(scriptPath);
+    // Installed again, it is the same script: its logs must be read once.
+    if (!this.scripts.includes(scriptPath)) this.scripts.push(scriptPath);
     if (process.platform === 'win32') {
       writeFileSync(join(binDir, `${name}.cmd`), `@"${process.execPath}" "${standIn}" "${scriptPath}" %*\r\n`);
     } else {

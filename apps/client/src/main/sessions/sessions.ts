@@ -68,8 +68,11 @@ export class Sessions {
   private live = new Map<number, AgentSession>();
   /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
   private readonly diffSummaries = new Map<string, DiffSummary>();
-  /** Sessions being archived: an agent opening for one is closed again, and its closing isn't a failure. */
-  private readonly archiving = new Set<number>();
+  /**
+   * Archives running, by Session: an agent that opens meanwhile waits for the
+   * outcome, and is closed if the Session was archived; its closing isn't a failure.
+   */
+  private readonly archiving = new Map<number, Promise<unknown>>();
   /** Sessions whose agent ended with its Environment's bridge: their next prompt starts it again. */
   private restarted = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
@@ -280,12 +283,13 @@ export class Sessions {
    * that fails can be tried again.
    */
   async archive({ id, discard = false }: { id: number; discard?: boolean }): Promise<ArchiveResult> {
-    // An agent still starting up for this Session is closed as soon as it is open.
-    this.archiving.add(id);
+    // An agent still starting up for this Session waits for this, and is closed if the Session is archived.
+    const archiving = this.archiveSession(id, discard);
+    this.archiving.set(id, archiving);
     try {
-      return await this.archiveSession(id, discard);
+      return await archiving;
     } finally {
-      this.archiving.delete(id);
+      if (this.archiving.get(id) === archiving) this.archiving.delete(id);
     }
   }
 
@@ -452,7 +456,9 @@ export class Sessions {
       },
     });
     opened = agent;
-    if (this.get(id).status === 'archived' || this.archiving.has(id)) {
+    // An archive held back by unsaved work leaves the Session as it was, so its agent carries on.
+    while (this.archiving.has(id)) await this.archiving.get(id)!.catch(() => {});
+    if (this.get(id).status === 'archived') {
       await agent.close();
       throw new Error('This Session is archived.');
     }

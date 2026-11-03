@@ -85,6 +85,7 @@ function acp() {
     if (method === 'initialize') {
       send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
     } else if (method === 'session/new') {
+      if (script.acp?.holdNew) await released(script.acp.holdNew);
       sessionId = `ses_standin${process.pid}`;
       send({ id, result: { sessionId } });
     } else if (method === 'session/prompt') {
