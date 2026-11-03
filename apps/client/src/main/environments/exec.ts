@@ -16,10 +16,11 @@ export interface ExecResult {
 /**
  * Runs `command` with `args`, giving it `timeoutMs` and the bridge 5 s more
  * to answer. Rejects with a `not_found` BridgeRequestError (see isNotFound)
- * when the command isn't on the PATH.
+ * when the command isn't on the PATH. Runs in `cwd` if given (a bridge older
+ * than this option ignores it and runs in its own directory).
  */
-export function exec(call: BridgeCall, command: string, args: string[], timeoutMs: number): Promise<ExecResult> {
-  return call<ExecResult>('exec', timeoutMs + 5_000, { command, args, timeoutMs });
+export function exec(call: BridgeCall, command: string, args: string[], timeoutMs: number, cwd?: string): Promise<ExecResult> {
+  return call<ExecResult>('exec', timeoutMs + 5_000, { command, args, timeoutMs, ...(cwd ? { cwd } : {}) });
 }
 
 /** Whether `error` says the command isn't on the Environment's PATH. */

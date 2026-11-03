@@ -1,10 +1,11 @@
 // The Projects service: the git checkouts the user has added to Loom, kept in
 // the database, and what each one's Environment reports about them.
-import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Project } from '../../shared/api';
+import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type Project } from '../../shared/api';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { LoomDatabase } from '../storage/database';
 import { detectForge, GIT_TIMEOUT_MS } from './forge';
+import { listIssues } from './issues';
 
 /** What the Projects service needs from an Environment. */
 export interface ProjectEnvironment {
@@ -108,6 +109,15 @@ export class Projects {
     })().finally(() => this.checking.delete(id));
     this.checking.set(id, check);
     return check;
+  }
+
+  /** The open issues on the Project's Forge, matching `search` if given. */
+  async issues(id: number, search?: string): Promise<Issue[]> {
+    const project = this.projects.get(id);
+    if (!project) throw new Error(`unknown Project ${id}`);
+    const environment = this.environment(project.checkout.environmentId);
+    if (!environment.connected()) throw new Error(`${environment.label} isn't connected.`);
+    return listIssues(environment.request, project.forge, project.checkout.path, search);
   }
 
   /** Checks the Forge of every Project, or of those in the Environment `environmentId`. */

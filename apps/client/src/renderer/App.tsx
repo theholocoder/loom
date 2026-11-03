@@ -1,9 +1,10 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
 // Inbox sidebar, the main pane and the diff rail.
 import { ChartColumn, FileDiff, FolderGit2, FolderOpen, MessageSquarePlus, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Session } from '../shared/api';
 import { useTopic } from './api';
+import { Popover } from './Popover';
 import { Projects, useExistingCloneLinker } from './Projects';
 import { InboxList } from './Inbox';
 import { NewSession, SessionView } from './Sessions';
@@ -100,26 +101,15 @@ export function App() {
 /** The + button's menu of things to start: a Session or a Project. */
 function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: () => void; onAddExistingClone: () => void }) {
   const [open, setOpen] = useState(false);
-  const container = useRef<HTMLDivElement>(null);
-  const firstItem = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    firstItem.current?.focus();
-    const closeOutside = (event: MouseEvent) => {
-      if (!container.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', closeOutside);
-    return () => document.removeEventListener('mousedown', closeOutside);
-  }, [open]);
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
-    <div className="menu-anchor" ref={container}>
-      <button className="icon-btn" type="button" title="New" aria-label="New" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+    <>
+      <button ref={trigger} className="icon-btn" type="button" title="New" aria-label="New" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Plus />
       </button>
       {open && (
-        <div className="menu" role="menu" onKeyDown={(event) => event.key === 'Escape' && setOpen(false)}>
+        <Popover anchor={trigger} role="menu" label="New" onClose={() => setOpen(false)}>
           <button
-            ref={firstItem}
             type="button"
             role="menuitem"
             onClick={() => {
@@ -141,9 +131,9 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: () => voi
             <FolderOpen className="sm" />
             Add Project from existing clone…
           </button>
-        </div>
+        </Popover>
       )}
-    </div>
+    </>
   );
 }
 

@@ -13,6 +13,15 @@ export default defineConfig({
         },
       },
       {
+        // Opt-in: skipped unless LOOM_FORGE_CONTRACT=1 (see the README).
+        test: {
+          name: 'forge-contract',
+          include: ['test/forge-contract/**/*.test.ts'],
+          environment: 'node',
+          testTimeout: 60000,
+        },
+      },
+      {
         plugins: [react()],
         test: {
           name: 'seam-b',

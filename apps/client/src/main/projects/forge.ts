@@ -7,6 +7,30 @@ import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environme
 
 export const GIT_TIMEOUT_MS = 10_000;
 const AUTH_STATUS_TIMEOUT_MS = 15_000;
+const PROBE_TIMEOUT_MS = 8_000;
+
+type RepoView = { kind: 'found'; host: string; repository: string } | { kind: 'missing' } | { kind: 'error'; error: string };
+
+/** What `glab repo view --output json` says of the checkout's repository, run in it. */
+async function glabRepoView(call: BridgeCall, checkoutPath: string): Promise<RepoView> {
+  let result: ExecResult;
+  try {
+    result = await exec(call, 'glab', ['repo', 'view', '--output', 'json'], PROBE_TIMEOUT_MS, checkoutPath);
+  } catch (error) {
+    if (isNotFound(error)) return { kind: 'missing' };
+    return { kind: 'error', error: `glab repo view failed: ${(error as Error).message}` };
+  }
+  if (result.exitCode !== 0) return { kind: 'error', error: (result.stderr || result.stdout).trim() || `glab repo view exited with code ${result.exitCode}` };
+  try {
+    const view = JSON.parse(result.stdout) as { path_with_namespace?: unknown; web_url?: unknown };
+    const host = new URL(String(view.web_url)).host.toLowerCase();
+    const repository = String(view.path_with_namespace ?? '');
+    if (host && repository) return { kind: 'found', host, repository };
+  } catch {
+    // falls through
+  }
+  return { kind: 'error', error: `glab repo view printed something unexpected: ${result.stdout.slice(0, 200)}` };
+}
 
 export async function detectForge(call: BridgeCall, checkoutPath: string): Promise<Omit<ForgeStatus, 'checking'>> {
   let remote: ExecResult;
@@ -22,20 +46,54 @@ export async function detectForge(call: BridgeCall, checkoutPath: string): Promi
   }
   const url = remote.stdout.trim();
   const parsed = parseRemote(url);
-  const kind = parsed && forgeKind(parsed.host);
-  if (!parsed || !kind) return { state: 'unsupported', remote: url, host: parsed?.host };
+  if (!parsed) return { state: 'unsupported', remote: url };
+  const kind = forgeKind(parsed.host);
+  const host = parsed.host;
+  const repository = parsed.repository;
+  if (!kind || kind === 'gitlab') {
+    // glab resolves the repository from the checkout, which copes with a
+    // GitLab reached over a different (SSH) host than its web one.
+    const repo = await glabRepoView(call, checkoutPath);
+    // glab just talked to the host, so it's signed in.
+    if (repo.kind === 'found') return { state: 'available', kind: 'gitlab', host: repo.host, repository: repo.repository, remote: url };
+    if (!kind) {
+      if (repo.kind === 'missing') return { state: 'unsupported', remote: url, host: parsed.host };
+      return { state: 'unsupported', remote: url, host: parsed.host, error: repo.error };
+    }
+  }
 
-  const found = { kind, host: parsed.host, repository: parsed.repository, remote: url };
+  const found = { kind, host, repository, remote: url };
   const cli = FORGE_CLI[kind];
   let status: ExecResult;
   try {
-    status = await exec(call, cli, ['auth', 'status', '--hostname', parsed.host], AUTH_STATUS_TIMEOUT_MS);
+    status = await exec(call, cli, ['auth', 'status', '--hostname', host], AUTH_STATUS_TIMEOUT_MS);
   } catch (error) {
     if (isNotFound(error)) return { ...found, state: 'cli-missing' };
     return { ...found, state: 'error', error: `${cli} auth status failed: ${(error as Error).message}` };
   }
-  if (status.exitCode !== 0) return { ...found, state: 'signed-out', error: (status.stderr || status.stdout).trim() || undefined };
+  const output = `${status.stdout}\n${status.stderr}`.trim();
+  if (authState(output, host) === 'signed-out') return { ...found, state: 'signed-out', error: output || undefined };
   return { ...found, state: 'available' };
+}
+
+/**
+ * Whether `gh`/`glab auth status --hostname <host>` says it's signed in to
+ * host. Both write to stderr, and exit codes vary across versions (some glab
+ * exit 0 when signed out, or 1 on any warning), so the text decides: a "Logged
+ * in to <host>" line means signed in, then a known signed-out phrase or a
+ * failure line for host means signed out. Anything else counts as signed in,
+ * so the feature stays on and listing issues surfaces the real error.
+ */
+export function authState(output: string, host: string): 'signed-in' | 'signed-out' {
+  const h = escapeRegExp(host);
+  if (new RegExp(`logged in to ${h}\\b`, 'i').test(output) && !/not logged in/i.test(output)) return 'signed-in';
+  if (/has not been authenticated|not logged in|not authenticated|no token|\b401\b|unauthorized/i.test(output)) return 'signed-out';
+  if (new RegExp(`^\\s*[x✗×]\\s+${h}\\b`, 'im').test(output)) return 'signed-out';
+  return 'signed-in';
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -72,7 +130,9 @@ function parseRemote(url: string): { host: string; repository: string } | undefi
  * named after them (`github.acme.com`, `gitlab.example.org`).
  */
 function forgeKind(host: string): ForgeKind | undefined {
-  if (host === 'github.com' || host.split('.').includes('github')) return 'github';
-  if (host === 'gitlab.com' || host.split('.').includes('gitlab')) return 'gitlab';
+  // Any hyphen-separated word of a label: `gitlab-ssh.acme.net`, `ssh-gitlab.x.y`.
+  const words = host.split(/[.-]/);
+  if (words.includes('github')) return 'github';
+  if (words.includes('gitlab')) return 'gitlab';
   return undefined;
 }

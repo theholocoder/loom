@@ -1,0 +1,10 @@
+/* Popovers (menus, pickers, selects): fixed to the viewport, themed by the app's variables only. */
+.popover { position: fixed; z-index: 50; min-width: 220px; max-width: calc(100vw - 16px); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); }
+.popover [role="option"], .popover [role="menuitem"] { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text); background: none; border: 0; border-radius: 6px; padding: 6px 10px; font-weight: 400; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.popover [role="option"]:hover, .popover [role="menuitem"]:hover, .popover [role="option"]:focus-visible, .popover [role="menuitem"]:focus-visible { background: var(--hover); outline: none; }
+.popover [role="option"][aria-selected="true"] { color: var(--accent); }
+.popover input { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; outline: none; }
+.popover input:focus { border-color: var(--accent); }
+.popover [role="listbox"] { display: flex; flex-direction: column; gap: 2px; }
+button.pick { background: none; border: 0; border-radius: 8px; }
+button.pick:hover { background: var(--hover); }

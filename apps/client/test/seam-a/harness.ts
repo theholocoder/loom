@@ -87,6 +87,16 @@ export interface AcpMessage {
 export interface ForgeCliScript {
   /** The hosts `auth status --hostname <host>` says it is signed in to. */
   signedInHosts: string[];
+  /**
+   * Exactly what `auth status --hostname <host>` prints and exits with, per
+   * host, overriding `signedInHosts` (real CLIs vary: glab writes to stderr,
+   * and some versions exit 0 when signed out or 1 on a mere warning).
+   */
+  authStatus?: Record<string, { stdout?: string; stderr?: string; exitCode: number }>;
+  /** What `repo view --output json` prints and exits with (default: fails, not a repository). */
+  repoView?: { stdout?: string | object; stderr?: string; exitCode?: number };
+  /** The open issues `issue list` lists. */
+  issues?: { number: number; title: string; body: string; url: string }[];
 }
 
 export type ForgeCli = 'gh' | 'glab';
@@ -190,6 +200,12 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   /** Every argv the installed `gh` or `glab` stand-ins were run with. */
   forgeCliInvocations(cli: ForgeCli): string[][] {
     return this.invocations(cli);
+  }
+
+  /** The working directory of every run of the `gh` or `glab` stand-in, in order, written like `folder()` paths. */
+  forgeCliCwds(cli: ForgeCli): string[] {
+    const cwds = readLines(join(this.binDir(), `${cli}.json.cwd`));
+    return process.platform === 'win32' ? cwds.map((cwd) => cwd.replaceAll('\\', '/')) : cwds;
   }
 
   /**

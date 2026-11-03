@@ -23,6 +23,9 @@ type execParams struct {
 	Command   string   `json:"command"`
 	Args      []string `json:"args"`
 	TimeoutMs int      `json:"timeoutMs"`
+	// Cwd is the directory to run in; empty means the bridge's own. An older
+	// bridge ignores the field and runs in its own directory.
+	Cwd string `json:"cwd,omitempty"`
 }
 
 type execResult struct {
@@ -51,6 +54,7 @@ func runCommand(ctx context.Context, env shellenv.Env, params execParams) (*exec
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, params.Args...)
+	cmd.Dir = params.Cwd
 	cmd.Env = env.ForTools()
 	proc.Isolate(cmd)
 	cmd.WaitDelay = time.Second

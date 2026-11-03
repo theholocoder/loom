@@ -1,11 +1,13 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { OPENCODE_NAME, type Session, type WaitingReason, type WorkingCopyKind } from '../shared/api';
-import { suggestBranch } from '../shared/branches';
+import { OPENCODE_NAME, type Issue, type Session, type WaitingReason, type WorkingCopyKind } from '../shared/api';
+import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
+import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
+import { Select } from './Popover';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -47,14 +49,17 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
   // The branch the user typed; until then, the one suggested from the prompt.
   const [editedBranch, setEditedBranch] = useState<string>();
   const [error, setError] = useState<string>();
-  const suggested = chosen && draft.trim() ? suggestBranch(chosen.branchPrefix, draft) : '';
+  // The issue picked to start from, while Forge features are on.
+  const [pickedIssue, setIssue] = useState<Issue>();
+  const issue = chosen?.forge.state === 'available' ? pickedIssue : undefined;
+  const suggested = !chosen ? '' : issue ? issueBranch(chosen.branchPrefix, issue) : draft.trim() ? suggestBranch(chosen.branchPrefix, draft) : '';
 
   const start = async (prompt: string) => {
     if (!chosen) return false;
     setError(undefined);
     const branch = workingCopy === 'worktree' && editedBranch?.trim() ? { branch: editedBranch } : {};
     try {
-      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, workingCopy, ...branch, prompt }));
+      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, workingCopy, ...branch, ...(issue ? { issue } : {}), prompt }));
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -81,34 +86,38 @@ export function NewSession({ onStarted }: { onStarted: (session: Session) => voi
           placeholder={`Tell ${OPENCODE_NAME} what to do…`}
           onSend={start}
           onDraftChange={setDraft}
+          canSendEmpty={!!issue}
           tools={
             <>
-              <label className="pick" title="Project">
-                <FolderTree className="sm" />
-                <b>{chosen.name}</b>
-                <select
-                  aria-label="Project"
-                  value={chosen.id}
-                  onChange={(event) => {
-                    setProjectId(Number(event.target.value));
-                    // An edited name has the old Project's prefix.
-                    setEditedBranch(undefined);
-                  }}
-                >
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="pick" title="Working copy">
-                <b>{workingCopy === 'worktree' ? 'New worktree' : 'Stay on current branch'}</b>
-                <select aria-label="Working copy" value={workingCopy} onChange={(event) => setWorkingCopy(event.target.value as WorkingCopyKind)}>
-                  <option value="worktree">New worktree</option>
-                  <option value="checkout">Stay on current branch</option>
-                </select>
-              </label>
+              <Select
+                label="Project"
+                icon={<FolderTree className="sm" />}
+                value={chosen.id}
+                options={projects.map((p) => ({ value: p.id, label: p.name }))}
+                onChange={(id) => {
+                  setProjectId(id);
+                  // An edited name has the old Project's prefix; the issue is the old Project's.
+                  setEditedBranch(undefined);
+                  setIssue(undefined);
+                }}
+              />
+              <Select<WorkingCopyKind>
+                label="Working copy"
+                value={workingCopy}
+                options={[
+                  { value: 'worktree', label: 'New worktree' },
+                  { value: 'checkout', label: 'Stay on current branch' },
+                ]}
+                onChange={setWorkingCopy}
+              />
+              <IssuePicker
+                project={chosen}
+                issue={issue}
+                onChange={(picked) => {
+                  setIssue(picked);
+                  setEditedBranch(undefined);
+                }}
+              />
               {workingCopy === 'worktree' && (
                 <label className="pick" title="Branch">
                   <GitBranch className="sm" />
@@ -174,6 +183,14 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
           <div className="crumb">
             {project && <span>{project.name}</span>}
             {project?.forge.repository && <span className="tech">{project.forge.repository}</span>}
+            {session.issue && (
+              <>
+                <ChevronRight className="sm" />
+                <button type="button" className="chip tech" title="Issue" onClick={() => void api.invoke('links.open', { url: session.issue!.url }).catch(() => {})}>
+                  <CircleDot className="sm" />#{session.issue.number}
+                </button>
+              </>
+            )}
             {session.branch && (
               <>
                 <ChevronRight className="sm" />
@@ -267,6 +284,7 @@ function Composer({
   focusRequest = 0,
   onSend,
   onDraftChange,
+  canSendEmpty = false,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -278,6 +296,8 @@ function Composer({
   onSend: (prompt: string) => Promise<boolean>;
   /** Called with the prompt as the user types it. */
   onDraftChange?: (draft: string) => void;
+  /** Whether an empty prompt can be sent. */
+  canSendEmpty?: boolean;
 }) {
   const [draft, setDraftState] = useState('');
   const setDraft = (value: string) => {
@@ -289,7 +309,7 @@ function Composer({
     if (focusRequest) prompt.current?.focus();
   }, [focusRequest]);
   const [sending, setSending] = useState(false);
-  const canSend = !disabled && !sending && draft.trim() !== '';
+  const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '');
 
   const send = async (event?: FormEvent) => {
     event?.preventDefault();

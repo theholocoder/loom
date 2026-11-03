@@ -29,3 +29,8 @@ export function slugOf(text: string): string {
 export function suggestBranch(prefix: string, prompt: string): string {
   return `${prefix}/${slugOf(prompt)}`;
 }
+
+/** The branch Loom suggests for a worktree Session started from an issue: `<prefix>/<issue#>-<slug of its title>`. */
+export function issueBranch(prefix: string, issue: { number: number; title: string }): string {
+  return `${prefix}/${issue.number}-${slugOf(issue.title)}`;
+}

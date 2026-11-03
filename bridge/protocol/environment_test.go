@@ -210,3 +210,19 @@ func TestShuttingDownStopsAShellStillResolving(t *testing.T) {
 		t.Errorf("shutting down took %v, want it to stop the shell rather than wait it out", elapsed)
 	}
 }
+
+func TestACommandRunsInTheRequestedDirectory(t *testing.T) {
+	shell := fakeShell(t, `exec /bin/sh -c "$2"`)
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
+	dir := t.TempDir()
+
+	p.send(map[string]any{"id": 1, "method": "exec", "params": map[string]any{"command": "pwd", "args": []string{}, "cwd": dir}})
+	result, ok := p.receive()["result"].(map[string]any)
+	if !ok {
+		t.Fatal("exec with a cwd failed")
+	}
+	want, _ := filepath.EvalSymlinks(dir)
+	if got := strings.TrimSpace(result["stdout"].(string)); got != want && got != dir {
+		t.Errorf("pwd = %q, want %q", got, dir)
+	}
+}
