@@ -1,6 +1,7 @@
 // The one popover the renderer opens from a trigger: menus, pickers and
 // selects. It is placed against the viewport (fixed), so it never drops off
-// the bottom of the window; it is themed by `.popover` in styles.css.
+// the bottom of the window; it is themed by `.popover` in popover.css.
+import './popover.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 
 export interface Rect {
@@ -154,24 +155,27 @@ export function Select<T extends string | number>({
   options,
   onChange,
   icon,
+  className,
 }: {
   label: string;
   value: T;
   options: SelectOption<T>[];
   onChange: (value: T) => void;
   icon?: ReactNode;
+  /** Extra classes for the trigger, and for its popover. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const current = options.find((option) => option.value === value);
   return (
     <>
-      <button ref={trigger} type="button" className="pick" title={label} aria-label={label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button ref={trigger} type="button" className={['pick', className].filter(Boolean).join(' ')} title={label} aria-label={label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
         {icon}
         <b>{current?.label}</b>
       </button>
       {open && (
-        <Popover anchor={trigger} role="listbox" label={label} onClose={() => setOpen(false)}>
+        <Popover anchor={trigger} role="listbox" label={label} className={className} onClose={() => setOpen(false)}>
           {options.map((option) => (
             <button
               key={option.value}

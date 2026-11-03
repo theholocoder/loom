@@ -114,8 +114,6 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .ctoolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; }
 .pick { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 8px; color: var(--muted); font-size: 12.5px; cursor: pointer; }
 .pick:hover { background: var(--hover); color: var(--text); }
-button.pick { background: none; border: 0; border-radius: 8px; }
-button.pick:hover { background: var(--hover); }
 .pick b { color: var(--text); font-weight: 500; }
 .pick input.branch { border: 0; background: transparent; color: var(--text); outline: none; width: 22ch; padding: 0; }
 .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
@@ -173,14 +171,6 @@ button.diff-rail:hover { background: var(--panel); }
 .fg-available { color: var(--ok); } .fg-checking { color: var(--work); } .fg-off { color: var(--wait); } .fg-unknown { color: var(--muted); }
 input.prefix { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; width: 16ch; }
 .pick .issue-title { max-width: 28ch; }
-/* Popovers (menus, pickers, selects): fixed to the viewport, themed by the app's variables only. */
-.popover { position: fixed; z-index: 50; min-width: 220px; max-width: calc(100vw - 16px); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); }
-.popover [role="option"], .popover [role="menuitem"] { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text); background: none; border: 0; border-radius: 6px; padding: 6px 10px; font-weight: 400; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.popover [role="option"]:hover, .popover [role="menuitem"]:hover, .popover [role="option"]:focus-visible, .popover [role="menuitem"]:focus-visible { background: var(--hover); outline: none; }
-.popover [role="option"][aria-selected="true"] { color: var(--accent); }
-.popover input { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; outline: none; }
-.popover input:focus { border-color: var(--accent); }
-.popover [role="listbox"] { display: flex; flex-direction: column; gap: 2px; }
 .issue-popover { width: 360px; gap: 4px; }
 /* Sidebar rows and status are buttons here. */
 button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-align: left; }

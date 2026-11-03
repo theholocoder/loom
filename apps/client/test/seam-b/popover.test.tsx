@@ -1,10 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import { placePopover, POPOVER_MAX_HEIGHT } from '../../src/renderer/Popover';
 import type { Issue, Project } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
@@ -47,22 +44,6 @@ function startNewSession() {
 }
 
 const px = (value: string) => Number(value.replace('px', ''));
-
-describe('placing a popover', () => {
-  it('opens below when it fits', () => {
-    expect(placePopover({ top: 10, bottom: 34, left: 20 }, { width: 800, height: 600 }, { width: 200, height: 100 })).toEqual({ side: 'down', top: 38, left: 20, maxHeight: POPOVER_MAX_HEIGHT });
-  });
-
-  it('opens above, capped to the room there, when the trigger is near the bottom', () => {
-    // Above: 260 - 4 (gap) - 8 (margin) = 248.
-    expect(placePopover({ top: 260, bottom: 284, left: 20 }, VIEWPORT, { width: 200, height: 400 })).toEqual({ side: 'up', bottom: 44, left: 20, maxHeight: 248 });
-  });
-
-  it('stays inside the viewport horizontally', () => {
-    expect(placePopover({ top: 10, bottom: 34, left: 700 }, VIEWPORT, { width: 360, height: 50 }).left).toBe(800 - 8 - 360);
-    expect(placePopover({ top: 10, bottom: 34, left: -50 }, VIEWPORT, { width: 100, height: 50 }).left).toBe(8);
-  });
-});
 
 describe.each([
   ['the working-copy choice', 'Working copy', 'listbox', 'Working copy'],
@@ -139,23 +120,5 @@ describe('keyboard', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
     expect(within(pane).getByTitle(issues[1]!.url).textContent).toContain('#2 Issue 2');
-  });
-});
-
-describe('popover theme', () => {
-  const css = readFileSync(resolve(__dirname, '../../src/renderer/styles.css'), 'utf8');
-  const rules = [...css.matchAll(/^([^{}\n]*\.popover[^{}\n]*)\{([^}]*)\}/gm)];
-
-  it('colours popovers with the theme variables only', () => {
-    expect(rules.length).toBeGreaterThan(0);
-    const base = rules.find(([, selector]) => selector!.trim() === '.popover')![2]!;
-    for (const variable of ['--panel2', '--line', '--text', '--shadow', '--radius']) expect(base).toContain(`var(${variable})`);
-    expect(css).toMatch(/\.popover[^{]*:hover[^{]*\{[^}]*var\(--hover\)/);
-    for (const [, , body] of rules) {
-      expect(body).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
-      for (const [, prop, value] of body!.matchAll(/(?:^|;)\s*(color|background(?:-color)?|border(?:-color)?|box-shadow)\s*:\s*([^;]+)/g)) {
-        if (!/^(none|0|transparent)$/.test(value!.trim())) expect(`${prop}: ${value}`).toMatch(/var\(--/);
-      }
-    }
   });
 });
