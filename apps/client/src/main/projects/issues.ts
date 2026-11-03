@@ -27,9 +27,13 @@ export async function listIssues(call: BridgeCall, forge: ForgeStatus, search?: 
     throw new Error(`${cli} issue list printed something other than JSON: ${result.stdout.slice(0, 200)}`);
   }
   if (!Array.isArray(listed)) throw new Error(`${cli} issue list printed something other than a list.`);
-  return listed.map((item: Record<string, unknown>) =>
-    forge.kind === 'github'
-      ? { number: Number(item.number), title: String(item.title ?? ''), body: String(item.body ?? ''), url: String(item.url ?? '') }
-      : { number: Number(item.iid), title: String(item.title ?? ''), body: String(item.description ?? ''), url: String(item.web_url ?? '') },
-  );
+  return listed
+    .filter((item: unknown): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) =>
+      forge.kind === 'github'
+        ? { number: Number(item.number), title: String(item.title ?? ''), body: String(item.body ?? ''), url: String(item.url ?? '') }
+        : { number: Number(item.iid), title: String(item.title ?? ''), body: String(item.description ?? ''), url: String(item.web_url ?? '') },
+    )
+    // Skips what Loom couldn't link a Session to.
+    .filter((issue) => Number.isInteger(issue.number) && issue.number > 0 && /^https?:\/\//i.test(issue.url));
 }

@@ -23,7 +23,7 @@ export function IssuePicker({ project, issue, onChange }: { project: Project; is
         api
           .invoke('projects.issues', { id: project.id, ...(search.trim() ? { search: search.trim() } : {}) })
           .then((found) => current && (setIssues(found), setError(undefined)))
-          .catch((e: unknown) => current && setError((e as Error).message));
+          .catch((e: unknown) => current && (setIssues(undefined), setError((e as Error).message)));
       },
       search ? SEARCH_DELAY_MS : 0,
     );
