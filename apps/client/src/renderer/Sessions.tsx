@@ -8,6 +8,7 @@ import { useApi, useTopic } from './api';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
+import { useArchive, WorktreeMissing } from './Archive';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -150,6 +151,7 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
   const [error, setError] = useState<string>();
+  const archiver = useArchive();
   const status = statusOf(session);
   const working = session.status === 'working';
   // The conversation lives only while the Client runs; the error is stored.
@@ -214,9 +216,25 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
             <span className={`${status.className} chip`} role="status" aria-label="Session status">
               {status.label}
             </span>
+            {session.worktreeMissing && <WorktreeMissing />}
           </div>
         </div>
         <OpenActions session={session} onError={setError} />
+        {session.status !== 'archived' && (
+          <button
+            className="icon-btn"
+            type="button"
+            title="Archive"
+            aria-label="Archive"
+            onClick={() => {
+              setError(undefined);
+              archiver.archive(session).catch((e: unknown) => setError((e as Error).message));
+            }}
+          >
+            <Archive />
+          </button>
+        )}
+        {archiver.dialog}
       </div>
       <div className="chat" role="log" aria-label="Conversation">
         {items.map((item) =>
@@ -250,8 +268,16 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
       </div>
       <Composer
         agent={session.agent}
-        placeholder={working ? `${session.agent} is working…` : session.status === 'archived' ? 'This Session is archived.' : `Reply to ${session.agent}…`}
-        disabled={session.status !== 'waiting'}
+        placeholder={
+          working
+            ? `${session.agent} is working…`
+            : session.status === 'archived'
+              ? 'This Session is archived.'
+              : session.worktreeMissing
+                ? "This Session's worktree is missing; it can only be archived."
+                : `Reply to ${session.agent}…`
+        }
+        disabled={session.status !== 'waiting' || !!session.worktreeMissing}
         focusRequest={replyRequest}
         onSend={send}
       />

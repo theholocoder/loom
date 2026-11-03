@@ -1,5 +1,5 @@
-// The Working copy service: making a worktree Session's git worktree, and
-// reading which branch a working copy has checked out. Everything runs in the
+// The Working copy service: making a worktree Session's git worktree, checking
+// it for unsaved work, and removing it on archive while keeping its branch. Everything runs in the
 // Project's Environment, through its bridge (ADR 0008).
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';

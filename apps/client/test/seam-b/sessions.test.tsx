@@ -183,6 +183,28 @@ describe('a Session', () => {
   });
 
 
+  it('archives from its header, which an archived Session no longer offers', async () => {
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [inWorktree] })), inWorktree);
+
+    fireEvent.click(within(screen.getByRole('region', { name: 'Session header' })).getByRole('button', { name: 'Archive' }));
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive')).toEqual([{ command: 'sessions.archive', params: { id: inWorktree.id } }]));
+
+    act(() => main.publish('sessions', [{ ...inWorktree, status: 'archived', waitingReason: undefined }]));
+    expect(within(screen.getByRole('region', { name: 'Session header' })).queryByRole('button', { name: 'Archive' })).toBeNull();
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('This Session is archived.');
+  });
+
+  it('can only be archived when its worktree is missing', () => {
+    const missing = { ...inWorktree, worktreeMissing: true };
+    open(renderApp(new FakeMain({ projects: [project], sessions: [missing] })), missing);
+
+    expect(within(screen.getByRole('region', { name: 'Session header' })).getByRole('status', { name: 'Worktree missing' })).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'More' } });
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe("This Session's worktree is missing; it can only be archived.");
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(screen.getByRole('region', { name: 'Session header' })).getByRole('button', { name: 'Archive' })).toBeTruthy();
+  });
+
   it('shows the user as bubbles and streams the agent reply', () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
     const chat = () => screen.getByRole('log', { name: 'Conversation' });

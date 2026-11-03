@@ -208,8 +208,8 @@ export interface Session {
   status: SessionStatus;
   /**
    * Set when a worktree Session's worktree is gone, deleted outside Loom: it
-   * can only be archived. Checked when Loom starts, when the Session's
-   * Environment connects and when it is opened.
+   * can only be archived. Checked with its branch: after each turn, when
+   * the Session is opened and when its Environment connects.
    */
   worktreeMissing?: boolean;
   /** Why the Session is `waiting`. */
