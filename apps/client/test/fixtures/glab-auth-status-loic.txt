@@ -1,0 +1,9 @@
+gitlab-ssh.axiocode.net
+  ✓ Logged in to gitlab-ssh.axiocode.net as lboutter (/home/loic/.config/glab-cli/config.yml)
+  ✓ Git operations for gitlab-ssh.axiocode.net configured to use ssh protocol.
+  ✓ API calls for gitlab-ssh.axiocode.net are made over https protocol.
+  ✓ REST API Endpoint: https://code.axiocode.net/api/v4/
+  ✓ GraphQL Endpoint: https://code.axiocode.net/api/graphql/
+  ✓ SSH Host: gitlab-ssh.axiocode.net
+  ✓ Token found in configuration file (plaintext): ****
+  ! To store this token more securely, run glab auth login --hostname gitlab-ssh.axiocode.net to move it into the operating system keyring.

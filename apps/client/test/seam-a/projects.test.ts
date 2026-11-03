@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { authState } from '../../src/main/projects/forge';
 import { startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus } from '../../src/shared/api';
 
@@ -289,6 +291,34 @@ describe("a Project's Forge on GitLab, as glab reports it", () => {
     machine.installForgeCli('glab', { signedInHosts: [], repoView: { stdout: { path_with_namespace: 'a/b', web_url: 'https://git.acme.dev:8443/a/b' } } });
 
     expect((await link(machine, 'ssh://git@git.acme.dev:2222/a/b.git')).forge).toMatchObject({ state: 'available', kind: 'gitlab', host: 'git.acme.dev:8443', repository: 'a/b' });
+  });
+
+  const fixture = readFileSync(new URL('../fixtures/glab-auth-status-loic.txt', import.meta.url), 'utf8');
+  const SSH = 'gitlab-ssh.axiocode.net';
+  const origin = `git@${SSH}:axio/team/app.git`;
+
+  it('reads the real glab auth status as signed in', () => {
+    expect(authState(fixture, SSH)).toBe('signed-in');
+  });
+
+  it.each([
+    ['stdout', 0], ['stdout', 1], ['stderr', 0], ['stderr', 1],
+  ] as const)('falls back to glab auth status when repo view fails, printed on %s with exit %i', async (stream, exitCode) => {
+    const machine = tempMachine();
+    machine.installForgeCli('glab', {
+      signedInHosts: [],
+      repoView: { exitCode: 1, stderr: 'unknown flag: --output' },
+      authStatus: { [SSH]: { [stream]: fixture, exitCode } },
+    });
+
+    expect((await link(machine, origin)).forge).toMatchObject({ kind: 'gitlab', host: SSH, repository: 'axio/team/app', state: 'available' });
+  });
+
+  it('prefers what repo view resolves for a hyphenated GitLab host', async () => {
+    const machine = tempMachine();
+    machine.installForgeCli('glab', { signedInHosts: [], repoView: { stdout: { path_with_namespace: 'axio/team/app', web_url: 'https://code.axiocode.net/axio/team/app' } } });
+
+    expect((await link(machine, origin)).forge).toMatchObject({ kind: 'gitlab', host: 'code.axiocode.net', repository: 'axio/team/app', state: 'available' });
   });
 
   it("leaves a host glab can't resolve unsupported, with glab's reason", async () => {

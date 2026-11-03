@@ -47,17 +47,19 @@ export async function detectForge(call: BridgeCall, checkoutPath: string): Promi
   const url = remote.stdout.trim();
   const parsed = parseRemote(url);
   if (!parsed) return { state: 'unsupported', remote: url };
-  let kind = forgeKind(parsed.host);
-  let host = parsed.host;
-  let repository = parsed.repository;
-  if (!kind) {
-    // A self-hosted GitLab not named after GitLab, or reached over a different
-    // (SSH) host than its web one: glab resolves the repository from the checkout.
+  const kind = forgeKind(parsed.host);
+  const host = parsed.host;
+  const repository = parsed.repository;
+  if (!kind || kind === 'gitlab') {
+    // glab resolves the repository from the checkout, which copes with a
+    // GitLab reached over a different (SSH) host than its web one.
     const repo = await glabRepoView(call, checkoutPath);
-    if (repo.kind === 'missing') return { state: 'unsupported', remote: url, host: parsed.host };
-    if (repo.kind === 'error') return { state: 'unsupported', remote: url, host: parsed.host, error: repo.error };
     // glab just talked to the host, so it's signed in.
-    return { state: 'available', kind: 'gitlab', host: repo.host, repository: repo.repository, remote: url };
+    if (repo.kind === 'found') return { state: 'available', kind: 'gitlab', host: repo.host, repository: repo.repository, remote: url };
+    if (!kind) {
+      if (repo.kind === 'missing') return { state: 'unsupported', remote: url, host: parsed.host };
+      return { state: 'unsupported', remote: url, host: parsed.host, error: repo.error };
+    }
   }
 
   const found = { kind, host, repository, remote: url };
@@ -128,7 +130,9 @@ function parseRemote(url: string): { host: string; repository: string } | undefi
  * named after them (`github.acme.com`, `gitlab.example.org`).
  */
 function forgeKind(host: string): ForgeKind | undefined {
-  if (host === 'github.com' || host.split('.').includes('github')) return 'github';
-  if (host === 'gitlab.com' || host.split('.').includes('gitlab')) return 'gitlab';
+  // Any hyphen-separated word of a label: `gitlab-ssh.acme.net`, `ssh-gitlab.x.y`.
+  const words = host.split(/[.-]/);
+  if (words.includes('github')) return 'github';
+  if (words.includes('gitlab')) return 'gitlab';
   return undefined;
 }
