@@ -127,16 +127,19 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tool.ask .tool-head { cursor: default; }
 .ask-message { margin: 0 0 8px; white-space: pre-wrap; }
 .ask-hint { font-size: 12px; margin: 4px 0 0; }
-.ask-option[aria-pressed='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--panel2)); }
-.ask-option:focus-visible, .ask-step-number:focus-visible, .ask-step input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-step input[type='number']:focus-visible, .ask-choice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-choices { display: grid; gap: 6px; }
+.ask-choice { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); cursor: pointer; }
+.ask-choice:hover { background: var(--hover); }
+.ask-choice.checked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel2)); }
+.ask-choice input { margin: 3px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+.ask-choice-text { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.ask-choice-label { font-weight: 600; }
 /* the asked question's panel, docked on the composer */
 .composer.docked { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent), 0 2px 12px var(--shadow); }
 .ask-panel { padding: 10px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; max-height: 45vh; overflow: auto; }
 .ask-panel-head { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--wait); }
 .ask-panel-head .ask-message { margin: 0; color: var(--text); font-weight: 600; }
-.ask-steps { display: flex; gap: 4px; }
-.ask-step-number { min-width: 24px; justify-content: center; padding: 1px 6px; font-size: 12px; border-radius: 10px; }
-.ask-step-number[aria-current='step'] { border-color: var(--accent); color: var(--accent); }
 .ask-step-title { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
 .ask-step input[type='number'] { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; width: 12ch; }
 .ask-answer { margin: 0; display: grid; gap: 2px; font-size: 13px; }

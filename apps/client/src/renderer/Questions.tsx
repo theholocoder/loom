@@ -151,23 +151,6 @@ export function useQuestionPanel(item: Question | undefined, onAnswer: (answer: 
         <span className="grow ask-message">{item.message}</span>
         {steps.length > 0 && <span className="muted">{`Question ${flow.at + 1} of ${steps.length}`}</span>}
       </div>
-      {steps.length > 1 && (
-        <div className="ask-steps">
-          {steps.map((s, i) => (
-            <button
-              key={s.main.key}
-              type="button"
-              className="ask-step-number"
-              aria-label={`Question ${i + 1}: ${s.main.title ?? s.main.key}`}
-              aria-current={i === flow.at ? 'step' : undefined}
-              disabled={busy || i > flow.reached}
-              onClick={() => go(i)}
-            >
-              {i + 1}
-            </button>
-          ))}
-        </div>
-      )}
       {step && <StepBody step={step} draft={flow.draft} disabled={busy} onChange={change} />}
       {error && (
         <div className="err" role="alert">
@@ -175,6 +158,10 @@ export function useQuestionPanel(item: Question | undefined, onAnswer: (answer: 
         </div>
       )}
       <div className="opts">
+        <button type="button" disabled={busy} onClick={() => void send(null)}>
+          Dismiss
+        </button>
+        <span className="grow" />
         {flow.at > 0 && (
           <button type="button" disabled={busy} onClick={() => go(flow.at - 1)}>
             Back
@@ -182,10 +169,6 @@ export function useQuestionPanel(item: Question | undefined, onAnswer: (answer: 
         )}
         <button className="primary" type="button" disabled={busy || (step && !canLeave(step, flow.draft))} onClick={() => onward(flow.draft)}>
           {last ? 'Answer' : 'Next'}
-        </button>
-        <span className="grow" />
-        <button type="button" disabled={busy} onClick={() => void send(null)}>
-          Dismiss
         </button>
       </div>
     </div>
@@ -196,9 +179,9 @@ export function useQuestionPanel(item: Question | undefined, onAnswer: (answer: 
       ? {
           placeholder: `${free.description ?? (step.main === free ? 'Type your answer' : 'Type your own answer')}…`,
           send: async (text) => {
-            // One's own answer replaces a choice where there is only one answer.
+            // One's own answer replaces a choice where there is only one answer, and joins the choices otherwise.
             const values: Draft = singleAnswer(step) && step.main !== free ? { [free.key]: text, [step.main.key]: undefined } : { [free.key]: text };
-            change(values, singleAnswer(step));
+            change(values, true);
             return true;
           },
         }
@@ -216,52 +199,42 @@ function StepBody({ step, draft, disabled, onChange }: { step: Step; draft: Draf
   let body: ReactNode;
   switch (main.type) {
     case 'select':
+    case 'boolean': {
+      const options = main.type === 'select' ? main.options : [{ value: true, label: 'Yes' }, { value: false, label: 'No' }];
       body = (
-        <div className="opts">
-          {main.options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className="ask-option"
-              aria-pressed={value === option.value}
+        <div className="ask-choices" role="radiogroup" aria-label={title}>
+          {options.map((option) => (
+            <Choice
+              key={String(option.value)}
+              type="radio"
+              group={id}
+              label={option.label}
+              description={'description' in option ? option.description : undefined}
+              checked={value === option.value}
               disabled={disabled}
-              // A choice replaces an answer of one's own.
-              onClick={() => onChange({ [main.key]: option.value, ...(free ? { [free.key]: undefined } : {}) }, true)}
-            >
-              {option.label}
-              {option.description && <span className="muted"> {option.description}</span>}
-            </button>
+              // A choice replaces an answer of one's own; picked with the pointer, it goes on.
+              onChange={(goOn) => onChange({ [main.key]: option.value, ...(free ? { [free.key]: undefined } : {}) }, goOn)}
+            />
           ))}
         </div>
       );
       break;
-    case 'boolean':
-      body = (
-        <div className="opts">
-          {([true, false] as const).map((yes) => (
-            <button key={String(yes)} type="button" className="ask-option" aria-pressed={value === yes} disabled={disabled} onClick={() => onChange({ [main.key]: yes }, true)}>
-              {yes ? 'Yes' : 'No'}
-            </button>
-          ))}
-        </div>
-      );
-      break;
+    }
     case 'multiselect': {
       const chosen = Array.isArray(value) ? value : [];
       body = (
-        <div className="opts">
+        <div className="ask-choices" role="group" aria-label={title}>
           {main.options.map((option) => (
-            <button
+            <Choice
               key={option.value}
-              type="button"
-              className="ask-option"
-              aria-pressed={chosen.includes(option.value)}
+              type="checkbox"
+              group={id}
+              label={option.label}
+              description={option.description}
+              checked={chosen.includes(option.value)}
               disabled={disabled}
-              onClick={() => onChange({ [main.key]: chosen.includes(option.value) ? chosen.filter((v) => v !== option.value) : [...chosen, option.value] }, false)}
-            >
-              {option.label}
-              {option.description && <span className="muted"> {option.description}</span>}
-            </button>
+              onChange={() => onChange({ [main.key]: chosen.includes(option.value) ? chosen.filter((v) => v !== option.value) : [...chosen, option.value] }, false)}
+            />
           ))}
         </div>
       );
@@ -296,6 +269,44 @@ function StepBody({ step, draft, disabled, onChange }: { step: Step; draft: Draf
       {typeof own === 'string' && own.trim() ? <YourAnswer text={own} /> : free && free !== main && <p className="muted ask-hint">Or type your own answer below.</p>}
     </div>
   );
+}
+
+/**
+ * One choice of a question, as a radio button or a checkbox, with its
+ * description under its label. `onChange` is told to go on when a radio is
+ * picked with the pointer: picked with the keyboard (arrow keys, Space),
+ * it is only selected, so the user can look through the choices.
+ */
+function Choice({ type, group, label, description, checked, disabled, onChange }: { type: 'radio' | 'checkbox'; group: string; label: string; description?: string; checked: boolean; disabled: boolean; onChange: (goOn: boolean) => void }) {
+  const describedBy = useId();
+  return (
+    <label className={`ask-choice${checked ? ' checked' : ''}`}>
+      <input
+        type={type}
+        name={group}
+        aria-label={label}
+        aria-describedby={description ? describedBy : undefined}
+        checked={checked}
+        disabled={disabled}
+        // A radio changes on a click: a pointer's has a `detail` (its click count), one the keyboard makes doesn't.
+        onChange={(e) => onChange(type === 'radio' && pointer(e.nativeEvent))}
+        // Picking the radio already checked changes nothing, but still goes on.
+        onClick={(e) => checked && type === 'radio' && pointer(e.nativeEvent) && onChange(true)}
+      />
+      <span className="ask-choice-text">
+        <span className="ask-choice-label">{label}</span>
+        {description && (
+          <span className="muted" id={describedBy}>
+            {description}
+          </span>
+        )}
+      </span>
+    </label>
+  );
+}
+
+function pointer(event: Event): boolean {
+  return event instanceof MouseEvent && event.detail > 0;
 }
 
 function YourAnswer({ text }: { text: string }) {

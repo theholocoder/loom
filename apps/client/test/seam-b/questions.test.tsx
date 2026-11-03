@@ -52,34 +52,41 @@ function openSession(items: TranscriptItem[], handlers: ConstructorParameters<ty
   const prompt = () => within(composer()).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
   const step = () => within(panel()).getByRole('heading').textContent;
   const click = (name: string | RegExp) => act(async () => fireEvent.click(within(panel()).getByRole('button', { name })));
+  /** Picks a choice with the mouse (a click with a pointer has a `detail`; one from the keyboard doesn't). */
+  const pick = (name: string | RegExp, role: 'radio' | 'checkbox' = 'radio') => act(async () => fireEvent.click(within(panel()).getByRole(role, { name }), { detail: 1 }));
+  const choice = (name: string | RegExp, role: 'radio' | 'checkbox' = 'radio') => within(panel()).getByRole(role, { name }) as HTMLInputElement;
   const type = async (text: string) => {
     fireEvent.change(prompt(), { target: { value: text } });
     await act(async () => fireEvent.keyDown(prompt(), { key: 'Enter' }));
   };
   const answers = () => main.invoked.filter((i) => i.command === 'sessions.answer').map((i) => i.params);
-  return { main, composer, panel, prompt, step, click, type, answers };
+  return { main, composer, panel, prompt, step, click, pick, choice, type, answers };
 }
 
 describe("the agent's questions", () => {
   it('asks its questions one by one, in order, in a panel on the composer', async () => {
-    const { panel, prompt, step, click, answers } = openSession([questions]);
+    const { panel, prompt, step, click, pick, answers } = openSession([questions]);
     expect(panel().className).toContain('question');
     expect(within(panel()).getByText('A few questions')).toBeTruthy();
     expect(within(panel()).getByText('Question 1 of 3')).toBeTruthy();
     expect(step()).toBe('Color');
     expect(within(panel()).getByText('Which color should the button be?')).toBeTruthy();
-    expect(within(panel()).getByText('Like the sky')).toBeTruthy();
+    // Choices are a list, each with its description under it.
+    expect(within(panel()).getAllByRole('radio').map((r) => r.getAttribute('aria-describedby') && document.getElementById(r.getAttribute('aria-describedby')!)?.textContent)).toEqual([null, 'Like the sky']);
     expect(prompt().placeholder).toBe('Type your own answer…');
+    // No question numbers: Dismiss on one side, Back and Next on the other.
+    expect(within(panel()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Dismiss', 'Next']);
     // The conversation keeps a card pointing at the panel.
     expect(within(screen.getByRole('log', { name: 'Conversation' })).getByRole('group', { name: 'Question' }).textContent).toContain('Answer below');
 
     // One answer only: choosing it goes on to the next question.
-    await click(/Blue/);
+    await pick('Blue');
     expect(step()).toBe('Sizes');
     expect(within(panel()).getByText('Question 2 of 3')).toBeTruthy();
     // Several answers: the user goes on with Next.
-    await click('Small');
-    await click('Medium');
+    expect(within(panel()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Dismiss', 'Back', 'Next']);
+    await pick('Small', 'checkbox');
+    await pick('Medium', 'checkbox');
     expect(step()).toBe('Sizes');
     await click('Next');
     expect(step()).toBe('Shipping');
@@ -88,42 +95,41 @@ describe("the agent's questions", () => {
     expect(answers()).toEqual([]);
 
     // Choosing the last answer sends them all.
-    await click('Express');
+    await pick('Express');
     expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0: 'blue', q1: ['s', 'm'], q2: 'exp' } }]);
   });
 
-  it("takes an answer of one's own from the composer, going on where the question has only one answer", async () => {
-    const { step, type, click, answers, prompt } = openSession([questions]);
+  it("takes an answer of one's own from the composer, which goes on to the next question", async () => {
+    const { step, type, pick, answers, prompt } = openSession([questions]);
     await type('Green');
     expect(prompt().value).toBe('');
     expect(step()).toBe('Sizes');
-    // With several answers, one's own joins the choices and the user goes on with Next.
-    await click('Large');
+    // With several answers, one's own joins the choices, and sending it goes on too.
+    await pick('Large', 'checkbox');
     await type('XL');
-    expect(step()).toBe('Sizes');
-    await click('Next');
-    await click('Standard');
+    expect(step()).toBe('Shipping');
+    await pick('Standard');
     expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0_custom: 'Green', q1: ['l'], q1_custom: 'XL', q2: 'std' } }]);
   });
 
   it('goes back to an earlier question to change its answer, keeping the others', async () => {
-    const { panel, step, click, type, answers } = openSession([questions]);
+    const { panel, step, click, pick, choice, type, answers } = openSession([questions]);
     await type('Green');
-    await click('Medium');
+    await pick('Medium', 'checkbox');
     await click('Next');
     expect(step()).toBe('Shipping');
 
     await click('Back');
     expect(step()).toBe('Sizes');
-    expect(within(panel()).getByRole('button', { name: 'Medium' }).getAttribute('aria-pressed')).toBe('true');
-    await click('Question 1: Color');
+    expect(choice('Medium', 'checkbox').checked).toBe(true);
+    await click('Back');
     expect(step()).toBe('Color');
     expect(within(panel()).getByText('Green')).toBeTruthy();
     // A choice replaces the answer of one's own.
-    await click(/Red/);
+    await pick('Red');
     expect(step()).toBe('Sizes');
     await click('Next');
-    await click('Express');
+    await pick('Express');
     expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0: 'red', q1: ['m'], q2: 'exp' } }]);
   });
 
@@ -140,10 +146,10 @@ describe("the agent's questions", () => {
         { type: 'boolean', key: 'confirm', title: 'Run migrations?', required: true },
       ],
     };
-    const { panel, step, click, type, answers, prompt } = openSession([form]);
+    const { panel, step, click, pick, type, answers, prompt } = openSession([form]);
     const next = () => within(panel()).getByRole('button', { name: 'Next' }) as HTMLButtonElement;
     expect(next().disabled).toBe(true);
-    await click('Americas');
+    await pick('Americas', 'checkbox');
     expect(next().disabled).toBe(false);
     await click('Next');
 
@@ -156,7 +162,7 @@ describe("the agent's questions", () => {
     expect(prompt().placeholder).toBe('What changed…');
     await type('Faster invoices');
     expect(step()).toBe('Run migrations?');
-    await click('Yes');
+    await pick('Yes');
     expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { regions: ['us'], replicas: 3, notes: 'Faster invoices', confirm: true } }]);
 
     await click('Dismiss');
@@ -165,12 +171,12 @@ describe("the agent's questions", () => {
 
   it('shows why main refused an answer', async () => {
     const one: TranscriptItem = { kind: 'question', id: 1, message: 'Pick one', state: 'asked', fields: [fields[0]!, fields[1]!] };
-    const { panel, click } = openSession([one], {
+    const { panel, pick } = openSession([one], {
       'sessions.answer': () => {
         throw new Error('The agent is no longer asking this question.');
       },
     });
-    await click(/Red/);
+    await pick('Red');
     expect(within(panel()).getByRole('alert').textContent).toBe('The agent is no longer asking this question.');
   });
 
@@ -213,5 +219,19 @@ describe("trusting a Project's local files", () => {
     act(() => main.publish('transcript', [{ kind: 'user', id: 0, text: 'Add a button' }, { ...trust, state: 'trusted' }], { sessionId: 7 }));
     expect(within(card()).getByText('Trusted')).toBeTruthy();
     expect(within(card()).queryByRole('button')).toBeNull();
+  });
+
+});
+
+describe('choosing with the keyboard', () => {
+  it('selects with the arrow keys without going on, and goes on with Next', async () => {
+    const { step, click, choice, answers } = openSession([questions]);
+    // A keyboard selection clicks the radio with no pointer detail.
+    await act(async () => fireEvent.click(choice('Red')));
+    expect(choice('Red').checked).toBe(true);
+    expect(step()).toBe('Color');
+    await click('Next');
+    expect(step()).toBe('Sizes');
+    expect(answers()).toEqual([]);
   });
 });
