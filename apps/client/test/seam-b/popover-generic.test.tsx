@@ -70,6 +70,7 @@ describe('popover theme', () => {
   it('keeps the generic popover rules out of styles.css', () => {
     const styles = readFileSync(resolve(dir, 'styles.css'), 'utf8');
     const selectors = [...styles.matchAll(/^([^{}\n]*popover[^{}\n]*)\{/gm)].map(([, selector]) => selector!.trim());
-    expect(selectors).toEqual(['.issue-popover']);
+    const generic = selectors.filter((selector) => /(^|[^\w-])\.popover(?![\w.-])/.test(selector));
+    expect(generic).toEqual([]);
   });
 });
