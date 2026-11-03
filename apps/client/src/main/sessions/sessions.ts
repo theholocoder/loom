@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type ArchiveResult, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type ArchiveResult, type DiffFile, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -11,6 +11,7 @@ import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
+import { WorkingCopyDiff } from './diff';
 import { createWorktree, removeWorktree, unsavedWork, worktreeExists, type GitEnvironment } from './working-copies';
 import { capToolOutput } from './tool-output';
 
@@ -306,7 +307,7 @@ export class Sessions {
    * which the user may have switched.
    */
   subscribeTranscript(id: number, listener: (items: TranscriptItem[]) => void): () => void {
-    if (this.get(id).status !== 'archived') void this.lookUpBranch(id);
+    if (this.get(id).status !== 'archived') void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
     const loaded = this.transcripts.get(id);
     if (loaded) return loaded.subscribe(listener);
     let unsubscribe: (() => void) | undefined;
@@ -409,10 +410,10 @@ export class Sessions {
       case 'run-settled':
         this.endRun(id);
         this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
-        return void this.lookUpBranch(id);
+        return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
       case 'run-failed':
         this.fail(id, event.error);
-        return void this.lookUpBranch(id);
+        return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
       case 'closed':
         this.live.delete(id);
         return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
@@ -440,6 +441,53 @@ export class Sessions {
     if (!branch || this.shuttingDown || branch === this.get(id).branch) return;
     this.update(id, { branch });
     this.save(id, { branch });
+  }
+
+  /** Works out the Session's diff, and its rail badge with it. */
+  async diff(id: number, uncommittedOnly = false): Promise<DiffSummary> {
+    const diff = await this.diffOf(id);
+    if (!diff) return { available: false, reason: 'No diff available' };
+    const summary = await diff.summary(uncommittedOnly);
+    if (this.get(id).status !== 'archived') void this.lookUpDiffStat(id);
+    return summary;
+  }
+
+  /** One file of the Session's diff. */
+  async diffFile(id: number, file: DiffFile, uncommittedOnly = false): Promise<FileDiff> {
+    const diff = await this.diffOf(id);
+    if (!diff) throw new Error('No diff available');
+    return diff.file(file, uncommittedOnly);
+  }
+
+  /**
+   * The Session's working copy to diff; for an archived worktree Session, its
+   * branch in the Project's checkout while it still exists. None for an
+   * archived checkout Session or a missing worktree.
+   */
+  private async diffOf(id: number): Promise<WorkingCopyDiff | undefined> {
+    const session = this.get(id);
+    const environment = this.environmentOf(session);
+    if (session.status !== 'archived') return session.worktreeMissing ? undefined : new WorkingCopyDiff(environment, { repo: session.workingCopy.path });
+    if (session.workingCopy.kind !== 'worktree' || !session.branch) return undefined;
+    const checkout = this.options.project(session.projectId)?.checkout.path;
+    if (!checkout) return undefined;
+    const found = await exec(environment.request, 'git', ['-C', checkout, 'rev-parse', '--verify', '--quiet', `refs/heads/${session.branch}`], GIT_TIMEOUT_MS);
+    return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }) : undefined;
+  }
+
+  /** Records the rail badge; keeps the last one known if git can't say. */
+  private async lookUpDiffStat(id: number): Promise<void> {
+    try {
+      const session = this.get(id);
+      if (session.status === 'archived' || session.worktreeMissing) return;
+      const diffStat = await new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path }).stat();
+      if (this.shuttingDown || this.get(id).status === 'archived') return;
+      const known = this.get(id).diffStat;
+      if (known && known.files === diffStat.files && known.added === diffStat.added && known.removed === diffStat.removed) return;
+      this.update(id, { diffStat });
+    } catch {
+      return;
+    }
   }
 
   /** Flags or clears a worktree Session's worktree as missing; resolves with whether it exists. */

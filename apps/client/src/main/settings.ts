@@ -19,6 +19,9 @@ export class Settings {
     if (typeof stored.worktreeRoot === 'string') current.worktreeRoot = stored.worktreeRoot;
     if (typeof stored.editorCommand === 'string') current.editorCommand = stored.editorCommand;
     if (typeof stored.terminalCommand === 'string') current.terminalCommand = stored.terminalCommand;
+    if (Array.isArray(stored.diffCollapsedPatterns) && stored.diffCollapsedPatterns.every((p) => typeof p === 'string')) {
+      current.diffCollapsedPatterns = stored.diffCollapsedPatterns as string[];
+    }
     // A value Loom no longer offers falls back to the default.
     if (isTheme(stored.theme)) current.theme = stored.theme;
     if (isUiFont(stored.uiFont)) current.uiFont = stored.uiFont;
@@ -42,6 +45,11 @@ export class Settings {
 
   async setTerminalCommand(terminalCommand: string): Promise<SettingsValues> {
     return this.set('terminalCommand', checkCommand(terminalCommand));
+  }
+
+  async setDiffCollapsedPatterns(patterns: string[]): Promise<SettingsValues> {
+    if (!Array.isArray(patterns) || !patterns.every((p) => typeof p === 'string')) throw new Error('The collapsed-file patterns must be a list of text.');
+    return this.set('diffCollapsedPatterns', patterns.map((p) => p.trim()).filter(Boolean));
   }
 
   /** Sets the theme or fonts given; rejects any not in Loom's lists. */

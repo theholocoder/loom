@@ -214,6 +214,12 @@ export interface Session {
    * the Session is opened and when its Environment connects.
    */
   worktreeMissing?: boolean;
+  /**
+   * What its branch changed against the merge-base with its start base, for
+   * the diff rail's badge: worked out after each turn and when the Session is
+   * opened, kept in memory only. Absent until known.
+   */
+  diffStat?: DiffStat;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
@@ -227,6 +233,44 @@ export interface Session {
   createdAt: number;
   /** Clock time its status last changed. */
   updatedAt: number;
+}
+
+/** A diff's size: files changed, lines added and removed. Untracked files count as files of added lines. */
+export interface DiffStat {
+  files: number;
+  added: number;
+  removed: number;
+}
+
+/** How a file in a Session's diff changed: committed on its branch, changed since its last commit, or new to git. */
+export type DiffFileStatus = 'committed' | 'modified' | 'untracked';
+
+/** One file of a Session's diff. */
+export interface DiffFile {
+  /** Its path in the working copy, with `/`. */
+  path: string;
+  /** Where it was before a rename. */
+  oldPath?: string;
+  status: DiffFileStatus;
+  added: number;
+  removed: number;
+  binary: boolean;
+}
+
+/**
+ * A Session's diff: its working tree against the merge-base of HEAD and its
+ * start base (`origin/<default branch>`, as the local ref has it), or against
+ * HEAD for uncommitted changes only. An archived worktree Session's is its
+ * branch's commits, read-only.
+ */
+export type DiffSummary =
+  | { available: false; reason: string }
+  | { available: true; readOnly: boolean; base: string; files: DiffFile[] };
+
+/** One file's unified diff text, cut short past a size limit. */
+export interface FileDiff {
+  text: string;
+  truncated: boolean;
 }
 
 /** Loom's own settings, the same for every Project. */
@@ -249,9 +293,29 @@ export interface Settings extends Appearance {
    * until the user sets it.
    */
   terminalCommand: string;
+  /** Files the diff panel shows collapsed, as glob patterns on a path or file name (`*` matches within a folder). */
+  diffCollapsedPatterns: string[];
 }
 
-export const DEFAULT_SETTINGS: Settings = { worktreeRoot: '~/loom/worktrees', editorCommand: 'code', terminalCommand: '', ...DEFAULT_APPEARANCE };
+export const DEFAULT_DIFF_COLLAPSED_PATTERNS = [
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'yarn.lock',
+  'Cargo.lock',
+  'go.sum',
+  'poetry.lock',
+  'composer.lock',
+  'Gemfile.lock',
+  '*.lock',
+];
+
+export const DEFAULT_SETTINGS: Settings = {
+  worktreeRoot: '~/loom/worktrees',
+  editorCommand: 'code',
+  terminalCommand: '',
+  diffCollapsedPatterns: DEFAULT_DIFF_COLLAPSED_PATTERNS,
+  ...DEFAULT_APPEARANCE,
+};
 
 export type ToolStatus = 'running' | 'completed' | 'failed';
 
@@ -344,6 +408,8 @@ export interface Commands {
   'settings.setEditorCommand': { params: { editorCommand: string }; result: Settings };
   /** Sets the terminal command; empty turns "Open in terminal" off. Rejects an unclosed quote. */
   'settings.setTerminalCommand': { params: { terminalCommand: string }; result: Settings };
+  /** Sets which files the diff panel shows collapsed; blank patterns are dropped. */
+  'settings.setDiffCollapsedPatterns': { params: { patterns: string[] }; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
   'sessions.list': { params: void; result: Session[] };
@@ -395,6 +461,14 @@ export interface Commands {
    * editor isn't on the Environment's PATH.
    */
   'sessions.openInEditor': { params: { id: number; file?: string }; result: void };
+  /**
+   * Works out the Session's diff (and its rail badge) again, in its
+   * Environment. Never fetches. Not available for an archived checkout
+   * Session, or an archived worktree Session whose branch is gone.
+   */
+  'sessions.diff': { params: { id: number; uncommittedOnly?: boolean }; result: DiffSummary };
+  /** One file of the Session's diff, as `sessions.diff` listed it. */
+  'sessions.diffFile': { params: { id: number; file: DiffFile; uncommittedOnly?: boolean }; result: FileDiff };
   /**
    * Runs the terminal command in the Session's working copy, in its
    * Environment. Rejects when no terminal command is set.
