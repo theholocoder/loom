@@ -59,4 +59,14 @@ export const migrations: Migration[] = [
     await db.schema.alterTable('sessions').addColumn('merge_request_number', 'integer').execute();
     await db.schema.alterTable('sessions').addColumn('merge_request_url', 'text').execute();
   },
+  async (db) => {
+    await db.schema
+      .createTable('events')
+      .addColumn('session_id', 'integer', (c) => c.notNull().references('sessions.id').onDelete('cascade'))
+      .addColumn('seq', 'integer', (c) => c.notNull())
+      .addColumn('kind', 'text', (c) => c.notNull())
+      .addColumn('data', 'text', (c) => c.notNull())
+      .addPrimaryKeyConstraint('events_pk', ['session_id', 'seq'])
+      .execute();
+  },
 ];

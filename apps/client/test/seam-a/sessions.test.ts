@@ -400,3 +400,25 @@ async function eventually<T>(check: () => T | undefined): Promise<T> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
+
+describe("a Session's transcript", () => {
+  it('is replayed from the database when main starts again', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Hello', ', world'] }, { error: 'provider overloaded' }]);
+    const userDataDir = tempDir('loom-transcript-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Say hello' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await main.api.invoke('sessions.send', { id, prompt: 'Again' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.waitingReason === 'error'));
+    await main.close();
+
+    const again = await started(machine, userDataDir);
+
+    expect(await waitFor(again.api, 'transcript', (items) => items.length > 0, { sessionId: id })).toEqual([
+      { kind: 'user', id: expect.any(Number), text: 'Say hello' },
+      { kind: 'agent', id: expect.any(Number), text: 'Hello, world', streaming: false },
+      { kind: 'user', id: expect.any(Number), text: 'Again' },
+      { kind: 'error', id: expect.any(Number), message: 'provider overloaded' },
+    ]);
+  });
+});
