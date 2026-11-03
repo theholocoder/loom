@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, RotateCw, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { OPENCODE_NAME, type Issue, type Session, type WaitingReason, type WorkingCopyKind } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
@@ -156,6 +156,11 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
   const working = session.status === 'working';
   // The conversation lives only while the Client runs; the error is stored.
   const unshownError = session.waitingReason === 'error' && session.error && !items.some((i) => i.kind === 'error') ? session.error : undefined;
+  const environment = useTopic('environments')?.find((e) => e.id === project?.checkout.environmentId);
+  // Disconnected: the bridge died and is about to be started again.
+  const starting = working && (environment?.state === 'starting' || environment?.state === 'disconnected');
+  // The last prompt went unanswered, so it can be sent again.
+  const retryable = session.status === 'waiting' && session.waitingReason === 'error' && items.at(-2)?.kind === 'user' && items.at(-1)?.kind === 'error' && !session.worktreeMissing;
 
   const end = useRef<HTMLDivElement>(null);
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
@@ -177,6 +182,15 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
     } catch (e) {
       setError((e as Error).message);
       return false;
+    }
+  };
+
+  const retry = async () => {
+    setError(undefined);
+    try {
+      await api.invoke('sessions.retry', { id: session.id });
+    } catch (e) {
+      setError((e as Error).message);
     }
   };
 
@@ -255,10 +269,22 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
               </div>
             </div>
           ) : (
-            <ErrorCard key={item.id} message={item.message} />
+            <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
           ),
         )}
         {unshownError && <ErrorCard message={unshownError} />}
+        {starting && environment && (
+          <div className="tools">
+            <div className="tool" role="status">
+              <div className="tool-head">
+                <span className="spin">
+                  <LoaderCircle className="sm" />
+                </span>
+                <span className="grow">{`Starting ${environment.label}…`}</span>
+              </div>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="err" role="alert">
             {error}
@@ -285,15 +311,23 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
   );
 }
 
-/** A run that failed, with the agent's message. */
-function ErrorCard({ message }: { message: string }) {
+/** A run that failed, with the agent's message, and Retry when `onRetry` is given. */
+function ErrorCard({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="tools">
-      <div className="tool failed" role="alert">
+      <div className="tool failed">
         <div className="tool-head">
           <OctagonX className="sm" />
           <span className="name">error</span>
-          <span className="grow">{message}</span>
+          <span className="grow" role="alert">
+            {message}
+          </span>
+          {onRetry && (
+            <button type="button" onClick={onRetry}>
+              <RotateCw className="sm" />
+              Retry
+            </button>
+          )}
         </div>
       </div>
     </div>
