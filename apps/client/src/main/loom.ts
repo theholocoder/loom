@@ -20,6 +20,8 @@ export interface LoomOptions {
   appVersion: string;
   bridgePath: string;
   clock: Clock;
+  /** How many untracked files a diff counts lines for (default: the diff service's). */
+  maxUntrackedCounted?: number;
   spawnBridge?: SpawnBridge;
   /** Shows the folder picker; resolves to null if the user cancels. */
   chooseFolder?: () => Promise<string | null>;
@@ -146,6 +148,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     environment: (id) => (id === native.status.id ? nativeForSessions : undefined),
     worktreeRoot: () => settingsService.value.worktreeRoot,
     onChange: (list) => sessions.set(list),
+    maxUntrackedCounted: options.maxUntrackedCounted,
   });
   sessions.set(sessionService.list());
 

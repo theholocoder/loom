@@ -11,7 +11,7 @@ const session = (id: number, check: (s: Session) => boolean) => (sessions: Sessi
   return !!found && check(found);
 };
 
-async function started(workingCopy: 'worktree' | 'checkout' = 'worktree', turns = 1, defaultBranch = 'main') {
+async function started(workingCopy: 'worktree' | 'checkout' = 'worktree', turns = 1, defaultBranch = 'main', maxUntrackedCounted?: number) {
   const machine = tempMachine();
   machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: Array.from({ length: turns }, () => ({ chunks: ['Done.'] })) } });
   const origin = machine.gitOrigin('billing-api', defaultBranch);
@@ -20,7 +20,7 @@ async function started(workingCopy: 'worktree' | 'checkout' = 'worktree', turns 
   machine.commit(checkout, 'app.js', 'one\ntwo\nthree\n');
   git(checkout, 'push', '--quiet', 'origin', `HEAD:${defaultBranch}`);
   git(checkout, 'fetch', '--quiet', 'origin');
-  const main = await startMain({ machine });
+  const main = await startMain({ machine, maxUntrackedCounted });
   await waitFor(main.api, 'environments', ready);
   const project = await main.api.invoke('projects.link', { path: checkout });
   const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy, prompt: 'Fix it' });
@@ -117,10 +117,10 @@ describe("a Session's diff", () => {
   });
 
   it("doesn't read big untracked files, and says so for those past the counting limit", async () => {
-    const { main, id, path } = await started();
+    const { main, id, path } = await started('worktree', 1, 'main', 3);
     writeFileSync(join(path, 'big.log'), Buffer.alloc(1024 * 1024 + 10, 'a\n'));
     mkdirSync(join(path, 'many'));
-    for (let i = 0; i < 202; i++) writeFileSync(join(path, 'many', `f${String(i).padStart(3, '0')}.txt`), 'x\n');
+    for (let i = 0; i < 5; i++) writeFileSync(join(path, 'many', `f${String(i).padStart(3, '0')}.txt`), 'x\n');
 
     const summary = await main.api.invoke('sessions.diff', { id });
     if (!summary.available) throw new Error(summary.reason);

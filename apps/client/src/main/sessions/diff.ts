@@ -11,8 +11,8 @@ import type { GitEnvironment } from './working-copies';
 export const MAX_FILE_DIFF_CHARS = 512 * 1024;
 /** A file with more changed lines than this has its text left out, so it isn't read whole. */
 const MAX_FILE_DIFF_LINES = 20_000;
-/** Untracked files beyond this many count as files but not lines. */
-const MAX_UNTRACKED_COUNTED = 200;
+/** Untracked files beyond this many count as files but not lines (each costs a git process, which is slow on Windows/WSL). */
+const MAX_UNTRACKED_COUNTED = 50;
 
 /** What git compares in a working copy: the working tree against `from`, or `from` against `to`. */
 export interface DiffTarget {
@@ -33,6 +33,7 @@ export class WorkingCopyDiff {
   constructor(
     private readonly environment: GitEnvironment,
     private readonly target: DiffTarget,
+    private readonly maxUntrackedCounted = MAX_UNTRACKED_COUNTED,
   ) {}
 
   /** Lists the changed files; `uncommittedOnly` compares the working tree with HEAD instead. */
@@ -117,7 +118,7 @@ export class WorkingCopyDiff {
   /** Untracked files git doesn't ignore, as additions. */
   private async untracked(): Promise<DiffFile[]> {
     const paths = splitZ((await this.gitOrThrow(['ls-files', '-z', '--others', '--exclude-standard'])).stdout);
-    const files: DiffFile[] = paths.map((path, index) => ({ path, status: 'untracked', added: 0, removed: 0, binary: false, ...(index < MAX_UNTRACKED_COUNTED ? {} : { uncounted: true }) }));
+    const files: DiffFile[] = paths.map((path, index) => ({ path, status: 'untracked', added: 0, removed: 0, binary: false, ...(index < this.maxUntrackedCounted ? {} : { uncounted: true }) }));
     const counted = files.filter((f) => !f.uncounted);
     let next = 0;
     const worker = async () => {

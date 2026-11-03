@@ -25,6 +25,8 @@ export interface SessionsOptions {
   /** The worktree root setting. */
   worktreeRoot: () => string;
   onChange: (sessions: Session[]) => void;
+  /** How many untracked files a diff counts lines for; defaults to the diff service's limit. */
+  maxUntrackedCounted?: number;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -480,12 +482,12 @@ export class Sessions {
   private async diffOf(id: number): Promise<WorkingCopyDiff | undefined> {
     const session = this.get(id);
     const environment = this.environmentOf(session);
-    if (session.status !== 'archived') return session.worktreeMissing ? undefined : new WorkingCopyDiff(environment, { repo: session.workingCopy.path });
+    if (session.status !== 'archived') return session.worktreeMissing ? undefined : new WorkingCopyDiff(environment, { repo: session.workingCopy.path }, this.options.maxUntrackedCounted);
     if (session.workingCopy.kind !== 'worktree' || !session.branch) return undefined;
     const checkout = this.options.project(session.projectId)?.checkout.path;
     if (!checkout) return undefined;
     const found = await exec(environment.request, 'git', ['-C', checkout, 'rev-parse', '--verify', '--quiet', `refs/heads/${session.branch}`], GIT_TIMEOUT_MS);
-    return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }) : undefined;
+    return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }, this.options.maxUntrackedCounted) : undefined;
   }
 
   /** Records the rail badge; keeps the last one known if git can't say. */
@@ -493,7 +495,7 @@ export class Sessions {
     try {
       const session = this.get(id);
       if (session.status === 'archived' || session.worktreeMissing) return;
-      const diff = new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path });
+      const diff = new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path }, this.options.maxUntrackedCounted);
       const summary = await diff.summary();
       this.diffSummaries.set(`${id}:false`, summary);
       this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
