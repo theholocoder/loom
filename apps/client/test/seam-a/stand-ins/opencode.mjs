@@ -73,6 +73,10 @@ function acp() {
     } else if (method === 'session/prompt') {
       const turn = turns[prompts++] ?? { chunks: [] };
       for (const text of turn.chunks ?? []) {
+        if (typeof text === 'object') {
+          await released(text.hold);
+          continue;
+        }
         send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } } });
       }
       if (turn.hold) await released(turn.hold);

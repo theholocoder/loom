@@ -1,14 +1,15 @@
 // The Session service: every Session, its status, and its conversation with
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
+import type { Transaction } from 'kysely';
 import { FORGE_CLI, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
-import type { Clock } from '../clock';
+import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { LoomDatabase } from '../storage/database';
-import type { SessionsTable } from '../storage/schema';
+import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { createWorktree, type GitEnvironment } from './working-copies';
 
@@ -29,16 +30,27 @@ export interface SessionEnvironment extends AgentEnvironment, GitEnvironment {}
 
 const MAX_TITLE_LENGTH = 80;
 
+/** How often streaming agent text is checkpointed to the database. */
+export const CHECKPOINT_MS = 1000;
+
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
+type Write = (trx: Transaction<Schema>) => Promise<unknown>;
+/** A transcript item before it has its place in the transcript. */
+type NewItem = TranscriptItem extends infer I ? (I extends TranscriptItem ? Omit<I, 'id'> : never) : never;
 
 export class Sessions {
   private sessions = new Map<number, Session>();
-  /** Conversations, kept while the Client runs. */
+  /** Conversations read from the database or started since, by Session. */
   private transcripts = new Map<number, Topic<TranscriptItem[]>>();
+  /** Conversations being read from the database. */
+  private loading = new Map<number, Promise<Topic<TranscriptItem[]>>>();
+  /** The pending checkpoint of each Session's streaming agent text. */
+  private checkpoints = new Map<number, TimerHandle>();
   /** The agent conversation of each Session whose agent process is running. */
   private live = new Map<number, AgentSession>();
-  private nextItemId = 1;
-  /** Writes of status changes, one after another so they land in order. */
+  /** Writes made in this tick, committed together in one transaction. */
+  private pending: Write[] = [];
+  /** Transactions, one after another so they land in order. */
   private saving: Promise<void> = Promise.resolve();
   private shuttingDown = false;
   /** Worktrees being made, by Project, one after another so names can't race. */
@@ -49,16 +61,19 @@ export class Sessions {
   /**
    * The Session service, with the Sessions in the database. A Session that
    * was Working when the Client last stopped has lost its run: it is Waiting
-   * as interrupted.
+   * as interrupted, and its agent's last text as far as it was saved.
    */
   static async load(options: SessionsOptions): Promise<Sessions> {
     const sessions = new Sessions(options);
     const rows = await options.db.selectFrom('sessions').selectAll().execute();
     for (const row of rows) sessions.sessions.set(row.id, fromRow(row));
     for (const session of sessions.list()) {
-      if (session.status === 'working') sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
+      if (session.status !== 'working') continue;
+      await sessions.loadTranscript(session.id);
+      sessions.endAgentText(session.id);
+      sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
     }
-    await sessions.saving;
+    await sessions.flush();
     return sessions;
   }
 
@@ -110,7 +125,8 @@ export class Sessions {
     };
     const { id } = await this.options.db.insertInto('sessions').values(values).returning('id').executeTakeFirstOrThrow();
     this.sessions.set(id, fromRow({ id, ...values }));
-    this.addItem(id, { kind: 'user', id: this.nextItemId++, text });
+    this.transcripts.set(id, new Topic<TranscriptItem[]>([]));
+    this.addItem(id, { kind: 'user', text });
     this.publish();
     void this.lookUpBranch(id);
     void this.run(id, text);
@@ -118,14 +134,16 @@ export class Sessions {
   }
 
   async send({ id, prompt }: { id: number; prompt: string }): Promise<void> {
-    const session = this.get(id);
     const text = promptText(prompt);
+    this.get(id);
+    await this.loadTranscript(id);
+    const session = this.get(id);
     if (session.status === 'working') throw new Error('The agent is still working on this Session.');
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (!this.live.has(id) && session.agentSessionId) {
       throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
     }
-    this.addItem(id, { kind: 'user', id: this.nextItemId++, text });
+    this.addItem(id, { kind: 'user', text });
     this.setStatus(id, { status: 'working' });
     void this.run(id, text);
   }
@@ -145,6 +163,9 @@ export class Sessions {
 
   /** Archives the Session and stops its agent; its checkout is left as it is. */
   async archive({ id }: { id: number }): Promise<void> {
+    if (this.get(id).status === 'archived') return;
+    await this.loadTranscript(id);
+    // It may have been archived while its transcript was being read.
     if (this.get(id).status === 'archived') return;
     this.endAgentText(id);
     this.setStatus(id, { status: 'archived' });
@@ -171,21 +192,37 @@ export class Sessions {
   }
 
   /**
-   * Calls `listener` with the Session's conversation now and as it changes.
-   * Opening it also reads its branch again, which the user may have switched.
+   * Calls `listener` with the Session's conversation, replayed from the
+   * database, and then as it changes. Opening it also reads its branch again,
+   * which the user may have switched.
    */
   subscribeTranscript(id: number, listener: (items: TranscriptItem[]) => void): () => void {
     if (this.get(id).status !== 'archived') void this.lookUpBranch(id);
-    return this.transcript(id).subscribe(listener);
+    const loaded = this.transcripts.get(id);
+    if (loaded) return loaded.subscribe(listener);
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    this.loadTranscript(id).then(
+      (topic) => {
+        if (!cancelled) unsubscribe = topic.subscribe(listener);
+      },
+      (error: unknown) => console.error(`could not read Session ${id}'s transcript:`, error),
+    );
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }
 
   /**
    * Stops reacting to agents, whose processes end with their Environment,
-   * and waits for status changes to be written.
+   * and waits for status changes and transcripts, streaming text included,
+   * to be written.
    */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
-    await this.saving;
+    for (const id of [...this.checkpoints.keys()]) this.checkpoint(id);
+    await this.flush();
   }
 
   private async run(id: number, text: string): Promise<void> {
@@ -298,37 +335,97 @@ export class Sessions {
   private fail(id: number, error: string): void {
     if (this.get(id).status !== 'working') return;
     this.endAgentText(id);
-    this.addItem(id, { kind: 'error', id: this.nextItemId++, message: error });
+    this.addItem(id, { kind: 'error', message: error });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });
   }
 
+  /**
+   * Streaming text stays in memory, written about once a second, so a crash
+   * loses at most that much of it.
+   */
   private appendAgentText(id: number, text: string): void {
     const items = this.transcript(id).value;
     const last = items.at(-1);
     if (last?.kind === 'agent' && last.streaming) {
       this.transcript(id).set([...items.slice(0, -1), { ...last, text: last.text + text }]);
+      if (!this.checkpoints.has(id)) this.checkpoints.set(id, this.options.clock.setTimeout(() => this.checkpoint(id), CHECKPOINT_MS));
     } else {
-      this.addItem(id, { kind: 'agent', id: this.nextItemId++, text, streaming: true });
+      this.addItem(id, { kind: 'agent', text, streaming: true });
     }
   }
 
+  /** Writes the Session's streaming agent text as it is now. */
+  private checkpoint(id: number): void {
+    this.cancelCheckpoint(id);
+    const last = this.transcript(id).value.at(-1);
+    if (last?.kind === 'agent' && last.streaming) this.writeItem(id, last);
+  }
+
+  private cancelCheckpoint(id: number): void {
+    const handle = this.checkpoints.get(id);
+    if (handle === undefined) return;
+    this.options.clock.clearTimeout(handle);
+    this.checkpoints.delete(id);
+  }
+
+  /** Finishes the Session's streaming agent text, if any, and writes it. */
   private endAgentText(id: number): void {
     const items = this.transcript(id).value;
     const last = items.at(-1);
-    if (last?.kind === 'agent' && last.streaming) this.transcript(id).set([...items.slice(0, -1), { ...last, streaming: false }]);
+    if (last?.kind !== 'agent' || !last.streaming) return;
+    this.cancelCheckpoint(id);
+    const ended = { ...last, streaming: false };
+    this.transcript(id).set([...items.slice(0, -1), ended]);
+    this.writeItem(id, ended);
   }
 
-  private addItem(id: number, item: TranscriptItem): void {
-    this.transcript(id).set([...this.transcript(id).value, item]);
+  /** Appends an event to the Session's transcript and writes it; its id is its place there. */
+  private addItem(id: number, item: NewItem): void {
+    const items = this.transcript(id).value;
+    const added = { ...item, id: items.length } as TranscriptItem;
+    this.transcript(id).set([...items, added]);
+    this.writeItem(id, added);
   }
 
+  private writeItem(id: number, { id: seq, kind, ...data }: TranscriptItem): void {
+    const row: EventsTable = { session_id: id, seq, kind, data: JSON.stringify(data) };
+    this.write((trx) =>
+      trx
+        .insertInto('events')
+        .values(row)
+        .onConflict((oc) => oc.columns(['session_id', 'seq']).doUpdateSet({ kind: row.kind, data: row.data }))
+        .execute(),
+    );
+  }
+
+  /** The conversation of a Session whose transcript has been read. */
   private transcript(id: number): Topic<TranscriptItem[]> {
-    let topic = this.transcripts.get(id);
-    if (!topic) {
-      topic = new Topic<TranscriptItem[]>([]);
-      this.transcripts.set(id, topic);
-    }
+    const topic = this.transcripts.get(id);
+    if (!topic) throw new Error(`Session ${id}'s transcript hasn't been read`);
     return topic;
+  }
+
+  /** Reads the Session's transcript from the database, once. */
+  private loadTranscript(id: number): Promise<Topic<TranscriptItem[]>> {
+    const loaded = this.transcripts.get(id);
+    if (loaded) return Promise.resolve(loaded);
+    let loading = this.loading.get(id);
+    if (!loading) {
+      loading = this.options.db
+        .selectFrom('events')
+        .selectAll()
+        .where('session_id', '=', id)
+        .orderBy('seq')
+        .execute()
+        .then((rows) => {
+          const topic = new Topic(rows.map(itemOf));
+          this.transcripts.set(id, topic);
+          return topic;
+        })
+        .finally(() => this.loading.delete(id));
+      this.loading.set(id, loading);
+    }
+    return loading;
   }
 
   /** Changes the Session's status. Going Waiting brings news for the user; anything else means they've seen it. */
@@ -345,11 +442,35 @@ export class Sessions {
   }
 
   private save(id: number, change: Partial<Omit<SessionsTable, 'id'>>): void {
+    this.write((trx) => trx.updateTable('sessions').set(change).where('id', '=', id).execute());
+  }
+
+  /**
+   * Queues a write. Writes made in the same tick, such as a status change and
+   * the events that caused it, are committed in one transaction.
+   */
+  private write(write: Write): void {
+    this.pending.push(write);
+    if (this.pending.length === 1) queueMicrotask(() => this.commit());
+  }
+
+  private commit(): void {
+    const writes = this.pending;
+    if (!writes.length) return;
+    this.pending = [];
     this.saving = this.saving
-      .then(async () => {
-        await this.options.db.updateTable('sessions').set(change).where('id', '=', id).execute();
-      })
-      .catch((error: unknown) => console.error(`could not save Session ${id}:`, error));
+      .then(() =>
+        this.options.db.transaction().execute(async (trx) => {
+          for (const write of writes) await write(trx);
+        }),
+      )
+      .catch((error: unknown) => console.error('could not save Sessions:', error));
+  }
+
+  /** Commits the pending writes and waits for every write so far. */
+  private async flush(): Promise<void> {
+    this.commit();
+    await this.saving;
   }
 
   private get(id: number): Session {
@@ -411,6 +532,10 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+}
+
+function itemOf(row: EventsTable): TranscriptItem {
+  return { ...(JSON.parse(row.data) as object), kind: row.kind, id: row.seq } as TranscriptItem;
 }
 
 function linkOf(number: number | null, url: string | null): ForgeLink | undefined {

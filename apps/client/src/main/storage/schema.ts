@@ -1,6 +1,6 @@
 // The database's typed schema, as of the latest migration.
 import type { Generated } from 'kysely';
-import type { SessionStatus, WaitingReason, WorkingCopyKind } from '../../shared/api';
+import type { SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
 
 export interface SettingsTable {
   key: string;
@@ -51,9 +51,20 @@ export interface SessionsTable {
   updated_at: number;
 }
 
+/** A Session's transcript: its normalized events, in order. */
+export interface EventsTable {
+  session_id: number;
+  /** The event's position in its Session's transcript, from 0. */
+  seq: number;
+  kind: TranscriptItem['kind'];
+  /** The event's fields but its kind, JSON-encoded. */
+  data: string;
+}
+
 export interface Schema {
   settings: SettingsTable;
   projects: ProjectsTable;
   checkouts: CheckoutsTable;
   sessions: SessionsTable;
+  events: EventsTable;
 }
