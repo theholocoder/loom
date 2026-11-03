@@ -323,7 +323,7 @@ export class Sessions {
     this.save(id, { branch });
   }
 
-  /** Flags or clears a worktree Session's worktree as missing; false if it is. */
+  /** Flags or clears a worktree Session's worktree as missing; resolves with whether it exists. */
   private async lookUpWorktree(id: number): Promise<boolean> {
     const session = this.get(id);
     if (session.workingCopy.kind !== 'worktree') return true;
