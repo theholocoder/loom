@@ -10,6 +10,8 @@ export type SpawnBridge = (command: string, args: string[]) => ChildProcess;
 export const HANDSHAKE_TIMEOUT_MS = 20_000;
 export const PING_INTERVAL_MS = 30_000;
 export const PING_TIMEOUT_MS = 10_000;
+/** How long to wait before each restart of a bridge that died; after the last, the Environment is failed. */
+export const RESTART_BACKOFF_MS = [1_000, 5_000, 30_000];
 /** Resolving the shell environment runs the shell twice at most, 5 s each. */
 export const SHELL_ENVIRONMENT_TIMEOUT_MS = 15_000;
 /** The bridge protocol version this Client speaks. */
@@ -33,6 +35,11 @@ export class Environment {
   private pingTimer: TimerHandle | undefined;
   private stopped = false;
   private detecting: Promise<void> | undefined;
+  private child: ChildProcess | undefined;
+  private restartTimer: TimerHandle | undefined;
+  /** Restarts tried since the bridge last connected. */
+  private restarts = 0;
+  private waiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
 
   constructor(private readonly options: EnvironmentOptions) {
     this.current = { id: options.id, label: options.label, state: 'starting' };
@@ -42,24 +49,51 @@ export class Environment {
     return this.current;
   }
 
-  async start(): Promise<void> {
+  /** Starts the bridge. A bridge that fails to start leaves the Environment failed. */
+  start(): Promise<void> {
+    return this.connect();
+  }
+
+  /**
+   * Starts a failed Environment's bridge again, as Retry does; nothing
+   * happens unless it is failed.
+   */
+  async restart(): Promise<void> {
+    if (this.current.state !== 'failed' || this.stopped) return;
+    this.restarts = 0;
+    await this.connect();
+  }
+
+  /**
+   * Resolves once the Environment is connected, waiting while its bridge
+   * starts or restarts; rejects if it fails to start.
+   */
+  ready(): Promise<void> {
+    if (this.current.state === 'connected') return Promise.resolve();
+    if (this.current.state === 'failed' || this.stopped) return Promise.reject(this.failure());
+    return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
+  }
+
+  private async connect(): Promise<void> {
     const { clock } = this.options;
+    if (this.current.state !== 'starting') this.update({ state: 'starting' });
     let child: ChildProcess;
     try {
       child = this.options.spawnBridge(this.options.bridgePath, []);
     } catch (error) {
-      this.update({ state: 'failed', error: (error as Error).message });
+      this.startFailed((error as Error).message);
       return;
     }
     const connection = new BridgeConnection(child, clock);
     this.connection = connection;
+    this.child = child;
     connection.onClose((reason) => {
+      // A bridge that dies while starting fails its handshake, handled below.
+      if (this.connection !== connection || this.stopped) return;
+      if (this.current.state !== 'connected' && this.current.state !== 'unresponsive') return;
       this.cancelPing();
-      if (this.current.state === 'starting' || this.current.state === 'failed') {
-        this.update({ state: 'failed', error: reason.message });
-      } else {
-        this.update({ state: 'disconnected', error: reason.message });
-      }
+      this.update({ state: 'disconnected', error: reason.message });
+      this.scheduleRestart();
     });
     try {
       const bridge = await connection.request<BridgeInfo>('handshake', HANDSHAKE_TIMEOUT_MS);
@@ -68,11 +102,13 @@ export class Environment {
           `loom-bridge ${bridge.version} (protocol ${bridge.protocolVersion}) does not match Loom ${this.options.appVersion} (protocol ${PROTOCOL_VERSION})`,
         );
       }
+      if (this.stopped) return;
+      this.restarts = 0;
       this.update({ state: 'connected', bridge, error: undefined, lastSeenAt: clock.now() });
       this.schedulePing(connection);
     } catch (error) {
-      this.update({ state: 'failed', error: (error as Error).message });
       child.kill();
+      this.startFailed((error as Error).message);
       return;
     }
     try {
@@ -82,6 +118,34 @@ export class Environment {
       // or it was slow; detecting below covers both.
     }
     await this.detectAgent();
+  }
+
+  /**
+   * A start that failed: during restarts, the next one is tried after its
+   * backoff; otherwise, or once they're used up, the Environment is failed.
+   */
+  private startFailed(error: string): void {
+    if (this.stopped) return;
+    if (this.restarts > 0 && this.restarts < RESTART_BACKOFF_MS.length) {
+      this.update({ state: 'disconnected', error });
+      this.scheduleRestart();
+    } else {
+      this.update({ state: 'failed', error });
+    }
+  }
+
+  /** Starts the bridge again after the next backoff delay. */
+  private scheduleRestart(): void {
+    if (this.stopped) return;
+    const delay = RESTART_BACKOFF_MS[this.restarts++]!;
+    this.restartTimer = this.options.clock.setTimeout(() => {
+      this.restartTimer = undefined;
+      void this.connect();
+    }, delay);
+  }
+
+  private failure(): Error {
+    return new Error(this.current.error ? `${this.options.label} could not start: ${this.current.error}` : `${this.options.label} is not connected`);
   }
 
   /**
@@ -140,6 +204,8 @@ export class Environment {
   async stop(): Promise<void> {
     this.stopped = true;
     this.cancelPing();
+    if (this.restartTimer !== undefined) this.options.clock.clearTimeout(this.restartTimer);
+    this.settleWaiters();
     await this.connection?.close();
   }
 
@@ -152,8 +218,10 @@ export class Environment {
         if (this.connection !== connection || this.stopped) return;
         this.update({ state: 'connected', lastSeenAt: this.options.clock.now() });
       } catch {
-        if (this.connection !== connection || this.stopped || this.current.state === 'disconnected') return;
+        if (this.connection !== connection || this.stopped || this.current.state !== 'connected') return;
+        // A bridge that doesn't answer is killed, and so restarted.
         this.update({ state: 'unresponsive' });
+        this.child?.kill('SIGKILL');
       }
     }, PING_INTERVAL_MS);
   }
@@ -167,5 +235,17 @@ export class Environment {
   private update(change: Partial<EnvironmentStatus>): void {
     this.current = { ...this.current, ...change };
     this.options.onChange(this.current);
+    this.settleWaiters();
+  }
+
+  private settleWaiters(): void {
+    const { state } = this.current;
+    if (state !== 'connected' && state !== 'failed' && !this.stopped) return;
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const waiter of waiters) {
+      if (state === 'connected' && !this.stopped) waiter.resolve();
+      else waiter.reject(this.failure());
+    }
   }
 }

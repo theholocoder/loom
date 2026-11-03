@@ -349,8 +349,12 @@ export interface MainHarness {
   machine: Machine;
   /** Every URL main has opened in the user's browser, in order. */
   opened: string[];
-  /** The native Environment's bridge process. */
+  /** The native Environment's bridge process: the one started last. */
   bridge(): ChildProcess;
+  /** How many times main has started a bridge. */
+  bridgeStarts(): number;
+  /** Starts bridges from `path` from now on; undefined goes back to the real one. */
+  setBridgePath(path: string | undefined): void;
   /** Shuts main down; the harness also does this after each test. */
   close(): Promise<void>;
 }
@@ -384,13 +388,18 @@ export async function startMain(
   const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), 'loom-seam-a-'));
   const clock = new ManualClock();
   let bridge: ChildProcess | undefined;
+  let bridgeStarts = 0;
+  let bridgePath: string | undefined;
   const opened: string[] = [];
   const loom: Loom = await createLoom({
     userDataDir,
     appVersion: options.appVersion ?? appVersion,
     clock,
     bridgePath: options.bridgePath ?? bridgeBinaryPath(fileURLToPath(new URL('../../../../bridge/dist', import.meta.url))),
-    spawnBridge: (command, args) => (bridge = spawn(command, args, { stdio: 'pipe', env: machine.bridgeEnv() })),
+    spawnBridge: (command, args) => {
+      bridgeStarts++;
+      return (bridge = spawn(bridgePath ?? command, args, { stdio: 'pipe', env: machine.bridgeEnv() }));
+    },
     openExternal: async (url) => {
       opened.push(url);
     },
@@ -414,6 +423,8 @@ export async function startMain(
       if (!bridge) throw new Error('the bridge has not been spawned');
       return bridge;
     },
+    bridgeStarts: () => bridgeStarts,
+    setBridgePath: (path) => (bridgePath = path),
     close,
   };
 }
