@@ -73,6 +73,8 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     serveApi(loom.api);
+    // A topic gives its current value as soon as it's subscribed to, so the
+    // saved theme is known before the window opens.
     let theme: Theme | undefined;
     const stopWatchingTheme = loom.api.subscribe('settings', (settings) => {
       if (window && settings.theme !== theme) window.setBackgroundColor(THEMES[settings.theme].background);

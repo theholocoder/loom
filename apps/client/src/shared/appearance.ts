@@ -42,14 +42,11 @@ export interface Appearance {
 
 export const DEFAULT_APPEARANCE: Appearance = { theme: 'midnight', uiFont: 'Inter', monoFont: 'IBM Plex Mono' };
 
-export function isTheme(value: unknown): value is Theme {
-  return typeof value === 'string' && Object.hasOwn(THEMES, value);
-}
+const isIn =
+  <T extends object>(table: T) =>
+  (value: unknown): value is keyof T =>
+    typeof value === 'string' && Object.hasOwn(table, value);
 
-export function isUiFont(value: unknown): value is UiFont {
-  return typeof value === 'string' && Object.hasOwn(UI_FONTS, value);
-}
-
-export function isMonoFont(value: unknown): value is MonoFont {
-  return typeof value === 'string' && Object.hasOwn(MONO_FONTS, value);
-}
+export const isTheme = isIn(THEMES);
+export const isUiFont = isIn(UI_FONTS);
+export const isMonoFont = isIn(MONO_FONTS);

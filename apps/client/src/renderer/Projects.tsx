@@ -156,7 +156,8 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
 
 /** Why the Project's Forge features are off, and what to do about it, if they are. */
 function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode {
-  const cli = forge.kind && <span className="tech">{FORGE_CLI[forge.kind]}</span>;
+  const command = forge.kind && FORGE_CLI[forge.kind];
+  const cli = <span className="tech">{command}</span>;
   const recheck = 'Loom checks again whenever Projects opens.';
   switch (forge.state) {
     case 'no-remote':
@@ -177,7 +178,7 @@ function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode
       return (
         <>
           Forge features are off: {cli} isn't signed in to <span className="tech">{forge.host}</span>. Run "
-          <span className="tech">{`${forge.kind && FORGE_CLI[forge.kind]} auth login --hostname ${forge.host}`}</span>"; {recheck}
+          <span className="tech">{`${command} auth login --hostname ${forge.host}`}</span>"; {recheck}
         </>
       );
     case 'error':

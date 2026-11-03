@@ -4,7 +4,8 @@ import { useLayoutEffect } from 'react';
 import { MONO_FONTS, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useTopic } from './api';
 
-export function applyAppearance({ theme, uiFont, monoFont }: Appearance, root: HTMLElement = document.documentElement): void {
+export function applyAppearance({ theme, uiFont, monoFont }: Appearance): void {
+  const root = document.documentElement;
   root.dataset.theme = theme;
   root.style.setProperty('--font', UI_FONTS[uiFont]);
   root.style.setProperty('--mono', MONO_FONTS[monoFont]);
