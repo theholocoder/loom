@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -132,14 +133,21 @@ func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Er
 	if err != nil {
 		return nil, spawnFailed(err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Not StdoutPipe: Wait would close it once the process exits. This pipe
+	// reaches EOF only when the process and everything it started that holds
+	// it have gone, so its last output is never lost.
+	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, spawnFailed(err)
 	}
+	cmd.Stdout = stdoutW
 	stderr := &tailBuffer{}
 	cmd.Stderr = stderr
 	group, err := proc.Start(cmd, cs.grace)
+	_ = stdoutW.Close()
 	if err != nil {
+		_ = stdout.Close()
 		return nil, spawnFailed(err)
 	}
 
@@ -154,8 +162,16 @@ func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Er
 	go func() {
 		defer cs.running.Done()
 		stop := context.AfterFunc(cs.ctx, c.stop)
+		// The group is waited for alongside the pump: once the process has
+		// exited, Wait stops what it left running, which may hold stdout.
+		exited := make(chan struct{})
+		go func() {
+			_ = group.Wait()
+			close(exited)
+		}()
 		c.pump(stdout, cs.out)
-		_ = group.Wait()
+		<-exited
+		_ = stdout.Close()
 		stop()
 		cs.mu.Lock()
 		delete(cs.open, c.id)

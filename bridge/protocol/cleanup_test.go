@@ -78,3 +78,13 @@ func TestAChannelsProcessTakesTheToolsItLeftRunningWithItWhenItExits(t *testing.
 	}
 	assertGone(t, tool)
 }
+
+func TestAChannelsProcessThatExitsIsReportedEvenWhileItsToolHoldsItsOutput(t *testing.T) {
+	p := helperBridge(t)
+	channel, tool := p.openSpawner(1, map[string]string{"LOOM_SPAWNER_EXITS": "1", "LOOM_TOOL_KEEPS_STDOUT": "1"})
+
+	if _, exit := p.output(channel); exit["exitCode"] != float64(0) {
+		t.Fatalf("exit = %v, want the helper's clean exit", exit)
+	}
+	assertGone(t, tool)
+}

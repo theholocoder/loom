@@ -84,6 +84,9 @@ func spawnTool() {
 	}
 	tool := exec.Command(self)
 	tool.Env = append(os.Environ(), helperEnv+"=tool")
+	if os.Getenv("LOOM_TOOL_KEEPS_STDOUT") != "" {
+		tool.Stdout = os.Stdout
+	}
 	if err := tool.Start(); err != nil {
 		os.Exit(3)
 	}
