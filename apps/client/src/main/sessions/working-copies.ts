@@ -3,6 +3,7 @@
 // Project's Environment, through its bridge (ADR 0008).
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
+import type { UnsavedWork } from '../../shared/api';
 import { checkWorktreeRoot } from '../settings';
 
 /** What the Working copy service needs from an Environment. */
@@ -53,6 +54,36 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
     throw error;
   }
   return { path, branch };
+}
+
+/** Whether the worktree's folder is still there. */
+export async function worktreeExists(environment: GitEnvironment, path: string): Promise<boolean> {
+  const { exists } = await environment.request<{ exists: boolean }>('files.exists', GIT_TIMEOUT_MS, { path });
+  return exists;
+}
+
+/**
+ * What removing the worktree would lose or leave only on its local branch:
+ * uncommitted changes and commits on no remote branch. Undefined if none.
+ */
+export async function unsavedWork(environment: GitEnvironment, path: string): Promise<UnsavedWork | undefined> {
+  const status = await gitOrThrow(environment, ['-C', path, 'status', '--porcelain'], "Couldn't check the worktree for changes");
+  const unpushed = await gitOrThrow(environment, ['-C', path, 'rev-list', '--count', 'HEAD', '--not', '--remotes'], "Couldn't check the worktree for unpushed commits");
+  const work = { uncommitted: status.stdout.trim() !== '', unpushedCommits: Number(unpushed.stdout.trim()) || 0 };
+  return work.uncommitted || work.unpushedCommits > 0 ? work : undefined;
+}
+
+/**
+ * Removes the worktree from the checkout, keeping its branch; `force` discards
+ * its changes. A worktree already gone is only forgotten. The remote is never
+ * touched.
+ */
+export async function removeWorktree(environment: GitEnvironment, { checkout, path, force }: { checkout: string; path: string; force: boolean }): Promise<void> {
+  if (!(await worktreeExists(environment, path))) {
+    await gitOrThrow(environment, ['-C', checkout, 'worktree', 'prune'], "Couldn't forget the missing worktree");
+    return;
+  }
+  await gitOrThrow(environment, ['-C', checkout, 'worktree', 'remove', ...(force ? ['--force'] : []), path], "Couldn't remove the worktree");
 }
 
 /** The root with a leading `~` replaced by the Environment's home. */

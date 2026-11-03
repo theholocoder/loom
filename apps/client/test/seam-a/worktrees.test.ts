@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { git, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
+import { git, processEnded, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus, Session } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -199,5 +199,104 @@ describe("a Session's branch", () => {
     main.api.subscribe('transcript', () => {}, { sessionId: created.id })();
 
     await waitFor(main.api, 'sessions', session(created.id, (s) => s.branch === 'by-hand'));
+  });
+});
+
+describe('archiving a worktree Session', () => {
+  /** A Waiting worktree Session, its agent done. */
+  async function worktreeSession() {
+    const { machine, origin, checkout } = machineWithClone();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['Done.'] }, { chunks: ['Again.'] }] } });
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    return { machine, origin, checkout, main, id: created.id, path: created.workingCopy.path };
+  }
+
+  const branches = (repo: string) => git(repo, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').split('\n');
+  const remoteRefs = (origin: string) => git(origin, 'for-each-ref', '--format=%(refname) %(objectname)');
+
+  it('removes a clean worktree, keeps its local branch, stops its agent and leaves the remote alone', async () => {
+    const { machine, origin, checkout, main, id, path } = await worktreeSession();
+    const before = remoteRefs(origin);
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
+
+    expect(existsSync(path)).toBe(false);
+    expect(git(checkout, 'worktree', 'list', '--porcelain')).not.toContain(path);
+    expect(branches(checkout)).toContain('loom/fix-the-login-bug');
+    expect(remoteRefs(origin)).toBe(before);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived' });
+    await processEnded(machine.acpMessages()[0]!.pid);
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'More' })).rejects.toThrow('This Session is archived.');
+  });
+
+  it('holds back on uncommitted changes, touching nothing, until told to discard them', async () => {
+    const { machine, checkout, main, id, path } = await worktreeSession();
+    writeFileSync(join(path, 'README.md'), 'half done\n');
+    writeFileSync(join(path, 'notes.txt'), 'untracked\n');
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0 } });
+    expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('half done\n');
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting' });
+    await main.api.invoke('sessions.send', { id, prompt: 'Keep going' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+
+    expect(await main.api.invoke('sessions.archive', { id, discard: true })).toEqual({ archived: true });
+    expect(existsSync(path)).toBe(false);
+    expect(branches(checkout)).toContain('loom/fix-the-login-bug');
+    await processEnded(machine.acpMessages()[0]!.pid);
+  });
+
+  it('holds back on commits on no remote branch, and keeps them on the local branch once discarded', async () => {
+    const { machine, origin, checkout, main, id, path } = await worktreeSession();
+    const before = remoteRefs(origin);
+    const commit = machine.commit(path, 'fix.txt', 'fixed\n');
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: false, unsavedWork: { uncommitted: false, unpushedCommits: 1 } });
+    expect(await main.api.invoke('sessions.archive', { id, discard: true })).toEqual({ archived: true });
+
+    expect(existsSync(path)).toBe(false);
+    expect(git(checkout, 'rev-parse', 'loom/fix-the-login-bug')).toBe(commit);
+    expect(remoteRefs(origin)).toBe(before);
+  });
+
+  it('archives a pushed branch without asking', async () => {
+    const { machine, main, id, path } = await worktreeSession();
+    machine.commit(path, 'fix.txt', 'fixed\n');
+    git(path, 'push', '--quiet', 'origin', 'HEAD');
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('flags a worktree deleted outside Loom as missing, which can only be archived', async () => {
+    const { checkout, main, id, path } = await worktreeSession();
+    rmSync(path, { recursive: true, force: true });
+
+    main.api.subscribe('transcript', () => {}, { sessionId: id })();
+    await waitFor(main.api, 'sessions', session(id, (s) => s.worktreeMissing === true));
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'More' })).rejects.toThrow("This Session's worktree is missing; it can only be archived.");
+
+    expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
+    const archived = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!;
+    expect(archived.status).toBe('archived');
+    expect(archived.worktreeMissing).toBeUndefined();
+    expect(git(checkout, 'worktree', 'list', '--porcelain')).not.toContain(path);
+    expect(branches(checkout)).toContain('loom/fix-the-login-bug');
+  });
+
+  it('flags a missing worktree when Loom starts again', async () => {
+    const { machine, checkout } = machineWithClone();
+    const userDataDir = tempDir('loom-archive-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix it' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    await main.close();
+    rmSync(created.workingCopy.path, { recursive: true, force: true });
+
+    const again = await startMain({ machine, userDataDir });
+
+    await waitFor(again.api, 'sessions', session(created.id, (s) => s.worktreeMissing === true));
   });
 });
