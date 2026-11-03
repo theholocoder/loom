@@ -25,6 +25,26 @@ func (p *peer) launchHelper(id int, mode, cwd, record string) map[string]any {
 	})
 }
 
+// liveDir makes a folder a launched program may still be using as its cwd when
+// the test ends. Windows can't delete such a folder, so removal retries and
+// never fails the test (t.TempDir would).
+func liveDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "loom-launch-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for i := 0; i < 50; i++ {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	return dir
+}
+
 // recorded waits for the record helper's file and returns its two lines.
 func recorded(t *testing.T, file string) (cwd, path string) {
 	t.Helper()
@@ -42,7 +62,7 @@ func recorded(t *testing.T, file string) (cwd, path string) {
 
 func TestALaunchedProgramRunsInTheGivenFolder(t *testing.T) {
 	p := startBridge(t)
-	folder := t.TempDir()
+	folder := liveDir(t)
 	record := filepath.Join(t.TempDir(), "record")
 
 	p.launchHelper(1, "record", folder, record)
@@ -70,7 +90,7 @@ func TestALaunchedProgramKeepsTheFullPath(t *testing.T) {
 	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: []string{"PATH=/usr/bin:/bin", "HOME=/nonexistent"}})
 	record := filepath.Join(t.TempDir(), "record")
 
-	p.launchHelper(1, "record", t.TempDir(), record)
+	p.launchHelper(1, "record", liveDir(t), record)
 
 	if _, path := recorded(t, record); !strings.HasPrefix(path, "/mnt/c/Windows:") {
 		t.Errorf("PATH = %q, want it to keep /mnt/c/Windows", path)

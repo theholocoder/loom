@@ -39,6 +39,7 @@ export async function openIn(environment: OpenEnvironment, request: OpenRequest)
   }
   const path = request.file === undefined ? request.workingCopy : fileIn(request.workingCopy, request.file);
   const [program, ...rest] = words as [string, ...string[]];
+  // `{path}` is substituted only in the arguments, never in the program word, deliberately.
   const args = rest.map((word) => word.replaceAll(PATH_PLACEHOLDER, path));
   if (request.opener === 'editor' && !words.some((word) => word.includes(PATH_PLACEHOLDER))) args.push(path);
   try {

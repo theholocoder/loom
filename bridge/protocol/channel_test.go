@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), size))
 	case "hang":
 		fmt.Print("ready")
-		time.Sleep(time.Minute)
+		time.Sleep(10 * time.Second)
 	case "record":
 		// Writes where it ran and its PATH to $LOOM_RECORD, all at once.
 		cwd, _ := os.Getwd()
