@@ -40,7 +40,7 @@ describe('the Project picker for a new Session', () => {
     const dialog = openPicker()!;
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.classList).toContain('picker-modal');
-    expect(dialog.parentElement!.classList).toContain('modal-backdrop');
+    expect(dialog.parentElement!.classList).toContain('scrim');
     expect(document.activeElement).toBe(filter());
     expect(screen.queryByRole('menu')).toBeNull();
     expect(screen.queryByRole('main', { name: 'New Session' })).toBeNull();
@@ -60,6 +60,11 @@ describe('the Project picker for a new Session', () => {
   it('filters by name and by path, case-insensitively, highlighting the first match', () => {
     openPicker();
     fireEvent.keyDown(filter(), { key: 'ArrowDown' });
+    fireEvent.keyDown(filter(), { key: 'ArrowDown' });
+    expect(highlighted()).toBe('docs');
+    fireEvent.change(filter(), { target: { value: 'DEV' } });
+    expect(names()).toEqual(['billing-api', 'web-shop']);
+    expect(highlighted()).toBe('billing-api');
     fireEvent.change(filter(), { target: { value: 'SHOP' } });
     expect(names()).toEqual(['web-shop']);
     expect(highlighted()).toBe('web-shop');
@@ -72,6 +77,7 @@ describe('the Project picker for a new Session', () => {
     expect(screen.getByText('No matching Project.')).toBeTruthy();
     fireEvent.keyDown(filter(), { key: 'Enter' });
     expect(screen.getByRole('dialog', { name: 'Pick a Project' })).toBeTruthy();
+    expect(screen.queryByRole('main', { name: 'New Session' })).toBeNull();
   });
 
   it('moves the highlight with the arrow keys, stopping at the ends, and Enter starts the Session with that Project', () => {

@@ -16,8 +16,7 @@ button.select-field { justify-content: space-between; min-width: 170px; padding:
 button.select-field:hover { background: var(--hover); border-color: var(--muted); }
 button.select-field[aria-expanded="true"] { border-color: var(--accent); }
 button.select-field:focus-visible { border-color: var(--accent); }
-/* A popover centred on the window over a dimmed backdrop: the Project picker. */
-.modal-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding-top: 18vh; background: var(--shadow); }
+/* A popover centred on the window over the app's `.scrim`: the Project picker. */
 .popover.picker-modal { position: relative; width: min(520px, calc(100vw - 32px)); max-height: 60vh; padding: 6px; gap: 6px; overflow: hidden; }
 .picker-modal input { flex-shrink: 0; padding: 8px 10px; font-size: 14px; }
 .picker-modal [role="listbox"] { overflow-y: auto; }

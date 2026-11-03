@@ -30,7 +30,7 @@ export function ProjectPicker({ projects, onPick, onClose }: { projects: Project
   });
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div
         className="popover picker-modal"
         role="dialog"

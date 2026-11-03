@@ -107,8 +107,9 @@ test('the composer pickers open inside the window, themed', async () => {
   const filter = picker.getByRole('combobox', { name: 'Filter Projects' });
   await expect(filter).toBeFocused();
   const pickerBox = (await picker.boundingBox())!;
-  const windowWidth = await window.evaluate(() => globalThis.innerWidth);
-  expect(Math.abs(pickerBox.x + pickerBox.width / 2 - windowWidth / 2)).toBeLessThan(2);
+  const centre = await window.evaluate(() => ({ x: globalThis.innerWidth / 2, y: globalThis.innerHeight / 2 }));
+  expect(Math.abs(pickerBox.x + pickerBox.width / 2 - centre.x)).toBeLessThan(2);
+  expect(Math.abs(pickerBox.y + pickerBox.height / 2 - centre.y)).toBeLessThan(2);
   await filter.fill('picker');
   await expect(picker.getByRole('option', { name: /picker-repo/ })).toHaveAttribute('aria-selected', 'true');
   await filter.press('Enter');

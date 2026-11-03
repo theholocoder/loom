@@ -43,7 +43,7 @@ function Workspace() {
   /** Bumped to focus the open Session's composer. */
   const [replyRequest, setReplyRequest] = useState(0);
   /** The Project picked for the New Session view; each pick starts it afresh. */
-  const [newSession, setNewSession] = useState<{ projectId?: number; key: number }>({ key: 0 });
+  const [newSession, setNewSession] = useState<{ projectId?: number; generation: number }>({ generation: 0 });
   const selected = sessions.find((s) => s.id === selectedId);
   const select = (session: Session) => {
     setSelectedId(session.id);
@@ -63,7 +63,7 @@ function Workspace() {
             <NewMenu
               projects={projects}
               onNewSession={(project) => {
-                setNewSession((n) => ({ projectId: project?.id, key: n.key + 1 }));
+                setNewSession((n) => ({ projectId: project?.id, generation: n.generation + 1 }));
                 setView('new-session');
               }}
               onAddExistingClone={() => {
@@ -93,7 +93,7 @@ function Workspace() {
       ) : view === 'projects' ? (
         <Projects linker={linker} />
       ) : view === 'new-session' ? (
-        <NewSession key={newSession.key} initialProjectId={newSession.projectId} onStarted={select} />
+        <NewSession key={newSession.generation} initialProjectId={newSession.projectId} onStarted={select} />
       ) : selected ? (
         <SessionView key={selected.id} session={selected} replyRequest={replyRequest} />
       ) : (
