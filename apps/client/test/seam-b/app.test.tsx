@@ -36,7 +36,9 @@ describe('the window', () => {
       expect(within(inbox).getByRole('button', { name: section }).getAttribute('aria-expanded')).toBe('false');
     }
     expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Show changes' }).getAttribute('aria-expanded')).toBe('false');
+    // No Session selected: no header, so no diff toggle, and no panel or rail taking space.
+    expect(screen.queryByRole('button', { name: /changes/i })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
 
     const footer = within(inbox).getByRole('navigation');
     expect(within(footer).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Projects', 'Dashboard', 'Settings']);

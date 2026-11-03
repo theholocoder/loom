@@ -20,6 +20,8 @@ export interface LoomOptions {
   appVersion: string;
   bridgePath: string;
   clock: Clock;
+  /** How many untracked files a diff counts lines for (default: the diff service's). */
+  maxUntrackedCounted?: number;
   spawnBridge?: SpawnBridge;
   /** Shows the folder picker; resolves to null if the user cancels. */
   chooseFolder?: () => Promise<string | null>;
@@ -146,6 +148,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     environment: (id) => (id === native.status.id ? nativeForSessions : undefined),
     worktreeRoot: () => settingsService.value.worktreeRoot,
     onChange: (list) => sessions.set(list),
+    maxUntrackedCounted: options.maxUntrackedCounted,
   });
   sessions.set(sessionService.list());
 
@@ -196,6 +199,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
     'settings.setEditorCommand': ({ editorCommand }) => settingsService.setEditorCommand(editorCommand),
     'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),
+    'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
@@ -205,6 +209,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
+    'sessions.diff': ({ id, uncommittedOnly }) => sessionService.diff(id, uncommittedOnly),
+    'sessions.diffFile': ({ id, path, uncommittedOnly }) => sessionService.diffFile(id, path, uncommittedOnly),
     'sessions.retry': (params) => sessionService.retry(params),
     'database.restoreLatestSnapshot': () => {
       throw new Error('the database is not damaged');

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type R
 import { OPENCODE_NAME, type Issue, type Session, type WaitingReason, type WorkingCopyKind } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
+import { DiffToggle } from './DiffToggle';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
@@ -147,7 +148,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
  * marks it read, as does a status change while it is shown. Changing
  * `replyRequest` focuses the composer.
  */
-export function SessionView({ session, replyRequest = 0 }: { session: Session; replyRequest?: number }) {
+export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff }: { session: Session; replyRequest?: number; diffOpen: boolean; onToggleDiff: () => void }) {
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
@@ -234,6 +235,7 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
             {session.worktreeMissing && <WorktreeMissing />}
           </div>
         </div>
+        <DiffToggle stat={session.diffStat} open={diffOpen} onToggle={onToggleDiff} />
         <OpenActions session={session} onError={setError} />
         {session.status !== 'archived' && (
           <button

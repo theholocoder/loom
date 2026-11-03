@@ -48,6 +48,11 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setDiffCollapsedPatterns': ({ patterns }) => {
+        const settings = { ...this.value('settings'), diffCollapsedPatterns: patterns };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setAppearance': (appearance) => {
         const settings = { ...this.value('settings'), ...appearance };
         this.publish('settings', settings);
@@ -63,6 +68,8 @@ export class FakeMain implements LoomApi {
       'sessions.setUnread': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
+      'sessions.diff': () => ({ available: false, reason: 'No diff available' }),
+      'sessions.diffFile': () => ({ text: '', truncated: false }),
       'sessions.retry': () => {},
       'database.restoreLatestSnapshot': () => {},
       ...handlers,

@@ -136,6 +136,17 @@ function OpenCommands() {
         Runs in the working copy's folder, which it also gets wherever you write <span className="tech">{'{path}'}</span>, as in{' '}
         <span className="tech">{'wt -d {path}'}</span> or <span className="tech">{'kitty --directory {path}'}</span>.
       </TextSetting>
+      <TextSetting
+        label="Collapsed in the diff"
+        saved={(settings?.diffCollapsedPatterns ?? []).join(', ')}
+        width="40ch"
+        save={(api, value) =>
+          api.invoke('settings.setDiffCollapsedPatterns', { patterns: value.split(',') }).then((s) => s.diffCollapsedPatterns.join(', '))
+        }
+      >
+        Files the diff panel starts collapsed, besides binaries and very large changes: comma-separated patterns on a file name, or on its path when they
+        have a <span className="tech">/</span>, as in <span className="tech">*.lock</span>.
+      </TextSetting>
     </>
   );
 }

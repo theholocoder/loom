@@ -98,7 +98,7 @@ export function tempMachine(): Machine {
 }
 
 export async function startMain(
-  options: { userDataDir?: string; bridgePath?: string; appVersion?: string; machine?: Machine } = {},
+  options: { userDataDir?: string; bridgePath?: string; appVersion?: string; machine?: Machine; maxUntrackedCounted?: number } = {},
 ): Promise<MainHarness> {
   const ownDir = !options.userDataDir;
   const machine = options.machine ?? new Machine();
@@ -112,6 +112,7 @@ export async function startMain(
     userDataDir,
     appVersion: options.appVersion ?? appVersion,
     clock,
+    maxUntrackedCounted: options.maxUntrackedCounted,
     bridgePath: options.bridgePath ?? realBridgePath,
     spawnBridge: (command, args) => {
       bridgeStarts++;
