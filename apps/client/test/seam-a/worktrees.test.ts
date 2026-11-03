@@ -169,8 +169,12 @@ describe('the branches a worktree Session can start from', () => {
     git(checkout, 'branch', 'busy');
     git(checkout, 'push', '--quiet', 'origin', 'busy');
     // Checked out in another worktree.
-    git(checkout, 'worktree', 'add', '--quiet', machine.folder('busy-wt'), 'busy');
-    git(checkout, 'worktree', 'add', '--quiet', '-b', 'elsewhere', machine.folder('elsewhere-wt'));
+    const busyWorktree = machine.folder('busy-wt');
+    git(checkout, 'worktree', 'add', '--quiet', busyWorktree, 'busy');
+    const elsewhere = machine.folder('elsewhere-wt');
+    git(checkout, 'worktree', 'add', '--quiet', '-b', 'elsewhere', elsewhere);
+    const detached = machine.folder('detached-wt');
+    git(checkout, 'worktree', 'add', '--quiet', '--detach', detached);
     const { main, project } = await withProject(machine, checkout);
 
     expect(await main.api.invoke('projects.branches', { id: project.id })).toEqual({
@@ -181,6 +185,7 @@ describe('the branches a worktree Session can start from', () => {
         { name: 'release/1.2', remote: true },
         { name: 'shared', remote: true },
       ],
+      worktrees: [{ path: busyWorktree, branch: 'busy' }, { path: detached }, { path: elsewhere, branch: 'elsewhere' }],
     });
   });
 });
@@ -264,6 +269,43 @@ describe('a worktree Session on an existing branch', () => {
     );
     expect(await main.api.invoke('sessions.list')).toEqual([]);
     expect(existsSync(`${machine.home}/loom/worktrees/billing-api`) ? readdirSync(`${machine.home}/loom/worktrees/billing-api`) : []).toEqual([]);
+  });
+});
+
+describe('a worktree Session in an existing worktree', () => {
+  it('works in the worktree as it is, on its branch, and archiving removes it like any worktree', async () => {
+    const { machine, checkout } = machineWithClone();
+    const path = machine.folder('by-hand');
+    git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat/49-cards', path);
+    const tip = machine.commit(path, 'cards.txt', 'wip\n');
+    writeFileSync(join(path, 'scratch.txt'), 'mine\n');
+    const { main, project } = await withProject(machine, checkout);
+
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existingWorktree: path, prompt: 'Carry on' });
+
+    expect(created).toMatchObject({ workingCopy: { kind: 'worktree', path }, branch: 'feat/49-cards' });
+    expect(git(path, 'rev-parse', 'HEAD')).toBe(tip);
+    expect(readFileSync(join(path, 'scratch.txt'), 'utf8')).toBe('mine\n');
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    expect(machine.acpMessages().filter((m) => m.message.method === 'session/new').map((m) => m.message.params?.cwd)).toEqual([path]);
+
+    expect(await main.api.invoke('sessions.archive', { id: created.id })).toMatchObject({ archived: false, unsavedWork: { uncommitted: true } });
+    expect(await main.api.invoke('sessions.archive', { id: created.id, discard: true })).toEqual({ archived: true });
+    expect(existsSync(path)).toBe(false);
+    expect(git(checkout, 'rev-parse', 'refs/heads/feat/49-cards')).toBe(tip);
+  });
+
+  it("rejects a folder that isn't one of the checkout's other worktrees, making nothing", async () => {
+    const { machine, checkout } = machineWithClone();
+    const { main, project } = await withProject(machine, checkout);
+    const create = (existingWorktree: string) => main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existingWorktree, prompt: 'Go' });
+
+    await expect(create(machine.folder('not-a-worktree'))).rejects.toThrow("isn't a worktree of billing-api");
+    await expect(create(checkout)).rejects.toThrow("isn't a worktree of billing-api");
+    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existingWorktree: checkout, base: 'main', prompt: 'Go' })).rejects.toThrow(
+      "doesn't name or base a new one",
+    );
+    expect(await main.api.invoke('sessions.list')).toEqual([]);
   });
 });
 

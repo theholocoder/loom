@@ -12,7 +12,7 @@ import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { WorkingCopyDiff } from './diff';
-import { createWorktree, removeWorktree, unsavedWork, worktreeExists, type GitEnvironment } from './working-copies';
+import { createWorktree, findWorktree, removeWorktree, unsavedWork, worktreeExists, type GitEnvironment } from './working-copies';
 import { capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
 
@@ -119,15 +119,23 @@ export class Sessions {
     if (!project) throw new Error(`unknown Project ${projectId}`);
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
     if (issue) checkIssue(issue);
-    if (params.existingBranch) {
-      if (workingCopy !== 'worktree') throw new Error('Only a worktree Session checks out an existing branch');
-      if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch doesn't name or base a new one");
-      checkExistingBranch(params.existingBranch);
+    const existing = params.existingWorktree !== undefined ? 'worktree' : params.existingBranch ? 'branch' : undefined;
+    if (existing) {
+      if (workingCopy !== 'worktree') throw new Error(`Only a worktree Session works on an existing ${existing}`);
+      if (params.branch !== undefined || params.base !== undefined || (params.existingBranch && params.existingWorktree !== undefined)) {
+        throw new Error(`A Session on an existing ${existing} doesn't name or base a new one`);
+      }
+      if (params.existingBranch) checkExistingBranch(params.existingBranch);
+      if (typeof params.existingWorktree !== 'string' && params.existingWorktree !== undefined) throw new Error('An existing worktree needs its path.');
     }
     const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt);
     let path = project.checkout.path;
     let branch: string | null = null;
-    if (workingCopy === 'worktree') {
+    if (params.existingWorktree !== undefined) {
+      const found = await findWorktree(this.environmentOf({ projectId }), project.checkout.path, params.existingWorktree, project.name);
+      path = found.path;
+      branch = found.branch ?? null;
+    } else if (workingCopy === 'worktree') {
       const environment = this.environmentOf({ projectId });
       ({ path, branch } = await this.oneAtATime(projectId, () =>
         createWorktree(environment, {

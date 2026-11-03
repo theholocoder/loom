@@ -2,10 +2,10 @@
 // docs/prototypes/ui-layout.html.
 import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, RotateCw, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { OPENCODE_NAME, type Branches, type ExistingBranch, type Issue, type Session, type WaitingReason } from '../shared/api';
+import { OPENCODE_NAME, type Branches, type ExistingBranch, type ExistingWorktree, type Issue, type Session, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
-import { BranchPicker, type Listed } from './BranchPicker';
+import { SearchPicker, type Listed, type PickerOption } from './SearchPicker';
 import { DiffToggle } from './DiffToggle';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
@@ -43,8 +43,31 @@ export function StatusIcon({ session }: { session: Session }) {
   );
 }
 
-/** The composer's working copy choices: a worktree on a new or an existing branch, or the checkout. */
+/** The composer's working copy choices: a new worktree, an existing one, or the checkout. */
 type WorkingCopyChoice = 'worktree' | 'existing' | 'checkout';
+
+/** What an existing-worktree Session works in: a worktree as it is, or a branch no worktree has, in a new one. */
+type ExistingChoice = { worktree: ExistingWorktree } | { branch: ExistingBranch };
+
+/** How a branch reads: `origin/<name>` for one on `origin`. */
+function branchLabel(branch: ExistingBranch): string {
+  return branch.remote ? `origin/${branch.name}` : branch.name;
+}
+
+/** The existing-worktree picker's options: the worktrees first, by branch, then the branches a new worktree can check out. */
+function existingOptions(branches: Branches): PickerOption<ExistingChoice>[] {
+  return [
+    ...branches.worktrees.map((worktree) => ({ ...existingKey({ worktree }), detail: worktree.path, value: { worktree } })),
+    ...branches.existing.map((branch) => ({ ...existingKey({ branch }), detail: 'new worktree', value: { branch } })),
+  ];
+}
+
+/** The picker's key and label for a choice. */
+function existingKey(choice: ExistingChoice): { key: string; label: string } {
+  return 'worktree' in choice
+    ? { key: `worktree:${choice.worktree.path}`, label: choice.worktree.branch ?? 'detached HEAD' }
+    : { key: `branch:${branchLabel(choice.branch)}:${choice.branch.remote}`, label: branchLabel(choice.branch) };
+}
 
 /** Starting a Session: which Project, which working copy, and the first prompt. */
 export function NewSession({ initialProjectId, onStarted }: { initialProjectId?: number; onStarted: (session: Session) => void }) {
@@ -55,7 +78,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
   const [workingCopy, setWorkingCopy] = useState<WorkingCopyChoice>('worktree');
   // The `origin` branch picked to branch from; until then, origin's default.
   const [pickedBase, setPickedBase] = useState<string>();
-  const [existingBranch, setExistingBranch] = useState<ExistingBranch>();
+  const [existing, setExisting] = useState<ExistingChoice>();
   const listed = useBranches(workingCopy === 'checkout' ? undefined : chosen?.id);
   const defaultBranch = listed && 'branches' in listed ? listed.branches.defaultBranch : undefined;
   const base = pickedBase ?? defaultBranch;
@@ -73,7 +96,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
     setError(undefined);
     const branch =
       workingCopy === 'existing'
-        ? { existingBranch }
+        ? existing && ('worktree' in existing ? { existingWorktree: existing.worktree.path } : { existingBranch: existing.branch })
         : workingCopy === 'worktree'
           ? { ...(editedBranch?.trim() ? { branch: editedBranch } : {}), ...(pickedBase !== undefined ? { base: pickedBase } : {}) }
           : {};
@@ -106,7 +129,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
           onSend={start}
           onDraftChange={setDraft}
           canSendEmpty={!!issue}
-          disabled={workingCopy === 'existing' && !existingBranch}
+          disabled={workingCopy === 'existing' && !existing}
           tools={
             <>
               <Select
@@ -121,7 +144,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
                   setEditedBranch(undefined);
                   setIssue(undefined);
                   setPickedBase(undefined);
-                  setExistingBranch(undefined);
+                  setExisting(undefined);
                 }}
               />
               <Select<WorkingCopyChoice>
@@ -130,7 +153,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
                 value={workingCopy}
                 options={[
                   { value: 'worktree', label: 'New worktree' },
-                  { value: 'existing', label: 'Check out an existing branch' },
+                  { value: 'existing', label: 'Existing worktree' },
                   { value: 'checkout', label: 'Stay on current branch' },
                 ]}
                 onChange={setWorkingCopy}
@@ -144,21 +167,23 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
                 }}
               />
               {workingCopy === 'existing' && (
-                <BranchPicker
-                  label="Existing branch"
-                  placeholder="Pick a branch"
-                  listed={listed && 'branches' in listed ? { branches: listed.branches.existing } : listed}
-                  selected={existingBranch}
-                  onChange={setExistingBranch}
+                <SearchPicker
+                  label="Worktree"
+                  placeholder="Pick a worktree"
+                  noun="worktrees"
+                  options={listed && 'branches' in listed ? { branches: existingOptions(listed.branches) } : listed}
+                  selected={existing && existingKey(existing)}
+                  onChange={setExisting}
                 />
               )}
               {workingCopy === 'worktree' && (
-                <BranchPicker
+                <SearchPicker
                   label="Branch from"
                   placeholder="origin/…"
-                  listed={listed && 'branches' in listed ? { branches: listed.branches.remote.map((name) => ({ name, remote: true })) } : listed}
-                  selected={base === undefined ? undefined : { name: base, remote: true }}
-                  onChange={(picked) => setPickedBase(picked.name)}
+                  noun="branches"
+                  options={listed && 'branches' in listed ? { branches: listed.branches.remote.map((name) => ({ key: name, label: `origin/${name}`, value: name })) } : listed}
+                  selected={base === undefined ? undefined : { key: base, label: `origin/${base}` }}
+                  onChange={setPickedBase}
                 />
               )}
               {workingCopy === 'worktree' && (

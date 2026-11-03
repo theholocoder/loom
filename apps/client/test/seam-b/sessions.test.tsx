@@ -70,6 +70,10 @@ describe('starting a Session', () => {
       { name: 'feature/login', remote: true },
       { name: 'release/1.2', remote: true },
     ],
+    worktrees: [
+      { path: '/home/dev/loom-worktrees/49', branch: 'feat/49-cards' },
+      { path: '/home/dev/loom-worktrees/scratch' },
+    ],
   };
 
   it("branches the new worktree from origin's default unless another origin branch is picked", async () => {
@@ -98,32 +102,55 @@ describe('starting a Session', () => {
     );
   });
 
-  it('checks out an existing local or origin branch, searchable, naming no new one', async () => {
+  it('works in an existing worktree, or a branch no worktree has in a new one, searchable, naming no new branch', async () => {
     const main = renderApp(new FakeMain({ projects: [project] }, { 'projects.branches': () => branches, 'sessions.create': () => inWorktree }));
     const pane = startNewSession();
     fireEvent.click(within(pane).getByRole('button', { name: 'Working copy' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Check out an existing branch' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Existing worktree' }));
 
     expect(within(pane).queryByRole('textbox', { name: 'Branch' })).toBeNull();
     expect(within(pane).queryByRole('button', { name: 'Branch from' })).toBeNull();
-    const picker = within(pane).getByRole('button', { name: 'Existing branch' });
-    expect(picker.textContent).toBe('Pick a branch');
+    const picker = within(pane).getByRole('button', { name: 'Worktree' });
+    expect(picker.textContent).toBe('Pick a worktree');
     fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Carry on' } });
     expect((within(pane).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(picker);
-    const listbox = await screen.findByRole('listbox', { name: 'Branches' });
+    const listbox = await screen.findByRole('listbox', { name: 'Worktrees' });
     await waitFor(() =>
-      expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual(['loom/spike', 'origin/feature/login', 'origin/release/1.2']),
+      expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'feat/49-cards/home/dev/loom-worktrees/49',
+        'detached HEAD/home/dev/loom-worktrees/scratch',
+        'loom/spikenew worktree',
+        'origin/feature/loginnew worktree',
+        'origin/release/1.2new worktree',
+      ]),
     );
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search branches' }), { target: { value: 'LOGIN' } });
-    expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual(['origin/feature/login']);
-    fireEvent.click(screen.getByRole('option', { name: 'origin/feature/login' }));
-    expect(picker.textContent).toBe('origin/feature/login');
+    const search = screen.getByRole('textbox', { name: 'Search worktrees' });
+    fireEvent.change(search, { target: { value: 'LOGIN' } });
+    expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual(['origin/feature/loginnew worktree']);
+    fireEvent.change(search, { target: { value: 'worktrees/49' } });
+    fireEvent.click(within(listbox).getByRole('option'));
+    expect(picker.textContent).toBe('feat/49-cards');
     fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.create')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
+    const filter = screen.queryByRole('combobox', { name: 'Filter Projects' });
+    if (filter) fireEvent.keyDown(filter, { key: 'Enter' });
+    const again = screen.getByRole('main', { name: 'New Session' });
+    fireEvent.click(within(again).getByRole('button', { name: 'Working copy' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Existing worktree' }));
+    fireEvent.click(within(again).getByRole('button', { name: 'Worktree' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search worktrees' }), { target: { value: 'login' } });
+    fireEvent.click(await screen.findByRole('option'));
+    fireEvent.change(within(again).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Carry on' } });
+    fireEvent.click(within(again).getByRole('button', { name: 'Send' }));
 
     await waitFor(() =>
       expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existingWorktree: '/home/dev/loom-worktrees/49', prompt: 'Carry on' } },
         { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existingBranch: { name: 'feature/login', remote: true }, prompt: 'Carry on' } },
       ]),
     );
@@ -155,7 +182,7 @@ describe('starting a Session', () => {
     const choices = within(screen.getByRole('listbox', { name: 'Working copy' })).getAllByRole('option');
     expect(choices.map((o) => [o.textContent, o.getAttribute('aria-selected')])).toEqual([
       ['New worktree', 'true'],
-      ['Check out an existing branch', 'false'],
+      ['Existing worktree', 'false'],
       ['Stay on current branch', 'false'],
     ]);
     expect(within(pane).getByTitle('Agent').textContent).toBe('OpenCode');

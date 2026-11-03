@@ -262,4 +262,4 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .database-problem ul { margin: 0; padding-left: 20px; }
 .database-problem code { word-break: break-all; }
 .database-problem .error { color: var(--err); }
-.popover.branch-popover { width: 360px; gap: 4px; }
+.popover.search-popover { width: 360px; gap: 4px; }

@@ -168,8 +168,9 @@ export interface Issue extends ForgeLink {
 }
 
 /**
- * The branches a worktree Session can branch from or check out, as
- * `projects.branches` lists them after fetching `origin`.
+ * What a worktree Session can start from, as `projects.branches` lists it
+ * after fetching `origin`: a base for a new branch, an existing worktree to
+ * work in, or an existing branch to check out in a new worktree.
  */
 export interface Branches {
   /** `origin`'s default branch, as `origin` itself says, without `origin/`. */
@@ -182,6 +183,16 @@ export interface Branches {
    * `origin`'s branches whose same-named local branch isn't either.
    */
   existing: ExistingBranch[];
+  /** The checkout's other worktrees, the Project's checkout itself left out, in `git worktree list` order. */
+  worktrees: ExistingWorktree[];
+}
+
+/** A git worktree of the Project's checkout that already exists. */
+export interface ExistingWorktree {
+  /** Its folder, as git reports it. */
+  path: string;
+  /** The branch it has checked out; absent on a detached HEAD. */
+  branch?: string;
 }
 
 /** An existing branch a worktree Session checks out: a local one, or one on `origin` by its name there. */
@@ -526,6 +537,12 @@ export interface Commands {
    * none. `branch` and `base` are then not allowed. `.worktreeinclude` files
    * are copied in all the same.
    *
+   * A `worktree` Session given an `existingWorktree`, the path of one of the
+   * checkout's other worktrees (see Branches), works in that worktree as it
+   * is, on whatever it has checked out; nothing is fetched or copied. It is
+   * a worktree Session like any other: archiving it removes the worktree.
+   * `branch`, `base` and `existingBranch` are then not allowed.
+   *
    * Started from an `issue`, the Session is linked to it, its first prompt
    * starts with the issue's number, title, URL and body (`prompt` may then be
    * empty), and the branch suggested is `<prefix>/<issue#>-<slug of the title>`.
@@ -537,6 +554,7 @@ export interface Commands {
       branch?: string;
       base?: string;
       existingBranch?: ExistingBranch;
+      existingWorktree?: string;
       issue?: Issue;
       prompt: string;
     };

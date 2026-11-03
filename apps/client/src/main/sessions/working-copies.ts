@@ -3,7 +3,7 @@
 // Everything runs in the Project's Environment, through its bridge (ADR 0008).
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
-import type { Branches, ExistingBranch, UnsavedWork } from '../../shared/api';
+import type { Branches, ExistingBranch, ExistingWorktree, UnsavedWork } from '../../shared/api';
 import { checkWorktreeRoot } from '../settings';
 
 /** What the Working copy service needs from an Environment. */
@@ -91,21 +91,60 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
 }
 
 /**
- * Fetches `origin`, then lists its branches, and the branches git can still
+ * Fetches `origin`, then lists its branches; the branches git can still
  * check out: local ones not checked out in the checkout or any of its
- * worktrees, and `origin`'s whose local namesake isn't either.
+ * worktrees, and `origin`'s whose local namesake isn't either; and the
+ * checkout's other worktrees.
  */
 export async function listBranches(environment: GitRunner, checkout: string): Promise<Branches> {
   await fetchOrigin(environment, checkout);
   const defaultBranch = await originDefaultBranch(environment, checkout);
   const { local, remote } = await branchesOf(environment, checkout);
-  const busy = await checkedOut(environment, checkout);
+  const all = await worktreesOf(environment, checkout);
+  const busy = new Set(all.flatMap((worktree) => (worktree.branch ? [worktree.branch] : [])));
   const free = (name: string) => !busy.has(name);
   return {
     defaultBranch,
     remote,
     existing: [...local.filter(free).map((name) => ({ name, remote: false })), ...remote.filter(free).map((name) => ({ name, remote: true }))],
+    worktrees: others(all, checkout),
   };
+}
+
+/**
+ * The checkout's other worktree at `path`, as it is now. Rejects a folder
+ * that isn't one, the checkout itself included.
+ */
+export async function findWorktree(environment: GitRunner, checkout: string, path: string, projectName: string): Promise<ExistingWorktree> {
+  const found = others(await worktreesOf(environment, checkout), checkout).find((worktree) => worktree.path === path);
+  if (!found) throw new Error(`${path} isn't a worktree of ${projectName}`);
+  return found;
+}
+
+/** A worktree as `git worktree list --porcelain` describes it. */
+interface ListedWorktree extends ExistingWorktree {
+  /** Bare, or its folder is gone: nothing can work in it. */
+  unusable: boolean;
+}
+
+/** Every worktree of the checkout, the checkout itself included, as git lists them. */
+async function worktreesOf(environment: GitRunner, checkout: string): Promise<ListedWorktree[]> {
+  const list = await gitOrThrow(environment, ['-C', checkout, 'worktree', 'list', '--porcelain', '-z'], "Couldn't list the worktrees");
+  const worktrees: ListedWorktree[] = [];
+  // One `worktree <path>` line starts each, its other lines follow.
+  for (const line of list.stdout.split('\0')) {
+    const current = worktrees.at(-1);
+    if (line.startsWith('worktree ')) worktrees.push({ path: line.slice('worktree '.length), unusable: false });
+    else if (!current) continue;
+    else if (line.startsWith('branch refs/heads/')) current.branch = line.slice('branch refs/heads/'.length);
+    else if (line === 'bare' || line.startsWith('prunable')) current.unusable = true;
+  }
+  return worktrees;
+}
+
+/** The usable worktrees other than the checkout itself. */
+function others(worktrees: ListedWorktree[], checkout: string): ExistingWorktree[] {
+  return worktrees.filter((worktree) => !worktree.unusable && worktree.path !== checkout).map(({ path, branch }) => (branch ? { path, branch } : { path }));
 }
 
 /** The checkout's local branches and its `origin` ones (without `origin/`, `HEAD` left out), each sorted. */
@@ -118,17 +157,6 @@ async function branchesOf(environment: GitRunner, checkout: string): Promise<{ l
     else if (ref !== 'refs/remotes/origin/HEAD') remote.push(ref.slice('refs/remotes/origin/'.length));
   }
   return { local: local.sort(), remote: remote.sort() };
-}
-
-/** The local branches checked out in the checkout or any of its worktrees. */
-async function checkedOut(environment: GitRunner, checkout: string): Promise<Set<string>> {
-  const list = await gitOrThrow(environment, ['-C', checkout, 'worktree', 'list', '--porcelain', '-z'], "Couldn't list the worktrees");
-  return new Set(
-    list.stdout
-      .split('\0')
-      .filter((line) => line.startsWith('branch refs/heads/'))
-      .map((line) => line.slice('branch refs/heads/'.length)),
-  );
 }
 
 /** Whether the worktree's folder is still there. */
