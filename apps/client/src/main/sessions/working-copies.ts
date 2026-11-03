@@ -45,6 +45,8 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
   const base = `origin/${await defaultBranch(environment, checkout)}`;
   const { branch, path } = await freeName(environment, worktree, root);
   await gitOrThrow(environment, ['-C', checkout, 'worktree', 'add', '--quiet', '--no-track', '-b', branch, path, base], "Couldn't create the worktree");
+  // Where the Session's diff starts from, whatever `origin/HEAD` says later; local config only.
+  await git(environment, ['-C', checkout, 'config', '--local', `branch.${branch}.loomBase`, base]).catch(() => {});
   try {
     await copyIncluded(environment, checkout, path);
   } catch (error) {
