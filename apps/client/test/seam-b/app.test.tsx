@@ -226,6 +226,14 @@ describe('Projects', () => {
     expect(main.invoked.map((i) => i.command)).toContain('projects.check');
   });
 
+  it('checks the Sessions again when the window gets focus', () => {
+    const main = openProjects(new FakeMain({}));
+
+    fireEvent.focus(window);
+
+    expect(main.invoked.map((i) => i.command)).toContain('sessions.check');
+  });
+
   it('links the folder chosen with "Use existing clone…"', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => project('loom') }));
 

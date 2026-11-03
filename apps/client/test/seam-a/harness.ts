@@ -449,3 +449,17 @@ export function waitFor<T extends TopicName>(
     if (done) unsubscribe();
   });
 }
+
+/** Resolves once the process with `pid` has exited. */
+export async function processEnded(pid: number): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() > deadline) throw new Error(`process ${pid} still running`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}

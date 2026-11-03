@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type ArchiveResult, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -11,7 +11,7 @@ import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
-import { createWorktree, type GitEnvironment } from './working-copies';
+import { createWorktree, removeWorktree, unsavedWork, worktreeExists, type GitEnvironment } from './working-copies';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -48,6 +48,8 @@ export class Sessions {
   private checkpoints = new Map<number, TimerHandle>();
   /** The agent conversation of each Session whose agent process is running. */
   private live = new Map<number, AgentSession>();
+  /** Sessions being archived: an agent opening for one is closed again, and its closing isn't a failure. */
+  private readonly archiving = new Set<number>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -140,6 +142,7 @@ export class Sessions {
     const session = this.get(id);
     if (session.status === 'working') throw new Error('The agent is still working on this Session.');
     if (session.status === 'archived') throw new Error('This Session is archived.');
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     if (!this.live.has(id) && session.agentSessionId) {
       throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
     }
@@ -161,14 +164,83 @@ export class Sessions {
     await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[forge.kind]) });
   }
 
-  /** Archives the Session and stops its agent; its checkout is left as it is. */
-  async archive({ id }: { id: number }): Promise<void> {
-    if (this.get(id).status === 'archived') return;
+  /**
+   * Archives the Session and stops its agent. A checkout Session's checkout is
+   * left as it is. A worktree Session's worktree is removed and its branch
+   * kept; unsaved work there holds the archive back unless `discard`. The
+   * Session counts as archived only once its worktree is gone, so a removal
+   * that fails can be tried again.
+   */
+  async archive({ id, discard = false }: { id: number; discard?: boolean }): Promise<ArchiveResult> {
+    // An agent still starting up for this Session is closed as soon as it is open.
+    this.archiving.add(id);
+    try {
+      return await this.archiveSession(id, discard);
+    } finally {
+      this.archiving.delete(id);
+    }
+  }
+
+  private async worktreeLeftOver(session: Session): Promise<boolean> {
+    if (session.workingCopy.kind !== 'worktree') return false;
+    try {
+      return await worktreeExists(this.environmentOf(session), session.workingCopy.path);
+    } catch {
+      return false; // Environment gone or offline: nothing left to do
+    }
+  }
+
+  private async archiveSession(id: number, discard: boolean): Promise<ArchiveResult> {
+    // Ending the agent's text needs the transcript, so it is read first.
+    this.get(id);
     await this.loadTranscript(id);
-    // It may have been archived while its transcript was being read.
+    const session = this.get(id);
+    const worktree = session.workingCopy.kind === 'worktree' ? session.workingCopy.path : undefined;
+    // An archived Session is only retried while its worktree is still on disk; never fail on one.
+    if (session.status === 'archived' && !(await this.worktreeLeftOver(session))) return { archived: true };
+    const environment = worktree === undefined ? undefined : this.environmentOf(session);
+    if (!environment || worktree === undefined) {
+      this.markArchived(id);
+      await this.stopAgent(id);
+      return { archived: true };
+    }
+    // The check runs with the agent alive, so Cancel on the warning leaves the Session as it was.
+    if (!discard && (await worktreeExists(environment, worktree))) {
+      const work = await unsavedWork(environment, worktree);
+      if (work) return { archived: false, unsavedWork: work };
+    }
+    // Confirmed: stop the agent, then look again in case it wrote in its last moment.
+    await this.stopAgent(id);
+    if (!discard && (await worktreeExists(environment, worktree))) {
+      const work = await unsavedWork(environment, worktree);
+      if (work) {
+        this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.');
+        return { archived: false, unsavedWork: work };
+      }
+    }
+    const checkout = this.options.project(session.projectId)!.checkout.path;
+    try {
+      await removeWorktree(environment, { checkout, path: worktree, force: discard });
+    } catch (error) {
+      const message = `The worktree at ${worktree} is still there, so the Session isn't archived. ${(error as Error).message}`;
+      this.fail(id, `Loom stopped the agent to archive this Session. ${message}`);
+      throw new Error(message);
+    }
+    this.markArchived(id);
+    return { archived: true };
+  }
+
+  private markArchived(id: number): void {
+    // Also guards a concurrent archive of the same Session: it was archived while this one waited.
     if (this.get(id).status === 'archived') return;
     this.endAgentText(id);
     this.setStatus(id, { status: 'archived' });
+    this.update(id, { worktreeMissing: undefined });
+  }
+
+  /** Closes the Session's agent, if it has one. */
+  private async stopAgent(id: number): Promise<void> {
+    this.endAgentText(id);
     const agent = this.live.get(id);
     this.live.delete(id);
     await agent?.close();
@@ -246,7 +318,7 @@ export class Sessions {
       workingCopy: session.workingCopy.path,
       onEvent: (event) => this.onAgentEvent(id, event),
     });
-    if (this.get(id).status === 'archived') {
+    if (this.get(id).status === 'archived' || this.archiving.has(id)) {
       await agent.close();
       throw new Error('This Session is archived.');
     }
@@ -257,6 +329,8 @@ export class Sessions {
   }
 
   private onAgentEvent(id: number, event: AgentEvent): void {
+    // The agent closing is Archive's own doing; Archive reports it if the Session stays.
+    if (event.type === 'closed' && this.archiving.has(id)) return void this.live.delete(id);
     // An archived Session's agent is on its way out; nothing it says counts.
     if (this.shuttingDown || this.get(id).status === 'archived') return;
     switch (event.type) {
@@ -280,11 +354,13 @@ export class Sessions {
   /**
    * Records the branch the Session's working copy has checked out, which the
    * agent or the user may have changed, or its short commit id on a detached
-   * HEAD. Keeps the last one known if git can't say.
+   * HEAD. Keeps the last one known if git can't say. Flags a worktree that is
+   * gone as missing.
    */
   private async lookUpBranch(id: number): Promise<void> {
     let branch: string | undefined;
     try {
+      if (!(await this.lookUpWorktree(id))) return;
       branch = await this.currentBranch(id);
       if (!branch) {
         const detached = await this.git(id, 'rev-parse', '--short', 'HEAD');
@@ -296,6 +372,18 @@ export class Sessions {
     if (!branch || this.shuttingDown || branch === this.get(id).branch) return;
     this.update(id, { branch });
     this.save(id, { branch });
+  }
+
+  /** Flags or clears a worktree Session's worktree as missing; resolves with whether it exists. */
+  private async lookUpWorktree(id: number): Promise<boolean> {
+    const session = this.get(id);
+    if (session.workingCopy.kind !== 'worktree') return true;
+    const exists = await worktreeExists(this.environmentOf(session), session.workingCopy.path);
+    const current = this.get(id);
+    if (this.shuttingDown || current.status === 'archived') return false;
+    if (exists === !current.worktreeMissing) return exists;
+    this.update(id, { worktreeMissing: exists ? undefined : true });
+    return exists;
   }
 
   /** The branch the Session's working copy has checked out; undefined on a detached HEAD. */

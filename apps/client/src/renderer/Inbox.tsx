@@ -5,6 +5,7 @@ import { Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch,
 import { useEffect, useState } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
+import { useArchive, WorktreeMissing } from './Archive';
 import { StatusIcon } from './Sessions';
 
 /** How often the rows' times are brought up to date. */
@@ -99,6 +100,7 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
   const at = new Date(session.updatedAt);
   const { issue, mergeRequest, branch } = session;
   const mergeRequestNumber = mergeRequest && mergeRequestRef(project.forge.kind, mergeRequest.number);
+  const archiver = useArchive();
   /** A click handler running a row action, saying in the row why it failed. */
   const withRowError = (action: () => Promise<void>) => () => {
     setError(undefined);
@@ -110,6 +112,7 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
         <div className="l1">
           <StatusIcon session={session} />
           <span className="title grow ellipsis">{session.title}</span>
+          {session.worktreeMissing && <WorktreeMissing />}
           {session.unread && <span className="unread-dot" role="img" aria-label="Unread" />}
           <time className="time" dateTime={at.toISOString()} title={at.toLocaleString()}>
             {timeOf(session.updatedAt, now)}
@@ -129,15 +132,17 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
         </div>
       )}
       <div className="hover-actions">
-        <Action label="Reply" icon={Reply} onClick={() => onReply(session)} />
-        {mergeRequest ? (
+        {/* A Session whose worktree is missing can only be archived. */}
+        {!session.worktreeMissing && <Action label="Reply" icon={Reply} onClick={() => onReply(session)} />}
+        {session.worktreeMissing ? null : mergeRequest ? (
           <Action label={`Open Merge request ${mergeRequestNumber}`} icon={ExternalLink} onClick={withRowError(() => api.invoke('links.open', { url: mergeRequest.url }))} />
         ) : (
           project.forge.state === 'available' && <Action label="Create Merge request" icon={GitPullRequestCreate} onClick={withRowError(() => api.invoke('sessions.requestMergeRequest', { id: session.id }))} />
         )}
-        <Action label="Archive" icon={Archive} onClick={withRowError(() => api.invoke('sessions.archive', { id: session.id }))} />
-        {!session.unread && <Action label="Mark unread" icon={Mail} onClick={withRowError(() => api.invoke('sessions.setUnread', { id: session.id, unread: true }))} />}
+        <Action label="Archive" icon={Archive} onClick={withRowError(() => archiver.archive(session))} />
+        {!session.worktreeMissing && !session.unread && <Action label="Mark unread" icon={Mail} onClick={withRowError(() => api.invoke('sessions.setUnread', { id: session.id, unread: true }))} />}
       </div>
+      {archiver.dialog}
     </div>
   );
 }

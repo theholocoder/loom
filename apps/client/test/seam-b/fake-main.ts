@@ -32,6 +32,7 @@ export class FakeMain implements LoomApi {
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       'projects.issues': () => [],
       'projects.check': () => {},
+      'sessions.check': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
         const settings = { ...this.value('settings'), worktreeRoot };
         this.publish('settings', settings);
@@ -57,7 +58,7 @@ export class FakeMain implements LoomApi {
         throw new Error('sessions.create is not scripted');
       },
       'sessions.send': () => {},
-      'sessions.archive': () => {},
+      'sessions.archive': () => ({ archived: true }),
       'sessions.requestMergeRequest': () => {},
       'sessions.setUnread': () => {},
       'sessions.openInEditor': () => {},

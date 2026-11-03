@@ -174,6 +174,19 @@ export interface WorkingCopy {
   path: string;
 }
 
+/** Work in a worktree that removing it would lose, or leave only on its local branch. */
+export interface UnsavedWork {
+  /** Whether it has uncommitted changes, untracked files included. */
+  uncommitted: boolean;
+  /** How many of its commits are on no remote branch. */
+  unpushedCommits: number;
+  /** Whether HEAD is detached, so those commits are on no branch and archiving loses them. */
+  detached: boolean;
+}
+
+/** What `sessions.archive` did: archived, or held back by unsaved work. */
+export type ArchiveResult = { archived: true } | { archived: false; unsavedWork: UnsavedWork };
+
 export interface Session {
   id: number;
   projectId: number;
@@ -195,6 +208,12 @@ export interface Session {
   /** Its current branch's Merge request, once linked. */
   mergeRequest?: ForgeLink;
   status: SessionStatus;
+  /**
+   * Set when a worktree Session's worktree is gone, deleted outside Loom: it
+   * can only be archived. Checked with its branch: after each turn, when
+   * the Session is opened and when its Environment connects.
+   */
+  worktreeMissing?: boolean;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
@@ -277,6 +296,8 @@ export interface Commands {
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
+  /** The Loom window got focus: read every Session's branch and worktree again. */
+  'sessions.check': { params: void; result: void };
   /**
    * Sets where new worktrees go. Rejects a root that is neither absolute nor
    * under `~`.
@@ -315,10 +336,14 @@ export interface Commands {
    */
   'sessions.send': { params: { id: number; prompt: string }; result: void };
   /**
-   * Archives a Session, stopping its agent, mid-run if Working. Only checkout
-   * Sessions so far, which archive without touching the checkout.
+   * Archives a Session, stopping its agent, mid-run if Working. A checkout
+   * Session's checkout is left as it is. A worktree Session's worktree is
+   * removed, keeping its local branch and never touching the remote; if the
+   * worktree has uncommitted changes or commits on no remote branch, it
+   * resolves with that unsaved work and archives nothing, unless `discard`.
+   * A Session whose worktree is missing archives as it is.
    */
-  'sessions.archive': { params: { id: number }; result: void };
+  'sessions.archive': { params: { id: number; discard?: boolean }; result: ArchiveResult };
   /**
    * Asks a Waiting Session's agent to open its branch's Merge request, or
    * update it, with a canned prompt; Loom never creates one itself. Rejects

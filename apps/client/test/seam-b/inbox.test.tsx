@@ -166,6 +166,35 @@ describe('the Inbox', () => {
     expect(main.invoked.filter((i) => i.command === 'sessions.archive')).toEqual([{ command: 'sessions.archive', params: { id: waiting.id } }]);
   });
 
+  it('warns before archiving a row with unsaved work: Cancel keeps it, Discard archives it', async () => {
+    const dirty = session({ title: 'Half done', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/loom/half' } });
+    const main = renderApp(
+      new FakeMain({ projects: [loom], sessions: [dirty] }, { 'sessions.archive': ({ discard }) => (discard ? { archived: true } : { archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 2, detached: false } }) }),
+    );
+    const archive = () => fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Half done' })).getByRole('button', { name: 'Archive' }));
+
+    archive();
+    const warning = await screen.findByRole('alertdialog', { name: 'Archive with unsaved work?' });
+    expect(warning.textContent).toContain('uncommitted changes and 2 unpushed commits');
+    fireEvent.click(within(warning).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    archive();
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: dirty.id }, { id: dirty.id }, { id: dirty.id, discard: true }]);
+  });
+
+  it('flags a Session whose worktree is missing, offering only Archive', () => {
+    const missing = session({ title: 'Gone', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/loom/gone' }, worktreeMissing: true });
+    renderApp(new FakeMain({ projects: [loom], sessions: [missing] }));
+
+    const row = within(inbox()).getByRole('listitem', { name: 'Gone' });
+
+    expect(within(row).getByRole('status', { name: 'Worktree missing' })).toBeTruthy();
+    expect(within(row.querySelector('.hover-actions') as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Archive']);
+  });
+
   it('replies from a row: the Session opens with its composer focused, and leaves the Inbox once sent', async () => {
     const waiting = session({ title: 'Asked me something', waitingReason: 'question' });
     const main = renderApp(

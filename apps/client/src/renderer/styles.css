@@ -196,3 +196,9 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .B-item > button.open { display: block; width: 100%; background: none; border: 0; border-radius: 0; padding: 7px 12px 7px 46px; text-align: left; }
 .B-item > button.open:hover { background: none; }
 .B-item .row-error { padding: 0 12px 7px 46px; }
+.scrim { position: fixed; inset: 0; background: var(--shadow); display: grid; place-items: center; z-index: 50; }
+.modal { width: min(440px, calc(100vw - 32px)); box-shadow: 0 12px 40px var(--shadow); }
+.modal p { margin: 0 0 12px; color: var(--muted); }
+.modal-actions { justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.danger { background: var(--err); color: var(--bg); border-color: var(--err); }
+.warn-icon, .flag-missing { color: var(--err); }

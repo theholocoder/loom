@@ -1,9 +1,9 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
 // Inbox sidebar, the main pane and the diff rail.
 import { ChartColumn, FileDiff, FolderGit2, FolderOpen, MessageSquarePlus, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Session } from '../shared/api';
-import { useTopic } from './api';
+import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
 import { Popover } from './Popover';
 import { Projects, useExistingCloneLinker } from './Projects';
@@ -15,7 +15,16 @@ type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
 
 export function App() {
   useAppearance();
+  const api = useApi();
   const [view, setView] = useState<View>('session');
+  // A worktree may be deleted while Loom is in the background: look again on focus.
+  useEffect(() => {
+    const check = () => {
+      api.invoke('sessions.check').catch((error: unknown) => console.error('session check failed:', error));
+    };
+    window.addEventListener('focus', check);
+    return () => window.removeEventListener('focus', check);
+  }, [api]);
   const [diffOpen, setDiffOpen] = useState(false);
   const linker = useExistingCloneLinker();
   const sessions = useTopic('sessions') ?? [];
