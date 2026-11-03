@@ -10,6 +10,7 @@ import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
 import { useArchive, WorktreeMissing } from './Archive';
+import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
@@ -163,6 +164,13 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const starting = working && (environment?.state === 'starting' || environment?.state === 'disconnected');
   // The last prompt went unanswered, so it can be sent again.
   const retryable = session.status === 'waiting' && session.waitingReason === 'error' && items.at(-2)?.kind === 'user' && items.at(-1)?.kind === 'error' && !session.worktreeMissing;
+  // The agent waits on an answer. A question is answered in a panel on the composer, one question
+  // at a time, the composer giving its answers of one's own; a trust request, on its card.
+  const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust') && i.state === 'asked') : undefined;
+  const asked = firstAsked !== undefined;
+  const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
+    api.invoke('sessions.answer', { id: session.id, itemId, answer }),
+  );
 
   const end = useRef<HTMLDivElement>(null);
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
@@ -179,12 +187,23 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const send = async (prompt: string) => {
     setError(undefined);
     try {
+      if (freeAnswer) return await freeAnswer.send(prompt);
       await api.invoke('sessions.send', { id: session.id, prompt });
       return true;
     } catch (e) {
       setError((e as Error).message);
       return false;
     }
+  };
+
+  /** What the composer is for right now. */
+  const composerPlaceholder = (): string => {
+    if (working) return `${session.agent} is working…`;
+    if (freeAnswer) return freeAnswer.placeholder;
+    if (asked) return 'Answer the question above to go on.';
+    if (session.status === 'archived') return 'This Session is archived.';
+    if (session.worktreeMissing) return "This Session's worktree is missing; it can only be archived.";
+    return `Reply to ${session.agent}…`;
   };
 
   const retry = async () => {
@@ -275,6 +294,10 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
             <ThinkingBlock key={item.id} item={item} />
           ) : item.kind === 'tool' ? (
             <ToolCard key={item.id} item={item} />
+          ) : item.kind === 'question' ? (
+            <QuestionCard key={item.id} item={item} />
+          ) : item.kind === 'trust' ? (
+            <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
           ) : (
             <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
           ),
@@ -301,16 +324,10 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
       </div>
       <Composer
         agent={session.agent}
-        placeholder={
-          working
-            ? `${session.agent} is working…`
-            : session.status === 'archived'
-              ? 'This Session is archived.'
-              : session.worktreeMissing
-                ? "This Session's worktree is missing; it can only be archived."
-                : `Reply to ${session.agent}…`
-        }
-        disabled={session.status !== 'waiting' || !!session.worktreeMissing}
+        placeholder={composerPlaceholder()}
+        disabled={session.status !== 'waiting' || (asked && !freeAnswer) || !!session.worktreeMissing}
+        dock={panel}
+        clearKey={stepKey}
         focusRequest={replyRequest}
         onSend={send}
       />
@@ -354,6 +371,8 @@ function Composer({
   onSend,
   onDraftChange,
   canSendEmpty = false,
+  dock,
+  clearKey,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -367,6 +386,10 @@ function Composer({
   onDraftChange?: (draft: string) => void;
   /** Whether an empty prompt can be sent. */
   canSendEmpty?: boolean;
+  /** What sits on the prompt box, part of it: the panel of a question it answers. */
+  dock?: ReactNode;
+  /** Changing it empties the prompt box: what was typed was for something else, such as another question. */
+  clearKey?: string;
 }) {
   const [draft, setDraftState] = useState('');
   const setDraft = (value: string) => {
@@ -377,6 +400,12 @@ function Composer({
   useEffect(() => {
     if (focusRequest) prompt.current?.focus();
   }, [focusRequest]);
+  const clearedFor = useRef(clearKey);
+  useEffect(() => {
+    if (clearedFor.current === clearKey) return;
+    clearedFor.current = clearKey;
+    setDraft('');
+  }, [clearKey]);
   const [sending, setSending] = useState(false);
   const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '');
 
@@ -395,8 +424,9 @@ function Composer({
   };
 
   return (
-    <form className="composer-wrap" onSubmit={send}>
-      <div className="composer">
+    <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
+      <div className={`composer${dock ? ' docked' : ''}`}>
+        {dock}
         <textarea ref={prompt} aria-label="Prompt" rows={2} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} />
         <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>

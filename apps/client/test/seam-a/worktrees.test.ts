@@ -407,6 +407,38 @@ describe('archiving a worktree Session whose agent is working', () => {
     expect(existsSync(path)).toBe(false);
   });
 
+  it('leaves an agent that is still starting alone when the archive is held back', async () => {
+    const { machine, checkout } = machineWithClone();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['On it.'], hold: 'run' }], holdNew: 'start' } });
+    const { main, project } = await withProject(machine, checkout);
+    const { id, workingCopy } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    const deadline = Date.now() + 5000;
+    while (!machine.acpMessages().some((m) => m.message.method === 'session/new')) {
+      if (Date.now() > deadline) throw new Error('the agent was never asked for a session');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    writeFileSync(join(workingCopy.path, 'README.md'), 'half done\n');
+    // The agent finishes starting while the archive looks for unsaved work: git status runs
+    // the fsmonitor hook, which lets the agent go on, then gives it a moment before git carries on.
+    const hook = join(tempDir('loom-fsmonitor-'), 'fsmonitor.mjs');
+    writeFileSync(hook, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(machine.releaseFile('start'))}, '');\nsetTimeout(() => {}, 1000);\n`);
+    git(workingCopy.path, 'config', 'core.fsmonitor', `"${process.execPath.replaceAll('\\', '/')}" "${hook.replaceAll('\\', '/')}"`);
+
+    // The archive is held back while the agent is still starting; once started, it carries on.
+    const archiving = main.api.invoke('sessions.archive', { id });
+    expect(await archiving).toMatchObject({ archived: false, unsavedWork: { uncommitted: true } });
+    // Where git couldn't run the hook, the agent starts now, after the archive.
+    machine.release('start');
+    const prompted = Date.now() + 5000;
+    while (!machine.acpMessages().some((m) => m.message.method === 'session/prompt')) {
+      if (Date.now() > prompted) throw new Error('the agent never got its prompt');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'working' });
+    machine.release('run');
+    await waitFor(main.api, 'sessions', (list) => list.some((s) => s.id === id && s.status === 'waiting' && s.waitingReason === 'finished'));
+  });
+
   it('flags commits on a detached HEAD as lost with the worktree', async () => {
     const { machine, main, id, path } = await workingSession();
     git(path, 'checkout', '--detach');

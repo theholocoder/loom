@@ -25,6 +25,8 @@ const UNCHECKED: ForgeStatus = { state: 'unknown', checking: false };
 
 export class Projects {
   private projects = new Map<number, Project>();
+  /** Whether each Project's local files are trusted, once the user has said. */
+  private trust = new Map<number, boolean>();
   /** Forge checks running, by Project id. */
   private checking = new Map<number, Promise<void>>();
 
@@ -36,9 +38,10 @@ export class Projects {
     const rows = await options.db
       .selectFrom('projects')
       .innerJoin('checkouts', 'checkouts.project_id', 'projects.id')
-      .select(['id', 'name', 'branch_prefix', 'environment_id', 'path'])
+      .select(['id', 'name', 'branch_prefix', 'trusted', 'environment_id', 'path'])
       .execute();
     for (const row of rows) {
+      if (row.trusted !== null) projects.trust.set(row.id, row.trusted !== 0);
       projects.projects.set(row.id, {
         id: row.id,
         name: row.name,
@@ -89,6 +92,18 @@ export class Projects {
     await this.options.db.updateTable('projects').set({ branch_prefix: prefix }).where('id', '=', id).execute();
     this.update(id, { branchPrefix: prefix });
     return this.projects.get(id)!;
+  }
+
+  /** Whether the agent may trust the Project's local files, as the user said; undefined until asked. */
+  trusted(id: number): boolean | undefined {
+    return this.trust.get(id);
+  }
+
+  /** Records whether the agent may trust the Project's local files, for all its Sessions: at once, then in the database. */
+  async setTrusted(id: number, trusted: boolean): Promise<void> {
+    if (!this.projects.has(id)) throw new Error(`unknown Project ${id}`);
+    this.trust.set(id, trusted);
+    await this.options.db.updateTable('projects').set({ trusted: trusted ? 1 : 0 }).where('id', '=', id).execute();
   }
 
   /**

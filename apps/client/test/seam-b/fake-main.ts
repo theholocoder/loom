@@ -71,6 +71,8 @@ export class FakeMain implements LoomApi {
       'sessions.diff': () => ({ available: false, reason: 'No diff available' }),
       'sessions.diffFile': () => ({ text: '', truncated: false }),
       'sessions.retry': () => {},
+      'sessions.answer': () => {},
+      'sessions.trust': () => {},
       'database.restoreLatestSnapshot': () => {},
       ...handlers,
     };
