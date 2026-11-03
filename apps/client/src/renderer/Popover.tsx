@@ -119,7 +119,7 @@ export function Popover({
 
   const style: CSSProperties = placement
     ? { top: placement.top, bottom: placement.bottom, left: placement.left, maxHeight: placement.maxHeight }
-    : { visibility: 'hidden', top: 0, left: 0 };
+    : { top: 0, left: 0 }; // Placed by the layout effect before the first paint.
 
   return (
     <div
