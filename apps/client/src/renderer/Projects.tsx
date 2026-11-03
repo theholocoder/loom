@@ -1,5 +1,5 @@
 import { CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project } from '../shared/api';
 import { useApi, useTopic } from './api';
 
@@ -155,18 +155,31 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
 }
 
 /** Why the Project's Forge features are off, and what to do about it, if they are. */
-function forgeOffReason(forge: ForgeStatus, environmentLabel: string): string | undefined {
-  const cli = forge.kind && FORGE_CLI[forge.kind];
+function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode {
+  const cli = forge.kind && <span className="tech">{FORGE_CLI[forge.kind]}</span>;
   const recheck = 'Loom checks again whenever Projects opens.';
   switch (forge.state) {
     case 'no-remote':
       return 'Forge features are off: this checkout has no origin remote.';
     case 'unsupported':
-      return `Forge features are off: origin (${forge.remote}) isn't on GitHub or GitLab.`;
+      return (
+        <>
+          Forge features are off: origin (<span className="tech">{forge.remote}</span>) isn't on GitHub or GitLab.
+        </>
+      );
     case 'cli-missing':
-      return `Forge features are off: ${cli} isn't installed in ${environmentLabel}, or isn't on your shell's PATH. Install it, then Reload the Environment in Settings.`;
+      return (
+        <>
+          Forge features are off: {cli} isn't installed in {environmentLabel}, or isn't on your shell's PATH. Install it, then Reload the Environment in Settings.
+        </>
+      );
     case 'signed-out':
-      return `Forge features are off: ${cli} isn't signed in to ${forge.host}. Run "${cli} auth login --hostname ${forge.host}"; ${recheck}`;
+      return (
+        <>
+          Forge features are off: {cli} isn't signed in to <span className="tech">{forge.host}</span>. Run "
+          <span className="tech">{`${forge.kind && FORGE_CLI[forge.kind]} auth login --hostname ${forge.host}`}</span>"; {recheck}
+        </>
+      );
     case 'error':
       return `Forge features are off: Loom couldn't check the Forge: ${forge.error}`;
     default:
