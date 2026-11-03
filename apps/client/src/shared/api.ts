@@ -303,13 +303,23 @@ export interface DiffFile {
 
 /**
  * A Session's diff: its working tree against the merge-base of HEAD and its
- * start base (`origin/<default branch>`, as the local ref has it), or against
+ * start base (an `origin/…` branch as the local ref has it; see
+ * DiffBaseSource for which), or against
  * HEAD for uncommitted changes only. An archived worktree Session's is its
  * branch's commits, read-only.
  */
 export type DiffSummary =
   | { available: false; reason: string }
-  | { available: true; readOnly: boolean; base: string; files: DiffFile[] };
+  | { available: true; readOnly: boolean; base: string; baseSource?: DiffBaseSource; files: DiffFile[] };
+
+/**
+ * Where a diff's start base came from (none for an uncommitted-only diff, against `HEAD`):
+ * - `recorded`: Loom recorded it when it made the branch, or the user set it
+ *   (`sessions.setDiffBase`), in the repository's local git config;
+ * - `created-from`: the branch's reflog says it was created from it;
+ * - `default`: neither says, so it is `origin`'s default branch, a guess.
+ */
+export type DiffBaseSource = 'recorded' | 'created-from' | 'default';
 
 /** One file's unified diff text, cut short past a size limit. */
 export interface FileDiff {
@@ -603,6 +613,18 @@ export interface Commands {
    * Session, or an archived worktree Session whose branch is gone.
    */
   'sessions.diff': { params: { id: number; uncommittedOnly?: boolean }; result: DiffSummary };
+  /**
+   * The `origin/…` branches the Session's diff can be against, as the local
+   * refs have them, by name. Never fetches.
+   */
+  'sessions.diffBases': { params: { id: number }; result: string[] };
+  /**
+   * Sets the start base the Session's diff is against, `origin/<branch>`,
+   * for its current branch, in the repository's local git config; it stays
+   * with the branch. Rejects one the local refs don't have, a Session that
+   * isn't on a branch, and an archived Session.
+   */
+  'sessions.setDiffBase': { params: { id: number; base: string }; result: void };
   /** One file of the Session's diff, as `sessions.diff` listed it. */
   'sessions.diffFile': { params: { id: number; path: string; uncommittedOnly?: boolean }; result: FileDiff };
   /**

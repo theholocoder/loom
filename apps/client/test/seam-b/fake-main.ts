@@ -71,6 +71,8 @@ export class FakeMain implements LoomApi {
       'sessions.openInTerminal': () => {},
       'sessions.diff': () => ({ available: false, reason: 'No diff available' }),
       'sessions.diffFile': () => ({ text: '', truncated: false }),
+      'sessions.diffBases': () => [],
+      'sessions.setDiffBase': () => {},
       'sessions.retry': () => {},
       'sessions.answer': () => {},
       'sessions.trust': () => {},

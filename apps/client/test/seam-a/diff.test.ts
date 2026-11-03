@@ -175,3 +175,87 @@ describe("a Session's diff", () => {
     expect(await main.api.invoke('sessions.diff', { id })).toEqual({ available: false, reason: 'No diff available' });
   });
 });
+
+describe("a Session's diff base", () => {
+  /** A Project whose origin has `main` and `release`, the release one a commit ahead, and a Session in a worktree made by hand with `add`. */
+  async function inHandMadeWorktree(add: (checkout: string, path: string) => void) {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['Done.'] }] } });
+    const origin = machine.gitOrigin('billing-api');
+    const checkout = machine.gitClone(origin, 'billing-api');
+    git(checkout, 'switch', '--quiet', '-c', 'release');
+    machine.commit(checkout, 'release.txt', 'r\n');
+    git(checkout, 'push', '--quiet', 'origin', 'release');
+    git(checkout, 'switch', '--quiet', 'main');
+    git(checkout, 'branch', '--quiet', '-D', 'release');
+    const path = machine.folder('by-hand');
+    add(checkout, path);
+    machine.commit(path, 'work.txt', 'w\n');
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', ready);
+    const project = await main.api.invoke('projects.link', { path: checkout });
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { worktree: path }, prompt: 'Carry on' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    return { machine, checkout, main, id: created.id, path };
+  }
+
+  it('is the one Loom recorded when it made the branch', async () => {
+    const { main, id } = await started();
+
+    expect(await main.api.invoke('sessions.diff', { id })).toMatchObject({ available: true, base: 'origin/main', baseSource: 'recorded' });
+  });
+
+  it("is what the branch's reflog says it was created from, for a worktree made outside Loom", async () => {
+    const { main, id } = await inHandMadeWorktree((checkout, path) => git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat', path, 'origin/release'));
+
+    const summary = await main.api.invoke('sessions.diff', { id });
+
+    expect(summary).toMatchObject({ available: true, base: 'origin/release', baseSource: 'created-from' });
+    expect(files(summary).map((f) => f.path)).toEqual(['work.txt']);
+  });
+
+  it("follows origin/HEAD, and a local branch to its origin namesake, as the reflog names them", async () => {
+    const fromHead = await inHandMadeWorktree((checkout, path) => git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat', path, 'origin/HEAD'));
+    expect(await fromHead.main.api.invoke('sessions.diff', { id: fromHead.id })).toMatchObject({ base: 'origin/main', baseSource: 'created-from' });
+
+    const fromLocal = await inHandMadeWorktree((checkout, path) => {
+      git(checkout, 'branch', '--quiet', 'release', 'origin/release');
+      git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat', path, 'release');
+    });
+    expect(await fromLocal.main.api.invoke('sessions.diff', { id: fromLocal.id })).toMatchObject({ base: 'origin/release', baseSource: 'created-from' });
+  });
+
+  it("falls back to origin's default when the reflog can't say, and takes the base the user sets, kept in git config", async () => {
+    // Created from HEAD: which branch that was isn't recorded.
+    const { checkout, main, id, path } = await inHandMadeWorktree((checkout, path) => {
+      git(checkout, 'switch', '--quiet', '--detach', 'origin/release');
+      git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat', path);
+      git(checkout, 'switch', '--quiet', 'main');
+    });
+    expect(await main.api.invoke('sessions.diff', { id })).toMatchObject({ base: 'origin/main', baseSource: 'default' });
+    expect(await main.api.invoke('sessions.diffBases', { id })).toEqual(['origin/main', 'origin/release']);
+
+    await main.api.invoke('sessions.setDiffBase', { id, base: 'origin/release' });
+
+    const summary = await main.api.invoke('sessions.diff', { id });
+    expect(summary).toMatchObject({ base: 'origin/release', baseSource: 'recorded' });
+    expect(files(summary).map((f) => f.path)).toEqual(['work.txt']);
+    expect(git(checkout, 'config', '--get', 'branch.feat.loomBase')).toBe('origin/release');
+    expect(git(path, 'status', '--porcelain')).toBe('');
+  });
+
+  it("doesn't take its own origin branch as the base of a branch made to track it", async () => {
+    const { main, id } = await inHandMadeWorktree((checkout, path) => git(checkout, 'worktree', 'add', '--quiet', '--track', '-b', 'release', path, 'origin/release'));
+
+    expect(await main.api.invoke('sessions.diff', { id })).toMatchObject({ base: 'origin/main', baseSource: 'default' });
+  });
+
+  it("rejects a base that isn't one of origin's branches, or a Session that isn't on a branch", async () => {
+    const { main, id, path } = await inHandMadeWorktree((checkout, path) => git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat', path, 'origin/main'));
+
+    await expect(main.api.invoke('sessions.setDiffBase', { id, base: 'origin/nope' })).rejects.toThrow('origin/nope isn\'t one of origin\'s branches here; fetch origin if it is new.');
+    await expect(main.api.invoke('sessions.setDiffBase', { id, base: 'main' })).rejects.toThrow("main isn't one of origin's branches here");
+    git(path, 'switch', '--quiet', '--detach');
+    await expect(main.api.invoke('sessions.setDiffBase', { id, base: 'origin/main' })).rejects.toThrow("isn't on a branch");
+  });
+});

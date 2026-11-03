@@ -602,6 +602,26 @@ export class Sessions {
     return summary;
   }
 
+  /** The `origin/…` branches the Session's diff can be against, as the local refs have them. */
+  async diffBases(id: number): Promise<string[]> {
+    return (await this.liveDiffOf(id)).bases();
+  }
+
+  /** Records the start base the Session's diff is against, for its current branch. */
+  async setDiffBase(id: number, base: string): Promise<void> {
+    if (typeof base !== 'string') throw new Error('A diff base needs a name.');
+    await (await this.liveDiffOf(id)).setBase(base);
+    void this.lookUpDiffStat(id);
+  }
+
+  /** The diff of a Session that isn't archived, whose base can still change. */
+  private async liveDiffOf(id: number): Promise<WorkingCopyDiff> {
+    if (this.get(id).status === 'archived') throw new Error("An archived Session's diff base can't change.");
+    const diff = await this.diffOf(id);
+    if (!diff) throw new Error('No diff available');
+    return diff;
+  }
+
   /** One file of the Session's diff; the renderer names the path, what git is asked about it is worked out here. */
   async diffFile(id: number, path: string, uncommittedOnly = false): Promise<FileDiff> {
     const diff = await this.diffOf(id);
