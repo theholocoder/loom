@@ -104,8 +104,10 @@ export class BridgeConnection {
    * Closes the bridge's stdin, which tells it to shut down, and waits for it
    * to exit, killing it if it hasn't within `graceMs`. This runs on real time
    * rather than the Clock: shutting down must not wait on a test's clock.
+   * The default outlasts the bridge's own 5 s grace for its agents' process
+   * groups, so the bridge gets to kill the stubborn ones before it is killed.
    */
-  async close(graceMs = 5_000): Promise<void> {
+  async close(graceMs = 10_000): Promise<void> {
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
     const exited = new Promise<void>((resolve) => this.child.once('exit', () => resolve()));
     this.child.stdin!.end();

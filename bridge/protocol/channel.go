@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/theholocoder/loom/bridge/proc"
 	"github.com/theholocoder/loom/bridge/shellenv"
@@ -34,7 +36,7 @@ const maxExitStderr = 4 << 10
 // events, then a channel.exit event once it has exited.
 type channel struct {
 	id    int
-	cmd   *exec.Cmd
+	group *proc.Group
 	stdin io.WriteCloser
 	// writing keeps writes in the order main sent them.
 	writing sync.Mutex
@@ -91,11 +93,13 @@ type exitEvent struct {
 	Stderr   string `json:"stderr"`
 }
 
-// channels holds the bridge's open channels. Every process it starts is
+// channels holds the bridge's open channels. Each process runs in its own
+// process group (proc.Group) with whatever it starts, and every group is
 // stopped when ctx ends, which is when the bridge shuts down.
 type channels struct {
 	ctx     context.Context
 	out     *writer
+	grace   time.Duration
 	running sync.WaitGroup
 
 	mu     sync.Mutex
@@ -103,8 +107,11 @@ type channels struct {
 	open   map[int]*channel
 }
 
-func newChannels(ctx context.Context, out *writer) *channels {
-	return &channels{ctx: ctx, out: out, open: map[int]*channel{}}
+func newChannels(ctx context.Context, out *writer, grace time.Duration) *channels {
+	if grace <= 0 {
+		grace = proc.DefaultGrace
+	}
+	return &channels{ctx: ctx, out: out, grace: grace, open: map[int]*channel{}}
 }
 
 func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Error) {
@@ -115,31 +122,38 @@ func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Er
 	if err != nil {
 		return nil, &Error{Code: "not_found", Message: fmt.Sprintf("%s is not on the PATH", params.Command)}
 	}
-	cmd := exec.CommandContext(cs.ctx, path, params.Args...)
+	cmd := exec.Command(path, params.Args...)
 	cmd.Dir = params.Cwd
 	cmd.Env = env.ForTools()
 	// exec.Cmd keeps the last of duplicate variables, so these win.
 	for name, value := range params.Env {
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
-	proc.Isolate(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, spawnFailed(err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Not StdoutPipe: Wait would close it once the process exits. This pipe
+	// reaches EOF only when the process and everything it started that holds
+	// it have gone, so its last output is never lost.
+	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, spawnFailed(err)
 	}
+	cmd.Stdout = stdoutW
 	stderr := &tailBuffer{}
 	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
+	group, err := proc.Start(cmd, cs.grace)
+	_ = stdoutW.Close()
+	if err != nil {
+		_ = stdout.Close()
 		return nil, spawnFailed(err)
 	}
 
 	cs.mu.Lock()
 	cs.nextID++
-	c := &channel{id: cs.nextID, cmd: cmd, stdin: stdin, credit: ChannelWindow}
+	c := &channel{id: cs.nextID, group: group, stdin: stdin, credit: ChannelWindow}
 	c.changed = sync.NewCond(&c.mu)
 	cs.open[c.id] = c
 	cs.mu.Unlock()
@@ -148,8 +162,16 @@ func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Er
 	go func() {
 		defer cs.running.Done()
 		stop := context.AfterFunc(cs.ctx, c.stop)
+		// The group is waited for alongside the pump: once the process has
+		// exited, Wait stops what it left running, which may hold stdout.
+		exited := make(chan struct{})
+		go func() {
+			_ = group.Wait()
+			close(exited)
+		}()
 		c.pump(stdout, cs.out)
-		_ = cmd.Wait()
+		<-exited
+		_ = stdout.Close()
 		stop()
 		cs.mu.Lock()
 		delete(cs.open, c.id)
@@ -159,7 +181,8 @@ func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Er
 	return &openResult{Channel: c.id, Path: path}, nil
 }
 
-// wait returns once every channel's process has exited and been reported.
+// wait returns once every channel's process group has gone and its exit been
+// reported.
 func (cs *channels) wait() {
 	cs.running.Wait()
 }
@@ -223,13 +246,14 @@ func (cs *channels) kill(params channelParams) (any, *Error) {
 	return struct{}{}, nil
 }
 
-// stop kills the process's group and drops whatever it still prints.
+// stop stops the process's group (SIGTERM, then SIGKILL once the grace is
+// up) and drops whatever it still prints. It doesn't wait for the group.
 func (c *channel) stop() {
 	c.mu.Lock()
 	c.stopped = true
 	c.changed.Broadcast()
 	c.mu.Unlock()
-	_ = proc.Kill(c.cmd)
+	c.group.Stop()
 }
 
 // pump sends the process's stdout as channel.data events, never more than the

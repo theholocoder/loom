@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -49,8 +52,47 @@ func TestMain(m *testing.M) {
 	case "fail":
 		fmt.Fprint(os.Stderr, "something broke")
 		os.Exit(7)
+	case "spawner":
+		spawnTool()
+		fmt.Print("ready")
+		if os.Getenv("LOOM_SPAWNER_EXITS") == "" {
+			time.Sleep(time.Minute)
+		}
+	case "tool":
+		time.Sleep(time.Minute)
+	case "graceful":
+		term := make(chan os.Signal, 1)
+		signal.Notify(term, syscall.SIGTERM)
+		fmt.Print("ready")
+		<-term
+		_ = os.WriteFile(os.Getenv("LOOM_MARK_FILE"), []byte("terminated"), 0o644)
+	case "stubborn":
+		signal.Ignore(syscall.SIGTERM)
+		fmt.Print("ready")
+		time.Sleep(time.Minute)
 	}
 	os.Exit(0)
+}
+
+// spawnTool starts this test binary as a "tool" helper, as an agent starts
+// its tools, and writes its PID to $LOOM_PID_FILE. The tool sleeps for a
+// minute at most, so even a leaked one doesn't outlive the test run for long.
+func spawnTool() {
+	self, err := os.Executable()
+	if err != nil {
+		os.Exit(3)
+	}
+	tool := exec.Command(self)
+	tool.Env = append(os.Environ(), helperEnv+"=tool")
+	if os.Getenv("LOOM_TOOL_KEEPS_STDOUT") != "" {
+		tool.Stdout = os.Stdout
+	}
+	if err := tool.Start(); err != nil {
+		os.Exit(3)
+	}
+	if err := os.WriteFile(os.Getenv("LOOM_PID_FILE"), []byte(strconv.Itoa(tool.Process.Pid)), 0o644); err != nil {
+		os.Exit(3)
+	}
 }
 
 // helperBridge is a bridge whose Environment can run this test binary.

@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 import electronBinary from 'electron';
 import clientPackage from '../package.json' with { type: 'json' };
+import type { EnvironmentStatus, LoomApi } from '../src/shared/api';
+import { Machine } from '../test/seam-a/machine';
 
 // resolve() drops the trailing separator: on Windows a quoted "…\client\"
 // escapes its closing quote and Electron gets a broken app path.
@@ -38,8 +40,8 @@ test.afterEach(async ({}, testInfo) => {
   rmSync(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
-async function launch() {
-  app = await electron.launch({ args, env: { ...process.env, LOOM_USER_DATA_DIR: userDataDir } });
+async function launch(env: NodeJS.ProcessEnv = process.env) {
+  app = await electron.launch({ args, env: { ...env, LOOM_USER_DATA_DIR: userDataDir } });
   app.process().stdout?.on('data', (chunk) => appOutput.push(String(chunk)));
   app.process().stderr?.on('data', (chunk) => appOutput.push(String(chunk)));
   const window = await app.firstWindow({ timeout: 20_000 });
@@ -188,3 +190,73 @@ test('the Settings dropdowns take on the theme', async () => {
   }
   // Each test gets its own profile, so the theme needs no restoring for the others.
 });
+
+test('closing the window with a Working Session asks first, and quitting stops its agent', async () => {
+  const machine = new Machine();
+  let agent: number | undefined;
+  try {
+    machine.installOpencode({
+      version: 'opencode v2.1.4',
+      integrations: [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }],
+      acp: { turns: [{ chunks: ['On it'], hold: 'never' }] },
+    });
+    const checkout = machine.gitRepo('billing-api');
+    const window = await launch(machine.bridgeEnv());
+    await window.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const loom = (globalThis as unknown as { loom: LoomApi }).loom;
+          loom.subscribe('environments', (envs: EnvironmentStatus[]) => {
+            if (envs.find((e) => e.id === 'native')?.agent?.state === 'ready') resolve();
+          });
+        }),
+    );
+    await window.evaluate(async (path) => {
+      const loom = (globalThis as unknown as { loom: LoomApi }).loom;
+      const project = await loom.invoke('projects.link', { path });
+      await loom.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the build' });
+    }, checkout);
+    await expect.poll(() => machine.acpMessages().some((m) => m.message.method === 'session/prompt')).toBe(true);
+    const pid = machine.acpMessages()[0]!.pid;
+    agent = pid;
+
+    // The question is answered Cancel, then Quit.
+    await app!.evaluate(({ dialog }) => {
+      const answers = [1, 0];
+      const asked: string[] = [];
+      (globalThis as { asked?: string[] }).asked = asked;
+      dialog.showMessageBox = (async (_window: unknown, options: Electron.MessageBoxOptions) => {
+        asked.push(options.message);
+        return { response: answers.shift() ?? 1, checkboxChecked: false };
+      }) as typeof dialog.showMessageBox;
+    });
+    const closeWindow = () => app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+    const asked = () => app!.evaluate(() => (globalThis as { asked?: string[] }).asked);
+
+    await closeWindow();
+    await expect.poll(asked).toEqual(['1 Session is working: quit and stop it?']);
+    expect(await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
+
+    const exited = new Promise<void>((resolve) => app!.process().once('exit', () => resolve()));
+    await closeWindow();
+    await exited;
+    app = undefined;
+
+    await expect.poll(() => running(pid), { timeout: 15_000 }).toBe(false);
+  } finally {
+    await app?.close();
+    app = undefined;
+    // Only ever the stand-in this test started, by its PID.
+    if (agent !== undefined && running(agent)) process.kill(agent, 'SIGKILL');
+    rmSync(machine.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
+});
+
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}

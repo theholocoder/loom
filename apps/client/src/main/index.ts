@@ -6,6 +6,8 @@ import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { serveApi } from './ipc';
 import { createLoom, type Loom } from './loom';
+import { guardQuit, quitQuestion } from './quit';
+import type { Session } from '../shared/api';
 
 // Lets tests run the app against a temporary userData.
 if (process.env.LOOM_USER_DATA_DIR) app.setPath('userData', process.env.LOOM_USER_DATA_DIR);
@@ -75,23 +77,38 @@ if (!app.requestSingleInstanceLock()) {
     serveApi(loom.api);
     // A topic gives its current value as soon as it's subscribed to, so the
     // saved theme is known before the window opens. A damaged database serves
-    // no settings: the window opens with the default theme, and follows the
-    // settings once a snapshot is restored.
+    // no settings or Sessions: the window opens with the default theme and
+    // closes without asking, and follows both once a snapshot is restored.
     let theme: Theme | undefined;
-    let stopWatchingTheme: (() => void) | undefined;
+    let sessions: Session[] = [];
+    let stopWatching: (() => void)[] | undefined;
     const api = loom.api;
     const stopWatchingDatabase = api.subscribe('database', (database) => {
-      if (database.state !== 'ok' || stopWatchingTheme) return;
-      stopWatchingTheme = api.subscribe('settings', (settings) => {
-        if (window && settings.theme !== theme) window.setBackgroundColor(THEMES[settings.theme].background);
-        theme = settings.theme;
-      });
+      if (database.state !== 'ok' || stopWatching) return;
+      stopWatching = [
+        api.subscribe('settings', (settings) => {
+          if (window && settings.theme !== theme) window.setBackgroundColor(THEMES[settings.theme].background);
+          theme = settings.theme;
+        }),
+        api.subscribe('sessions', (list) => (sessions = list)),
+      ];
     });
-    window = createWindow(theme ?? 'midnight');
-    window.on('closed', () => {
+    const win = (window = createWindow(theme ?? 'midnight'));
+    win.on(
+      'close',
+      guardQuit({
+        question: () => quitQuestion(sessions),
+        confirm: async (message) => {
+          const options = { type: 'warning' as const, message, buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true };
+          return (await dialog.showMessageBox(win, options)).response === 0;
+        },
+        quit: () => app.quit(),
+      }),
+    );
+    win.on('closed', () => {
       window = undefined;
       stopWatchingDatabase();
-      stopWatchingTheme?.();
+      for (const stop of stopWatching ?? []) stop();
     });
   });
 }
