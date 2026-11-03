@@ -92,12 +92,13 @@ func TestALaunchedProgramRunsInTheGivenFolder(t *testing.T) {
 func TestLaunchRepliesWithoutWaitingForTheProgram(t *testing.T) {
 	p := startBridge(t)
 
-	started := time.Now()
+	finished := filepath.Join(liveDir(t), "finished")
 	// The helper outlives the test, so it runs somewhere never deleted.
-	p.launchHelper(1, "linger", os.TempDir(), "")
+	p.launchHelper(1, "linger", os.TempDir(), finished)
 
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Errorf("launch took %v, want a reply once the program started", elapsed)
+	// The reply is in, but the program is still sleeping: launch didn't wait.
+	if _, err := os.Stat(finished); err == nil {
+		t.Error("the program had already finished when launch replied; launch waited for it")
 	}
 }
 

@@ -34,8 +34,12 @@ func TestMain(m *testing.M) {
 		fmt.Print("ready")
 		time.Sleep(10 * time.Second)
 	case "linger":
-		// Like hang, but short-lived: a launched copy that nobody stops.
+		// A launched copy that nobody stops. It must end within liveDir's
+		// cleanup retry window (5s), and says so at $LOOM_RECORD when it does.
 		time.Sleep(2 * time.Second)
+		if to := os.Getenv("LOOM_RECORD"); to != "" {
+			_ = os.WriteFile(to, []byte("finished"), 0o644)
+		}
 	case "record":
 		// Writes where it ran and its PATH to $LOOM_RECORD, all at once.
 		cwd, _ := os.Getwd()
