@@ -68,8 +68,8 @@ export interface OpencodeScript {
 
 /** One run of the `opencode acp` stand-in. */
 export interface AcpTurn {
-  /** The agent's reply, sent as one `agent_message_chunk` each. */
-  chunks?: string[];
+  /** The agent's reply, sent as one `agent_message_chunk` each; a `{ hold }` waits for `machine.release(hold)`. */
+  chunks?: Array<string | { hold: string }>;
   /** After the chunks, the run holds until the test calls `machine.release(hold)`. */
   hold?: string;
   /** The run fails with this JSON-RPC error message, as a provider error does. */

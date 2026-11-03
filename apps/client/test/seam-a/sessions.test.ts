@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { copyFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
@@ -402,6 +403,26 @@ async function eventually<T>(check: () => T | undefined): Promise<T> {
 }
 
 describe("a Session's transcript", () => {
+  it('loses at most about a second of streaming text when main is killed mid-stream', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Hello', ', wor', { hold: 'rest' }, 'ld!'], hold: 'never' }]);
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Say hello' });
+    await waitFor(main.api, 'transcript', (items) => agentText(items) === 'Hello, wor', { sessionId: id });
+    main.clock.advance(1000);
+    machine.release('rest');
+    await waitFor(main.api, 'transcript', (items) => agentText(items) === 'Hello, world!', { sessionId: id });
+
+    // A kill leaves the database as it is on disk: start main on a copy of it.
+    const killed = killedCopy(main.userDataDir);
+    const again = await started(machine, killed);
+
+    expect(await waitFor(again.api, 'transcript', (items) => items.length > 0, { sessionId: id })).toEqual([
+      { kind: 'user', id: expect.any(Number), text: 'Say hello' },
+      { kind: 'agent', id: expect.any(Number), text: 'Hello, wor', streaming: false },
+    ]);
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting', waitingReason: 'interrupted' });
+  });
+
   it('is replayed from the database when main starts again', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Hello', ', world'] }, { error: 'provider overloaded' }]);
     const userDataDir = tempDir('loom-transcript-');
@@ -422,3 +443,12 @@ describe("a Session's transcript", () => {
     ]);
   });
 });
+
+/** A copy of main's database files as they are on disk now, as a kill would leave them. */
+function killedCopy(userDataDir: string): string {
+  const copy = tempDir('loom-killed-');
+  for (const file of ['loom.db', 'loom.db-wal']) {
+    if (existsSync(join(userDataDir, file))) copyFileSync(join(userDataDir, file), join(copy, file));
+  }
+  return copy;
+}
