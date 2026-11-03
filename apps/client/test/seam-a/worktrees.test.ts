@@ -271,8 +271,17 @@ describe('archiving a worktree Session', () => {
   });
 
   it('flags a worktree deleted outside Loom as missing, which can only be archived', async () => {
-    const { checkout, main, id, path } = await worktreeSession();
+    // Windows can't delete a process's cwd, so remove the worktree while no Loom process (and no agent) holds it.
+    const { machine, checkout } = machineWithClone();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['Done.'] }] } });
+    const userDataDir = tempDir('loom-archive-');
+    const first = await withProject(machine, checkout, userDataDir);
+    const created = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    await waitFor(first.main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    const { id, path } = { id: created.id, path: created.workingCopy.path };
+    await first.main.close();
     rmSync(path, { recursive: true, force: true });
+    const main = await startMain({ machine, userDataDir });
 
     main.api.subscribe('transcript', () => {}, { sessionId: id })();
     await waitFor(main.api, 'sessions', session(id, (s) => s.worktreeMissing === true));
