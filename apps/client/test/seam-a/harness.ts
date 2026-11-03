@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach } from 'vitest';
 import { createLoom, type Loom } from '../../src/main/loom';
 import type { Clock, TimerHandle } from '../../src/main/clock';
+import type { AgentAdapter } from '../../src/main/agents/adapter';
 import type { LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
 import { bridgeBinaryPath } from '../../src/main/environments/bridge-path';
 import clientPackage from '../../package.json';
@@ -98,7 +99,15 @@ export function tempMachine(): Machine {
 }
 
 export async function startMain(
-  options: { userDataDir?: string; bridgePath?: string; appVersion?: string; machine?: Machine; maxUntrackedCounted?: number } = {},
+  options: {
+    userDataDir?: string;
+    bridgePath?: string;
+    appVersion?: string;
+    machine?: Machine;
+    maxUntrackedCounted?: number;
+    /** An agent standing in for OpenCode over ACP, for what no ACP agent does yet. */
+    adapter?: AgentAdapter;
+  } = {},
 ): Promise<MainHarness> {
   const ownDir = !options.userDataDir;
   const machine = options.machine ?? new Machine();
@@ -113,6 +122,7 @@ export async function startMain(
     appVersion: options.appVersion ?? appVersion,
     clock,
     maxUntrackedCounted: options.maxUntrackedCounted,
+    adapter: options.adapter,
     bridgePath: options.bridgePath ?? realBridgePath,
     spawnBridge: (command, args) => {
       bridgeStarts++;

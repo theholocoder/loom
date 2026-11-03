@@ -2,7 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
-import type { ToolStatus } from '../../shared/api';
+import type { Answer, QuestionField, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -21,6 +21,14 @@ export type AgentEvent =
   | ({ type: 'tool-started'; title: string } & ToolCall)
   /** What changed of a tool call; what's left out is as it was. `input` and `output` are given whole. */
   | ({ type: 'tool-updated'; title?: string } & ToolCall)
+  /**
+   * The agent asks the user something and waits for the answer: its question
+   * tool, or a dialog from the user's plugins or MCP servers. Answered with
+   * AgentSession.answer, under `requestId`.
+   */
+  | { type: 'question-asked'; requestId: string; message: string; fields: QuestionField[] }
+  /** The agent asks whether to trust the Project's local files; answered like a question. */
+  | { type: 'trust-asked'; requestId: string; message: string }
   /** The run ended normally. */
   | { type: 'run-settled' }
   /** The run ended in an error, such as a provider's (no credit, exhausted quota). */
@@ -58,6 +66,14 @@ export interface AgentSession {
   readonly id: string;
   /** Starts a run; its progress and outcome arrive as events. */
   prompt(text: string): void;
+  /**
+   * Answers what the agent asked under `requestId` in this run. A request
+   * the agent no longer waits on is ignored.
+   */
+  answer(requestId: string, response: AgentResponse): void;
   /** Ends the agent's process. */
   close(): Promise<void>;
 }
+
+/** The user's response to an agent's request: an answer to its question (null dismisses it), or whether to trust. */
+export type AgentResponse = { kind: 'question'; answer: Answer | null } | { kind: 'trust'; trusted: boolean };

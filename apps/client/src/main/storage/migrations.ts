@@ -69,4 +69,7 @@ export const migrations: Migration[] = [
       .addPrimaryKeyConstraint('events_pk', ['session_id', 'seq'])
       .execute();
   },
+  async (db) => {
+    await db.schema.alterTable('projects').addColumn('trusted', 'integer').execute();
+  },
 ];

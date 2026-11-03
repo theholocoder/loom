@@ -321,6 +321,60 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export type ToolStatus = 'running' | 'completed' | 'failed';
 
+/** One choice of a `select` or `multiselect` question field. */
+export interface QuestionOption {
+  /** What the answer holds when it is chosen. */
+  value: string;
+  label: string;
+  description?: string;
+}
+
+interface FieldBase {
+  /** Where its value goes in the answer. */
+  key: string;
+  title?: string;
+  description?: string;
+  required: boolean;
+}
+
+/**
+ * One input of a question the agent asked: its own question tool's, or a
+ * dialog from the user's plugins or MCP servers (select, confirm, input,
+ * editor, forms).
+ * - `text`: free text, of up to `maxLength` characters, matching `pattern` if given;
+ * - `select`: one of `options`;
+ * - `multiselect`: some of `options`, between `minItems` and `maxItems`;
+ * - `number`: a number between `minimum` and `maximum`, whole if `integer`;
+ * - `boolean`: yes or no.
+ */
+export type QuestionField =
+  | (FieldBase & { type: 'text'; default?: string; minLength?: number; maxLength?: number; pattern?: string; format?: 'email' | 'uri' | 'date' | 'date-time' })
+  | (FieldBase & { type: 'select'; options: QuestionOption[]; default?: string })
+  | (FieldBase & { type: 'multiselect'; options: QuestionOption[]; default?: string[]; minItems?: number; maxItems?: number })
+  | (FieldBase & { type: 'number'; integer: boolean; default?: number; minimum?: number; maximum?: number })
+  | (FieldBase & { type: 'boolean'; default?: boolean });
+
+/** One field's value in an answer. */
+export type AnswerValue = string | number | boolean | string[];
+
+/** An answer to a question, by field key; fields left blank are left out. */
+export type Answer = Record<string, AnswerValue>;
+
+/**
+ * - `asked`: the agent waits for the user's answer;
+ * - `answered`: the user answered;
+ * - `dismissed`: the user declined to answer;
+ * - `expired`: the run ended before the user answered, so it can't be answered any more.
+ */
+export type QuestionState = 'asked' | 'answered' | 'dismissed' | 'expired';
+
+/**
+ * - `asked`: the agent waits for the user to say whether it may trust the Project's local files;
+ * - `trusted` / `untrusted`: what the user said, for the Project, or what the Project already had;
+ * - `expired`: as for a question.
+ */
+export type TrustState = 'asked' | 'trusted' | 'untrusted' | 'expired';
+
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
   | { kind: 'user'; id: number; text: string }
@@ -344,6 +398,13 @@ export type TranscriptItem =
       output?: string;
       truncated?: boolean;
     }
+  /**
+   * A question the agent asked: its question tool, or a dialog from the
+   * user's plugins or MCP servers. `answer` is set once `answered`.
+   */
+  | { kind: 'question'; id: number; message: string; fields: QuestionField[]; state: QuestionState; answer?: Answer }
+  /** The agent asking whether to trust the Project's local files: asked once per Project. */
+  | { kind: 'trust'; id: number; message: string; state: TrustState }
   /** A run that failed, with the agent's message. */
   | { kind: 'error'; id: number; message: string };
 
@@ -482,6 +543,21 @@ export interface Commands {
    * prompt went unanswered: its conversation ends with the error right after it.
    */
   'sessions.retry': { params: { id: number }; result: void };
+  /**
+   * Answers the question of the transcript item `itemId`, or dismisses it
+   * when `answer` is null; once nothing else is asked, the Session is
+   * Working again. Rejects unless that question is still asked, and an
+   * answer that doesn't fit its fields: a required one left blank, a value
+   * of the wrong type, not among the options or out of bounds.
+   */
+  'sessions.answer': { params: { id: number; itemId: number; answer: Answer | null }; result: void };
+  /**
+   * Answers the trust request of the transcript item `itemId`. The Project
+   * keeps the answer: later requests in any of its Sessions get it without
+   * asking, and any other Session waiting on one is answered too. Rejects
+   * unless that request is still asked.
+   */
+  'sessions.trust': { params: { id: number; itemId: number; trusted: boolean }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
   /**

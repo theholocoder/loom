@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, Project, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
@@ -27,6 +28,8 @@ export interface LoomOptions {
   chooseFolder?: () => Promise<string | null>;
   /** Opens a URL in the user's browser. */
   openExternal: (url: string) => Promise<void>;
+  /** The agent Sessions run on; OpenCode over ACP unless a test gives another. */
+  adapter?: AgentAdapter;
 }
 
 export interface Loom {
@@ -143,12 +146,13 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
-    adapter: new AcpAdapter(OPENCODE_ACP, options.appVersion),
+    adapter: options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion),
     project: (id) => projectService.list().find((p) => p.id === id),
     environment: (id) => (id === native.status.id ? nativeForSessions : undefined),
     worktreeRoot: () => settingsService.value.worktreeRoot,
     onChange: (list) => sessions.set(list),
     maxUntrackedCounted: options.maxUntrackedCounted,
+    projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
   });
   sessions.set(sessionService.list());
 
@@ -212,6 +216,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.diff': ({ id, uncommittedOnly }) => sessionService.diff(id, uncommittedOnly),
     'sessions.diffFile': ({ id, path, uncommittedOnly }) => sessionService.diffFile(id, path, uncommittedOnly),
     'sessions.retry': (params) => sessionService.retry(params),
+    'sessions.answer': (params) => sessionService.answer(params),
+    'sessions.trust': (params) => sessionService.trust(params),
     'database.restoreLatestSnapshot': () => {
       throw new Error('the database is not damaged');
     },

@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type ArchiveResult, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type Answer, type ArchiveResult, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type QuestionField, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -27,6 +27,11 @@ export interface SessionsOptions {
   onChange: (sessions: Session[]) => void;
   /** How many untracked files a diff counts lines for; defaults to the diff service's limit. */
   maxUntrackedCounted?: number;
+  /** Whether each Project's local files are trusted, as the user last said; undefined until asked. */
+  projectTrust: {
+    get(projectId: number): boolean | undefined;
+    set(projectId: number, trusted: boolean): Promise<void>;
+  };
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -66,6 +71,8 @@ export class Sessions {
   private readonly archiving = new Set<number>();
   /** Sessions whose agent ended with its Environment's bridge: their next prompt starts it again. */
   private restarted = new Set<number>();
+  /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
+  private readonly asks = new Map<number, Map<number, string>>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -86,7 +93,8 @@ export class Sessions {
     const rows = await options.db.selectFrom('sessions').selectAll().execute();
     for (const row of rows) sessions.sessions.set(row.id, fromRow(row));
     for (const session of sessions.list()) {
-      if (session.status !== 'working') continue;
+      // A Session waiting on a question was mid-run too: the agent's question went with its process.
+      if (session.status !== 'working' && !(session.status === 'waiting' && session.waitingReason === 'question')) continue;
       await sessions.loadTranscript(session.id);
       sessions.endRun(session.id);
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
@@ -157,6 +165,7 @@ export class Sessions {
     await this.loadTranscript(id);
     const session = this.get(id);
     if (session.status === 'working') throw new Error('The agent is still working on this Session.');
+    if (this.inRun(id)) throw new Error("The agent is waiting for an answer to what it asked; answer or dismiss it first.");
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     this.assertCanPrompt(id);
@@ -197,6 +206,60 @@ export class Sessions {
       throw new Error(`This Session is on ${branch}, the default branch. A Merge request needs a branch of its own.`);
     }
     await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[forge.kind]) });
+  }
+
+  /**
+   * Answers the agent's question in transcript item `itemId`, or dismisses it
+   * when `answer` is null. The Session is Working again once the agent waits
+   * on nothing else.
+   */
+  async answer({ id, itemId, answer }: { id: number; itemId: number; answer: Answer | null }): Promise<void> {
+    this.get(id);
+    const items = (await this.loadTranscript(id)).value;
+    const item = items[itemId];
+    if (item?.kind !== 'question') throw new Error('There is no such question in this Session.');
+    const requestId = this.asks.get(id)?.get(itemId);
+    if (item.state !== 'asked' || requestId === undefined) throw new Error('The agent is no longer asking this question.');
+    const values = answer === null ? null : checkAnswer(item.fields, answer);
+    this.settleAsk(id, itemId, answer === null ? { ...item, state: 'dismissed' } : { ...item, state: 'answered', answer: values! });
+    this.live.get(id)?.answer(requestId, { kind: 'question', answer: values });
+  }
+
+  /**
+   * Answers the agent's trust request in transcript item `itemId`. The
+   * Project keeps the answer, which also answers the requests other Sessions
+   * of the Project are waiting on.
+   */
+  async trust({ id, itemId, trusted }: { id: number; itemId: number; trusted: boolean }): Promise<void> {
+    this.get(id);
+    const item = (await this.loadTranscript(id)).value[itemId];
+    if (item?.kind !== 'trust') throw new Error('There is no such trust request in this Session.');
+    if (item.state !== 'asked' || !this.asks.get(id)?.has(itemId)) throw new Error('The agent is no longer asking this.');
+    const { projectId } = this.get(id);
+    await this.options.projectTrust.set(projectId, trusted);
+    for (const [other, asked] of [...this.asks.entries()]) {
+      if (this.get(other).projectId !== projectId) continue;
+      for (const [seq, requestId] of [...asked.entries()]) {
+        const card = this.transcript(other).value[seq];
+        if (card?.kind !== 'trust') continue;
+        this.settleAsk(other, seq, { ...card, state: trusted ? 'trusted' : 'untrusted' });
+        this.live.get(other)?.answer(requestId, { kind: 'trust', trusted });
+      }
+    }
+  }
+
+  /** Records the user's response to an ask; with nothing else asked, the Session is Working again. */
+  private settleAsk(id: number, itemId: number, settled: TranscriptItem): void {
+    const asked = this.asks.get(id);
+    asked?.delete(itemId);
+    if (asked?.size === 0) this.asks.delete(id);
+    this.replaceItem(id, settled);
+    if (!this.asks.has(id)) this.setStatus(id, { status: 'working' });
+  }
+
+  /** Whether the Session's agent is mid-run: working, or waiting on the user's answer to something it asked. */
+  private inRun(id: number): boolean {
+    return this.get(id).status === 'working' || this.asks.has(id);
   }
 
   /** Throws if the Session's agent has stopped for good: Loom can't resume agents yet. */
@@ -410,8 +473,18 @@ export class Sessions {
       case 'tool-started':
       case 'tool-updated':
         // A run's cards are settled when it ends; what comes after can't reopen them.
-        if (this.get(id).status !== 'working') return;
+        if (!this.inRun(id)) return;
         return this.recordTool(id, event);
+      case 'question-asked':
+        if (!this.inRun(id)) return;
+        return this.ask(id, event.requestId, { kind: 'question', message: event.message, fields: event.fields, state: 'asked' });
+      case 'trust-asked': {
+        if (!this.inRun(id)) return;
+        const trusted = this.options.projectTrust.get(this.get(id).projectId);
+        // Asked once per Project: its answer stands for every Session after.
+        if (trusted !== undefined) return void this.live.get(id)?.answer(event.requestId, { kind: 'trust', trusted });
+        return this.ask(id, event.requestId, { kind: 'trust', message: event.message, state: 'asked' });
+      }
       case 'run-settled':
         this.endRun(id);
         this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
@@ -423,6 +496,17 @@ export class Sessions {
         this.live.delete(id);
         return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
     }
+  }
+
+  /** Shows what the agent asked as a card, and waits on the user: Waiting (question). */
+  private ask(id: number, requestId: string, card: NewItem): void {
+    this.endStreaming(id);
+    this.addItem(id, card);
+    const seq = this.transcript(id).value.length - 1;
+    let asked = this.asks.get(id);
+    if (!asked) this.asks.set(id, (asked = new Map()));
+    asked.set(seq, requestId);
+    this.setStatus(id, { status: 'waiting', waitingReason: 'question' });
   }
 
   /**
@@ -559,7 +643,7 @@ export class Sessions {
   /** Puts a Working Session (or, `evenIfWaiting`, a Waiting one) in Waiting (error), showing why in its conversation. */
   private fail(id: number, error: string, { evenIfWaiting = false } = {}): void {
     const { status } = this.get(id);
-    if (status !== 'working' && !(evenIfWaiting && status === 'waiting')) return;
+    if (!this.inRun(id) && !(evenIfWaiting && status === 'waiting')) return;
     this.endRun(id);
     this.addItem(id, { kind: 'error', message: error });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });
@@ -608,14 +692,16 @@ export class Sessions {
   }
 
   /**
-   * Finishes what the Session's run left going: its streaming text, and its
-   * tool calls still running, which can't finish any more and so failed.
+   * Finishes what the Session's run left going: its streaming text, its
+   * tool calls still running, which can't finish any more and so failed, and
+   * what it asked, which can't be answered any more.
    */
   private endRun(id: number): void {
     this.endStreaming(id);
+    this.asks.delete(id);
     const items = this.transcript(id).value;
-    if (!items.some((i) => i.kind === 'tool' && i.status === 'running')) return;
-    const ended = items.map((i) => (i.kind === 'tool' && i.status === 'running' ? { ...i, status: 'failed' as const } : i));
+    if (!items.some(leftGoing)) return;
+    const ended = items.map((i) => (!leftGoing(i) ? i : i.kind === 'tool' ? { ...i, status: 'failed' as const } : { ...i, state: 'expired' as const }));
     this.transcript(id).set(ended);
     for (const [seq, item] of ended.entries()) if (item !== items[seq]) this.writeItem(id, item);
   }
@@ -637,9 +723,13 @@ export class Sessions {
       this.endStreaming(id);
       return this.addItem(id, { kind: 'tool', title: 'Tool call', status: 'running', ...changes, ...(truncated ? { truncated } : {}) });
     }
-    const updated = { ...card, ...changes, ...(truncated ? { truncated } : {}) };
-    this.transcript(id).set(items.map((item, seq) => (seq === at ? updated : item)));
-    this.writeItem(id, updated);
+    this.replaceItem(id, { ...card, ...changes, ...(truncated ? { truncated } : {}) });
+  }
+
+  /** Puts `item` in place of the transcript item with its id, and writes it. */
+  private replaceItem(id: number, item: TranscriptItem): void {
+    this.transcript(id).set(this.transcript(id).value.map((i) => (i.id === item.id ? item : i)));
+    this.writeItem(id, item);
   }
 
   /** Appends an event to the Session's transcript and writes it; its id is its place there. */
@@ -795,6 +885,65 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+}
+
+/** What a run leaves going until it ends: a tool call still running, or a question or trust request still asked. */
+function leftGoing(item: TranscriptItem): boolean {
+  return (item.kind === 'tool' && item.status === 'running') || ((item.kind === 'question' || item.kind === 'trust') && item.state === 'asked');
+}
+
+/**
+ * The answer, with blank fields left out, if it fits the question's fields:
+ * every required one given, each value of its field's type, among its
+ * options and within its bounds. Keys of no field are dropped.
+ */
+function checkAnswer(fields: QuestionField[], answer: Answer): Answer {
+  const checked: Answer = {};
+  for (const field of fields) {
+    const value = answer[field.key];
+    const name = field.title ?? field.key;
+    const blank = value === undefined || value === null || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0);
+    if (blank) {
+      if (field.required) throw new Error(`"${name}" needs an answer.`);
+      continue;
+    }
+    const wrong = () => new Error(`"${name}" can't be ${JSON.stringify(value)}.`);
+    switch (field.type) {
+      case 'text':
+        if (typeof value !== 'string') throw wrong();
+        if (field.minLength !== undefined && value.length < field.minLength) throw new Error(`"${name}" needs at least ${field.minLength} characters.`);
+        if (field.maxLength !== undefined && value.length > field.maxLength) throw new Error(`"${name}" takes at most ${field.maxLength} characters.`);
+        if (field.pattern !== undefined && !matches(field.pattern, value)) throw new Error(`"${name}" isn't in the expected form.`);
+        break;
+      case 'select':
+        if (typeof value !== 'string' || !field.options.some((o) => o.value === value)) throw wrong();
+        break;
+      case 'multiselect':
+        if (!Array.isArray(value) || value.some((v) => !field.options.some((o) => o.value === v))) throw wrong();
+        if (field.minItems !== undefined && value.length < field.minItems) throw new Error(`"${name}" needs at least ${field.minItems} choices.`);
+        if (field.maxItems !== undefined && value.length > field.maxItems) throw new Error(`"${name}" takes at most ${field.maxItems} choices.`);
+        break;
+      case 'number':
+        if (typeof value !== 'number' || !Number.isFinite(value) || (field.integer && !Number.isInteger(value))) throw wrong();
+        if (field.minimum !== undefined && value < field.minimum) throw new Error(`"${name}" must be at least ${field.minimum}.`);
+        if (field.maximum !== undefined && value > field.maximum) throw new Error(`"${name}" must be at most ${field.maximum}.`);
+        break;
+      case 'boolean':
+        if (typeof value !== 'boolean') throw wrong();
+        break;
+    }
+    checked[field.key] = value;
+  }
+  return checked;
+}
+
+/** Whether `value` matches a JSON Schema `pattern`; one Loom can't read lets anything through, as the agent checks it too. */
+function matches(pattern: string, value: string): boolean {
+  try {
+    return new RegExp(pattern, 'u').test(value);
+  } catch {
+    return true;
+  }
 }
 
 /** Text the agent is still adding to: its reply or its thinking. */

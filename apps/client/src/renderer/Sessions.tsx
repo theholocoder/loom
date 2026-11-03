@@ -10,6 +10,7 @@ import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
 import { useArchive, WorktreeMissing } from './Archive';
+import { QuestionCard, TrustCard } from './Questions';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
@@ -163,6 +164,8 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const starting = working && (environment?.state === 'starting' || environment?.state === 'disconnected');
   // The last prompt went unanswered, so it can be sent again.
   const retryable = session.status === 'waiting' && session.waitingReason === 'error' && items.at(-2)?.kind === 'user' && items.at(-1)?.kind === 'error' && !session.worktreeMissing;
+  // The agent waits on an answer: the card takes it, not the composer.
+  const asked = session.status === 'waiting' && items.some((i) => (i.kind === 'question' || i.kind === 'trust') && i.state === 'asked');
 
   const end = useRef<HTMLDivElement>(null);
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
@@ -275,6 +278,10 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
             <ThinkingBlock key={item.id} item={item} />
           ) : item.kind === 'tool' ? (
             <ToolCard key={item.id} item={item} />
+          ) : item.kind === 'question' ? (
+            <QuestionCard key={item.id} item={item} onAnswer={(answer) => api.invoke('sessions.answer', { id: session.id, itemId: item.id, answer })} />
+          ) : item.kind === 'trust' ? (
+            <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
           ) : (
             <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
           ),
@@ -304,13 +311,15 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
         placeholder={
           working
             ? `${session.agent} is working…`
-            : session.status === 'archived'
+            : asked
+              ? 'Answer the question above to go on.'
+              : session.status === 'archived'
               ? 'This Session is archived.'
               : session.worktreeMissing
                 ? "This Session's worktree is missing; it can only be archived."
                 : `Reply to ${session.agent}…`
         }
-        disabled={session.status !== 'waiting' || !!session.worktreeMissing}
+        disabled={session.status !== 'waiting' || asked || !!session.worktreeMissing}
         focusRequest={replyRequest}
         onSend={send}
       />

@@ -25,11 +25,17 @@ interface Message {
 
 export interface AcpHandlers {
   onNotification(method: string, params: unknown): void;
+  /**
+   * A request from the agent: resolves with its result, rejects to answer it
+   * with an error. Undefined for a method Loom doesn't handle.
+   */
+  onRequest?(method: string, params: unknown): Promise<unknown> | undefined;
   /** Ends with the process; `reason` says how. */
   onClose(reason: string): void;
 }
 
 const METHOD_NOT_FOUND = -32601;
+const INTERNAL_ERROR = -32603;
 
 /** The client side of an ACP connection: Loom's. */
 export class AcpConnection {
@@ -89,8 +95,7 @@ export class AcpConnection {
     }
     if (message.method !== undefined) {
       if (message.id === undefined) this.handlers.onNotification(message.method, message.params);
-      // Loom answers no agent requests yet (permissions, questions, files).
-      else void this.send({ jsonrpc: '2.0', id: message.id, error: { code: METHOD_NOT_FOUND, message: `Loom does not handle ${message.method}` } }).catch(() => {});
+      else this.answer(message.id, message.method, message.params);
       return;
     }
     if (typeof message.id !== 'number') return;
@@ -99,6 +104,20 @@ export class AcpConnection {
     this.pending.delete(message.id);
     if (message.error) pending.reject(new AcpError(message.error.code, message.error.message, message.error.data));
     else pending.resolve(message.result);
+  }
+
+  /** Answers a request from the agent once its handler settles; unhandled methods are not found. */
+  private answer(id: number | string, method: string, params: unknown): void {
+    const reply = (message: Omit<Message, 'jsonrpc' | 'id'>) => {
+      if (this.closedReason) return;
+      void this.send({ jsonrpc: '2.0', id, ...message }).catch(() => {});
+    };
+    const handled = this.handlers.onRequest?.(method, params);
+    if (!handled) return reply({ error: { code: METHOD_NOT_FOUND, message: `Loom does not handle ${method}` } });
+    handled.then(
+      (result) => reply({ result }),
+      (error: Error) => reply({ error: { code: INTERNAL_ERROR, message: error.message } }),
+    );
   }
 
   private close(reason: string): void {

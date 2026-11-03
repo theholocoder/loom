@@ -12,6 +12,8 @@ export interface ProjectsTable {
   id: Generated<number>;
   name: string;
   branch_prefix: string;
+  /** Whether the agent may trust the checkout's local files, as the user said once: 1 or 0, null until asked. */
+  trusted: number | null;
   /** Clock time the Project was added. */
   created_at: number;
 }
