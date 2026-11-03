@@ -261,6 +261,23 @@ export type TranscriptItem =
   /** A run that failed, with the agent's message. */
   | { kind: 'error'; id: number; message: string };
 
+/**
+ * Whether the Client's database could be opened. When `damaged`, it failed
+ * `PRAGMA quick_check` or isn't a database: main serves only this topic and
+ * `database.restoreLatestSnapshot` until it is restored.
+ */
+export type DatabaseStatus =
+  | { state: 'ok' }
+  | {
+      state: 'damaged';
+      /** The database file. */
+      path: string;
+      /** What SQLite reported. */
+      problem: string;
+      /** Every snapshot's path, newest first. */
+      snapshots: string[];
+    };
+
 /** Commands the renderer can invoke, with their parameters and results. */
 export interface Commands {
   'environments.list': { params: void; result: EnvironmentStatus[] };
@@ -371,6 +388,12 @@ export interface Commands {
   'sessions.retry': { params: { id: number }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
+  /**
+   * Moves the damaged database file (and its -wal and -shm) aside under a
+   * timestamped name, copies the latest snapshot into its place, and starts.
+   * Rejects when the database isn't damaged or there is no snapshot.
+   */
+  'database.restoreLatestSnapshot': { params: void; result: void };
 }
 
 /** Topics the renderer can subscribe to, with the value each one carries. */
@@ -383,6 +406,7 @@ export interface Topics {
   sessions: Session[];
   /** One Session's conversation, as it streams in. */
   transcript: TranscriptItem[];
+  database: DatabaseStatus;
 }
 
 /** What the topics that need one are subscribed with. */

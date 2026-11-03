@@ -1,7 +1,8 @@
 // Main's core, with no Electron in it: the Electron entry point and seam A
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
-import type { Commands, EnvironmentStatus, LoomApi, Project, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import { join } from 'node:path';
+import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, Project, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
@@ -10,7 +11,8 @@ import { Projects } from './projects/projects';
 import { openIn, type Opener } from './sessions/open-in';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Settings } from './settings';
-import { openDatabase } from './storage/database';
+import { DATABASE_FILE, DatabaseDamagedError, openDatabase, type LoomDatabase } from './storage/database';
+import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
 import { Topic } from './topic';
 
 export interface LoomOptions {
@@ -30,10 +32,62 @@ export interface Loom {
   close(): Promise<void>;
 }
 
+/**
+ * Starts main. A damaged database doesn't stop it: main then serves only the
+ * `database` topic, for the renderer's blocking screen, and
+ * `database.restoreLatestSnapshot`, which starts everything else once done.
+ */
 export async function createLoom(options: LoomOptions): Promise<Loom> {
-  const spawnBridge: SpawnBridge = options.spawnBridge ?? ((command, args) => spawn(command, args, { stdio: 'pipe' }));
+  const database = new Topic<DatabaseStatus>({ state: 'ok' });
+  const open = () => openDatabase(options.userDataDir, { now: () => options.clock.now() });
+  let started: Loom | undefined;
+  try {
+    started = await startLoom(options, await open(), database);
+    return started;
+  } catch (error) {
+    if (!(error instanceof DatabaseDamagedError)) throw error;
+    database.set(damaged(options.userDataDir, error));
+  }
 
-  const db = await openDatabase(options.userDataDir);
+  let restoring: Promise<void> | undefined;
+  const restore = async () => {
+    restoreLatestSnapshot(join(options.userDataDir, DATABASE_FILE), options.userDataDir, options.clock.now());
+    try {
+      started = await startLoom(options, await open(), database);
+    } catch (error) {
+      if (error instanceof DatabaseDamagedError) database.set(damaged(options.userDataDir, error));
+      throw error;
+    }
+    database.set({ state: 'ok' });
+  };
+  const notStarted = () => new Error('the database is damaged; restore a snapshot first');
+  return {
+    api: {
+      invoke: async (command, ...params) => {
+        if (started) return started.api.invoke(command, ...params);
+        if (command !== 'database.restoreLatestSnapshot') throw notStarted();
+        restoring ??= restore().finally(() => (restoring = undefined));
+        return restoring as never;
+      },
+      subscribe: (topic, listener, ...params) => {
+        if (started) return started.api.subscribe(topic, listener, ...params);
+        if (topic !== 'database') throw notStarted();
+        return database.subscribe(listener as never);
+      },
+    },
+    close: async () => {
+      await restoring?.catch(() => {});
+      await started?.close();
+    },
+  };
+}
+
+function damaged(userDataDir: string, error: DatabaseDamagedError): DatabaseStatus {
+  return { state: 'damaged', path: error.path, problem: error.problem, snapshots: listSnapshots(userDataDir).reverse() };
+}
+
+async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic<DatabaseStatus>): Promise<Loom> {
+  const spawnBridge: SpawnBridge = options.spawnBridge ?? ((command, args) => spawn(command, args, { stdio: 'pipe' }));
 
   const environments = new Topic<EnvironmentStatus[]>([]);
   let wasConnected = false;
@@ -112,7 +166,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     });
   };
 
-  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, settings, sessions };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, settings, sessions, database };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
   };
@@ -152,6 +206,9 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
     'sessions.retry': (params) => sessionService.retry(params),
+    'database.restoreLatestSnapshot': () => {
+      throw new Error('the database is not damaged');
+    },
   };
 
   const api: LoomApi = {

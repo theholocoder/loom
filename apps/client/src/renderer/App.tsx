@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
+import { DatabaseProblem } from './DatabaseProblem';
 import { Popover } from './Popover';
 import { Projects, useExistingCloneLinker } from './Projects';
 import { InboxList } from './Inbox';
@@ -14,6 +15,14 @@ import { Settings } from './Settings';
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
 
 export function App() {
+  const database = useTopic('database');
+  // Nothing else can be served until main knows its database is usable.
+  if (!database) return null;
+  if (database.state === 'damaged') return <DatabaseProblem status={database} />;
+  return <Workspace />;
+}
+
+function Workspace() {
   useAppearance();
   const api = useApi();
   const [view, setView] = useState<View>('session');

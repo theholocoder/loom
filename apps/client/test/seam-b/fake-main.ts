@@ -5,9 +5,9 @@ import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, Topic
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
-type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'settings' | 'sessions'>;
+type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'settings' | 'sessions' | 'database'>;
 
-const EMPTY: { [T in TopicName]: Topics[T] } = { environments: [], projects: [], settings: DEFAULT_SETTINGS, sessions: [], transcript: [] };
+const EMPTY: { [T in TopicName]: Topics[T] } = { environments: [], projects: [], settings: DEFAULT_SETTINGS, sessions: [], transcript: [], database: { state: 'ok' } };
 
 export class FakeMain implements LoomApi {
   /** Each topic's value, by topic and parameters. */
@@ -64,6 +64,7 @@ export class FakeMain implements LoomApi {
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
       'sessions.retry': () => {},
+      'database.restoreLatestSnapshot': () => {},
       ...handlers,
     };
   }

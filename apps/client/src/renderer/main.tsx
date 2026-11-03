@@ -36,14 +36,10 @@ declare global {
   }
 }
 
-// The first paint already has the saved theme and fonts: wait for the
-// settings before rendering. The App keeps them in step after that.
 let rendered = false;
-const unsubscribe = window.loom.subscribe('settings', (settings) => {
-  applyAppearance(settings);
+const render = () => {
   if (rendered) return;
   rendered = true;
-  queueMicrotask(() => unsubscribe());
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <ApiProvider api={window.loom}>
@@ -51,4 +47,20 @@ const unsubscribe = window.loom.subscribe('settings', (settings) => {
       </ApiProvider>
     </StrictMode>,
   );
+};
+
+// The first paint already has the saved theme and fonts: wait for the
+// settings before rendering. The App keeps them in step after that. A damaged
+// database serves no settings, so its blocking screen renders straight away,
+// with the default look.
+let waitingForSettings = false;
+window.loom.subscribe('database', (database) => {
+  if (database.state === 'damaged') return render();
+  if (waitingForSettings || rendered) return;
+  waitingForSettings = true;
+  const unsubscribe = window.loom.subscribe('settings', (settings) => {
+    applyAppearance(settings);
+    queueMicrotask(() => unsubscribe());
+    render();
+  });
 });
