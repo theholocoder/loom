@@ -30,6 +30,7 @@ export class FakeMain implements LoomApi {
         throw new Error('projects.link is not scripted');
       },
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
+      'projects.issues': () => [],
       'projects.check': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
         const settings = { ...this.value('settings'), worktreeRoot };

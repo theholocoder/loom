@@ -1,8 +1,8 @@
 // The Session service: every Session, its status, and its conversation with
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
-import { FORGE_CLI, type ForgeLink, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
-import { suggestBranch } from '../../shared/branches';
+import { FORGE_CLI, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
@@ -67,12 +67,13 @@ export class Sessions {
     return [...this.sessions.values()].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
   }
 
-  async create(params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; prompt: string }): Promise<Session> {
-    const { projectId, workingCopy } = params;
+  async create(params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; issue?: Issue; prompt: string }): Promise<Session> {
+    const { projectId, workingCopy, issue } = params;
     const project = this.options.project(projectId);
     if (!project) throw new Error(`unknown Project ${projectId}`);
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
-    const text = promptText(params.prompt);
+    if (issue) checkIssue(issue);
+    const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt);
     let path = project.checkout.path;
     let branch: string | null = null;
     if (workingCopy === 'worktree') {
@@ -82,7 +83,7 @@ export class Sessions {
           checkout: project.checkout.path,
           projectName: project.name,
           branchPrefix: project.branchPrefix,
-          branch: params.branch?.trim() || suggestBranch(project.branchPrefix, text),
+          branch: params.branch?.trim() || (issue ? issueBranch(project.branchPrefix, issue) : suggestBranch(project.branchPrefix, text)),
           root: this.options.worktreeRoot(),
         }),
       ));
@@ -100,8 +101,8 @@ export class Sessions {
       error: null,
       unread: 0,
       branch,
-      issue_number: null,
-      issue_url: null,
+      issue_number: issue?.number ?? null,
+      issue_url: issue?.url ?? null,
       merge_request_number: null,
       merge_request_url: null,
       created_at: now,
@@ -366,6 +367,19 @@ function promptText(prompt: string): string {
   const text = prompt.trim();
   if (!text) throw new Error('A prompt needs some text.');
   return text;
+}
+
+/** Rejects an issue Loom couldn't link to, or open in the browser. */
+function checkIssue(issue: Issue): void {
+  if (!Number.isInteger(issue.number) || issue.number <= 0 || !/^https?:\/\//i.test(issue.url ?? '')) {
+    throw new Error('An issue needs a number and an http(s) link.');
+  }
+}
+
+/** The start of a first prompt from an issue: its number and title, URL, then body. */
+function issuePrompt(issue: Issue): string {
+  const heading = `#${issue.number} ${(issue.title ?? '').trim()}`.trimEnd();
+  return [`${heading}\n${issue.url}`, (issue.body ?? '').trim()].filter(Boolean).join('\n\n');
 }
 
 /** The prompt shortcut asking the agent to open or update its branch's Merge request. */

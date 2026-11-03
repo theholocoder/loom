@@ -159,6 +159,13 @@ export interface ForgeLink {
   url: string;
 }
 
+/** An open issue on the Project's Forge, as the issue picker lists it. */
+export interface Issue extends ForgeLink {
+  title: string;
+  /** Its description, as the Forge stores it (Markdown). */
+  body: string;
+}
+
 /** Where a Session's agent works. */
 export interface WorkingCopy {
   kind: WorkingCopyKind;
@@ -261,6 +268,12 @@ export interface Commands {
    * would not accept at the start of a branch name.
    */
   'projects.setBranchPrefix': { params: { id: number; branchPrefix: string }; result: Project };
+  /**
+   * The open issues on the Project's Forge, any of them, not only the user's,
+   * matching `search` if given, as many as the Forge's CLI lists by default.
+   * Rejects when the Project's Forge is off.
+   */
+  'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
   /**
@@ -284,8 +297,15 @@ export interface Commands {
    * checkout's `.worktreeinclude` lists that git ignores are copied in. It
    * rejects if any of that fails. A `checkout` Session stays on whatever
    * branch the Project's checkout has.
+   *
+   * Started from an `issue`, the Session is linked to it, its first prompt
+   * starts with the issue's number, title, URL and body (`prompt` may then be
+   * empty), and the branch suggested is `<prefix>/<issue#>-<slug of the title>`.
    */
-  'sessions.create': { params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; prompt: string }; result: Session };
+  'sessions.create': {
+    params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; issue?: Issue; prompt: string };
+    result: Session;
+  };
   /**
    * Sends a prompt to a Waiting Session, which becomes Working. Rejects while
    * the Session is Working.

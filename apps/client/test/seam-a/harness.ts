@@ -87,6 +87,8 @@ export interface AcpMessage {
 export interface ForgeCliScript {
   /** The hosts `auth status --hostname <host>` says it is signed in to. */
   signedInHosts: string[];
+  /** The open issues `issue list` lists. */
+  issues?: { number: number; title: string; body: string; url: string }[];
 }
 
 export type ForgeCli = 'gh' | 'glab';

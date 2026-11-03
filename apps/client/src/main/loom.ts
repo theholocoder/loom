@@ -128,6 +128,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'projects.list': () => projects.value,
     'projects.link': (params) => projectService.link(params),
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
+    'projects.issues': ({ id, search }) => projectService.issues(id, search),
     'projects.check': () => projectService.checkForges(),
     'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
     'settings.setEditorCommand': ({ editorCommand }) => settingsService.setEditorCommand(editorCommand),
