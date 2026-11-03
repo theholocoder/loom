@@ -1,6 +1,7 @@
 // Opening a Session's working copy, or a file in it, in the user's own editor
 // or terminal: their command, run through the bridge in the Session's
 // Environment with its full PATH.
+import { splitCommandLine } from '../command-line';
 import { isNotFound, type BridgeCall } from '../environments/exec';
 
 /** How long the bridge may take to start the program. */
@@ -50,42 +51,13 @@ export async function openIn(environment: OpenEnvironment, request: OpenRequest)
   }
 }
 
-/**
- * Splits a command line into words as a shell would group them: "…" and '…'
- * quote, and backslashes are kept as they are, for Windows paths. Rejects an
- * unclosed quote.
- */
-export function splitCommandLine(line: string): string[] {
-  const words: string[] = [];
-  let word = '';
-  let inWord = false;
-  let quote: string | undefined;
-  for (const char of line) {
-    if (quote) {
-      if (char === quote) quote = undefined;
-      else word += char;
-    } else if (char === '"' || char === "'") {
-      quote = char;
-      inWord = true;
-    } else if (/\s/.test(char)) {
-      if (inWord) words.push(word);
-      word = '';
-      inWord = false;
-    } else {
-      word += char;
-      inWord = true;
-    }
-  }
-  if (quote) throw new Error(`"${line}" has an unclosed quote`);
-  if (inWord) words.push(word);
-  return words;
-}
-
 /** `file`, relative to `workingCopy`, as a path there; rejects one that leads out of it. */
 function fileIn(workingCopy: string, file: string): string {
   const parts = file.split(/[\\/]+/).filter((part) => part !== '' && part !== '.');
   if (/^([\\/]|[A-Za-z]:)/.test(file) || parts.includes('..') || !parts.length) {
     throw new Error(`"${file}" isn't in the Session's working copy`);
   }
-  return `${workingCopy.replace(/[\\/]+$/, '')}/${parts.join('/')}`;
+  // Written with the working copy's own separator, for Windows-only programs.
+  const separator = workingCopy.includes('\\') && !workingCopy.includes('/') ? '\\' : '/';
+  return `${workingCopy.replace(/[\\/]+$/, '')}${separator}${parts.join(separator)}`;
 }

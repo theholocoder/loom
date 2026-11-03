@@ -1,6 +1,6 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
 import { DEFAULT_SETTINGS, type Settings as SettingsValues } from '../shared/api';
-import { splitCommandLine } from './sessions/open-in';
+import { splitCommandLine } from './command-line';
 import type { LoomDatabase } from './storage/database';
 
 export class Settings {
