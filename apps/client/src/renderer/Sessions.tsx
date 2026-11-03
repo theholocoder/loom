@@ -9,6 +9,7 @@ import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
 import { useArchive, WorktreeMissing } from './Archive';
+import { ThinkingBlock, ToolCard } from './WorkCards';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -268,6 +269,10 @@ export function SessionView({ session, replyRequest = 0 }: { session: Session; r
                 <div className="bubble">{item.text}</div>
               </div>
             </div>
+          ) : item.kind === 'thinking' ? (
+            <ThinkingBlock key={item.id} item={item} />
+          ) : item.kind === 'tool' ? (
+            <ToolCard key={item.id} item={item} />
           ) : (
             <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
           ),

@@ -74,7 +74,14 @@ function acp() {
       const turn = turns[prompts++] ?? { chunks: [] };
       for (const text of turn.chunks ?? []) {
         if (typeof text === 'object') {
-          await released(text.hold);
+          if (text.hold) await released(text.hold);
+          if (text.update) send({ method: 'session/update', params: { sessionId, update: text.update } });
+          // A tool output of `bytes` bytes, made here so the script stays small: HEAD>, x's, <TAIL.
+          if (text.bigOutput) {
+            const { toolCallId, bytes } = text.bigOutput;
+            const output = 'HEAD>' + 'x'.repeat(bytes - 10) + '<TAIL';
+            send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: output } }] } } });
+          }
           continue;
         }
         send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } } });

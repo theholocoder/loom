@@ -12,6 +12,7 @@ import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { createWorktree, removeWorktree, unsavedWork, worktreeExists, type GitEnvironment } from './working-copies';
+import { capToolOutput } from './tool-output';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -82,7 +83,7 @@ export class Sessions {
     for (const session of sessions.list()) {
       if (session.status !== 'working') continue;
       await sessions.loadTranscript(session.id);
-      sessions.endAgentText(session.id);
+      sessions.endRun(session.id);
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
     }
     await sessions.flush();
@@ -269,14 +270,14 @@ export class Sessions {
   private markArchived(id: number): void {
     // Also guards a concurrent archive of the same Session: it was archived while this one waited.
     if (this.get(id).status === 'archived') return;
-    this.endAgentText(id);
+    this.endRun(id);
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined });
   }
 
   /** Closes the Session's agent, if it has one. */
   private async stopAgent(id: number): Promise<void> {
-    this.endAgentText(id);
+    this.endRun(id);
     const agent = this.live.get(id);
     this.live.delete(id);
     await agent?.close();
@@ -397,9 +398,16 @@ export class Sessions {
       case 'run-started':
         return;
       case 'text-delta':
-        return this.appendAgentText(id, event.text);
+        return this.appendText(id, 'agent', event.text);
+      case 'thinking-delta':
+        return this.appendText(id, 'thinking', event.text);
+      case 'tool-started':
+      case 'tool-updated':
+        // A run's cards are settled when it ends; what comes after can't reopen them.
+        if (this.get(id).status !== 'working') return;
+        return this.recordTool(id, event);
       case 'run-settled':
-        this.endAgentText(id);
+        this.endRun(id);
         this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
         return void this.lookUpBranch(id);
       case 'run-failed':
@@ -483,31 +491,33 @@ export class Sessions {
   private fail(id: number, error: string, { evenIfWaiting = false } = {}): void {
     const { status } = this.get(id);
     if (status !== 'working' && !(evenIfWaiting && status === 'waiting')) return;
-    this.endAgentText(id);
+    this.endRun(id);
     this.addItem(id, { kind: 'error', message: error });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });
   }
 
   /**
-   * Streaming text stays in memory, written about once a second, so a crash
-   * loses at most that much of it.
+   * Streaming text (the agent's reply or its thinking) stays in memory,
+   * written about once a second, so a crash loses at most that much of it.
+   * Text of another kind, or after a tool call, is a new item.
    */
-  private appendAgentText(id: number, text: string): void {
+  private appendText(id: number, kind: 'agent' | 'thinking', text: string): void {
     const items = this.transcript(id).value;
     const last = items.at(-1);
-    if (last?.kind === 'agent' && last.streaming) {
+    if (last?.kind === kind && last.streaming) {
       this.transcript(id).set([...items.slice(0, -1), { ...last, text: last.text + text }]);
       if (!this.checkpoints.has(id)) this.checkpoints.set(id, this.options.clock.setTimeout(() => this.checkpoint(id), CHECKPOINT_MS));
     } else {
-      this.addItem(id, { kind: 'agent', text, streaming: true });
+      this.endStreaming(id);
+      this.addItem(id, { kind, text, streaming: true });
     }
   }
 
-  /** Writes the Session's streaming agent text as it is now. */
+  /** Writes the Session's streaming text as it is now. */
   private checkpoint(id: number): void {
     this.cancelCheckpoint(id);
     const last = this.transcript(id).value.at(-1);
-    if (last?.kind === 'agent' && last.streaming) this.writeItem(id, last);
+    if (isStreamingText(last)) this.writeItem(id, last);
   }
 
   private cancelCheckpoint(id: number): void {
@@ -517,15 +527,50 @@ export class Sessions {
     this.checkpoints.delete(id);
   }
 
-  /** Finishes the Session's streaming agent text, if any, and writes it. */
-  private endAgentText(id: number): void {
+  /** Finishes the Session's streaming text, if any, and writes it. */
+  private endStreaming(id: number): void {
     const items = this.transcript(id).value;
     const last = items.at(-1);
-    if (last?.kind !== 'agent' || !last.streaming) return;
+    if (!isStreamingText(last)) return;
     this.cancelCheckpoint(id);
     const ended = { ...last, streaming: false };
     this.transcript(id).set([...items.slice(0, -1), ended]);
     this.writeItem(id, ended);
+  }
+
+  /**
+   * Finishes what the Session's run left going: its streaming text, and its
+   * tool calls still running, which can't finish any more and so failed.
+   */
+  private endRun(id: number): void {
+    this.endStreaming(id);
+    const items = this.transcript(id).value;
+    if (!items.some((i) => i.kind === 'tool' && i.status === 'running')) return;
+    const ended = items.map((i) => (i.kind === 'tool' && i.status === 'running' ? { ...i, status: 'failed' as const } : i));
+    this.transcript(id).set(ended);
+    for (const [seq, item] of ended.entries()) if (item !== items[seq]) this.writeItem(id, item);
+  }
+
+  /**
+   * Adds a tool call's card, or updates the one with its id wherever it is in
+   * the transcript, writing it at once. Its input and output are capped.
+   */
+  private recordTool(id: number, { type: _type, ...call }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
+    const input = call.input === undefined ? undefined : capToolOutput(call.input);
+    const output = call.output === undefined ? undefined : capToolOutput(call.output);
+    const changes = withoutUndefined({ ...call, input: input?.text, output: output?.text });
+    const items = this.transcript(id).value;
+    const at = items.findLastIndex((i) => i.kind === 'tool' && i.toolCallId === call.toolCallId);
+    const card = items[at];
+    // A card stays marked once cut: what's kept of it is still partial.
+    const truncated = (card?.kind === 'tool' && card.truncated) || input?.truncated || output?.truncated;
+    if (card?.kind !== 'tool') {
+      this.endStreaming(id);
+      return this.addItem(id, { kind: 'tool', title: 'Tool call', status: 'running', ...changes, ...(truncated ? { truncated } : {}) });
+    }
+    const updated = { ...card, ...changes, ...(truncated ? { truncated } : {}) };
+    this.transcript(id).set(items.map((item, seq) => (seq === at ? updated : item)));
+    this.writeItem(id, updated);
   }
 
   /** Appends an event to the Session's transcript and writes it; its id is its place there. */
@@ -681,6 +726,11 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+}
+
+/** Text the agent is still adding to: its reply or its thinking. */
+function isStreamingText(item: TranscriptItem | undefined): item is Extract<TranscriptItem, { kind: 'agent' | 'thinking' }> {
+  return (item?.kind === 'agent' || item?.kind === 'thinking') && item.streaming;
 }
 
 function itemOf(row: EventsTable): TranscriptItem {

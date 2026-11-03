@@ -253,11 +253,31 @@ export interface Settings extends Appearance {
 
 export const DEFAULT_SETTINGS: Settings = { worktreeRoot: '~/loom/worktrees', editorCommand: 'code', terminalCommand: '', ...DEFAULT_APPEARANCE };
 
+export type ToolStatus = 'running' | 'completed' | 'failed';
+
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
   | { kind: 'user'; id: number; text: string }
   /** `streaming` while the agent is still adding to it. */
   | { kind: 'agent'; id: number; text: string; streaming: boolean }
+  /** The agent's thinking, apart from its reply; `streaming` as for `agent`. */
+  | { kind: 'thinking'; id: number; text: string; streaming: boolean }
+  /**
+   * One tool call, kept up to date. Its `input` and `output` are capped at
+   * 256 KB each, keeping head and tail around a marker; `truncated` if cut.
+   * A call still running when its run ended is `failed`.
+   */
+  | {
+      kind: 'tool';
+      id: number;
+      toolCallId: string;
+      title: string;
+      toolKind?: string;
+      status: ToolStatus;
+      input?: string;
+      output?: string;
+      truncated?: boolean;
+    }
   /** A run that failed, with the agent's message. */
   | { kind: 'error'; id: number; message: string };
 
