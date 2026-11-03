@@ -29,17 +29,40 @@ function AskCard({ label, icon, name, asked, state, children }: { label: string;
   );
 }
 
+type TextField = Extract<QuestionField, { type: 'text' }>;
+
+/**
+ * The question's free answer, which the composer can give: its one text
+ * field, when nothing else is needed (OpenCode's "type your own answer").
+ * Undefined when the question needs more than a line of text.
+ */
+export function freeAnswerField(item: Question): TextField | undefined {
+  const texts = item.fields.filter((f): f is TextField => f.type === 'text');
+  if (texts.length !== 1) return undefined;
+  const [text] = texts;
+  return item.fields.every((f) => f === text || !f.required) ? text : undefined;
+}
+
 /**
  * A question card. When it is one choice, with nothing else it needs, an
  * option answers in one click; otherwise the form is filled in and sent
- * with Answer. Dismiss declines it.
+ * with Answer. Dismiss declines it. With `composerAnswers`, its free answer
+ * (see freeAnswerField) is typed in the composer instead of on the card.
  */
-export function QuestionCard({ item, onAnswer }: { item: Question; onAnswer: (answer: Answer | null) => Promise<void> }) {
+export function QuestionCard({ item, composerAnswers = false, onAnswer }: { item: Question; composerAnswers?: boolean; onAnswer: (answer: Answer | null) => Promise<void> }) {
   const asked = item.state === 'asked';
+  const free = composerAnswers ? freeAnswerField(item) : undefined;
   return (
     <AskCard label="Question" icon={<MessageCircleQuestionMark className="sm" />} name="question" asked={asked} state={QUESTION_STATES[item.state]}>
       {item.message && <p className="ask-message">{item.message}</p>}
-      {asked ? <QuestionForm fields={item.fields} onAnswer={onAnswer} /> : item.answer && <AnswerSummary fields={item.fields} answer={item.answer} />}
+      {asked ? (
+        <>
+          <QuestionForm fields={item.fields.filter((f) => f !== free)} onAnswer={onAnswer} />
+          {free && <p className="muted ask-hint">Or type your own answer below.</p>}
+        </>
+      ) : (
+        item.answer && <AnswerSummary fields={item.fields} answer={item.answer} />
+      )}
     </AskCard>
   );
 }

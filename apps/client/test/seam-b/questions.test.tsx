@@ -59,11 +59,18 @@ describe("the agent's questions", () => {
     expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0: 'blue' } }]);
   });
 
-  it('takes an answer of your own where the question allows one', async () => {
+  it("takes your own answer from the composer, where the question has room for one", async () => {
     const { card, answers } = openSession([colorQuestion]);
-    fireEvent.change(within(card()).getByRole('textbox', { name: 'Color (other)' }), { target: { value: 'Green' } });
-    await act(async () => fireEvent.click(within(card()).getByRole('button', { name: 'Answer' })));
+    // The free answer is the composer's, not a second box on the card.
+    expect(within(card()).queryByRole('textbox')).toBeNull();
+    expect(within(card()).queryByRole('button', { name: 'Answer' })).toBeNull();
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+    expect(prompt.placeholder).toBe('Type your own answer…');
+
+    fireEvent.change(prompt, { target: { value: 'Green' } });
+    await act(async () => fireEvent.keyDown(prompt, { key: 'Enter' }));
     expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0_custom: 'Green' } }]);
+    expect(prompt.value).toBe('');
   });
 
   it("fills in a plugin's dialog as a form, Answer only once what it needs is given, or dismisses it", async () => {
@@ -128,8 +135,18 @@ describe("the agent's questions", () => {
     for (const card of cards) expect(within(card).queryAllByRole('button')).toEqual([]);
   });
 
-  it('points the user at the question instead of the composer while it is asked', () => {
-    openSession([colorQuestion]);
+  it('points the user at the card when the question needs more than the composer can give', () => {
+    const form: TranscriptItem = {
+      kind: 'question',
+      id: 1,
+      message: 'Deploy settings',
+      state: 'asked',
+      fields: [
+        { type: 'text', key: 'notes', title: 'Release notes', required: false },
+        { type: 'boolean', key: 'confirm', title: 'Run migrations?', required: true },
+      ],
+    };
+    openSession([form]);
     const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
     expect(prompt.placeholder).toBe('Answer the question above to go on.');
     fireEvent.change(prompt, { target: { value: 'Make it green' } });

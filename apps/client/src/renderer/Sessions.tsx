@@ -10,7 +10,7 @@ import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
 import { useArchive, WorktreeMissing } from './Archive';
-import { QuestionCard, TrustCard } from './Questions';
+import { freeAnswerField, QuestionCard, TrustCard } from './Questions';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
@@ -164,8 +164,10 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const starting = working && (environment?.state === 'starting' || environment?.state === 'disconnected');
   // The last prompt went unanswered, so it can be sent again.
   const retryable = session.status === 'waiting' && session.waitingReason === 'error' && items.at(-2)?.kind === 'user' && items.at(-1)?.kind === 'error' && !session.worktreeMissing;
-  // The agent waits on an answer: the card takes it, not the composer.
-  const asked = session.status === 'waiting' && items.some((i) => (i.kind === 'question' || i.kind === 'trust') && i.state === 'asked');
+  // The agent waits on an answer: the card takes it, and the composer only when it is the question's free answer.
+  const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust') && i.state === 'asked') : undefined;
+  const asked = firstAsked !== undefined;
+  const freeAnswer = firstAsked?.kind === 'question' ? freeAnswerField(firstAsked) : undefined;
 
   const end = useRef<HTMLDivElement>(null);
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
@@ -182,12 +184,23 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const send = async (prompt: string) => {
     setError(undefined);
     try {
-      await api.invoke('sessions.send', { id: session.id, prompt });
+      if (firstAsked && freeAnswer) await api.invoke('sessions.answer', { id: session.id, itemId: firstAsked.id, answer: { [freeAnswer.key]: prompt } });
+      else await api.invoke('sessions.send', { id: session.id, prompt });
       return true;
     } catch (e) {
       setError((e as Error).message);
       return false;
     }
+  };
+
+  /** What the composer is for right now. */
+  const composerPlaceholder = (): string => {
+    if (working) return `${session.agent} is working…`;
+    if (freeAnswer) return `${freeAnswer.description ?? 'Type your own answer'}…`;
+    if (asked) return 'Answer the question above to go on.';
+    if (session.status === 'archived') return 'This Session is archived.';
+    if (session.worktreeMissing) return "This Session's worktree is missing; it can only be archived.";
+    return `Reply to ${session.agent}…`;
   };
 
   const retry = async () => {
@@ -279,7 +292,7 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
           ) : item.kind === 'tool' ? (
             <ToolCard key={item.id} item={item} />
           ) : item.kind === 'question' ? (
-            <QuestionCard key={item.id} item={item} onAnswer={(answer) => api.invoke('sessions.answer', { id: session.id, itemId: item.id, answer })} />
+            <QuestionCard key={item.id} item={item} composerAnswers={item === firstAsked && !!freeAnswer} onAnswer={(answer) => api.invoke('sessions.answer', { id: session.id, itemId: item.id, answer })} />
           ) : item.kind === 'trust' ? (
             <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
           ) : (
@@ -308,18 +321,8 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
       </div>
       <Composer
         agent={session.agent}
-        placeholder={
-          working
-            ? `${session.agent} is working…`
-            : asked
-              ? 'Answer the question above to go on.'
-              : session.status === 'archived'
-              ? 'This Session is archived.'
-              : session.worktreeMissing
-                ? "This Session's worktree is missing; it can only be archived."
-                : `Reply to ${session.agent}…`
-        }
-        disabled={session.status !== 'waiting' || asked || !!session.worktreeMissing}
+        placeholder={composerPlaceholder()}
+        disabled={session.status !== 'waiting' || (asked && !freeAnswer) || !!session.worktreeMissing}
         focusRequest={replyRequest}
         onSend={send}
       />
