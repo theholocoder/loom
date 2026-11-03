@@ -133,6 +133,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
     'settings.setEditorCommand': ({ editorCommand }) => settingsService.setEditorCommand(editorCommand),
     'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),
+    'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
     'sessions.send': (params) => sessionService.send(params),

@@ -1,6 +1,7 @@
 // The Electron entry point: wires createLoom to the window and IPC.
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, shell } from 'electron';
+import { THEMES, type Theme } from '../shared/appearance';
 import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { serveApi } from './ipc';
@@ -12,12 +13,13 @@ if (process.env.LOOM_USER_DATA_DIR) app.setPath('userData', process.env.LOOM_USE
 let window: BrowserWindow | undefined;
 let loom: Loom | undefined;
 
-function createWindow(): BrowserWindow {
+function createWindow(theme: Theme): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     title: 'Loom',
-    backgroundColor: '#0f1117',
+    // The saved theme's background, so the window never shows another first.
+    backgroundColor: THEMES[theme].background,
     webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), sandbox: true, contextIsolation: true },
   });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -71,7 +73,15 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     serveApi(loom.api);
-    window = createWindow();
-    window.on('closed', () => (window = undefined));
+    let theme: Theme | undefined;
+    const stopWatchingTheme = loom.api.subscribe('settings', (settings) => {
+      if (window && settings.theme !== theme) window.setBackgroundColor(THEMES[settings.theme].background);
+      theme = settings.theme;
+    });
+    window = createWindow(theme ?? 'midnight');
+    window.on('closed', () => {
+      window = undefined;
+      stopWatchingTheme();
+    });
   });
 }

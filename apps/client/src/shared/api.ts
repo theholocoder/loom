@@ -2,6 +2,7 @@
 // only through this: commands it invokes, and topics it subscribes to. It is
 // also the seam tests drive main through (seam A) and fake for the renderer
 // (seam B), so everything the UI can see or do goes through here.
+import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
 
 /** What the Environment's bridge reported in its handshake. */
 export interface BridgeInfo {
@@ -210,7 +211,7 @@ export interface Session {
 }
 
 /** Loom's own settings, the same for every Project. */
-export interface Settings {
+export interface Settings extends Appearance {
   /**
    * Where new worktrees go, as `<root>/<project>/<session>`, the Session's
    * folder named after its branch without the prefix. A leading `~` is the
@@ -231,7 +232,7 @@ export interface Settings {
   terminalCommand: string;
 }
 
-export const DEFAULT_SETTINGS: Settings = { worktreeRoot: '~/loom/worktrees', editorCommand: 'code', terminalCommand: '' };
+export const DEFAULT_SETTINGS: Settings = { worktreeRoot: '~/loom/worktrees', editorCommand: 'code', terminalCommand: '', ...DEFAULT_APPEARANCE };
 
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
@@ -285,6 +286,8 @@ export interface Commands {
   'settings.setEditorCommand': { params: { editorCommand: string }; result: Settings };
   /** Sets the terminal command; empty turns "Open in terminal" off. Rejects an unclosed quote. */
   'settings.setTerminalCommand': { params: { terminalCommand: string }; result: Settings };
+  /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
+  'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
   'sessions.list': { params: void; result: Session[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with

@@ -1,6 +1,7 @@
-import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, RotateCw, Server, TriangleAlert } from 'lucide-react';
+import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, Palette, RotateCw, Server, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { OPENCODE_MIN_VERSION, type AgentStatus, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
+import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 
 // The prototype has no Settings page; it uses the layout of its other full
@@ -16,6 +17,13 @@ export function Settings() {
     <main className="dash" aria-label="Settings">
       <div className="row">
         <h1>Settings</h1>
+      </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <Palette className="sm" />
+          <h3>Appearance</h3>
+        </div>
+        <AppearancePickers />
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
@@ -54,6 +62,53 @@ export function Settings() {
         <OpenCommands />
       </div>
     </main>
+  );
+}
+
+/** The theme and fonts, which the window takes on as soon as they're saved. */
+function AppearancePickers() {
+  const api = useApi();
+  const settings = useTopic('settings');
+  const [error, setError] = useState<string>();
+  if (!settings) return null;
+  const save = (change: Partial<Appearance>) => {
+    setError(undefined);
+    api.invoke('settings.setAppearance', change).catch((e: unknown) => setError((e as Error).message));
+  };
+  return (
+    <div className="row" style={{ padding: '10px 14px', gap: 18, flexWrap: 'wrap' }}>
+      <label className="row">
+        <span>Theme</span>
+        <select aria-label="Theme" value={settings.theme} onChange={(event) => save({ theme: event.target.value as Appearance['theme'] })}>
+          {Object.entries(THEMES).map(([id, theme]) => (
+            <option key={id} value={id}>
+              {theme.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="row">
+        <span>UI font</span>
+        <select aria-label="UI font" value={settings.uiFont} onChange={(event) => save({ uiFont: event.target.value as Appearance['uiFont'] })}>
+          {Object.keys(UI_FONTS).map((font) => (
+            <option key={font}>{font}</option>
+          ))}
+        </select>
+      </label>
+      <label className="row">
+        <span>Monospace font</span>
+        <select aria-label="Monospace font" className="tech" value={settings.monoFont} onChange={(event) => save({ monoFont: event.target.value as Appearance['monoFont'] })}>
+          {Object.keys(MONO_FONTS).map((font) => (
+            <option key={font}>{font}</option>
+          ))}
+        </select>
+      </label>
+      {error && (
+        <div className="err" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

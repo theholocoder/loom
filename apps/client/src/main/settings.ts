@@ -1,6 +1,7 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
 import { DEFAULT_SETTINGS, type Settings as SettingsValues } from '../shared/api';
 import { splitCommandLine } from './command-line';
+import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
 
 export class Settings {
@@ -18,6 +19,10 @@ export class Settings {
     if (typeof stored.worktreeRoot === 'string') current.worktreeRoot = stored.worktreeRoot;
     if (typeof stored.editorCommand === 'string') current.editorCommand = stored.editorCommand;
     if (typeof stored.terminalCommand === 'string') current.terminalCommand = stored.terminalCommand;
+    // A value Loom no longer offers falls back to the default.
+    if (isTheme(stored.theme)) current.theme = stored.theme;
+    if (isUiFont(stored.uiFont)) current.uiFont = stored.uiFont;
+    if (isMonoFont(stored.monoFont)) current.monoFont = stored.monoFont;
     return new Settings(db, current, onChange);
   }
 
@@ -37,6 +42,18 @@ export class Settings {
 
   async setTerminalCommand(terminalCommand: string): Promise<SettingsValues> {
     return this.set('terminalCommand', checkCommand(terminalCommand));
+  }
+
+  /** Sets the theme or fonts given; rejects any not in Loom's lists. */
+  async setAppearance(appearance: Partial<Appearance>): Promise<SettingsValues> {
+    const { theme, uiFont, monoFont } = appearance;
+    if (theme !== undefined && !isTheme(theme)) throw new Error(`"${String(theme)}" is not a theme`);
+    if (uiFont !== undefined && !isUiFont(uiFont)) throw new Error(`"${String(uiFont)}" is not a UI font Loom offers`);
+    if (monoFont !== undefined && !isMonoFont(monoFont)) throw new Error(`"${String(monoFont)}" is not a monospace font Loom offers`);
+    if (theme !== undefined) await this.set('theme', theme);
+    if (uiFont !== undefined) await this.set('uiFont', uiFont);
+    if (monoFont !== undefined) await this.set('monoFont', monoFont);
+    return this.current;
   }
 
   private async set<K extends keyof SettingsValues>(key: K, value: SettingsValues[K]): Promise<SettingsValues> {
