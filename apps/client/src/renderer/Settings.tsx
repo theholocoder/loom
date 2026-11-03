@@ -1,5 +1,5 @@
-import { CircleCheckBig, CircleX, LoaderCircle, RotateCw, Server, TriangleAlert } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { CircleCheckBig, CircleX, FolderTree, LoaderCircle, RotateCw, Server, TriangleAlert } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { OPENCODE_MIN_VERSION, type AgentStatus, type EnvironmentState, type EnvironmentStatus } from '../shared/api';
 import { useApi, useTopic } from './api';
 
@@ -39,7 +39,61 @@ export function Settings() {
             </tbody>
           </table>
       </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <FolderTree className="sm" />
+          <h3>Worktrees</h3>
+        </div>
+        <WorktreeRoot />
+      </div>
     </main>
+  );
+}
+
+/** Where new worktrees go; `~` is the home in each Project's Environment. */
+function WorktreeRoot() {
+  const api = useApi();
+  const saved = useTopic('settings')?.worktreeRoot ?? '';
+  const [value, setValue] = useState(saved);
+  const [error, setError] = useState<string>();
+  useEffect(() => setValue(saved), [saved]);
+
+  // Enter submits, then leaving the field blurs it: save each value once.
+  const sent = useRef<string>(undefined);
+  const save = (event?: FormEvent) => {
+    event?.preventDefault();
+    if (value === saved || value === sent.current) return;
+    sent.current = value;
+    setError(undefined);
+    api
+      .invoke('settings.setWorktreeRoot', { worktreeRoot: value })
+      .then((settings) => setValue(settings.worktreeRoot))
+      .catch((e: unknown) => setError((e as Error).message))
+      .finally(() => (sent.current = undefined));
+  };
+  return (
+    <form onSubmit={save} style={{ padding: '10px 14px' }}>
+      <label className="row">
+        <span>Worktree root</span>
+        <input
+          className="tech prefix"
+          style={{ width: '32ch' }}
+          aria-label="Worktree root"
+          value={value}
+          spellCheck={false}
+          onChange={(event) => setValue(event.target.value)}
+          onBlur={() => save()}
+        />
+      </label>
+      <div className="muted">
+        Each worktree Session gets a folder named after its branch: <span className="tech">{`${saved || '<root>'}/<project>/<session>`}</span>.
+      </div>
+      {error && (
+        <div className="err" role="alert">
+          {error}
+        </div>
+      )}
+    </form>
   );
 }
 

@@ -186,7 +186,7 @@ func TestHandshakeReportsProtocolVersionOSAndArchitecture(t *testing.T) {
 		t.Fatalf("reply has no result: %v", reply)
 	}
 	want := map[string]any{
-		"protocolVersion": float64(1),
+		"protocolVersion": float64(2),
 		"version":         "1.2.3",
 		"os":              runtime.GOOS,
 		"arch":            runtime.GOARCH,

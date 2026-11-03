@@ -20,7 +20,7 @@ import (
 
 // ProtocolVersion is bumped whenever the frames or messages change in a way
 // an older peer would not understand.
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 // MaxFrameSize bounds a single frame so a corrupt length can't make the
 // bridge allocate without limit.
@@ -40,6 +40,8 @@ type Machine struct {
 	Shell string
 	// Environ is the bridge's own environment, the fallback.
 	Environ []string
+	// Home is the user's home folder, which `~` in Loom's settings means.
+	Home string
 	// ShellTimeout bounds each attempt at running Shell; zero means
 	// shellenv.DefaultTimeout.
 	ShellTimeout time.Duration
@@ -68,6 +70,7 @@ type handshakeResult struct {
 	Version         string `json:"version"`
 	OS              string `json:"os"`
 	Arch            string `json:"arch"`
+	Home            string `json:"home"`
 }
 
 // Serve answers requests read from r on w until r reaches EOF, which is how
@@ -78,7 +81,7 @@ type handshakeResult struct {
 func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 	out := &writer{w: w}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &server{info: info, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out)}
+	s := &server{info: info, home: machine.Home, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out)}
 	var inFlight sync.WaitGroup
 	defer s.channels.wait()
 	defer inFlight.Wait()
@@ -110,6 +113,7 @@ func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 
 type server struct {
 	info     Info
+	home     string
 	env      *environment
 	channels *channels
 }
@@ -128,6 +132,7 @@ func (s *server) handle(ctx context.Context, req request) response {
 			Version:         s.info.Version,
 			OS:              runtime.GOOS,
 			Arch:            runtime.GOARCH,
+			Home:            s.home,
 		}, nil)
 	case "ping":
 		return reply(struct{}{}, nil)
@@ -141,6 +146,18 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(runCommand(ctx, s.env.get(), params))
+	case "files.exists":
+		var params existsParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(pathExists(params))
+	case "files.copy":
+		var params copyParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(copyFiles(params))
 	case "opencode.probe":
 		return reply(probeOpencode(ctx, s.env.get()))
 	case "channel.open":

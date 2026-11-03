@@ -36,6 +36,13 @@ const working: Session = {
   updatedAt: 1,
 };
 const finished: Session = { ...working, status: 'waiting', waitingReason: 'finished' };
+const inWorktree: Session = {
+  ...finished,
+  id: 8,
+  title: 'Fix the login bug',
+  workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/billing-api/login' },
+  branch: 'loom/login',
+};
 
 function startNewSession() {
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
@@ -51,14 +58,18 @@ function open(main: FakeMain, session: Session) {
 }
 
 describe('starting a Session', () => {
-  it('offers to stay on the current branch, with OpenCode as the agent', () => {
+  it('defaults to a new worktree, also offering to stay on the current branch, with OpenCode as the agent', () => {
     renderApp(new FakeMain({ projects: [project] }));
 
     const pane = startNewSession();
 
     const workingCopy = within(pane).getByRole('combobox', { name: 'Working copy' }) as HTMLSelectElement;
-    expect(workingCopy.value).toBe('checkout');
-    expect(workingCopy.selectedOptions[0]!.textContent).toBe('Stay on current branch');
+    expect(workingCopy.value).toBe('worktree');
+    expect(workingCopy.selectedOptions[0]!.textContent).toBe('New worktree');
+    expect([...workingCopy.options].map((o) => [o.value, o.textContent, o.disabled])).toEqual([
+      ['worktree', 'New worktree', false],
+      ['checkout', 'Stay on current branch', false],
+    ]);
     expect(within(pane).getByTitle('Agent').textContent).toBe('OpenCode');
     expect((within(pane).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe('1');
   });
@@ -74,6 +85,8 @@ describe('starting a Session', () => {
     );
     const pane = startNewSession();
 
+    fireEvent.change(within(pane).getByRole('combobox', { name: 'Working copy' }), { target: { value: 'checkout' } });
+    expect(within(pane).queryByRole('textbox', { name: 'Branch' })).toBeNull();
     fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Say hello' } });
     fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
 
@@ -82,6 +95,48 @@ describe('starting a Session', () => {
       { command: 'sessions.create', params: { projectId: 1, workingCopy: 'checkout', prompt: 'Say hello' } },
     ]);
     expect(screen.getByRole('heading', { name: 'Say hello' })).toBeTruthy();
+  });
+
+  it("suggests the new worktree's branch from the prompt, and starts it with the branch as edited", async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project] }, {
+        'sessions.create': () => {
+          main.publish('sessions', [inWorktree]);
+          return inWorktree;
+        },
+      }),
+    );
+    const pane = startNewSession();
+    const branch = () => within(pane).getByRole('textbox', { name: 'Branch' }) as HTMLInputElement;
+    const prompt = within(pane).getByRole('textbox', { name: 'Prompt' });
+
+    expect(branch().placeholder).toBe('loom/…');
+    fireEvent.change(prompt, { target: { value: 'Fix the login bug!' } });
+    expect(branch().value).toBe('loom/fix-the-login-bug');
+
+    fireEvent.change(branch(), { target: { value: 'loom/login' } });
+    fireEvent.change(prompt, { target: { value: 'Fix the login bug, please' } });
+    expect(branch().value).toBe('loom/login');
+    fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy());
+    expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
+      { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', branch: 'loom/login', prompt: 'Fix the login bug, please' } },
+    ]);
+  });
+
+  it('leaves the branch to main when the user did not edit it', async () => {
+    const main = renderApp(new FakeMain({ projects: [project] }, { 'sessions.create': () => inWorktree }));
+    const pane = startNewSession();
+
+    fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Fix the login bug' } });
+    fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', prompt: 'Fix the login bug' } },
+      ]),
+    );
   });
 
   it('says why a Session could not start', async () => {
@@ -111,6 +166,21 @@ describe('starting a Session', () => {
 });
 
 describe('a Session', () => {
+  it('shows its Project, repository, branch and working copy in its header', () => {
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [inWorktree] })), inWorktree);
+    const header = () => screen.getByRole('region', { name: 'Session header' });
+
+    expect(within(header()).getByText('billing-api')).toBeTruthy();
+    expect(within(header()).getByText('acme/billing-api')).toBeTruthy();
+    expect(within(header()).getByTitle('Branch').textContent).toBe('loom/login');
+    const chip = within(header()).getByText('worktree');
+    expect(chip.closest('[title]')?.getAttribute('title')).toBe('/home/dev/loom/worktrees/billing-api/login');
+
+    act(() => main.publish('sessions', [{ ...inWorktree, branch: 'loom/login-v2' }]));
+    expect(within(header()).getByTitle('Branch').textContent).toBe('loom/login-v2');
+  });
+
+
   it('shows the user as bubbles and streams the agent reply', () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
     const chat = () => screen.getByRole('log', { name: 'Conversation' });

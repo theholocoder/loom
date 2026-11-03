@@ -109,11 +109,20 @@ export class Machine {
     this.addToShellPath(this.binDir());
   }
 
+  /** The user's home folder, empty to start with. */
+  get home(): string {
+    const dir = join(this.dir, 'home');
+    mkdirSync(dir, { recursive: true });
+    const real = realpathSync.native(dir);
+    return process.platform === 'win32' ? real.replaceAll('\\', '/') : real;
+  }
+
   /** The bridge's environment, as a desktop launcher gives it. */
   bridgeEnv(): NodeJS.ProcessEnv {
+    const home = { HOME: this.home, USERPROFILE: this.home };
     if (process.platform === 'win32') {
       const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
-      return { ...process.env, PATH: [...this.shellPath, dirname(onHostPath('git')), join(systemRoot, 'System32'), systemRoot].join(delimiter) };
+      return { ...process.env, ...home, PATH: [...this.shellPath, dirname(onHostPath('git')), join(systemRoot, 'System32'), systemRoot].join(delimiter) };
     }
     const shell = join(this.dir, 'login-shell');
     writeFileSync(
@@ -125,7 +134,7 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
       { mode: 0o755 },
     );
     this.writeShellPath();
-    return { ...process.env, SHELL: shell };
+    return { ...process.env, ...home, SHELL: shell };
   }
 
   /** Adds `dir` to the PATH the login shell reports from now on. */
@@ -186,6 +195,36 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
     return dir;
   }
 
+  /**
+   * A bare repository standing in for a Forge's, whose default branch
+   * `defaultBranch` has one commit adding `README.md`. Returns its path.
+   */
+  gitOrigin(name: string, defaultBranch = 'main'): string {
+    const dir = this.folder(`${name}.git`);
+    execFileSync('git', ['init', '--quiet', '--bare', `--initial-branch=${defaultBranch}`, dir]);
+    const seed = this.folder(`${name}-seed`);
+    execFileSync('git', ['clone', '--quiet', dir, seed], { stdio: 'ignore' });
+    this.commit(seed, 'README.md', `# ${name}\n`);
+    git(seed, 'push', '--quiet', 'origin', `HEAD:${defaultBranch}`);
+    rmSync(seed, { recursive: true, force: true });
+    return dir;
+  }
+
+  /** A clone of `origin`, as a user's checkout. Returns its path as git reports it. */
+  gitClone(origin: string, name: string): string {
+    const dir = this.folder(name);
+    execFileSync('git', ['clone', '--quiet', origin, dir], { stdio: 'ignore' });
+    return dir;
+  }
+
+  /** Writes `file` in the checkout `repo` and commits it. Returns the new commit. */
+  commit(repo: string, file: string, content: string): string {
+    writeFileSync(join(repo, file), content);
+    git(repo, 'add', file);
+    git(repo, 'commit', '--quiet', '-m', `Change ${file}`);
+    return git(repo, 'rev-parse', 'HEAD');
+  }
+
   /** A new empty folder, with its real path (git reports real paths). */
   folder(name: string): string {
     const dir = join(this.dir, 'code', name);
@@ -232,6 +271,14 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   remove(): void {
     rmSync(this.dir, { recursive: true, force: true });
   }
+}
+
+/** Runs git in `repo` on this test's machine, as a set-up step; returns what it prints, trimmed. */
+export function git(repo: string, ...args: string[]): string {
+  return execFileSync('git', ['-C', repo, '-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false', ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
 }
 
 /** The non-empty lines of a log file, none if it doesn't exist yet. */

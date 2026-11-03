@@ -20,7 +20,7 @@ const connectedNative: EnvironmentStatus = {
   id: 'native',
   label: 'Native',
   state: 'connected',
-  bridge: { protocolVersion: 1, version: '0.1.0', os: 'linux', arch: 'amd64' },
+  bridge: { protocolVersion: 2, version: '0.1.0', os: 'linux', arch: 'amd64', home: '/home/dev' },
   lastSeenAt: 1,
 };
 
@@ -66,6 +66,41 @@ describe('Settings', () => {
     act(() => main.publish('environments', [{ ...connectedNative, state: 'disconnected', error: 'bridge exited (SIGKILL)' }]));
     expect(within(row()).getByText('disconnected')).toBeTruthy();
     expect(within(row()).getByText('bridge exited (SIGKILL)')).toBeTruthy();
+  });
+});
+
+describe('Settings: worktrees', () => {
+  const openSettings = (main: FakeMain) => {
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    return screen.getByRole('textbox', { name: 'Worktree root' }) as HTMLInputElement;
+  };
+
+  it('shows the worktree root, ~/loom/worktrees by default, and saves a new one', async () => {
+    const main = new FakeMain();
+    const input = openSettings(main);
+    expect(input.value).toBe('~/loom/worktrees');
+
+    fireEvent.change(input, { target: { value: '/srv/worktrees' } });
+    fireEvent.submit(input);
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'settings.setWorktreeRoot')).toEqual([{ command: 'settings.setWorktreeRoot', params: { worktreeRoot: '/srv/worktrees' } }]));
+  });
+
+  it('says why a worktree root was refused', async () => {
+    const input = openSettings(
+      new FakeMain({}, {
+        'settings.setWorktreeRoot': () => {
+          throw new Error('"code" can\'t be the worktree root: it must be an absolute path or start with ~');
+        },
+      }),
+    );
+
+    fireEvent.change(input, { target: { value: 'code' } });
+    fireEvent.submit(input);
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/can't be the worktree root/);
   });
 });
 
