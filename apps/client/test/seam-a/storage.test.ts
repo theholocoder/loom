@@ -154,7 +154,6 @@ describe('a damaged database', () => {
     await damagedWithSnapshot(userDataDir);
     const damagedBytes = readFileSync(join(userDataDir, 'loom.db'));
     const main = await startMain({ userDataDir });
-    main.clock.advance(60_000);
 
     await main.api.invoke('database.restoreLatestSnapshot');
 

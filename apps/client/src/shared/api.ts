@@ -261,7 +261,6 @@ export type TranscriptItem =
   /** A run that failed, with the agent's message. */
   | { kind: 'error'; id: number; message: string };
 
-/** Commands the renderer can invoke, with their parameters and results. */
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed
  * `PRAGMA quick_check` or isn't a database: main serves only this topic and
@@ -279,6 +278,7 @@ export type DatabaseStatus =
       snapshots: string[];
     };
 
+/** Commands the renderer can invoke, with their parameters and results. */
 export interface Commands {
   'environments.list': { params: void; result: EnvironmentStatus[] };
   /** Checks the agent again in every connected Environment, and resolves once done. */

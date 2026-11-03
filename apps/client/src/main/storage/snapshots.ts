@@ -30,7 +30,7 @@ export function listSnapshots(userDataDir: string): string[] {
 export function takeSnapshot(sqlite: BetterSqlite3.Database, userDataDir: string, version: number, now: number): void {
   const dir = snapshotsDir(userDataDir);
   mkdirSync(dir, { recursive: true });
-  sqlite.prepare('VACUUM INTO ?').run(join(dir, `${stamp(now)}-v${version}.db`));
+  sqlite.prepare('VACUUM INTO ?').run(unused(now, (t) => join(dir, `${stamp(t)}-v${version}.db`)));
   for (const old of listSnapshots(userDataDir).slice(0, -KEEP)) rmSync(old, { force: true });
 }
 
@@ -42,11 +42,19 @@ export function takeSnapshot(sqlite: BetterSqlite3.Database, userDataDir: string
 export function restoreLatestSnapshot(databasePath: string, userDataDir: string, now: number): void {
   const latest = listSnapshots(userDataDir).at(-1);
   if (!latest) throw new Error('there is no snapshot to restore');
-  const aside = `${databasePath}.damaged-${stamp(now)}`;
+  // Never over an earlier damaged file: renaming onto it would delete it.
+  const aside = unused(now, (t) => `${databasePath}.damaged-${stamp(t)}`, ['', '-wal', '-shm']);
   for (const suffix of ['', '-wal', '-shm']) {
     if (existsSync(databasePath + suffix)) renameSync(databasePath + suffix, aside + suffix);
   }
   copyFileSync(latest, databasePath);
+}
+
+/** The path `at` names for the earliest time from `now` at which no file (with any of `suffixes`) exists yet. */
+function unused(now: number, at: (time: number) => string, suffixes = ['']): string {
+  let time = now;
+  while (suffixes.some((suffix) => existsSync(at(time) + suffix))) time++;
+  return at(time);
 }
 
 /** A sortable, file-name-safe UTC timestamp. */
