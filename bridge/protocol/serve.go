@@ -45,6 +45,9 @@ type Machine struct {
 	// ShellTimeout bounds each attempt at running Shell; zero means
 	// shellenv.DefaultTimeout.
 	ShellTimeout time.Duration
+	// StopGrace is how long a stopped channel's process group has to exit
+	// after SIGTERM before it is killed; zero means proc.DefaultGrace.
+	StopGrace time.Duration
 }
 
 type request struct {
@@ -77,11 +80,12 @@ type handshakeResult struct {
 // main tells the bridge to shut down. Requests are handled concurrently, so a
 // slow command never holds up a ping. It returns nil on a clean EOF and an
 // error if the stream breaks or a frame can't be read; either way it first
-// stops whatever the requests in flight were running.
+// stops whatever the requests in flight were running, and every channel's
+// process group with all it started, waiting for them for at most the grace.
 func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 	out := &writer{w: w}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &server{info: info, home: machine.Home, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out)}
+	s := &server{info: info, home: machine.Home, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out, machine.StopGrace)}
 	var inFlight sync.WaitGroup
 	defer s.channels.wait()
 	defer inFlight.Wait()
