@@ -167,6 +167,29 @@ export interface Issue extends ForgeLink {
   body: string;
 }
 
+/**
+ * The branches a worktree Session can branch from or check out, as
+ * `projects.branches` lists them after fetching `origin`.
+ */
+export interface Branches {
+  /** `origin`'s default branch, as `origin` itself says, without `origin/`. */
+  defaultBranch: string;
+  /** `origin`'s branches, without `origin/`, by name: what a new branch can start from. */
+  remote: string[];
+  /**
+   * The branches git can still check out, local ones first, each by name:
+   * local branches not checked out in the checkout or any worktree, and
+   * `origin`'s branches whose same-named local branch isn't either.
+   */
+  existing: ExistingBranch[];
+}
+
+/** An existing branch a worktree Session checks out: a local one, or one on `origin` by its name there. */
+export interface ExistingBranch {
+  name: string;
+  remote: boolean;
+}
+
 /** Where a Session's agent works. */
 export interface WorkingCopy {
   kind: WorkingCopyKind;
@@ -458,6 +481,12 @@ export interface Commands {
    * Rejects when the Project's Forge is off.
    */
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
+  /**
+   * Fetches the Project's `origin`, then lists the branches a worktree Session
+   * can branch from (`origin`'s) or check out (those, and local branches not
+   * checked out anywhere). Rejects if `origin` can't be fetched.
+   */
+  'projects.branches': { params: { id: number }; result: Branches };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
   /** The Loom window got focus: read every Session's branch and worktree again. */
@@ -488,12 +517,29 @@ export interface Commands {
    * rejects if any of that fails. A `checkout` Session stays on whatever
    * branch the Project's checkout has.
    *
+   * `base` names another `origin` branch to branch from instead, without
+   * `origin/`; it rejects if `origin` has no such branch.
+   *
+   * A `worktree` Session given an `existingBranch` checks that branch out
+   * as-is instead, in a folder named after it: a local one, or for one on
+   * `origin`, its same-named local branch, created to track it if there is
+   * none. `branch` and `base` are then not allowed. `.worktreeinclude` files
+   * are copied in all the same.
+   *
    * Started from an `issue`, the Session is linked to it, its first prompt
    * starts with the issue's number, title, URL and body (`prompt` may then be
    * empty), and the branch suggested is `<prefix>/<issue#>-<slug of the title>`.
    */
   'sessions.create': {
-    params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; issue?: Issue; prompt: string };
+    params: {
+      projectId: number;
+      workingCopy: WorkingCopyKind;
+      branch?: string;
+      base?: string;
+      existingBranch?: ExistingBranch;
+      issue?: Issue;
+      prompt: string;
+    };
     result: Session;
   };
   /**

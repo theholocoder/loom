@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type Answer, type ArchiveResult, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type Answer, type ArchiveResult, type Commands, type ExistingBranch, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -113,12 +113,17 @@ export class Sessions {
     return [...this.sessions.values()].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
   }
 
-  async create(params: { projectId: number; workingCopy: WorkingCopyKind; branch?: string; issue?: Issue; prompt: string }): Promise<Session> {
+  async create(params: Commands['sessions.create']['params']): Promise<Session> {
     const { projectId, workingCopy, issue } = params;
     const project = this.options.project(projectId);
     if (!project) throw new Error(`unknown Project ${projectId}`);
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
     if (issue) checkIssue(issue);
+    if (params.existingBranch) {
+      if (workingCopy !== 'worktree') throw new Error('Only a worktree Session checks out an existing branch');
+      if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch doesn't name or base a new one");
+      checkExistingBranch(params.existingBranch);
+    }
     const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt);
     let path = project.checkout.path;
     let branch: string | null = null;
@@ -129,7 +134,12 @@ export class Sessions {
           checkout: project.checkout.path,
           projectName: project.name,
           branchPrefix: project.branchPrefix,
-          branch: params.branch?.trim() || (issue ? issueBranch(project.branchPrefix, issue) : suggestBranch(project.branchPrefix, text)),
+          branch: params.existingBranch
+            ? { existing: params.existingBranch }
+            : {
+                new: params.branch?.trim() || (issue ? issueBranch(project.branchPrefix, issue) : suggestBranch(project.branchPrefix, text)),
+                ...(params.base?.trim() ? { base: params.base.trim() } : {}),
+              },
           root: this.options.worktreeRoot(),
         }),
       ));
@@ -859,6 +869,13 @@ function promptText(prompt: string): string {
 function checkIssue(issue: Issue): void {
   if (!Number.isInteger(issue.number) || issue.number <= 0 || !/^https?:\/\//i.test(issue.url ?? '')) {
     throw new Error('An issue needs a number and an http(s) link.');
+  }
+}
+
+/** Rejects an existing branch that isn't a plain branch name. */
+function checkExistingBranch(branch: ExistingBranch): void {
+  if (typeof branch.name !== 'string' || !branch.name || branch.name.startsWith('-') || typeof branch.remote !== 'boolean') {
+    throw new Error('An existing branch needs a name, and whether it is on origin.');
   }
 }
 

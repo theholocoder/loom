@@ -31,6 +31,7 @@ export class FakeMain implements LoomApi {
       },
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       'projects.issues': () => [],
+      'projects.branches': () => ({ defaultBranch: 'main', remote: ['main'], existing: [] }),
       'projects.check': () => {},
       'sessions.check': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {

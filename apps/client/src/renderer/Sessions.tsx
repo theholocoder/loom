@@ -2,9 +2,10 @@
 // docs/prototypes/ui-layout.html.
 import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, RotateCw, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { OPENCODE_NAME, type Issue, type Session, type WaitingReason, type WorkingCopyKind } from '../shared/api';
+import { OPENCODE_NAME, type Branches, type ExistingBranch, type Issue, type Session, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
+import { BranchPicker, type Listed } from './BranchPicker';
 import { DiffToggle } from './DiffToggle';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
@@ -42,13 +43,22 @@ export function StatusIcon({ session }: { session: Session }) {
   );
 }
 
+/** The composer's working copy choices: a worktree on a new or an existing branch, or the checkout. */
+type WorkingCopyChoice = 'worktree' | 'existing' | 'checkout';
+
 /** Starting a Session: which Project, which working copy, and the first prompt. */
 export function NewSession({ initialProjectId, onStarted }: { initialProjectId?: number; onStarted: (session: Session) => void }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
   const [projectId, setProjectId] = useState(initialProjectId);
   const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
-  const [workingCopy, setWorkingCopy] = useState<WorkingCopyKind>('worktree');
+  const [workingCopy, setWorkingCopy] = useState<WorkingCopyChoice>('worktree');
+  // The `origin` branch picked to branch from; until then, origin's default.
+  const [pickedBase, setPickedBase] = useState<string>();
+  const [existingBranch, setExistingBranch] = useState<ExistingBranch>();
+  const listed = useBranches(workingCopy === 'checkout' ? undefined : chosen?.id);
+  const defaultBranch = listed && 'branches' in listed ? listed.branches.defaultBranch : undefined;
+  const base = pickedBase ?? defaultBranch;
   const [draft, setDraft] = useState('');
   // The branch the user typed; until then, the one suggested from the prompt.
   const [editedBranch, setEditedBranch] = useState<string>();
@@ -61,9 +71,14 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
   const start = async (prompt: string) => {
     if (!chosen) return false;
     setError(undefined);
-    const branch = workingCopy === 'worktree' && editedBranch?.trim() ? { branch: editedBranch } : {};
+    const branch =
+      workingCopy === 'existing'
+        ? { existingBranch }
+        : workingCopy === 'worktree'
+          ? { ...(editedBranch?.trim() ? { branch: editedBranch } : {}), ...(pickedBase !== undefined ? { base: pickedBase } : {}) }
+          : {};
     try {
-      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, workingCopy, ...branch, ...(issue ? { issue } : {}), prompt }));
+      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, workingCopy: workingCopy === 'checkout' ? 'checkout' : 'worktree', ...branch, ...(issue ? { issue } : {}), prompt }));
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -91,6 +106,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
           onSend={start}
           onDraftChange={setDraft}
           canSendEmpty={!!issue}
+          disabled={workingCopy === 'existing' && !existingBranch}
           tools={
             <>
               <Select
@@ -101,17 +117,20 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
                 options={projects.map((p) => ({ value: p.id, label: p.name }))}
                 onChange={(id) => {
                   setProjectId(id);
-                  // An edited name has the old Project's prefix; the issue is the old Project's.
+                  // An edited name has the old Project's prefix; the issue and branches are the old Project's.
                   setEditedBranch(undefined);
                   setIssue(undefined);
+                  setPickedBase(undefined);
+                  setExistingBranch(undefined);
                 }}
               />
-              <Select<WorkingCopyKind>
+              <Select<WorkingCopyChoice>
                 variant="compact"
                 label="Working copy"
                 value={workingCopy}
                 options={[
                   { value: 'worktree', label: 'New worktree' },
+                  { value: 'existing', label: 'Check out an existing branch' },
                   { value: 'checkout', label: 'Stay on current branch' },
                 ]}
                 onChange={setWorkingCopy}
@@ -124,6 +143,24 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
                   setEditedBranch(undefined);
                 }}
               />
+              {workingCopy === 'existing' && (
+                <BranchPicker
+                  label="Existing branch"
+                  placeholder="Pick a branch"
+                  listed={listed && 'branches' in listed ? { branches: listed.branches.existing } : listed}
+                  selected={existingBranch}
+                  onChange={setExistingBranch}
+                />
+              )}
+              {workingCopy === 'worktree' && (
+                <BranchPicker
+                  label="Branch from"
+                  placeholder="origin/…"
+                  listed={listed && 'branches' in listed ? { branches: listed.branches.remote.map((name) => ({ name, remote: true })) } : listed}
+                  selected={base === undefined ? undefined : { name: base, remote: true }}
+                  onChange={(picked) => setPickedBase(picked.name)}
+                />
+              )}
               {workingCopy === 'worktree' && (
                 <label className="pick" title="Branch">
                   <GitBranch className="sm" />
@@ -142,6 +179,28 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
       )}
     </main>
   );
+}
+
+/**
+ * The branches of the Project `projectId` a worktree Session can start from,
+ * listed (fetching origin) once per Project; nothing while undefined.
+ */
+function useBranches(projectId: number | undefined): Listed<Branches> {
+  const api = useApi();
+  const [listed, setListed] = useState<{ projectId: number; result: NonNullable<Listed<Branches>> }>();
+  const wanted = projectId !== undefined && listed?.projectId !== projectId;
+  useEffect(() => {
+    if (!wanted) return;
+    let current = true;
+    api
+      .invoke('projects.branches', { id: projectId })
+      .then((branches) => current && setListed({ projectId, result: { branches } }))
+      .catch((e: unknown) => current && setListed({ projectId, result: { error: (e as Error).message } }));
+    return () => {
+      current = false;
+    };
+  }, [api, projectId, wanted]);
+  return listed && listed.projectId === projectId ? listed.result : undefined;
 }
 
 /**

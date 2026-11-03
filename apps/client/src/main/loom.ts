@@ -196,6 +196,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.link': (params) => projectService.link(params),
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
+    'projects.branches': ({ id }) => projectService.branches(id),
     'projects.check': () => projectService.checkForges(),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
