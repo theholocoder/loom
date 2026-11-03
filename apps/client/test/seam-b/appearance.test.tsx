@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
@@ -11,6 +11,7 @@ afterEach(() => {
   delete root.dataset.theme;
   root.style.removeProperty('--font');
   root.style.removeProperty('--mono');
+  root.style.removeProperty('color-scheme');
 });
 
 function renderApp(main = new FakeMain()) {
@@ -23,7 +24,12 @@ function renderApp(main = new FakeMain()) {
 }
 
 const root = () => document.documentElement;
-const select = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement;
+const pick = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
+/** Opens the named Select and clicks one of its options. */
+function choose(name: string, option: string) {
+  fireEvent.click(pick(name));
+  fireEvent.click(within(screen.getByRole('listbox', { name })).getByRole('option', { name: option }));
+}
 
 function openSettings(main = new FakeMain()) {
   renderApp(main);
@@ -57,36 +63,75 @@ describe('the window', () => {
   });
 });
 
+describe('color-scheme', () => {
+  it.each([
+    ['paper', 'light'],
+    ['daylight', 'light'],
+    ['midnight', 'dark'],
+    ['nord', 'dark'],
+    ['mocha', 'dark'],
+  ] as const)('is %s → %s', (theme, scheme) => {
+    renderApp(new FakeMain({ settings: { ...DEFAULT_SETTINGS, theme } }));
+
+    expect(root().style.colorScheme).toBe(scheme);
+  });
+});
+
 describe('Settings: appearance', () => {
   it('offers the five themes, Midnight chosen by default', () => {
     openSettings();
 
-    const theme = select('Theme');
-    expect([...theme.options].map((o) => o.textContent)).toEqual(['Midnight', 'Paper', 'Nord', 'Mocha', 'Daylight']);
-    expect(theme.value).toBe('midnight');
+    expect(pick('Theme').textContent).toBe('Midnight');
+    fireEvent.click(pick('Theme'));
+    const options = within(screen.getByRole('listbox', { name: 'Theme' })).getAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['Midnight', 'Paper', 'Nord', 'Mocha', 'Daylight']);
+    expect(options.filter((o) => o.getAttribute('aria-selected') === 'true').map((o) => o.textContent)).toEqual(['Midnight']);
   });
 
   it('saves a chosen theme, and the window takes it on at once', async () => {
     const main = openSettings();
 
-    fireEvent.change(select('Theme'), { target: { value: 'paper' } });
+    choose('Theme', 'Paper');
 
     await waitFor(() => expect(root().dataset.theme).toBe('paper'));
     expect(main.invoked.filter((i) => i.command === 'settings.setAppearance')).toEqual([{ command: 'settings.setAppearance', params: { theme: 'paper' } }]);
-    expect(select('Theme').value).toBe('paper');
+    expect(pick('Theme').textContent).toBe('Paper');
   });
 
   it('saves the UI and monospace fonts, Inter and IBM Plex Mono by default', async () => {
     const main = openSettings();
-    expect(select('UI font').value).toBe('Inter');
-    expect(select('Monospace font').value).toBe('IBM Plex Mono');
+    expect(pick('UI font').textContent).toBe('Inter');
+    expect(pick('Monospace font').textContent).toBe('IBM Plex Mono');
 
-    fireEvent.change(select('UI font'), { target: { value: 'Figtree' } });
-    fireEvent.change(select('Monospace font'), { target: { value: 'JetBrains Mono' } });
+    choose('UI font', 'Figtree');
+    choose('Monospace font', 'JetBrains Mono');
 
     await waitFor(() => expect(root().style.getPropertyValue('--mono')).toMatch(/^"JetBrains Mono"/));
     expect(root().style.getPropertyValue('--font')).toMatch(/^"Figtree"/);
     expect(main.invoked.filter((i) => i.command === 'settings.setAppearance').map((i) => i.params)).toEqual([{ uiFont: 'Figtree' }, { monoFont: 'JetBrains Mono' }]);
+  });
+
+  it('uses themed dropdowns, not native selects', () => {
+    openSettings();
+
+    const settings = screen.getByRole('main', { name: 'Settings' });
+    expect(settings.querySelector('select')).toBeNull();
+    for (const name of ['Theme', 'UI font', 'Monospace font']) {
+      const trigger = pick(name);
+      expect(trigger.matches('button.pick')).toBe(true);
+      expect(trigger.getAttribute('aria-haspopup')).toBe('listbox');
+    }
+  });
+
+  it('saves each choice through settings.setAppearance', async () => {
+    const main = openSettings();
+
+    choose('Theme', 'Nord');
+    choose('UI font', 'system-ui');
+    choose('Monospace font', 'Fira Code');
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'settings.setAppearance')).toHaveLength(3));
+    expect(main.invoked.filter((i) => i.command === 'settings.setAppearance').map((i) => i.params)).toEqual([{ theme: 'nord' }, { uiFont: 'system-ui' }, { monoFont: 'Fira Code' }]);
   });
 
   it('says why a setting was refused', async () => {
@@ -98,7 +143,7 @@ describe('Settings: appearance', () => {
       }),
     );
 
-    fireEvent.change(select('Theme'), { target: { value: 'mocha' } });
+    choose('Theme', 'Mocha');
 
     expect((await screen.findByRole('alert')).textContent).toMatch(/is not a theme/);
   });

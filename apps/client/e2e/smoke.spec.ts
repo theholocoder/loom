@@ -126,3 +126,46 @@ test('the composer pickers open inside the window, themed', async () => {
   await window.keyboard.press('Escape');
   await expect(listbox).toBeHidden();
 });
+
+/** The relative luminance (0 black – 1 white) of a computed `rgb(...)` colour. */
+function luminance(color: string): number {
+  const [r = 0, g = 0, b = 0] = (color.match(/[\d.]+/g) ?? []).map(Number);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+test('the Settings dropdowns take on the theme', async () => {
+  const window = await launch();
+  await window.getByRole('button', { name: 'Settings' }).click();
+  const theme = window.getByRole('button', { name: 'Theme' });
+
+  for (const [label, scheme] of [
+    ['Midnight', 'dark'],
+    ['Paper', 'light'],
+  ] as const) {
+    await theme.click();
+    await window.getByRole('listbox', { name: 'Theme' }).getByRole('option', { name: label }).click();
+    await expect(window.locator('html')).toHaveAttribute('data-theme', label.toLowerCase());
+    await expect(theme).toHaveText(label);
+
+    await theme.click();
+    const listbox = window.getByRole('listbox', { name: 'Theme' });
+    await expect(listbox).toBeVisible();
+    await expect(listbox).toBeInViewport({ ratio: 1 });
+    const look = await listbox.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, color: style.color, scheme: getComputedStyle(document.documentElement).colorScheme };
+    });
+    expect(look.background).not.toBe(look.color);
+    expect(look.scheme).toBe(scheme);
+    if (scheme === 'dark') expect(luminance(look.background)).toBeLessThan(0.3);
+    else expect(luminance(look.background)).toBeGreaterThan(0.7);
+    expect(Math.abs(luminance(look.background) - luminance(look.color))).toBeGreaterThan(0.4);
+
+    if (process.env.LOOM_SMOKE_SCREENSHOT_DIR) {
+      await window.screenshot({ path: join(process.env.LOOM_SMOKE_SCREENSHOT_DIR, `settings-theme-${label.toLowerCase()}.png`) });
+    }
+    await window.keyboard.press('Escape');
+    await expect(listbox).toBeHidden();
+  }
+  // Each test gets its own profile, so the theme needs no restoring for the others.
+});

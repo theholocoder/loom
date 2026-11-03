@@ -1,12 +1,14 @@
 // Puts the theme and fonts from Loom's settings on the document, where the
 // stylesheet's [data-theme] blocks and --font / --mono pick them up.
 import { useLayoutEffect } from 'react';
-import { MONO_FONTS, UI_FONTS, type Appearance } from '../shared/appearance';
+import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useTopic } from './api';
 
 export function applyAppearance({ theme, uiFont, monoFont }: Appearance): void {
   const root = document.documentElement;
   root.dataset.theme = theme;
+  // Light or dark scrollbars, inputs and other controls the OS draws.
+  root.style.colorScheme = THEMES[theme].scheme;
   root.style.setProperty('--font', UI_FONTS[uiFont]);
   root.style.setProperty('--mono', MONO_FONTS[monoFont]);
 }

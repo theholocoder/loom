@@ -3,11 +3,11 @@
 // loads nothing from the network.
 
 export const THEMES = {
-  midnight: { label: 'Midnight', background: '#0f1117' },
-  paper: { label: 'Paper', background: '#f6f3ec' },
-  nord: { label: 'Nord', background: '#2e3440' },
-  mocha: { label: 'Mocha', background: '#1e1e2e' },
-  daylight: { label: 'Daylight', background: '#ffffff' },
+  midnight: { label: 'Midnight', background: '#0f1117', scheme: 'dark' },
+  paper: { label: 'Paper', background: '#f6f3ec', scheme: 'light' },
+  nord: { label: 'Nord', background: '#2e3440', scheme: 'dark' },
+  mocha: { label: 'Mocha', background: '#1e1e2e', scheme: 'dark' },
+  daylight: { label: 'Daylight', background: '#ffffff', scheme: 'light' },
 } as const;
 
 export type Theme = keyof typeof THEMES;

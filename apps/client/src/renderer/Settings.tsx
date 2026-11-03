@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { OPENCODE_MIN_VERSION, type AgentStatus, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { Select } from './Popover';
 
 // The prototype has no Settings page; it uses the layout of its other full
 // page, the Dashboard: a .dash page with a card holding a data table.
@@ -65,6 +66,10 @@ export function Settings() {
   );
 }
 
+const THEME_OPTIONS = (Object.keys(THEMES) as Appearance['theme'][]).map((value) => ({ value, label: THEMES[value].label }));
+const UI_FONT_OPTIONS = (Object.keys(UI_FONTS) as Appearance['uiFont'][]).map((value) => ({ value, label: value }));
+const MONO_FONT_OPTIONS = (Object.keys(MONO_FONTS) as Appearance['monoFont'][]).map((value) => ({ value, label: value }));
+
 /** The theme and fonts, which the window takes on as soon as they're saved. */
 function AppearancePickers() {
   const api = useApi();
@@ -77,32 +82,18 @@ function AppearancePickers() {
   };
   return (
     <div className="row" style={{ padding: '10px 14px', gap: 18, flexWrap: 'wrap' }}>
-      <label className="row">
+      <div className="row">
         <span>Theme</span>
-        <select aria-label="Theme" value={settings.theme} onChange={(event) => save({ theme: event.target.value as Appearance['theme'] })}>
-          {Object.entries(THEMES).map(([id, theme]) => (
-            <option key={id} value={id}>
-              {theme.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="row">
+        <Select label="Theme" value={settings.theme} options={THEME_OPTIONS} onChange={(theme) => save({ theme })} />
+      </div>
+      <div className="row">
         <span>UI font</span>
-        <select aria-label="UI font" value={settings.uiFont} onChange={(event) => save({ uiFont: event.target.value as Appearance['uiFont'] })}>
-          {Object.keys(UI_FONTS).map((font) => (
-            <option key={font}>{font}</option>
-          ))}
-        </select>
-      </label>
-      <label className="row">
+        <Select label="UI font" value={settings.uiFont} options={UI_FONT_OPTIONS} onChange={(uiFont) => save({ uiFont })} />
+      </div>
+      <div className="row">
         <span>Monospace font</span>
-        <select aria-label="Monospace font" className="tech" value={settings.monoFont} onChange={(event) => save({ monoFont: event.target.value as Appearance['monoFont'] })}>
-          {Object.keys(MONO_FONTS).map((font) => (
-            <option key={font}>{font}</option>
-          ))}
-        </select>
-      </label>
+        <Select label="Monospace font" className="tech" value={settings.monoFont} options={MONO_FONT_OPTIONS} onChange={(monoFont) => save({ monoFont })} />
+      </div>
       {error && (
         <div className="err" role="alert">
           {error}
