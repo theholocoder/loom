@@ -1,16 +1,15 @@
 // The Session service: every Session, its status, and its conversation with
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
+import type { Transaction } from 'kysely';
 import { FORGE_CLI, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
-import type { Transaction } from 'kysely';
 import type { LoomDatabase } from '../storage/database';
-import type { Schema } from '../storage/schema';
-import type { EventsTable, SessionsTable } from '../storage/schema';
+import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { createWorktree, type GitEnvironment } from './working-copies';
 
@@ -136,6 +135,7 @@ export class Sessions {
 
   async send({ id, prompt }: { id: number; prompt: string }): Promise<void> {
     const text = promptText(prompt);
+    this.get(id);
     await this.loadTranscript(id);
     const session = this.get(id);
     if (session.status === 'working') throw new Error('The agent is still working on this Session.');
@@ -165,6 +165,7 @@ export class Sessions {
   async archive({ id }: { id: number }): Promise<void> {
     if (this.get(id).status === 'archived') return;
     await this.loadTranscript(id);
+    // It may have been archived while its transcript was being read.
     if (this.get(id).status === 'archived') return;
     this.endAgentText(id);
     this.setStatus(id, { status: 'archived' });

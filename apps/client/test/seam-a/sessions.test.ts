@@ -409,10 +409,12 @@ describe("a Session's transcript", () => {
     const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Say hello' });
     await waitFor(main.api, 'transcript', (items) => agentText(items) === 'Hello, wor', { sessionId: id });
     main.clock.advance(1000);
+    await eventually(() => (savedAgentText(main.userDataDir, id) === 'Hello, wor' ? true : undefined));
     machine.release('rest');
     await waitFor(main.api, 'transcript', (items) => agentText(items) === 'Hello, world!', { sessionId: id });
 
     // A kill leaves the database as it is on disk: start main on a copy of it.
+    // Main runs in this process and writes synchronously, so the copy can't be torn.
     const killed = killedCopy(main.userDataDir);
     const again = await started(machine, killed);
 
@@ -451,4 +453,15 @@ function killedCopy(userDataDir: string): string {
     if (existsSync(join(userDataDir, file))) copyFileSync(join(userDataDir, file), join(copy, file));
   }
   return copy;
+}
+
+/** The agent text main has written so far for the Session, read as another process would. */
+function savedAgentText(userDataDir: string, sessionId: number): string {
+  const db = new Database(join(userDataDir, 'loom.db'), { readonly: true });
+  try {
+    const rows = db.prepare("SELECT data FROM events WHERE session_id = ? AND kind = 'agent' ORDER BY seq").all(sessionId) as Array<{ data: string }>;
+    return rows.map((r) => (JSON.parse(r.data) as { text: string }).text).join('');
+  } finally {
+    db.close();
+  }
 }
