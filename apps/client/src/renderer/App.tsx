@@ -1,11 +1,12 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
 // Inbox sidebar, the main pane and the diff rail.
-import { ChartColumn, FileDiff, FolderGit2, FolderOpen, MessageSquarePlus, PanelRightClose, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
+import { ChartColumn, FolderGit2, FolderOpen, MessageSquarePlus, Plus, Search, Settings as SettingsIcon, Waypoints, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Project, Session } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
 import { DatabaseProblem } from './DatabaseProblem';
+import { DiffPanel } from './DiffPanel';
 import { Popover } from './Popover';
 import { ProjectPicker } from './ProjectPicker';
 import { Projects, useExistingCloneLinker } from './Projects';
@@ -36,6 +37,8 @@ function Workspace() {
     return () => window.removeEventListener('focus', check);
   }, [api]);
   const [diffOpen, setDiffOpen] = useState(false);
+  /** Opens or closes the diff panel; what a future `d` shortcut calls. */
+  const toggleDiff = () => setDiffOpen((open) => !open);
   const linker = useExistingCloneLinker();
   const sessions = useTopic('sessions') ?? [];
   const projects = useTopic('projects') ?? [];
@@ -101,26 +104,7 @@ function Workspace() {
           <div className="empty">No Session selected.</div>
         </main>
       )}
-      {diffOpen ? (
-        <section className="diff" id="diff-panel" aria-label="Changes">
-          <header>
-            <FileDiff />
-            <b>Changes</b>
-            <span className="grow" />
-            <button className="icon-btn sm" type="button" title="Close" aria-label="Hide changes" aria-controls="diff-panel" aria-expanded onClick={() => setDiffOpen(false)}>
-              <PanelRightClose />
-            </button>
-          </header>
-          <div className="scroll">
-            <div className="empty">No Session selected.</div>
-          </div>
-        </section>
-      ) : (
-        <button className="diff-rail" type="button" title="Show changes" aria-label="Show changes" aria-expanded={false} onClick={() => setDiffOpen(true)}>
-          <FileDiff />
-          <span>CHANGES</span>
-        </button>
-      )}
+      <DiffPanel session={selected} open={diffOpen} onToggle={toggleDiff} />
     </div>
   );
 }
