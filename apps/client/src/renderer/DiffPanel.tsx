@@ -71,7 +71,7 @@ function SessionDiff({ session, onClose }: { session: Session; onClose: () => vo
   const [refreshes, setRefreshes] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
   // A turn ending refreshes it; so do opening it again and the refresh button.
-  const turnEnded = session.status === 'working' ? -1 : session.updatedAt;
+  const turnEnded = useTurnsEnded(session.status);
   useEffect(() => {
     let current = true;
     setLoaded((l) => (l.state === 'done' ? l : { state: 'loading' }));
@@ -214,6 +214,7 @@ function StatusBadge({ file }: { file: DiffFile }) {
 
 function Counts({ file }: { file: DiffFile }) {
   if (file.binary) return <span className="diff-counts">binary</span>;
+  if (file.uncounted) return <span className="diff-counts">not counted</span>;
   return (
     <span className="diff-counts">
       <span className="add">+{file.added}</span> <span className="del">−{file.removed}</span>
@@ -251,10 +252,10 @@ function FileSection({
     return () => observer.disconnect();
   }, [visible]);
   useEffect(() => {
-    if (!expanded || !visible || file.binary) return;
+    if (!expanded || !visible || file.binary || file.uncounted) return;
     let current = true;
     setText({ state: 'loading' });
-    api.invoke('sessions.diffFile', { id: session.id, file, uncommittedOnly }).then(
+    api.invoke('sessions.diffFile', { id: session.id, path: file.path, uncommittedOnly }).then(
       (diff) => current && setText({ state: 'done', ...diff }),
       (error: unknown) => current && setText({ state: 'error', message: (error as Error).message }),
     );
@@ -335,4 +336,15 @@ export function parseUnified(text: string): { kind: 'add' | 'del' | 'ctx' | 'hun
     if (line.startsWith('-')) return { kind: 'del', text: line };
     return { kind: 'ctx', text: line };
   });
+}
+
+/** How many times the Session has left `working`: a counter that moves once per turn end. */
+function useTurnsEnded(status: Session['status']): number {
+  const [ended, setEnded] = useState(0);
+  const previous = useRef(status);
+  useEffect(() => {
+    if (previous.current === 'working' && status !== 'working') setEnded((n) => n + 1);
+    previous.current = status;
+  }, [status]);
+  return ended;
 }

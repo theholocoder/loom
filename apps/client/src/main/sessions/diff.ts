@@ -23,6 +23,10 @@ export interface DiffTarget {
 }
 
 const BASE_FLAGS = ['--no-color', '--no-ext-diff'];
+/** Files past 1 MB are binary to git, so it doesn't read them whole. */
+const BIG_FILE = ['-c', 'core.bigFileThreshold=1m'];
+/** How many untracked files are counted at once. */
+const UNTRACKED_CONCURRENCY = 8;
 
 /** The Diff service for one working copy (or one archived branch) in an Environment. */
 export class WorkingCopyDiff {
@@ -33,8 +37,10 @@ export class WorkingCopyDiff {
 
   /** Lists the changed files; `uncommittedOnly` compares the working tree with HEAD instead. */
   async summary(uncommittedOnly = false): Promise<DiffSummary> {
-    const base = await this.base();
-    const from = uncommittedOnly && !this.target.branch ? 'HEAD' : await this.mergeBase(base);
+    const head = uncommittedOnly && !this.target.branch;
+    // The start base is only resolved when something is compared with it.
+    const base = head ? 'HEAD' : await this.base();
+    const from = head ? 'HEAD' : await this.mergeBase(base);
     const range = this.range(from);
     const listed = parseNumstat((await this.gitOrThrow(['diff', '--numstat', '-z', '-M', ...BASE_FLAGS, ...range])).stdout);
     const files: DiffFile[] = [];
@@ -51,30 +57,23 @@ export class WorkingCopyDiff {
     return { available: true, readOnly: !!this.target.branch, base, files };
   }
 
-  /** The rail badge: `git diff --shortstat` against the merge-base, plus untracked files as additions. */
-  async stat(): Promise<DiffStat> {
-    const from = await this.mergeBase(await this.base());
-    const result = await this.gitOrThrow(['diff', '--shortstat', ...BASE_FLAGS, ...this.range(from)]);
-    const stat = parseShortstat(result.stdout);
-    if (this.target.branch) return stat;
-    for (const file of await this.untracked()) {
-      stat.files += 1;
-      stat.added += file.added;
-    }
-    return stat;
+  /** The rail badge's numbers, from a summary of the whole diff. */
+  static stat(files: DiffFile[]): DiffStat {
+    return { files: files.length, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0) };
   }
 
   /** One file's unified diff, cut short past MAX_FILE_DIFF_CHARS; none for one too big to read. */
   async file(file: DiffFile, uncommittedOnly = false): Promise<FileDiff> {
     if (file.binary) return { text: '', truncated: false };
+    if (file.uncounted) return { text: '', truncated: true };
     if (file.added + file.removed > MAX_FILE_DIFF_LINES) return { text: '', truncated: true };
     let result: ExecResult;
     if (file.status === 'untracked' && !this.target.branch) {
-      result = await this.git(['diff', '--no-index', ...BASE_FLAGS, '--', '/dev/null', file.path]);
+      result = await this.git([...BIG_FILE, 'diff', '--no-index', ...BASE_FLAGS, '--', '/dev/null', file.path]);
     } else {
       const from = uncommittedOnly && !this.target.branch ? 'HEAD' : await this.mergeBase(await this.base());
       const paths = file.oldPath ? [file.oldPath, file.path] : [file.path];
-      result = await this.git(['diff', '-M', ...BASE_FLAGS, ...this.range(from), '--', ...paths]);
+      result = await this.git(['--literal-pathspecs', 'diff', '-M', ...BASE_FLAGS, ...this.range(from), '--', ...paths]);
     }
     // `--no-index` exits 1 when the files differ.
     if (result.exitCode > 1) throw new Error(`Couldn't read the diff of ${file.path}: ${message(result)}`);
@@ -82,15 +81,26 @@ export class WorkingCopyDiff {
     return text.length > MAX_FILE_DIFF_CHARS ? { text: text.slice(0, MAX_FILE_DIFF_CHARS), truncated: true } : { text, truncated: false };
   }
 
-  /** The start base: `origin/HEAD`'s branch as the local ref names it, else `origin/main` or `origin/master`. */
+  /**
+   * The start base: the one `createWorktree` recorded for the branch, else
+   * `origin/HEAD`'s branch as the local ref names it, else `origin/main` or
+   * `origin/master`.
+   */
   private async base(): Promise<string> {
+    const branch = this.target.branch ?? (await this.git(['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim();
+    const recorded = branch ? await this.git(['config', '--get', `branch.${branch}.loomBase`]) : undefined;
     const head = await this.git(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
-    const candidates = head.exitCode === 0 ? [head.stdout.trim()] : ['origin/main', 'origin/master'];
+    const candidates = [
+      ...(recorded?.exitCode === 0 && recorded.stdout.trim() ? [recorded.stdout.trim()] : []),
+      ...(head.exitCode === 0 ? [head.stdout.trim()] : []),
+      'origin/main',
+      'origin/master',
+    ];
     for (const ref of candidates) {
       const found = await this.git(['rev-parse', '--verify', '--quiet', `refs/remotes/${ref}^{commit}`]);
       if (found.exitCode === 0) return ref;
     }
-    throw new Error(`There's no local ${candidates.join(' or ')} to compare with; fetch origin to see this diff.`);
+    throw new Error("There's no local origin/main or origin/master to compare with; fetch origin to see this diff.");
   }
 
   private async mergeBase(base: string): Promise<string> {
@@ -107,16 +117,18 @@ export class WorkingCopyDiff {
   /** Untracked files git doesn't ignore, as additions. */
   private async untracked(): Promise<DiffFile[]> {
     const paths = splitZ((await this.gitOrThrow(['ls-files', '-z', '--others', '--exclude-standard'])).stdout);
-    const files: DiffFile[] = [];
-    for (const [index, path] of paths.entries()) {
-      const file: DiffFile = { path, status: 'untracked', added: 0, removed: 0, binary: false };
-      if (index < MAX_UNTRACKED_COUNTED) {
-        const result = await this.git(['diff', '--no-index', '--numstat', '-z', ...BASE_FLAGS, '--', '/dev/null', path]);
-        const [counted] = parseNumstat(result.stdout);
-        if (counted) Object.assign(file, { added: counted.added, binary: counted.binary });
+    const files: DiffFile[] = paths.map((path, index) => ({ path, status: 'untracked', added: 0, removed: 0, binary: false, ...(index < MAX_UNTRACKED_COUNTED ? {} : { uncounted: true }) }));
+    const counted = files.filter((f) => !f.uncounted);
+    let next = 0;
+    const worker = async () => {
+      while (next < counted.length) {
+        const file = counted[next++]!;
+        const result = await this.git([...BIG_FILE, 'diff', '--no-index', '--numstat', '-z', ...BASE_FLAGS, '--', '/dev/null', file.path]);
+        const [found] = parseNumstat(result.stdout);
+        if (found) Object.assign(file, { added: found.added, binary: found.binary });
       }
-      files.push(file);
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(UNTRACKED_CONCURRENCY, counted.length) }, worker));
     return files;
   }
 

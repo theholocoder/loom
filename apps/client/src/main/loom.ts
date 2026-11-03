@@ -207,7 +207,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
     'sessions.diff': ({ id, uncommittedOnly }) => sessionService.diff(id, uncommittedOnly),
-    'sessions.diffFile': ({ id, file, uncommittedOnly }) => sessionService.diffFile(id, file, uncommittedOnly),
+    'sessions.diffFile': ({ id, path, uncommittedOnly }) => sessionService.diffFile(id, path, uncommittedOnly),
     'sessions.retry': (params) => sessionService.retry(params),
     'database.restoreLatestSnapshot': () => {
       throw new Error('the database is not damaged');

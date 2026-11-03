@@ -11,14 +11,14 @@ const session = (id: number, check: (s: Session) => boolean) => (sessions: Sessi
   return !!found && check(found);
 };
 
-async function started(workingCopy: 'worktree' | 'checkout' = 'worktree', turns = 1) {
+async function started(workingCopy: 'worktree' | 'checkout' = 'worktree', turns = 1, defaultBranch = 'main') {
   const machine = tempMachine();
   machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: Array.from({ length: turns }, () => ({ chunks: ['Done.'] })) } });
-  const origin = machine.gitOrigin('billing-api');
+  const origin = machine.gitOrigin('billing-api', defaultBranch);
   const checkout = machine.gitClone(origin, 'billing-api');
   git(checkout, 'config', 'core.autocrlf', 'false');
   machine.commit(checkout, 'app.js', 'one\ntwo\nthree\n');
-  git(checkout, 'push', '--quiet', 'origin', 'HEAD:main');
+  git(checkout, 'push', '--quiet', 'origin', `HEAD:${defaultBranch}`);
   git(checkout, 'fetch', '--quiet', 'origin');
   const main = await startMain({ machine });
   await waitFor(main.api, 'environments', ready);
@@ -77,17 +77,17 @@ describe("a Session's diff", () => {
     ]);
 
     const byPath = (s: DiffSummary, p: string) => (s.available ? s.files.find((f) => f.path === p)! : undefined!);
-    const app = await main.api.invoke('sessions.diffFile', { id, file: byPath(summary, 'app.js') });
+    const app = await main.api.invoke('sessions.diffFile', { id, path: 'app.js' });
     expect(app.text).toContain('-two\n+2\n');
     expect(app.text).toContain('+four\n');
-    const appUncommitted = await main.api.invoke('sessions.diffFile', { id, file: byPath(uncommitted, 'app.js'), uncommittedOnly: true });
+    const appUncommitted = await main.api.invoke('sessions.diffFile', { id, path: 'app.js', uncommittedOnly: true });
     expect(appUncommitted.text).not.toContain('-two');
     expect(appUncommitted.text).toContain('+four\n');
-    const added = await main.api.invoke('sessions.diffFile', { id, file: byPath(summary, 'new file.txt') });
+    const added = await main.api.invoke('sessions.diffFile', { id, path: 'new file.txt' });
     expect(added.text).toContain('+x\n+y\n+z\n');
-    const renamed = await main.api.invoke('sessions.diffFile', { id, file: byPath(summary, 'READ ME.md') });
+    const renamed = await main.api.invoke('sessions.diffFile', { id, path: 'READ ME.md' });
     expect(renamed.text).toContain('rename to READ ME.md');
-    expect(await main.api.invoke('sessions.diffFile', { id, file: byPath(summary, 'logo.png') })).toEqual({ text: '', truncated: false });
+    expect(await main.api.invoke('sessions.diffFile', { id, path: 'logo.png' })).toEqual({ text: '', truncated: false });
 
     // Working out the diff updates the rail badge: 6 files, untracked ones' lines as additions.
     await waitFor(main.api, 'sessions', session(id, (s) => s.diffStat?.files === 6 && s.diffStat.added === 1 + 2 + 2 + 3 && s.diffStat.removed === 1));
@@ -102,6 +102,44 @@ describe("a Session's diff", () => {
     await main.api.invoke('sessions.send', { id, prompt: 'More' });
 
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.diffStat?.files === 2 && s.diffStat.added === 3 && s.diffStat.removed === 0));
+  });
+
+  it("refuses paths the diff doesn't list, so no file outside it is read", async () => {
+    const { main, id, path } = await started();
+    writeFileSync(join(path, '..', 'outside.txt'), 'secret\n');
+    writeFileSync(join(path, 'inside.txt'), 'ok\n');
+    await main.api.invoke('sessions.diff', { id });
+
+    await expect(main.api.invoke('sessions.diffFile', { id, path: '../outside.txt' })).rejects.toThrow(/isn't in this diff/);
+    await expect(main.api.invoke('sessions.diffFile', { id, path: join(path, '..', 'outside.txt') })).rejects.toThrow(/isn't in this diff/);
+    await expect(main.api.invoke('sessions.diffFile', { id, path: '*.txt' })).rejects.toThrow(/isn't in this diff/);
+    expect((await main.api.invoke('sessions.diffFile', { id, path: 'inside.txt' })).text).toContain('+ok');
+  });
+
+  it("doesn't read big untracked files, and says so for those past the counting limit", async () => {
+    const { main, id, path } = await started();
+    writeFileSync(join(path, 'big.log'), Buffer.alloc(1024 * 1024 + 10, 'a\n'));
+    mkdirSync(join(path, 'many'));
+    for (let i = 0; i < 202; i++) writeFileSync(join(path, 'many', `f${String(i).padStart(3, '0')}.txt`), 'x\n');
+
+    const summary = await main.api.invoke('sessions.diff', { id });
+    if (!summary.available) throw new Error(summary.reason);
+    expect(summary.files.find((f) => f.path === 'big.log')).toMatchObject({ binary: true });
+    expect(await main.api.invoke('sessions.diffFile', { id, path: 'big.log' })).toEqual({ text: '', truncated: false });
+    const uncounted = summary.files.filter((f) => f.uncounted);
+    expect(uncounted.length).toBeGreaterThan(0);
+    expect(await main.api.invoke('sessions.diffFile', { id, path: uncounted[0]!.path })).toEqual({ text: '', truncated: true });
+  });
+
+  it("keeps using the base the worktree was made from when origin/HEAD isn't there", async () => {
+    const { checkout, main, id, path } = await started('worktree', 1, 'develop');
+    git(checkout, 'remote', 'set-head', 'origin', '--delete');
+    writeFileSync(join(path, 'x.txt'), 'x\n');
+
+    const summary = await main.api.invoke('sessions.diff', { id });
+    expect(summary).toMatchObject({ available: true, base: 'origin/develop' });
+    expect(files(summary).map((f) => f.path)).toEqual(['x.txt']);
+    await expect(main.api.invoke('sessions.diff', { id, uncommittedOnly: true })).resolves.toMatchObject({ available: true });
   });
 
   it('says clearly when the base ref is missing', async () => {
@@ -122,7 +160,7 @@ describe("a Session's diff", () => {
     const summary = await main.api.invoke('sessions.diff', { id });
     expect(summary).toMatchObject({ available: true, readOnly: true });
     expect(files(summary)).toEqual([{ path: 'feature.txt', status: 'committed', added: 1, removed: 0, binary: false }]);
-    const file = await main.api.invoke('sessions.diffFile', { id, file: (summary as { files: DiffFile[] }).files[0]! });
+    const file = await main.api.invoke('sessions.diffFile', { id, path: 'feature.txt' });
     expect(file.text).toContain('+f\n');
 
     git(checkout, 'branch', '-D', branch);

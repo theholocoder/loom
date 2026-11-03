@@ -54,7 +54,7 @@ function fakeMain(result: DiffSummary = summary, s: Session = session) {
     { projects: [project], sessions: [s], settings: DEFAULT_SETTINGS },
     {
       'sessions.diff': ({ uncommittedOnly }) => (uncommittedOnly && result.available ? { ...result, files: result.files.filter((f) => f.status !== 'committed') } : result),
-      'sessions.diffFile': ({ file }) => ({ text: text(file.path), truncated: false }),
+      'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
     },
   );
 }
@@ -90,7 +90,7 @@ describe('the diff panel', () => {
     await waitFor(() => expect(within(section('src/auth/login.ts')).getByText('+new line').className).toContain('add'));
     expect(within(section('src/auth/login.ts')).getByText('-old line').className).toContain('del');
     for (const collapsed of ['docs/logo.png', 'pnpm-lock.yaml']) expect(toggle(collapsed).getAttribute('aria-expanded')).toBe('false');
-    expect(diffCalls(main, 'sessions.diffFile').map((c) => (c.params as { file: DiffFile }).file.path).sort()).toEqual(['src/auth/login.ts', 'src/auth/session.ts']);
+    expect(diffCalls(main, 'sessions.diffFile').map((c) => (c.params as { path: string }).path).sort()).toEqual(['src/auth/login.ts', 'src/auth/session.ts']);
 
     fireEvent.click(toggle('pnpm-lock.yaml'));
     await waitFor(() => expect(within(section('pnpm-lock.yaml')).getByText('+new line')).toBeTruthy());
@@ -118,11 +118,13 @@ describe('the diff panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(1));
     act(() => main.publish('sessions', [{ ...session, status: 'working' }]));
-    act(() => main.publish('sessions', [{ ...session, updatedAt: 5 }]));
-    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
+    act(() => main.publish('sessions', [{ ...session, status: 'waiting', updatedAt: 5 }]));
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(2));
+    // An update that isn't a turn ending doesn't refresh it.
+    act(() => main.publish('sessions', [{ ...session, status: 'waiting', updatedAt: 6, unread: true }]));
     fireEvent.click(within(panel()).getByRole('button', { name: 'Hide changes' }));
     fireEvent.click(screen.getByRole('button', { name: 'Show changes' }));
-    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(4));
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
   });
 
   it("shows an archived Session's branch read-only, or no diff available", async () => {

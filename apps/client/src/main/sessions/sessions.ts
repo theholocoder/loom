@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type ArchiveResult, type DiffFile, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type ArchiveResult, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -58,6 +58,8 @@ export class Sessions {
   private checkpoints = new Map<number, TimerHandle>();
   /** The agent conversation of each Session whose agent process is running. */
   private live = new Map<number, AgentSession>();
+  /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
+  private readonly diffSummaries = new Map<string, DiffSummary>();
   /** Sessions being archived: an agent opening for one is closed again, and its closing isn't a failure. */
   private readonly archiving = new Set<number>();
   /** Sessions whose agent ended with its Environment's bridge: their next prompt starts it again. */
@@ -273,7 +275,8 @@ export class Sessions {
     if (this.get(id).status === 'archived') return;
     this.endRun(id);
     this.setStatus(id, { status: 'archived' });
-    this.update(id, { worktreeMissing: undefined });
+    this.update(id, { worktreeMissing: undefined, diffStat: undefined });
+    for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
   }
 
   /** Closes the Session's agent, if it has one. */
@@ -448,14 +451,24 @@ export class Sessions {
     const diff = await this.diffOf(id);
     if (!diff) return { available: false, reason: 'No diff available' };
     const summary = await diff.summary(uncommittedOnly);
-    if (this.get(id).status !== 'archived') void this.lookUpDiffStat(id);
+    this.diffSummaries.set(`${id}:${uncommittedOnly}`, summary);
+    if (!uncommittedOnly && this.get(id).status !== 'archived') this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
     return summary;
   }
 
-  /** One file of the Session's diff. */
-  async diffFile(id: number, file: DiffFile, uncommittedOnly = false): Promise<FileDiff> {
+  /** One file of the Session's diff; the renderer names the path, what git is asked about it is worked out here. */
+  async diffFile(id: number, path: string, uncommittedOnly = false): Promise<FileDiff> {
     const diff = await this.diffOf(id);
     if (!diff) throw new Error('No diff available');
+    const key = `${id}:${uncommittedOnly}`;
+    const known = this.diffSummaries.get(key);
+    let file = known && filesOf(known).find((f) => f.path === path);
+    if (!file) {
+      const summary = await diff.summary(uncommittedOnly);
+      this.diffSummaries.set(key, summary);
+      file = filesOf(summary).find((f) => f.path === path);
+    }
+    if (!file) throw new Error(`${path} isn't in this diff`);
     return diff.file(file, uncommittedOnly);
   }
 
@@ -480,14 +493,20 @@ export class Sessions {
     try {
       const session = this.get(id);
       if (session.status === 'archived' || session.worktreeMissing) return;
-      const diffStat = await new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path }).stat();
-      if (this.shuttingDown || this.get(id).status === 'archived') return;
-      const known = this.get(id).diffStat;
-      if (known && known.files === diffStat.files && known.added === diffStat.added && known.removed === diffStat.removed) return;
-      this.update(id, { diffStat });
+      const diff = new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path });
+      const summary = await diff.summary();
+      this.diffSummaries.set(`${id}:false`, summary);
+      this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
     } catch {
       return;
     }
+  }
+
+  private recordDiffStat(id: number, diffStat: DiffStat): void {
+    if (this.shuttingDown || this.get(id).status === 'archived') return;
+    const known = this.get(id).diffStat;
+    if (known && known.files === diffStat.files && known.added === diffStat.added && known.removed === diffStat.removed) return;
+    this.update(id, { diffStat });
   }
 
   /** Flags or clears a worktree Session's worktree as missing; resolves with whether it exists. */
@@ -792,4 +811,8 @@ function linkOf(number: number | null, url: string | null): ForgeLink | undefine
 /** Drops absent optional fields, so a Session compares equal however it was built. */
 function withoutUndefined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
+
+function filesOf(summary: DiffSummary): DiffFile[] {
+  return summary.available ? summary.files : [];
 }

@@ -255,6 +255,8 @@ export interface DiffFile {
   added: number;
   removed: number;
   binary: boolean;
+  /** An untracked file past the counting limit: listed, but its lines aren't counted or read. */
+  uncounted?: boolean;
 }
 
 /**
@@ -468,7 +470,7 @@ export interface Commands {
    */
   'sessions.diff': { params: { id: number; uncommittedOnly?: boolean }; result: DiffSummary };
   /** One file of the Session's diff, as `sessions.diff` listed it. */
-  'sessions.diffFile': { params: { id: number; file: DiffFile; uncommittedOnly?: boolean }; result: FileDiff };
+  'sessions.diffFile': { params: { id: number; path: string; uncommittedOnly?: boolean }; result: FileDiff };
   /**
    * Runs the terminal command in the Session's working copy, in its
    * Environment. Rejects when no terminal command is set.
