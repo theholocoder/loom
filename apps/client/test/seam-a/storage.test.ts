@@ -1,9 +1,11 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startMain } from './harness';
+import { openDatabase } from '../../src/main/storage/database';
+import { migrations, type Migration } from '../../src/main/storage/migrations';
 
 // The database is a file on disk the Client owns; these tests read it the way
 // a user backing it up would, with main closed.
@@ -38,7 +40,7 @@ describe('the local database', () => {
     await main.close();
 
     expect(existsSync(join(userDataDir, 'loom.db'))).toBe(true);
-    expect(inspect(userDataDir)).toEqual({ journalMode: 'wal', userVersion: 6, tables: ['checkouts', 'events', 'projects', 'sessions', 'settings', 'sqlite_sequence'] });
+    expect(inspect(userDataDir)).toEqual({ journalMode: 'wal', userVersion: migrations.length, tables: ['checkouts', 'events', 'projects', 'sessions', 'settings', 'sqlite_sequence'] });
   });
 
   it('keeps its data and schema version when main starts again', async () => {
@@ -52,7 +54,54 @@ describe('the local database', () => {
 
     const after = new Database(join(userDataDir, 'loom.db'), { readonly: true });
     expect(after.prepare("select value from settings where key = 'marker'").get()).toEqual({ value: '"kept"' });
-    expect(after.pragma('user_version', { simple: true })).toBe(6);
+    expect(after.pragma('user_version', { simple: true })).toBe(migrations.length);
     after.close();
   });
+
+  it('takes no snapshot when it is created or already current', async () => {
+    const userDataDir = tempUserData();
+    await (await startMain({ userDataDir })).close();
+    await (await startMain({ userDataDir })).close();
+
+    expect(snapshots(userDataDir)).toEqual([]);
+  });
 });
+
+describe('snapshots', () => {
+  it('are taken with VACUUM INTO before a pending migration, named with the version they were taken at', async () => {
+    const userDataDir = tempUserData();
+    const from = migrations.length - 1;
+    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, from) })).destroy();
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.prepare("insert into settings (key, value) values ('marker', '\"before\"')").run();
+    db.close();
+
+    await (await startMain({ userDataDir })).close();
+
+    const taken = snapshots(userDataDir);
+    expect(taken).toHaveLength(1);
+    expect(taken[0]).toMatch(new RegExp(`-v${from}\\.db$`));
+    const snapshot = new Database(join(userDataDir, 'snapshots', taken[0]!), { readonly: true });
+    expect(snapshot.pragma('user_version', { simple: true })).toBe(from);
+    expect(snapshot.prepare("select value from settings where key = 'marker'").get()).toEqual({ value: '"before"' });
+    snapshot.close();
+    expect(inspect(userDataDir).userVersion).toBe(migrations.length);
+  });
+
+  it('keeps only the last three', async () => {
+    const userDataDir = tempUserData();
+    const list: Migration[] = [];
+    let now = Date.parse('2026-01-01T00:00:00Z');
+    for (let i = 0; i < 5; i++) {
+      list.push(async (db) => void (await db.schema.createTable(`t${i}`).addColumn('id', 'integer').execute()));
+      await (await openDatabase(userDataDir, { migrations: [...list], now: () => (now += 60_000) })).destroy();
+    }
+
+    expect(snapshots(userDataDir).map((name) => name.replace(/^.*-v/, 'v'))).toEqual(['v2.db', 'v3.db', 'v4.db']);
+  });
+});
+
+function snapshots(userDataDir: string): string[] {
+  const dir = join(userDataDir, 'snapshots');
+  return existsSync(dir) ? readdirSync(dir).sort() : [];
+}
