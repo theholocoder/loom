@@ -178,12 +178,17 @@ export interface Branches {
   /** `origin`'s branches, without `origin/`, by name: what a new branch can start from. */
   remote: string[];
   /**
-   * The branches git can still check out, local ones first, each by name:
-   * local branches not checked out in the checkout or any worktree, and
-   * `origin`'s branches whose same-named local branch isn't either.
+   * The branches git can still check out in a new worktree, local ones first,
+   * each by name: local branches not checked out in the checkout or any
+   * worktree, and `origin`'s branches with no same-named local branch (one
+   * there would be reused, so is listed instead).
    */
   existing: ExistingBranch[];
-  /** The checkout's other worktrees, the Project's checkout itself left out, in `git worktree list` order. */
+  /**
+   * The worktrees a Session can work in, in `git worktree list` order: the
+   * checkout's linked worktrees but the Project's own, leaving out bare,
+   * missing and locked ones, and those a Session that isn't archived works in.
+   */
   worktrees: ExistingWorktree[];
 }
 
@@ -200,6 +205,9 @@ export interface ExistingBranch {
   name: string;
   remote: boolean;
 }
+
+/** What a worktree Session starts on instead of a new branch: an existing branch, in a new worktree, or an existing worktree, by its path. */
+export type ExistingWorkingCopy = { branch: ExistingBranch } | { worktree: string };
 
 /** Where a Session's agent works. */
 export interface WorkingCopy {
@@ -493,9 +501,10 @@ export interface Commands {
    */
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
   /**
-   * Fetches the Project's `origin`, then lists the branches a worktree Session
-   * can branch from (`origin`'s) or check out (those, and local branches not
-   * checked out anywhere). Rejects if `origin` can't be fetched.
+   * Fetches the Project's `origin`, then lists what a worktree Session can
+   * start from (see Branches): `origin`'s branches to branch from, the
+   * branches git can still check out, and the worktrees a Session can work
+   * in. Rejects if `origin` can't be fetched.
    */
   'projects.branches': { params: { id: number }; result: Branches };
   /** Checks every Project's Forge again, and resolves once done. */
@@ -531,17 +540,18 @@ export interface Commands {
    * `base` names another `origin` branch to branch from instead, without
    * `origin/`; it rejects if `origin` has no such branch.
    *
-   * A `worktree` Session given an `existingBranch` checks that branch out
-   * as-is instead, in a folder named after it: a local one, or for one on
-   * `origin`, its same-named local branch, created to track it if there is
-   * none. `branch` and `base` are then not allowed. `.worktreeinclude` files
-   * are copied in all the same.
-   *
-   * A `worktree` Session given an `existingWorktree`, the path of one of the
-   * checkout's other worktrees (see Branches), works in that worktree as it
-   * is, on whatever it has checked out; nothing is fetched or copied. It is
-   * a worktree Session like any other: archiving it removes the worktree.
-   * `branch`, `base` and `existingBranch` are then not allowed.
+   * A `worktree` Session given an `existing` working copy names no new
+   * branch (`branch` and `base` are not allowed):
+   * - `{ branch }` checks that branch out as-is in a new worktree, in a
+   *   folder named after it: a local one, or for one on `origin`, its
+   *   same-named local branch, created to track it if there is none.
+   *   `.worktreeinclude` files are copied in all the same. It rejects a
+   *   branch checked out in another worktree, naming it.
+   * - `{ worktree }`, the path of a worktree Branches lists, works in it as
+   *   it is, on whatever it has checked out; nothing is fetched or copied.
+   *   It rejects a locked worktree, and one a Session that isn't archived
+   *   works in. Archiving the Session removes the worktree, as for any
+   *   worktree Session.
    *
    * Started from an `issue`, the Session is linked to it, its first prompt
    * starts with the issue's number, title, URL and body (`prompt` may then be
@@ -553,8 +563,7 @@ export interface Commands {
       workingCopy: WorkingCopyKind;
       branch?: string;
       base?: string;
-      existingBranch?: ExistingBranch;
-      existingWorktree?: string;
+      existing?: ExistingWorkingCopy;
       issue?: Issue;
       prompt: string;
     };

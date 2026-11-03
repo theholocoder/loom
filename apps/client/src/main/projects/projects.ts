@@ -1,12 +1,11 @@
 // The Projects service: the git checkouts the user has added to Loom, kept in
 // the database, and what each one's Environment reports about them.
-import { DEFAULT_BRANCH_PREFIX, type Branches, type ForgeStatus, type Issue, type Project } from '../../shared/api';
+import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type Project } from '../../shared/api';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { LoomDatabase } from '../storage/database';
 import { detectForge, GIT_TIMEOUT_MS } from './forge';
 import { listIssues } from './issues';
-import { listBranches } from '../sessions/working-copies';
 
 /** What the Projects service needs from an Environment. */
 export interface ProjectEnvironment {
@@ -134,15 +133,6 @@ export class Projects {
     const environment = this.environment(project.checkout.environmentId);
     if (!environment.connected()) throw new Error(`${environment.label} isn't connected.`);
     return listIssues(environment.request, project.forge, project.checkout.path, search);
-  }
-
-  /** The branches a worktree Session on the Project can branch from or check out, once `origin` is fetched. */
-  async branches(id: number): Promise<Branches> {
-    const project = this.projects.get(id);
-    if (!project) throw new Error(`unknown Project ${id}`);
-    const environment = this.environment(project.checkout.environmentId);
-    if (!environment.connected()) throw new Error(`${environment.label} isn't connected.`);
-    return listBranches(environment, project.checkout.path);
   }
 
   /** Checks the Forge of every Project, or of those in the Environment `environmentId`. */

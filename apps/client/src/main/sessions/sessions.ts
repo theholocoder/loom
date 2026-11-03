@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type Answer, type ArchiveResult, type Commands, type ExistingBranch, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type Answer, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -12,7 +12,7 @@ import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { WorkingCopyDiff } from './diff';
-import { createWorktree, findWorktree, removeWorktree, unsavedWork, worktreeExists, type GitEnvironment } from './working-copies';
+import { createWorktree, findWorktree, listBranches, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
 import { capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
 
@@ -85,6 +85,8 @@ export class Sessions {
   private shuttingDown = false;
   /** Worktrees being made, by Project, one after another so names can't race. */
   private creatingWorktree = new Map<number, Promise<unknown>>();
+  /** Existing worktrees a starting Session has taken, until its record exists. */
+  private claimed = new Set<string>();
 
   private constructor(private readonly options: SessionsOptions) {}
 
@@ -108,6 +110,24 @@ export class Sessions {
     return sessions;
   }
 
+  /**
+   * What a worktree Session on the Project can start from, once `origin` is
+   * fetched, leaving out the worktrees Sessions that aren't archived work in.
+   */
+  async branches(projectId: number): Promise<Branches> {
+    const project = this.options.project(projectId);
+    if (!project) throw new Error(`unknown Project ${projectId}`);
+    const environment = this.environmentOf({ projectId });
+    await environment.ready();
+    const branches = await listBranches(environment, project.checkout.path);
+    return { ...branches, worktrees: branches.worktrees.filter((worktree) => !this.claimed.has(worktree.path) && !this.sessionIn(worktree.path)) };
+  }
+
+  /** The Session that isn't archived working in the worktree at `path`, if any. */
+  private sessionIn(path: string): Session | undefined {
+    return [...this.sessions.values()].find((session) => session.status !== 'archived' && session.workingCopy.kind === 'worktree' && session.workingCopy.path === path);
+  }
+
   /** Newest first. */
   list(): Session[] {
     return [...this.sessions.values()].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
@@ -119,20 +139,25 @@ export class Sessions {
     if (!project) throw new Error(`unknown Project ${projectId}`);
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
     if (issue) checkIssue(issue);
-    const existing = params.existingWorktree !== undefined ? 'worktree' : params.existingBranch ? 'branch' : undefined;
-    if (existing) {
-      if (workingCopy !== 'worktree') throw new Error(`Only a worktree Session works on an existing ${existing}`);
-      if (params.branch !== undefined || params.base !== undefined || (params.existingBranch && params.existingWorktree !== undefined)) {
-        throw new Error(`A Session on an existing ${existing} doesn't name or base a new one`);
-      }
-      if (params.existingBranch) checkExistingBranch(params.existingBranch);
-      if (typeof params.existingWorktree !== 'string' && params.existingWorktree !== undefined) throw new Error('An existing worktree needs its path.');
+    const { existing } = params;
+    if (existing !== undefined) {
+      checkExisting(existing);
+      if (workingCopy !== 'worktree') throw new Error('Only a worktree Session works on an existing branch or worktree.');
+      if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch or worktree doesn't name or base a new one.");
     }
     const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt);
     let path = project.checkout.path;
     let branch: string | null = null;
-    if (params.existingWorktree !== undefined) {
-      const found = await findWorktree(this.environmentOf({ projectId }), project.checkout.path, params.existingWorktree, project.name);
+    if (existing && 'worktree' in existing) {
+      const found = await this.oneAtATime(projectId, async () => {
+        const worktree = await findWorktree(this.environmentOf({ projectId }), project.checkout.path, existing.worktree, project.name);
+        if (this.claimed.has(worktree.path)) throw new Error(`Another Session is starting in ${worktree.path}.`);
+        const user = this.sessionIn(worktree.path);
+        if (user) throw new Error(`The Session "${user.title}" works in ${worktree.path}; archive it first, or reply to it there.`);
+        // Claimed until this Session's record exists, so a second start can't take it meanwhile.
+        this.claimed.add(worktree.path);
+        return worktree;
+      });
       path = found.path;
       branch = found.branch ?? null;
     } else if (workingCopy === 'worktree') {
@@ -142,8 +167,8 @@ export class Sessions {
           checkout: project.checkout.path,
           projectName: project.name,
           branchPrefix: project.branchPrefix,
-          branch: params.existingBranch
-            ? { existing: params.existingBranch }
+          branch: existing
+            ? { existing: existing.branch }
             : {
                 new: params.branch?.trim() || (issue ? issueBranch(project.branchPrefix, issue) : suggestBranch(project.branchPrefix, text)),
                 ...(params.base?.trim() ? { base: params.base.trim() } : {}),
@@ -172,8 +197,13 @@ export class Sessions {
       created_at: now,
       updated_at: now,
     };
-    const { id } = await this.options.db.insertInto('sessions').values(values).returning('id').executeTakeFirstOrThrow();
-    this.sessions.set(id, fromRow({ id, ...values }));
+    let id: number;
+    try {
+      ({ id } = await this.options.db.insertInto('sessions').values(values).returning('id').executeTakeFirstOrThrow());
+      this.sessions.set(id, fromRow({ id, ...values }));
+    } finally {
+      this.claimed.delete(path);
+    }
     this.transcripts.set(id, new Topic<TranscriptItem[]>([]));
     this.addItem(id, { kind: 'user', text });
     this.publish();
@@ -315,7 +345,7 @@ export class Sessions {
   private async worktreeLeftOver(session: Session): Promise<boolean> {
     if (session.workingCopy.kind !== 'worktree') return false;
     try {
-      return await worktreeExists(this.environmentOf(session), session.workingCopy.path);
+      return await pathExists(this.environmentOf(session), session.workingCopy.path);
     } catch {
       return false; // Environment gone or offline: nothing left to do
     }
@@ -336,7 +366,7 @@ export class Sessions {
       return { archived: true };
     }
     // The check runs with the agent alive, so Cancel on the warning leaves the Session as it was.
-    if (!discard && (await worktreeExists(environment, worktree))) {
+    if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
       if (work) return { archived: false, unsavedWork: work };
     }
@@ -344,7 +374,7 @@ export class Sessions {
     // A run waiting on the user's answer ends here too, so it fails like a Working one.
     const evenIfWaiting = this.inRun(id);
     await this.stopAgent(id);
-    if (!discard && (await worktreeExists(environment, worktree))) {
+    if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
       if (work) {
         this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.', { evenIfWaiting });
@@ -629,7 +659,7 @@ export class Sessions {
   private async lookUpWorktree(id: number): Promise<boolean> {
     const session = this.get(id);
     if (session.workingCopy.kind !== 'worktree') return true;
-    const exists = await worktreeExists(this.environmentOf(session), session.workingCopy.path);
+    const exists = await pathExists(this.environmentOf(session), session.workingCopy.path);
     const current = this.get(id);
     if (this.shuttingDown || current.status === 'archived') return false;
     if (exists === !current.worktreeMissing) return exists;
@@ -880,9 +910,15 @@ function checkIssue(issue: Issue): void {
   }
 }
 
-/** Rejects an existing branch that isn't a plain branch name. */
-function checkExistingBranch(branch: ExistingBranch): void {
-  if (typeof branch.name !== 'string' || !branch.name || branch.name.startsWith('-') || typeof branch.remote !== 'boolean') {
+/** Rejects an existing working copy that isn't a plain branch name, or a worktree's path. */
+function checkExisting(existing: ExistingWorkingCopy): void {
+  if (typeof existing !== 'object' || existing === null) throw new Error('An existing working copy needs a branch or a worktree.');
+  if ('worktree' in existing) {
+    if (typeof existing.worktree !== 'string' || !existing.worktree) throw new Error('An existing worktree needs its path.');
+    return;
+  }
+  const { branch } = existing;
+  if (typeof branch?.name !== 'string' || !branch.name || branch.name.startsWith('-') || typeof branch.remote !== 'boolean') {
     throw new Error('An existing branch needs a name, and whether it is on origin.');
   }
 }

@@ -1,12 +1,12 @@
-// A searchable picker for a new worktree Session: the `origin` branch to
-// branch from, or the existing worktree (or branch, in a new worktree) to work
-// in. Lists what main listed with `projects.branches`.
-import { ChevronDown, GitBranch } from 'lucide-react';
-import { useRef, useState } from 'react';
+// A searchable single-choice picker: a `.pick` trigger opening a popover with
+// a search box over a list main loads, such as the composer's branches and
+// worktrees.
+import { ChevronDown } from 'lucide-react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Popover } from './Popover';
 
-/** What `projects.branches` gave, or why it failed; undefined while it runs. */
-export type Listed<T> = { branches: T } | { error: string } | undefined;
+/** What main gave for a request, or why it failed; undefined while it runs. */
+export type Loaded<T> = { value: T } | { error: string } | undefined;
 
 export interface PickerOption<T> {
   key: string;
@@ -20,20 +20,28 @@ export interface PickerOption<T> {
 export function SearchPicker<T>({
   label,
   placeholder,
+  icon,
   noun,
+  loading,
   options,
   selected,
+  onOpen,
   onChange,
 }: {
   /** The trigger's accessible name. */
   label: string;
   /** What the trigger shows while nothing is selected. */
   placeholder: string;
+  icon?: ReactNode;
   /** What the options are, plural, for the list and its search box: `branches`. */
   noun: string;
-  options: Listed<PickerOption<T>[]>;
+  /** What the list says while the options load. */
+  loading: string;
+  options: Loaded<PickerOption<T>[]>;
   /** The selected option's key and label; the label shows even before the options are listed. */
   selected?: { key: string; label: string };
+  /** Called when the list opens, e.g. to load the options again. */
+  onOpen?: () => void;
   onChange: (value: T) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -43,15 +51,20 @@ export function SearchPicker<T>({
     setOpen(false);
     setSearch('');
   };
-  const listed = options && 'branches' in options ? options.branches : undefined;
+  const listed = options && 'value' in options ? options.value : undefined;
   const wanted = search.trim().toLowerCase();
   const shown = (listed ?? []).filter((option) => `${option.label} ${option.detail ?? ''}`.toLowerCase().includes(wanted));
   const title = noun.charAt(0).toUpperCase() + noun.slice(1);
 
   return (
     <>
-      <button ref={trigger} type="button" className="pick" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
-        <GitBranch className="sm" />
+      <button ref={trigger} type="button" className="pick" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open} onClick={() => {
+          if (open) return close();
+          setOpen(true);
+          onOpen?.();
+        }}
+      >
+        {icon}
         <b className="tech ellipsis">{selected?.label ?? placeholder}</b>
         <ChevronDown className="chev" aria-hidden />
       </button>
@@ -63,7 +76,7 @@ export function SearchPicker<T>({
               {options.error}
             </div>
           )}
-          {!options && <div className="muted">Fetching origin…</div>}
+          {!options && <div className="muted">{loading}</div>}
           {listed && shown.length === 0 && <div className="muted">No {noun} found.</div>}
           <div role="listbox" aria-label={title}>
             {shown.map((option) => (

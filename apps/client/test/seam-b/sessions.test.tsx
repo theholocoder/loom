@@ -115,7 +115,10 @@ describe('starting a Session', () => {
     fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Carry on' } });
     expect((within(pane).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
 
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.branches')).toHaveLength(1));
     fireEvent.click(picker);
+    // Listed again on opening, so worktrees and branches other Sessions took since don't show.
+    expect(main.invoked.filter((i) => i.command === 'projects.branches')).toHaveLength(2);
     const listbox = await screen.findByRole('listbox', { name: 'Worktrees' });
     await waitFor(() =>
       expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
@@ -150,8 +153,8 @@ describe('starting a Session', () => {
 
     await waitFor(() =>
       expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
-        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existingWorktree: '/home/dev/loom-worktrees/49', prompt: 'Carry on' } },
-        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existingBranch: { name: 'feature/login', remote: true }, prompt: 'Carry on' } },
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existing: { worktree: '/home/dev/loom-worktrees/49' }, prompt: 'Carry on' } },
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existing: { branch: { name: 'feature/login', remote: true } }, prompt: 'Carry on' } },
       ]),
     );
   });
@@ -171,7 +174,7 @@ describe('starting a Session', () => {
     expect((await screen.findByRole('alert')).textContent).toBe("Couldn't fetch origin: no network");
   });
 
-  it('defaults to a new worktree, also offering an existing branch or the current one, with OpenCode as the agent', () => {
+  it('defaults to a new worktree, also offering an existing worktree or the current branch, with OpenCode as the agent', () => {
     renderApp(new FakeMain({ projects: [project] }));
 
     const pane = startNewSession();
