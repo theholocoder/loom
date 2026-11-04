@@ -9,9 +9,10 @@ import { Popover } from './Popover';
 
 const SEARCH_DELAY_MS = 250;
 
-export function IssuePicker({ project, issue, onChange }: { project: Project; issue?: Issue; onChange: (issue: Issue | undefined) => void }) {
+/** `defaultOpen` shows the list from the start. */
+export function IssuePicker({ project, issue, defaultOpen = false, onChange }: { project: Project; issue?: Issue; defaultOpen?: boolean; onChange: (issue: Issue | undefined) => void }) {
   const api = useApi();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [search, setSearch] = useState('');
   const [issues, setIssues] = useState<Issue[]>();
   const [error, setError] = useState<string>();

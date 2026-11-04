@@ -13,8 +13,7 @@ const STATUS_LABEL: Record<DiffFile['status'], string> = { committed: 'committed
 
 /**
  * The open diff panel; nothing at all when closed (the Session header's
- * DiffToggle opens it). `onToggle` closes it, for the close button and a
- * future `d` shortcut alike.
+ * DiffToggle, the palette or `d` opens it). `onToggle` closes it.
  */
 export function DiffPanel({ session, open, onToggle }: { session?: Session; open: boolean; onToggle: () => void }) {
   if (!open) return null;
