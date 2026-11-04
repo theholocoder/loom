@@ -3,19 +3,25 @@
 // the Ctrl+K palette and the keyboard shortcuts, which run the same actions.
 import {
   Archive,
+  ArrowLeftToLine,
   ArrowRightToLine,
   ChartColumn,
   CircleDot,
+  CodeXml,
   ExternalLink,
   FileDiff,
   FolderGit2,
   FolderOpen,
   GitPullRequestCreate,
+  Mail,
   MessageSquarePlus,
   Palette,
   Plus,
+  Reply,
+  RotateCw,
   Search,
   Settings as SettingsIcon,
+  SquareTerminal,
   Waypoints,
   type LucideIcon,
 } from 'lucide-react';
@@ -24,7 +30,7 @@ import { mergeRequestRef, type Project, type Session } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
-import { CommandPalette, type PaletteAction } from './CommandPalette';
+import { CommandPalette, matchesShortcut, type PaletteAction } from './CommandPalette';
 import { DatabaseProblem } from './DatabaseProblem';
 import { DiffPanel } from './DiffPanel';
 import { inboxOrder, InboxList } from './Inbox';
@@ -72,6 +78,8 @@ function Workspace() {
   const [replyRequest, setReplyRequest] = useState(0);
   /** What the open Session is asked to do next, until it has. */
   const [command, setCommand] = useState<SessionCommand>();
+  /** Whether the open Session's last prompt failed, so it can be sent again. */
+  const [retryable, setRetryable] = useState(false);
   /** The Project picked for the New Session view; each pick starts it afresh. */
   const [newSession, setNewSession] = useState<{ projectId?: number; fromIssue?: boolean; generation: number }>({ generation: 0 });
   const [picking, setPicking] = useState<Picking>();
@@ -103,11 +111,15 @@ function Workspace() {
   };
   const forgeProjects = projects.filter((p) => p.forge.state === 'available');
 
+  const waiting = inboxOrder(sessions, projects);
   const actions = paletteActions({
     projects,
     forgeProjects,
     session: shown,
-    nextWaiting: nextWaitingSession(inboxOrder(sessions, projects), shown),
+    nextWaiting: stepWaiting(waiting, shown, 1),
+    previousWaiting: stepWaiting(waiting, shown, -1),
+    retryable,
+    reply,
     newSession: (returnFocus) => pickProject(returnFocus),
     newSessionFromIssue: (returnFocus) => pickProject(returnFocus, true),
     addExistingClone,
@@ -125,11 +137,11 @@ function Workspace() {
     palette?.returnFocus?.focus();
     setPalette(undefined);
   };
-  const latest = useRef({ palette, openPalette, closePalette, actions });
-  latest.current = { palette, openPalette, closePalette, actions };
+  const latest = useRef({ palette, openPalette, closePalette, actions, waiting, select });
+  latest.current = { palette, openPalette, closePalette, actions, waiting, select };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const { palette, openPalette, closePalette, actions } = latest.current;
+      const { palette, openPalette, closePalette, actions, waiting, select } = latest.current;
       // Not over a dialog, nor a menu or picker, which have keys of their own.
       const covered = () => !!document.querySelector('[aria-modal="true"], .popover');
       if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
@@ -140,7 +152,15 @@ function Workspace() {
       }
       const ctrl = event.ctrlKey || event.metaKey;
       if (event.altKey || event.defaultPrevented || (!ctrl && isTyping(event.target)) || covered()) return;
-      const action = actions.find((a) => a.shortcut && a.shortcut.key === event.key && !!a.shortcut.ctrl === ctrl);
+      // Ctrl+1 to Ctrl+9: the Inbox's Sessions by position, by physical key (AZERTY's 1 types &).
+      const position = ctrl && !event.shiftKey ? /^Digit([1-9])$/.exec(event.code)?.[1] : undefined;
+      if (position) {
+        event.preventDefault();
+        const session = waiting[Number(position) - 1];
+        if (session) select(session);
+        return;
+      }
+      const action = actions.find((a) => a.shortcut && matchesShortcut(a.shortcut, event));
       if (!action) return;
       event.preventDefault();
       action.run(focusedElement());
@@ -186,6 +206,7 @@ function Workspace() {
           replyRequest={replyRequest}
           command={command}
           onCommandDone={() => setCommand(undefined)}
+          onRetryableChange={setRetryable}
           diffOpen={diffOpen}
           onToggleDiff={toggleDiff}
         />
@@ -239,10 +260,16 @@ function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || target.matches('input, textarea, select'));
 }
 
-/** The Waiting Session after the one shown, in Inbox order, wrapping round; the first when none is shown. */
-function nextWaitingSession(waiting: Session[], shown: Session | undefined): Session | undefined {
+/**
+ * The Waiting Session `step` places from the one shown, in Inbox order,
+ * wrapping round; from none shown, the first going forward or the last going
+ * back. None when that is the one shown.
+ */
+function stepWaiting(waiting: Session[], shown: Session | undefined, step: 1 | -1): Session | undefined {
+  if (!waiting.length) return undefined;
   const at = shown ? waiting.findIndex((s) => s.id === shown.id) : -1;
-  const next = waiting[(at + 1) % waiting.length];
+  const from = at < 0 && step < 0 ? waiting.length : at;
+  const next = waiting[(from + step + waiting.length) % waiting.length];
   return next?.id === shown?.id ? undefined : next;
 }
 
@@ -255,6 +282,10 @@ function paletteActions(app: {
   forgeProjects: Project[];
   session: Session | undefined;
   nextWaiting: Session | undefined;
+  previousWaiting: Session | undefined;
+  /** Whether the open Session's last prompt failed. */
+  retryable: boolean;
+  reply: (session: Session) => void;
   newSession: (returnFocus: HTMLElement | null) => void;
   newSessionFromIssue: (returnFocus: HTMLElement | null) => void;
   addExistingClone: () => void;
@@ -264,25 +295,38 @@ function paletteActions(app: {
   setTheme: (theme: Theme) => void;
   setView: (view: View) => void;
 }): PaletteAction[] {
-  const { session, nextWaiting } = app;
+  const { session, nextWaiting, previousWaiting } = app;
   const project = session && app.projects.find((p) => p.id === session.projectId);
   // A Session whose worktree is missing can only be archived.
   const active = session && session.status !== 'archived' && !session.worktreeMissing ? session : undefined;
   const mergeRequest = active?.mergeRequest;
   const canCreateMergeRequest = active && !mergeRequest && project?.forge.state === 'available';
+  const open = session && session.status !== 'archived' ? session : undefined;
   const actions: Array<PaletteAction | false | undefined> = [
     { label: 'New Session', icon: MessageSquarePlus, shortcut: { key: 'n', ctrl: true }, run: app.newSession },
-    app.forgeProjects.length > 0 && { label: 'New Session from an issue…', icon: CircleDot, run: app.newSessionFromIssue },
+    app.forgeProjects.length > 0 && { label: 'New Session from an issue…', icon: CircleDot, shortcut: { key: 'n', ctrl: true, shift: true }, run: app.newSessionFromIssue },
     { label: 'Add Project from existing clone…', icon: FolderOpen, shortcut: { key: 'o', ctrl: true }, run: app.addExistingClone },
     nextWaiting && { label: 'Go to next Waiting Session', icon: ArrowRightToLine, shortcut: { key: 'j' }, run: () => app.select(nextWaiting) },
+    previousWaiting && { label: 'Go to previous Waiting Session', icon: ArrowLeftToLine, shortcut: { key: 'k' }, run: () => app.select(previousWaiting) },
+    active?.status === 'waiting' && { label: 'Reply to this Session', icon: Reply, shortcut: { key: 'r' }, run: () => app.reply(active) },
+    app.retryable && { label: 'Retry the last prompt', icon: RotateCw, shortcut: { key: 'enter', ctrl: true, shift: true }, run: () => app.command('retry') },
     mergeRequest && {
       label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} for this Session`,
       icon: ExternalLink,
+      shortcut: { key: 'm', ctrl: true, shift: true },
       run: () => app.command('openMergeRequest'),
     },
-    canCreateMergeRequest && { label: 'Create Merge request for this Session', icon: GitPullRequestCreate, run: () => app.command('createMergeRequest') },
+    canCreateMergeRequest && {
+      label: 'Create Merge request for this Session',
+      icon: GitPullRequestCreate,
+      shortcut: { key: 'm', ctrl: true, shift: true },
+      run: () => app.command('createMergeRequest'),
+    },
+    open && { label: 'Open in editor', icon: CodeXml, shortcut: { key: 'e', ctrl: true, shift: true }, run: () => app.command('openInEditor') },
+    open && { label: 'Open in terminal', icon: SquareTerminal, shortcut: { key: '`', ctrl: true, code: 'Backquote' }, run: () => app.command('openInTerminal') },
     { label: 'Toggle changes panel', icon: FileDiff, shortcut: { key: 'd' }, run: app.toggleDiff },
-    session && session.status !== 'archived' && { label: 'Archive this Session', icon: Archive, shortcut: { key: 'e' }, run: () => app.command('archive') },
+    active && !active.unread && { label: 'Mark this Session unread', icon: Mail, shortcut: { key: 'u' }, run: () => app.command('markUnread') },
+    open && { label: 'Archive this Session', icon: Archive, shortcut: { key: 'e' }, run: () => app.command('archive') },
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.setView('projects') },
     { label: 'Open Settings', icon: SettingsIcon, shortcut: { key: ',', ctrl: true }, run: () => app.setView('settings') },

@@ -259,20 +259,22 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
 }
 
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */
-export type SessionCommand = 'archive' | 'openMergeRequest' | 'createMergeRequest';
+export type SessionCommand = 'archive' | 'openMergeRequest' | 'createMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
 
 /**
  * One Session: its header, its conversation and the composer. Showing it
  * marks it read, as does a status change while it is shown. Changing
  * `replyRequest` focuses the composer. A `command` is run once, showing what
  * went wrong in the conversation like the header's own actions, then handed
- * back through `onCommandDone`.
+ * back through `onCommandDone`. `onRetryableChange` says whether `retry`
+ * would do anything: whether the last prompt failed.
  */
 export function SessionView({
   session,
   replyRequest = 0,
   command,
   onCommandDone,
+  onRetryableChange,
   diffOpen,
   onToggleDiff,
 }: {
@@ -280,6 +282,7 @@ export function SessionView({
   replyRequest?: number;
   command?: SessionCommand;
   onCommandDone?: () => void;
+  onRetryableChange?: (retryable: boolean) => void;
   diffOpen: boolean;
   onToggleDiff: () => void;
 }) {
@@ -309,15 +312,23 @@ export function SessionView({
     if (!command) return;
     onCommandDone?.();
     setError(undefined);
-    const run =
-      command === 'archive'
-        ? archiver.archive(session)
-        : command === 'openMergeRequest'
-          ? api.invoke('links.open', { url: session.mergeRequest!.url })
-          : api.invoke('sessions.requestMergeRequest', { id: session.id });
-    run.catch((e: unknown) => setError((e as Error).message));
+    const { id } = session;
+    const runs: Record<SessionCommand, () => Promise<void>> = {
+      archive: () => archiver.archive(session),
+      openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
+      createMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
+      openInEditor: () => api.invoke('sessions.openInEditor', { id }),
+      openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
+      retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
+      markUnread: () => api.invoke('sessions.setUnread', { id, unread: true }),
+    };
+    runs[command]().catch((e: unknown) => setError((e as Error).message));
     // Run once per command: onCommandDone clears it, so asking again runs it again.
   }, [command]);
+  useEffect(() => {
+    onRetryableChange?.(retryable);
+  }, [retryable]);
+  useEffect(() => () => onRetryableChange?.(false), []);
 
   const end = useRef<HTMLDivElement>(null);
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.

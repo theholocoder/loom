@@ -107,8 +107,13 @@ describe('palette actions', () => {
       'New Session from an issue…',
       'Add Project from existing clone…',
       'Go to next Waiting Session',
+      'Go to previous Waiting Session',
+      'Reply to this Session',
       'Create Merge request for this Session',
+      'Open in editor',
+      'Open in terminal',
       'Toggle changes panel',
+      'Mark this Session unread',
       'Archive this Session',
       'Theme: Midnight',
       'Theme: Paper',
@@ -426,5 +431,107 @@ describe('focus after running an action', () => {
     settings.focus();
     runAction('Theme: Nord');
     expect(document.activeElement).toBe(settings);
+  });
+});
+
+describe('more shortcuts', () => {
+  const ctrl = (key: string, more: { shiftKey?: boolean; code?: string } = {}, target: Element = document.body) => fireEvent.keyDown(target, { key, ctrlKey: true, ...more });
+  const three = () =>
+    new FakeMain({
+      projects: [billing],
+      sessions: [session(1, { title: 'First', updatedAt: 9 }), session(2, { title: 'Second', updatedAt: 5 }), session(3, { title: 'Third', updatedAt: 1 })],
+    });
+
+  it('k goes to the previous Waiting Session, wrapping round', () => {
+    renderApp(three());
+    press('k');
+    expect(openSessionTitle()).toBe('Third');
+    press('k');
+    expect(openSessionTitle()).toBe('Second');
+    press('j');
+    expect(openSessionTitle()).toBe('Third');
+  });
+
+  it('Ctrl+1 to Ctrl+9 open the Inbox Sessions by position, by physical key, even while typing', () => {
+    renderApp(three());
+    ctrl('2', { code: 'Digit2' });
+    expect(openSessionTitle()).toBe('Second');
+    // AZERTY: the 3 key types ".
+    ctrl('"', { code: 'Digit3' }, screen.getByRole('textbox', { name: 'Prompt' }));
+    expect(openSessionTitle()).toBe('Third');
+    ctrl('9', { code: 'Digit9' });
+    expect(openSessionTitle()).toBe('Third');
+  });
+
+  it('r focuses the composer of a Waiting Session', () => {
+    renderApp(three());
+    press('j');
+    press('r');
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Prompt' }));
+  });
+
+  it('u marks the open Session unread', async () => {
+    const main = renderApp(three());
+    press('j');
+    press('u');
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.setUnread', params: { id: 1, unread: true } }));
+  });
+
+  it('Ctrl+Shift+N starts from an issue', () => {
+    renderApp(three());
+    ctrl('N', { shiftKey: true });
+    expect(screen.getByRole('dialog', { name: 'Pick a Project' })).toBeTruthy();
+  });
+
+  it('Ctrl+Shift+M asks for a Merge request; Ctrl+Shift+E and Ctrl+` open the editor and terminal', async () => {
+    const main = renderApp(three());
+    press('j');
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+    ctrl('M', { shiftKey: true }, prompt);
+    ctrl('E', { shiftKey: true }, prompt);
+    // AZERTY: the key left of 1 types ².
+    ctrl('²', { code: 'Backquote' }, prompt);
+    await waitFor(() =>
+      expect(main.invoked.filter((i) => i.command !== 'sessions.setUnread').map((i) => i.command)).toEqual(
+        expect.arrayContaining(['sessions.requestMergeRequest', 'sessions.openInEditor', 'sessions.openInTerminal']),
+      ),
+    );
+  });
+
+  it('Ctrl+Shift+Enter retries a prompt that failed, and is only offered then', async () => {
+    const main = new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Broke', waitingReason: 'error', error: 'boom' })] });
+    renderApp(main);
+    act(() =>
+      main.publish(
+        'transcript',
+        [
+          { id: 1, kind: 'user', text: 'do it' },
+          { id: 2, kind: 'error', message: 'boom' },
+        ],
+        { sessionId: 1 },
+      ),
+    );
+    press('j');
+    ctrlK();
+    expect(actionNames()).toContain('Retry the last prompt');
+    press('Escape', search());
+
+    ctrl('Enter', { shiftKey: true }, screen.getByRole('textbox', { name: 'Prompt' }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.retry', params: { id: 1 } }));
+  });
+
+  it('lists the new actions in the palette with their keys', () => {
+    renderApp(three());
+    press('j');
+    ctrlK();
+    const keys = (name: string) => within(within(palette()).getByRole('option', { name })).queryByText((_, el) => el?.tagName === 'KBD')?.textContent;
+    expect(keys('Go to previous Waiting Session')).toBe('K');
+    expect(keys('Reply to this Session')).toBe('R');
+    expect(keys('Mark this Session unread')).toBe('U');
+    expect(keys('New Session from an issue…')).toBe('Ctrl Shift N');
+    expect(keys('Create Merge request for this Session')).toBe('Ctrl Shift M');
+    expect(keys('Open in editor')).toBe('Ctrl Shift E');
+    expect(keys('Open in terminal')).toBe('Ctrl `');
+    expect(actionNames()).not.toContain('Retry the last prompt');
   });
 });
