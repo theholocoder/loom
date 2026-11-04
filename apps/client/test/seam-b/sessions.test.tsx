@@ -370,11 +370,82 @@ describe('a Session', () => {
     }
   });
 
-  it("can't be sent a message while Working", () => {
-    open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
+  it('queues a message sent while Working, and offers Stop', async () => {
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
 
     expect(screen.getByRole('status', { name: 'Session status' }).textContent).toBe('Working');
-    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Prompt' }).getAttribute('placeholder')).toBe('Queue a message for when OpenCode finishes…');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Then add tests' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Queue' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.send')).toEqual([{ command: 'sessions.send', params: { id: 7, prompt: 'Then add tests' } }]));
+    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.stop')).toEqual([{ command: 'sessions.stop', params: { id: 7 } }]));
+  });
+
+  it('lists the queue, each message with Remove and Send now', async () => {
+    const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);
+
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    const items = within(queue).getAllByRole('listitem');
+    expect(items.map((i) => within(i).getByText(/Then|And/).textContent)).toEqual(['Then add tests', 'And update the docs']);
+    expect(within(items[0]!).queryByRole('button', { name: 'Steer' })).toBeNull();
+
+    fireEvent.click(within(items[1]!).getByRole('button', { name: 'Send now' }));
+    fireEvent.click(within(items[0]!).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(main.invoked.filter((i) => i.command === 'sessions.sendNow' || i.command === 'sessions.removeQueued')).toEqual([
+        { command: 'sessions.sendNow', params: { id: 7, queuedId: 4 } },
+        { command: 'sessions.removeQueued', params: { id: 7, queuedId: 3 } },
+      ]),
+    );
+  });
+
+  it('offers Steer instead of Send now when the agent can be steered', async () => {
+    const steerable: Session = { ...working, canSteer: true, queue: [{ id: 3, text: 'Then add tests' }] };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [steerable] })), steerable);
+
+    const item = within(screen.getByRole('list', { name: 'Queued messages' })).getByRole('listitem');
+    expect(within(item).queryByRole('button', { name: 'Send now' })).toBeNull();
+    fireEvent.click(within(item).getByRole('button', { name: 'Steer' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.steer')).toEqual([{ command: 'sessions.steer', params: { id: 7, queuedId: 3 } }]));
+  });
+
+  it('keeps showing the queue once stopped, with Send now and no Stop', () => {
+    const stopped: Session = { ...working, status: 'waiting', waitingReason: 'stopped', canSteer: true, queue: [{ id: 3, text: 'Then add tests' }] };
+    open(renderApp(new FakeMain({ projects: [project], sessions: [stopped] })), stopped);
+
+    expect(screen.getByRole('status', { name: 'Session status' }).textContent).toBe('Stopped');
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
+    // Nothing runs to steer: Send now sends it as the reply.
+    expect(within(screen.getByRole('list', { name: 'Queued messages' })).getByRole('button', { name: 'Send now' })).toBeTruthy();
+  });
+
+  it('shows where the user interrupted the run', () => {
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
+
+    act(() =>
+      main.publish(
+        'transcript',
+        [
+          { kind: 'user', id: 0, text: 'Say hello' },
+          { kind: 'interruption', id: 1, by: 'send-now' },
+          { kind: 'user', id: 2, text: 'Say goodbye instead' },
+          { kind: 'interruption', id: 3, by: 'stop' },
+        ],
+        { sessionId: 7 },
+      ),
+    );
+
+    const marks = within(screen.getByRole('log', { name: 'Conversation' })).getAllByRole('note');
+    expect(marks.map((m) => m.textContent)).toEqual(['Interrupted to send a queued message', 'Stopped']);
   });
 
   it('sends a reply once the agent has finished', async () => {

@@ -14,7 +14,10 @@
 // (see OpencodeScript in harness.ts); an `elicit` chunk sends Loom an
 // `elicitation/create` request and waits for its response, a `permission`
 // chunk a `session/request_permission` one (a reject ends the turn as
-// cancelled, as OpenCode does). Every message it receives is appended to
+// cancelled, as OpenCode does). A `session/cancel` notification ends the
+// running turn as cancelled, cutting short what it holds on; a
+// `session/prompt` while a turn runs is refused, as OpenCode 2.1.4's ACP
+// bridge does. Every message it receives is appended to
 // <script.json>.acp.log as {pid, cwd, config, message}, `config` being its
 // OPENCODE_CONFIG_CONTENT. It exits when its stdin closes.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -63,6 +66,8 @@ function acp() {
   const turns = script.acp?.turns ?? [];
   let prompts = 0;
   let sessionId;
+  // The turn running, if any: `cancelled` once Loom cancels it, `stopped` resolving then.
+  let running;
   // Requests this agent sent Loom, waiting on Loom's response.
   let nextRequestId = 1000;
   const responses = new Map();
@@ -90,13 +95,24 @@ function acp() {
       if (script.acp?.holdNew) await released(script.acp.holdNew);
       sessionId = `ses_standin${process.pid}`;
       send({ id, result: { sessionId } });
+    } else if (method === 'session/cancel') {
+      if (running) {
+        running.cancelled = true;
+        running.stop();
+      }
     } else if (method === 'session/prompt') {
+      if (running) return send({ id, error: { code: -32603, message: 'session is busy' } });
       const turn = turns[prompts++] ?? { chunks: [] };
+      const current = { cancelled: false };
+      current.stopped = new Promise((resolve) => (current.stop = resolve));
+      running = current;
+      const hold = (name) => Promise.race([released(name), current.stopped]);
       let rejected = false;
       for (const text of turn.chunks ?? []) {
-        if (rejected) break;
+        if (rejected || current.cancelled) break;
         if (typeof text === 'object') {
-          if (text.hold) await released(text.hold);
+          if (text.hold) await hold(text.hold);
+          if (current.cancelled) break;
           // An elicitation (a question, or a plugin's form): the turn goes on once Loom answers it.
           if (text.elicit) await ask('elicitation/create', { sessionId, mode: 'form', ...text.elicit });
           // A permission request, with OpenCode's options; a reject cancels the rest of the turn.
@@ -123,9 +139,9 @@ function acp() {
         }
         send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } } });
       }
-      if (rejected) send({ id, result: { stopReason: 'cancelled' } });
-      else if (turn.hold) await released(turn.hold);
-      if (rejected) return;
+      if (!rejected && !current.cancelled && turn.hold) await hold(turn.hold);
+      running = undefined;
+      if (rejected || current.cancelled) return send({ id, result: { stopReason: 'cancelled' } });
       if (turn.error) send({ id, error: { code: -32603, message: turn.error } });
       else send({ id, result: { stopReason: 'end_turn' } });
     } else if (id !== undefined) {

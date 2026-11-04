@@ -70,6 +70,10 @@ export class FakeMain implements LoomApi {
         throw new Error('sessions.create is not scripted');
       },
       'sessions.send': () => {},
+      'sessions.stop': () => {},
+      'sessions.removeQueued': () => {},
+      'sessions.sendNow': () => {},
+      'sessions.steer': () => {},
       'sessions.archive': () => ({ archived: true }),
       'sessions.requestMergeRequest': () => {},
       'sessions.setUnread': () => {},

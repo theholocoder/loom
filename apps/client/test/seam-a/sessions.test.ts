@@ -118,7 +118,6 @@ describe('a checkout Session', () => {
     await main.api.invoke('sessions.send', { id, prompt: 'Second' });
 
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'working' && s.waitingReason === undefined));
-    await expect(main.api.invoke('sessions.send', { id, prompt: 'Third' })).rejects.toThrow('The agent is still working on this Session.');
     machine.release('second');
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
     expect((await waitFor(main.api, 'transcript', (items) => items.length === 4, { sessionId: id })).map((i) => [i.kind, 'text' in i ? i.text : ''])).toEqual([

@@ -619,7 +619,8 @@ describe('archiving a worktree Session whose agent is working', () => {
     expect(existsSync(path)).toBe(true);
     // Cancel keeps the agent: the Session is still working, with its run going.
     expect(await statusOf(main, id)).toBe('working');
-    await expect(main.api.invoke('sessions.send', { id, prompt: 'more' })).rejects.toThrow(/still working/);
+    await main.api.invoke('sessions.send', { id, prompt: 'more' });
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)?.queue?.map((m) => m.text)).toEqual(['more']);
     expect(await main.api.invoke('sessions.archive', { id, discard: true })).toEqual({ archived: true });
     expect(existsSync(path)).toBe(false);
   });

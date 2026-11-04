@@ -262,6 +262,14 @@ export interface Session {
    * opened, kept in memory only. Absent until known.
    */
   diffStat?: DiffStat;
+  /**
+   * The messages the user sent while it was Working, oldest first, waiting
+   * to be sent one by one as runs settle. Kept in the database; absent when
+   * empty.
+   */
+  queue?: QueuedMessage[];
+  /** Set when its agent can take a queued message mid-run (Steer); otherwise Send now interrupts the run. */
+  canSteer?: boolean;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
@@ -275,6 +283,12 @@ export interface Session {
   createdAt: number;
   /** Clock time its status last changed. */
   updatedAt: number;
+}
+
+/** A message waiting in a Session's queue. */
+export interface QueuedMessage {
+  id: number;
+  text: string;
 }
 
 /** A diff's size: files changed, lines added and removed. Untracked files count as files of added lines. */
@@ -531,7 +545,9 @@ export type TranscriptItem =
       message?: string;
     }
   /** A run that failed, with the agent's message. */
-  | { kind: 'error'; id: number; message: string };
+  | { kind: 'error'; id: number; message: string }
+  /** The user interrupted the run: with Stop, or to send a queued message now. */
+  | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' };
 
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed
@@ -660,10 +676,25 @@ export interface Commands {
     result: Session;
   };
   /**
-   * Sends a prompt to a Waiting Session, which becomes Working. Rejects while
-   * the Session is Working.
+   * Sends a prompt to a Waiting Session, which becomes Working. While the
+   * Session is Working, the prompt joins its queue instead, sent once the runs
+   * before it settle. Rejects while the agent waits on an answer.
    */
   'sessions.send': { params: { id: number; prompt: string }; result: void };
+  /**
+   * Interrupts the Session's run without sending its queue, which it keeps:
+   * the Session goes Waiting (stopped). Rejects when no run is going.
+   */
+  'sessions.stop': { params: { id: number }; result: void };
+  /** Drops a message from the Session's queue. */
+  'sessions.removeQueued': { params: { id: number; queuedId: number }; result: void };
+  /**
+   * Sends a queued message now: a run going is interrupted first, which the
+   * transcript shows; the rest of the queue stays.
+   */
+  'sessions.sendNow': { params: { id: number; queuedId: number }; result: void };
+  /** Gives a queued message to the agent mid-run, for an agent that can be steered (`canSteer`). */
+  'sessions.steer': { params: { id: number; queuedId: number }; result: void };
   /**
    * Archives a Session, stopping its agent, mid-run if Working. A checkout
    * Session's checkout is left as it is. A worktree Session's worktree is
@@ -677,7 +708,7 @@ export interface Commands {
    * Asks a Waiting Session's agent to open its branch's Merge request, or
    * update it, with a canned prompt; Loom never creates one itself. Rejects
    * when the Project's Forge is off or not checked yet, when the working copy
-   * is on the default branch or on no branch, and while the Session is Working.
+   * is on the default branch or on no branch. Queued while the Session is Working.
    */
   'sessions.requestMergeRequest': { params: { id: number }; result: void };
   /**
