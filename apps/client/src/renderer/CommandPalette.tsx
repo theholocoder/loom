@@ -10,11 +10,25 @@ import { ProjectAvatar } from './ProjectAvatar';
 import { filterToken, parseQuery, searchSessions, suggestedFilters, toggleFilter } from './session-search';
 import { StatusIcon } from './Sessions';
 
+/**
+ * A key, as `KeyboardEvent.key` gives it. A Ctrl shortcut (Cmd works too)
+ * runs anywhere, even in a text field; a bare key only outside one.
+ */
+export interface Shortcut {
+  key: string;
+  ctrl?: boolean;
+}
+
+/** How a shortcut reads in a `<kbd>`: `Ctrl N`, `J`. */
+export function shortcutLabel({ key, ctrl }: Shortcut): string {
+  return `${ctrl ? 'Ctrl ' : ''}${key.toUpperCase()}`;
+}
+
 export interface PaletteAction {
   label: string;
   icon: LucideIcon;
-  /** The key that runs it outside the palette, as `KeyboardEvent.key` gives it. */
-  shortcut?: string;
+  /** What runs it outside the palette. */
+  shortcut?: Shortcut;
   /** `returnFocus` is where focus was before the palette, for an action opening a dialog of its own. */
   run: (returnFocus: HTMLElement | null) => void;
 }
@@ -131,7 +145,7 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
                   <>
                     <action.icon className="sm" />
                     <span className="grow ellipsis">{action.label}</span>
-                    {action.shortcut && <kbd>{action.shortcut.toUpperCase()}</kbd>}
+                    {action.shortcut && <kbd>{shortcutLabel(action.shortcut)}</kbd>}
                   </>,
                 ),
               )}

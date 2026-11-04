@@ -1,6 +1,6 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
 // Inbox sidebar, the main pane and the Session header's changes control. Also
-// the Ctrl+K palette and the one-key shortcuts, which run the same actions.
+// the Ctrl+K palette and the keyboard shortcuts, which run the same actions.
 import {
   Archive,
   ArrowRightToLine,
@@ -138,8 +138,9 @@ function Workspace() {
         else if (!covered()) openPalette();
         return;
       }
-      if (event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented || isTyping(event.target) || covered()) return;
-      const action = actions.find((a) => a.shortcut === event.key);
+      const ctrl = event.ctrlKey || event.metaKey;
+      if (event.altKey || event.defaultPrevented || (!ctrl && isTyping(event.target)) || covered()) return;
+      const action = actions.find((a) => a.shortcut && a.shortcut.key === event.key && !!a.shortcut.ctrl === ctrl);
       if (!action) return;
       event.preventDefault();
       action.run(focusedElement());
@@ -247,7 +248,7 @@ function nextWaitingSession(waiting: Session[], shown: Session | undefined): Ses
 
 /**
  * The main actions, as far as there is something for them: the palette lists
- * them, in this order, and their `shortcut` keys run them from anywhere outside a text field.
+ * them, in this order, and their shortcuts run them (see Shortcut).
  */
 function paletteActions(app: {
   projects: Project[];
@@ -270,21 +271,21 @@ function paletteActions(app: {
   const mergeRequest = active?.mergeRequest;
   const canCreateMergeRequest = active && !mergeRequest && project?.forge.state === 'available';
   const actions: Array<PaletteAction | false | undefined> = [
-    { label: 'New Session', icon: MessageSquarePlus, shortcut: 'n', run: app.newSession },
+    { label: 'New Session', icon: MessageSquarePlus, shortcut: { key: 'n', ctrl: true }, run: app.newSession },
     app.forgeProjects.length > 0 && { label: 'New Session from an issue…', icon: CircleDot, run: app.newSessionFromIssue },
-    { label: 'Add Project from existing clone…', icon: FolderOpen, shortcut: 'p', run: app.addExistingClone },
-    nextWaiting && { label: 'Go to next Waiting Session', icon: ArrowRightToLine, shortcut: 'j', run: () => app.select(nextWaiting) },
+    { label: 'Add Project from existing clone…', icon: FolderOpen, shortcut: { key: 'o', ctrl: true }, run: app.addExistingClone },
+    nextWaiting && { label: 'Go to next Waiting Session', icon: ArrowRightToLine, shortcut: { key: 'j' }, run: () => app.select(nextWaiting) },
     mergeRequest && {
       label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} for this Session`,
       icon: ExternalLink,
       run: () => app.command('openMergeRequest'),
     },
     canCreateMergeRequest && { label: 'Create Merge request for this Session', icon: GitPullRequestCreate, run: () => app.command('createMergeRequest') },
-    { label: 'Toggle changes panel', icon: FileDiff, shortcut: 'd', run: app.toggleDiff },
-    session && session.status !== 'archived' && { label: 'Archive this Session', icon: Archive, shortcut: 'e', run: () => app.command('archive') },
+    { label: 'Toggle changes panel', icon: FileDiff, shortcut: { key: 'd' }, run: app.toggleDiff },
+    session && session.status !== 'archived' && { label: 'Archive this Session', icon: Archive, shortcut: { key: 'e' }, run: () => app.command('archive') },
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.setView('projects') },
-    { label: 'Open Settings', icon: SettingsIcon, shortcut: ',', run: () => app.setView('settings') },
+    { label: 'Open Settings', icon: SettingsIcon, shortcut: { key: ',', ctrl: true }, run: () => app.setView('settings') },
   ];
   return actions.filter((action): action is PaletteAction => !!action);
 }

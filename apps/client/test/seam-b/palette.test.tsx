@@ -91,10 +91,10 @@ describe('palette actions', () => {
       'Open Settings',
     ]);
     const keys = (name: string) => within(within(palette()).getByRole('option', { name })).queryByText((_, el) => el?.tagName === 'KBD')?.textContent;
-    expect(keys('New Session')).toBe('N');
-    expect(keys('Add Project from existing clone…')).toBe('P');
+    expect(keys('New Session')).toBe('Ctrl N');
+    expect(keys('Add Project from existing clone…')).toBe('Ctrl O');
     expect(keys('Toggle changes panel')).toBe('D');
-    expect(keys('Open Settings')).toBe(',');
+    expect(keys('Open Settings')).toBe('Ctrl ,');
   });
 
   it('adds the open Session’s actions, next Waiting and starting from an issue when they apply', () => {
@@ -267,19 +267,36 @@ describe('shortcuts', () => {
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.archive', params: { id: 2 } }));
   });
 
-  it('n starts a New Session, p adds a Project, comma opens Settings', async () => {
-    const main = renderApp(twoWaiting());
+  const ctrl = (key: string, target: Element = document.body) => fireEvent.keyDown(target, { key, ctrlKey: true });
 
-    press('n');
+  it('Ctrl+N starts a New Session, Ctrl+O adds a Project, Ctrl+, opens Settings, even while typing', async () => {
+    const main = renderApp(twoWaiting());
+    press('j');
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+
+    ctrl('n', prompt);
     const filter = screen.getByRole('combobox', { name: 'Filter Projects' });
     fireEvent.keyDown(filter, { key: 'Enter' });
     expect(screen.getByRole('main', { name: 'New Session' })).toBeTruthy();
 
-    press(',');
+    ctrl(',', screen.getByRole('textbox', { name: 'Prompt' }));
     expect(screen.getByRole('button', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
 
-    press('p');
+    ctrl('o');
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));
+  });
+
+  it('take the Ctrl ones only with Ctrl held, and not while a dialog is open', () => {
+    const main = renderApp(twoWaiting());
+    press('n');
+    press('o');
+    press(',');
+    expect(screen.queryByRole('dialog', { name: 'Pick a Project' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Settings' }).getAttribute('aria-current')).toBeNull();
+
+    ctrlK();
+    ctrl('o', search());
+    expect(main.invoked.map((i) => i.command)).not.toContain('dialogs.chooseFolder');
   });
 
   it('are left alone while typing, with a modifier held, or while a dialog is open', () => {
@@ -298,7 +315,7 @@ describe('shortcuts', () => {
     expect(openSessionTitle()).toBe('First');
     press('Escape', search());
 
-    press('n');
+    fireEvent.keyDown(document.body, { key: 'n', ctrlKey: true });
     press('j', screen.getByRole('dialog', { name: 'Pick a Project' }));
     expect(openSessionTitle()).toBe('First');
   });
