@@ -1,9 +1,10 @@
-import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, Palette, RotateCw, Server, TriangleAlert } from 'lucide-react';
+import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { OPENCODE_MIN_VERSION, type AgentStatus, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
+import { APPROVAL_CATEGORIES, OPENCODE_MIN_VERSION, type AgentStatus, type ApprovalCategory, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { Select } from './Popover';
+import { ErrorAlert } from './Questions';
 
 // The prototype has no Settings page; it uses the layout of its other full
 // page, the Dashboard: a .dash page with a card holding a data table.
@@ -47,6 +48,13 @@ export function Settings() {
               ))}
             </tbody>
           </table>
+      </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <ShieldAlert className="sm" />
+          <h3>Approvals</h3>
+        </div>
+        <ApprovalSettings />
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
@@ -99,6 +107,40 @@ function AppearancePickers() {
           {error}
         </div>
       )}
+    </div>
+  );
+}
+
+const APPROVAL_OPTIONS: { value: ApprovalSetting; label: string }[] = [
+  { value: 'allow', label: 'Allow' },
+  { value: 'ask', label: 'Ask' },
+];
+
+/** Whether the agent asks before each category of action beyond its working copy. */
+function ApprovalSettings() {
+  const api = useApi();
+  const approvals = useTopic('settings')?.approvals;
+  const [error, setError] = useState<string>();
+  if (!approvals) return null;
+  const save = (category: ApprovalCategory, setting: ApprovalSetting) => {
+    setError(undefined);
+    api.invoke('settings.setApproval', { category, setting }).catch((e: unknown) => setError((e as Error).message));
+  };
+  return (
+    <div className="settings-fields">
+      <p className="muted" style={{ margin: 0 }}>
+        The agent reads, edits and runs commands in its working copy and the temp directory freely. For the rest, Ask pauses it with an Approval request. Rules match commands and paths on a best-effort basis: a guardrail, not a security boundary. Agents started from now on get the changes.
+      </p>
+      {(Object.keys(APPROVAL_CATEGORIES) as ApprovalCategory[]).map((category) => (
+        <div key={category} className="field-row approval-row">
+          <span>
+            {APPROVAL_CATEGORIES[category].label}
+            <span className="muted approval-description">{APPROVAL_CATEGORIES[category].description}</span>
+          </span>
+          <Select label={APPROVAL_CATEGORIES[category].label} value={approvals[category]} options={APPROVAL_OPTIONS} onChange={(setting) => save(category, setting)} />
+        </div>
+      ))}
+      <ErrorAlert error={error} />
     </div>
   );
 }

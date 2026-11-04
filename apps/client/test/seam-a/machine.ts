@@ -40,6 +40,7 @@ export interface AcpTurn {
     | { update: Record<string, unknown> }
     | { bigOutput: { toolCallId: string; bytes: number } }
     | { elicit: { message: string; requestedSchema: Record<string, unknown>; toolCallId?: string } }
+    | { permission: PermissionToolCall }
   >;
   /** After the chunks, the run holds until the test calls `machine.release(hold)`. */
   hold?: string;
@@ -47,10 +48,26 @@ export interface AcpTurn {
   error?: string;
 }
 
+/**
+ * The tool call of a `session/request_permission` the stand-in sends, as
+ * OpenCode 2.2.5 does: `{ permission }` chunks wait for Loom's answer, and a
+ * reject ends the turn as cancelled.
+ */
+export interface PermissionToolCall {
+  toolCallId: string;
+  name: string;
+  title: string;
+  kind: string;
+  locations: Array<{ path: string }>;
+  rawInput: Record<string, unknown>;
+}
+
 /** An ACP message the `opencode acp` stand-in received. */
 export interface AcpMessage {
   pid: number;
   cwd: string;
+  /** The process's OPENCODE_CONFIG_CONTENT. */
+  config?: string;
   message: { id?: number; method?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { code: number; message: string } };
 }
 

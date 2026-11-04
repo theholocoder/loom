@@ -22,6 +22,15 @@ export default defineConfig({
         },
       },
       {
+        // Opt-in: skipped unless LOOM_OPENCODE_CONTRACT=1 (see the README).
+        test: {
+          name: 'opencode-contract',
+          include: ['test/opencode-contract/**/*.test.ts'],
+          environment: 'node',
+          testTimeout: 240000,
+        },
+      },
+      {
         plugins: [react()],
         test: {
           name: 'seam-b',

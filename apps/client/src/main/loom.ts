@@ -141,6 +141,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     openChannel: (params) => native.openChannel(params),
     ready: () => native.ready(),
     restart: () => native.restart(),
+    tempDir: () => tempDirOf(native.status.bridge?.os, native.status.bridge?.home),
   };
   const sessions = new Topic<Session[]>([]);
   const sessionService = await Sessions.load({
@@ -153,6 +154,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     onChange: (list) => sessions.set(list),
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
+    approvals: () => settingsService.value.approvals,
   });
   sessions.set(sessionService.list());
 
@@ -206,6 +208,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
+    'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
     'sessions.diffBases': ({ id }) => sessionService.diffBases(id),
@@ -221,6 +224,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.retry': (params) => sessionService.retry(params),
     'sessions.answer': (params) => sessionService.answer(params),
     'sessions.trust': (params) => sessionService.trust(params),
+    'sessions.approve': (params) => sessionService.approve(params),
     'database.restoreLatestSnapshot': () => {
       throw new Error('the database is not damaged');
     },
@@ -249,6 +253,15 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       await db.destroy();
     },
   };
+}
+
+/**
+ * The Environment's temp directory: `/tmp`, or on native Windows `%TEMP%`,
+ * which the bridge doesn't report, so its usual place under the home.
+ */
+function tempDirOf(os: string | undefined, home: string | undefined): string {
+  if (os === 'windows' && home) return `${home.replaceAll('\\', '/')}/AppData/Local/Temp`;
+  return '/tmp';
 }
 
 function isWebLink(url: string): boolean {

@@ -12,6 +12,7 @@ import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
 import { useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
+import { ApprovalCard } from './Approvals';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
@@ -276,8 +277,8 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   // The last prompt went unanswered, so it can be sent again.
   const retryable = session.status === 'waiting' && session.waitingReason === 'error' && items.at(-2)?.kind === 'user' && items.at(-1)?.kind === 'error' && !session.worktreeMissing;
   // The agent waits on an answer. A question is answered in a panel on the composer, one question
-  // at a time, the composer giving its answers of one's own; a trust request, on its card.
-  const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust') && i.state === 'asked') : undefined;
+  // at a time, the composer giving its answers of one's own; a trust or Approval request, on its card.
+  const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust' || i.kind === 'approval') && i.state === 'asked') : undefined;
   const asked = firstAsked !== undefined;
   const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
     api.invoke('sessions.answer', { id: session.id, itemId, answer }),
@@ -311,6 +312,7 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const composerPlaceholder = (): string => {
     if (working) return `${session.agent} is working…`;
     if (freeAnswer) return freeAnswer.placeholder;
+    if (firstAsked?.kind === 'approval') return 'Approve or deny the request above to go on.';
     if (asked) return 'Answer the question above to go on.';
     if (session.status === 'archived') return 'This Session is archived.';
     if (session.worktreeMissing) return "This Session's worktree is missing; it can only be archived.";
@@ -407,6 +409,8 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
             <ToolCard key={item.id} item={item} />
           ) : item.kind === 'question' ? (
             <QuestionCard key={item.id} item={item} />
+          ) : item.kind === 'approval' ? (
+            <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
           ) : item.kind === 'trust' ? (
             <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
           ) : (

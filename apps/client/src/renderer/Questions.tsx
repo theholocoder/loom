@@ -14,7 +14,7 @@ const QUESTION_STATES: Record<QuestionState, string | undefined> = { asked: unde
 const TRUST_STATES: Record<TrustState, string | undefined> = { asked: undefined, trusted: 'Trusted', untrusted: 'Not trusted', expired: 'No longer asked' };
 
 /** The frame both cards share: highlighted while the agent waits on the user. */
-function AskCard({ label, icon, name, asked, state, children }: { label: string; icon: ReactNode; name: string; asked: boolean; state?: string; children: ReactNode }) {
+export function AskCard({ label, icon, name, asked, state, children }: { label: string; icon: ReactNode; name: string; asked: boolean; state?: string; children: ReactNode }) {
   return (
     <div className="tools">
       <div className={`tool ask${asked ? ' question' : ''}`} role="group" aria-label={label}>
@@ -136,7 +136,7 @@ interface FreeAnswer {
 }
 
 /** Something the user set going that may fail: whether it is running, and why it failed. */
-function useAction() {
+export function useAction() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const run = async (action: () => Promise<void>) => {
@@ -154,7 +154,7 @@ function useAction() {
 }
 
 /** The reason an action failed, for the user. */
-function ErrorAlert({ error }: { error?: string }) {
+export function ErrorAlert({ error }: { error?: string }) {
   return error ? (
     <div className="err" role="alert">
       {error}

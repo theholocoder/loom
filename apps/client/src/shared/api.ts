@@ -349,6 +349,46 @@ export interface Settings extends Appearance {
   terminalCommand: string;
   /** Files the diff panel shows collapsed, as glob patterns on a path or file name (`*` matches within a folder). */
   diffCollapsedPatterns: string[];
+  /**
+   * Whether the agent goes ahead with each category of action reaching
+   * beyond its Session's working copy and the temp directory, or asks first
+   * with an Approval request. Agents started from now on get the new rules.
+   */
+  approvals: ApprovalPolicy;
+}
+
+/**
+ * The kinds of action an Approval request is about (see APPROVAL_CATEGORIES
+ * for what each covers). The agent reads, edits and runs commands in its
+ * working copy and the temp directory freely, whatever these say.
+ */
+export type ApprovalCategory = 'ownPush' | 'ownMergeRequest' | 'mcp' | 'writeElsewhere' | 'otherPush' | 'forge' | 'system';
+
+export type ApprovalSetting = 'allow' | 'ask';
+
+export type ApprovalPolicy = Record<ApprovalCategory, ApprovalSetting>;
+
+/** Each category, in the order Settings lists them, with its name and its default. */
+export const APPROVAL_CATEGORIES: Record<ApprovalCategory, { label: string; description: string; default: ApprovalSetting }> = {
+  ownPush: { label: "Push the Session's own branch", description: 'A plain push of the branch the working copy has checked out.', default: 'allow' },
+  ownMergeRequest: { label: "Open or update the Session's own Merge request", description: 'gh pr create or edit, glab mr create or update.', default: 'allow' },
+  mcp: { label: 'MCP and extension tools', description: "Tools from your MCP servers and OpenCode plugins.", default: 'allow' },
+  writeElsewhere: { label: 'Files outside the working copy', description: 'Writing or deleting files outside the working copy and the temp directory.', default: 'ask' },
+  otherPush: {
+    label: 'Force push, push another branch',
+    description: "Force pushes, pushes to other branches and deleting remote branches or tags. A push to the Project's default branch always asks.",
+    default: 'ask',
+  },
+  forge: { label: 'Other Forge changes', description: 'gh and glab actions that change the Forge: merging or closing, comments, issues, releases.', default: 'ask' },
+  system: { label: 'sudo and global installs', description: 'sudo, and installing packages or tools for the whole machine.', default: 'ask' },
+};
+
+/** What each category is set to until the user changes it. */
+export const DEFAULT_APPROVALS = Object.fromEntries(Object.entries(APPROVAL_CATEGORIES).map(([category, { default: setting }]) => [category, setting])) as ApprovalPolicy;
+
+/** Whether `value` names an approval category Loom has. */
+export function isApprovalCategory(value: unknown): value is ApprovalCategory {
+  return typeof value === 'string' && Object.hasOwn(APPROVAL_CATEGORIES, value);
 }
 
 export const DEFAULT_DIFF_COLLAPSED_PATTERNS = [
@@ -368,6 +408,7 @@ export const DEFAULT_SETTINGS: Settings = {
   editorCommand: 'code',
   terminalCommand: '',
   diffCollapsedPatterns: DEFAULT_DIFF_COLLAPSED_PATTERNS,
+  approvals: DEFAULT_APPROVALS,
   ...DEFAULT_APPEARANCE,
 };
 
@@ -427,6 +468,18 @@ export type QuestionState = 'asked' | 'answered' | 'dismissed' | 'expired';
  */
 export type TrustState = 'asked' | 'trusted' | 'untrusted' | 'expired';
 
+/**
+ * - `asked`: the agent waits for the user's decision;
+ * - `approved`: the user approved it once;
+ * - `approved-session`: the user approved its whole category for the Session;
+ * - `denied`: the user denied it, or archived the Session while it was asked;
+ * - `expired`: the run ended before the user decided.
+ */
+export type ApprovalState = 'asked' | 'approved' | 'approved-session' | 'denied' | 'expired';
+
+/** The user's decision on an Approval request. */
+export type ApprovalDecision = 'once' | 'session' | 'deny';
+
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
   | { kind: 'user'; id: number; text: string }
@@ -457,6 +510,26 @@ export type TranscriptItem =
   | { kind: 'question'; id: number; message: string; fields: QuestionField[]; state: QuestionState; answer?: Answer }
   /** The agent asking whether to trust the Project's local files: asked once per Project. */
   | { kind: 'trust'; id: number; message: string; state: TrustState }
+  /**
+   * An Approval request: the agent paused before an action reaching beyond
+   * its working copy. `detail` is the exact command, or the paths, it's
+   * about. `category` is absent when Loom can't tell which it is in (the
+   * user's own OpenCode rules asked), so it can only be approved once.
+   * `defaultBranch` is set for a push to the Project's default branch,
+   * which always asks. `message` is what the user told the agent on denying.
+   */
+  | {
+      kind: 'approval';
+      id: number;
+      toolCallId?: string;
+      title: string;
+      tool: string;
+      detail: string;
+      category?: ApprovalCategory;
+      defaultBranch?: string;
+      state: ApprovalState;
+      message?: string;
+    }
   /** A run that failed, with the agent's message. */
   | { kind: 'error'; id: number; message: string };
 
@@ -532,6 +605,13 @@ export interface Commands {
   'settings.setTerminalCommand': { params: { terminalCommand: string }; result: Settings };
   /** Sets which files the diff panel shows collapsed; blank patterns are dropped. */
   'settings.setDiffCollapsedPatterns': { params: { patterns: string[] }; result: Settings };
+  /**
+   * Sets whether the agent asks before actions of `category`. Agents
+   * started from now on get the new rules. Loom answers by the new setting
+   * at once what running agents still ask, so going to Allow takes effect
+   * at once; going to Ask, only for agents started after.
+   */
+  'settings.setApproval': { params: { category: ApprovalCategory; setting: ApprovalSetting }; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
   'sessions.list': { params: void; result: Session[] };
@@ -653,6 +733,16 @@ export interface Commands {
    * unless that request is still asked.
    */
   'sessions.trust': { params: { id: number; itemId: number; trusted: boolean }; result: void };
+  /**
+   * Decides the Approval request of the transcript item `itemId`: approves
+   * it once; approves it and, for the rest of the Session, every request of
+   * its category (Loom answers them itself, never writing the agent's
+   * config); or denies it, `message` going to the agent as the next prompt
+   * once its run ends. Once nothing else is asked, the Session is Working
+   * again. Rejects unless that request is still asked, and `session` for
+   * one with no category or a push to the default branch.
+   */
+  'sessions.approve': { params: { id: number; itemId: number; decision: ApprovalDecision; message?: string }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
   /**

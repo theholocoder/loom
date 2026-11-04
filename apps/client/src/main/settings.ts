@@ -1,5 +1,5 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
-import { DEFAULT_SETTINGS, type Settings as SettingsValues } from '../shared/api';
+import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, type ApprovalCategory, type ApprovalSetting, type Settings as SettingsValues } from '../shared/api';
 import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
@@ -21,6 +21,12 @@ export class Settings {
     if (typeof stored.terminalCommand === 'string') current.terminalCommand = stored.terminalCommand;
     if (Array.isArray(stored.diffCollapsedPatterns) && stored.diffCollapsedPatterns.every((p) => typeof p === 'string')) {
       current.diffCollapsedPatterns = stored.diffCollapsedPatterns as string[];
+    }
+    // Categories stored are kept; one Loom no longer has is dropped, and a new one gets its default.
+    if (typeof stored.approvals === 'object' && stored.approvals !== null) {
+      const approvals = { ...DEFAULT_APPROVALS };
+      for (const [category, setting] of Object.entries(stored.approvals)) if (isApprovalCategory(category) && isApprovalSetting(setting)) approvals[category] = setting;
+      current.approvals = approvals;
     }
     // A value Loom no longer offers falls back to the default.
     if (isTheme(stored.theme)) current.theme = stored.theme;
@@ -52,6 +58,13 @@ export class Settings {
     return this.set('diffCollapsedPatterns', patterns.map((p) => p.trim()).filter(Boolean));
   }
 
+  /** Sets whether the agent asks before actions of `category`; rejects an unknown category or setting. */
+  async setApproval(category: ApprovalCategory, setting: ApprovalSetting): Promise<SettingsValues> {
+    if (!isApprovalCategory(category)) throw new Error(`"${String(category)}" is not an approval category`);
+    if (!isApprovalSetting(setting)) throw new Error(`An approval setting is "allow" or "ask", not "${String(setting)}"`);
+    return this.set('approvals', { ...this.current.approvals, [category]: setting });
+  }
+
   /** Sets the theme or fonts given; rejects any not in Loom's lists. */
   async setAppearance(appearance: Partial<Appearance>): Promise<SettingsValues> {
     const { theme, uiFont, monoFont } = appearance;
@@ -75,6 +88,11 @@ export class Settings {
     this.onChange(this.current);
     return this.current;
   }
+}
+
+/** Whether `value` is Allow or Ask. */
+function isApprovalSetting(value: unknown): value is ApprovalSetting {
+  return value === 'allow' || value === 'ask';
 }
 
 /** An editor or terminal command, trimmed; rejects one that can't be split into words. */

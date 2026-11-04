@@ -2,7 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
-import type { Answer, QuestionField, ToolStatus } from '../../shared/api';
+import type { Answer, ApprovalPolicy, QuestionField, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -29,6 +29,11 @@ export type AgentEvent =
   | { type: 'question-asked'; requestId: string; message: string; fields: QuestionField[] }
   /** The agent asks whether to trust the Project's local files; answered like a question. */
   | { type: 'trust-asked'; requestId: string; message: string }
+  /**
+   * The agent paused before an action its approval rules ask about, until
+   * AgentSession.answer approves or denies it under `requestId`.
+   */
+  | { type: 'approval-asked'; requestId: string; action: ApprovalAction }
   /** The run ended normally. */
   | { type: 'run-settled' }
   /** The run ended in an error, such as a provider's (no credit, exhausted quota). */
@@ -46,10 +51,34 @@ export interface ToolCall {
   output?: string;
 }
 
+/** What an agent asks approval for, as it reports it. */
+export interface ApprovalAction {
+  /** The tool call it is part of, if the agent says. */
+  toolCallId?: string;
+  /** The tool's name, as the agent calls it: `shell`, `write`, `read`, or an MCP tool's. */
+  tool: string;
+  /** What sort of tool, such as read, edit or execute. */
+  toolKind?: string;
+  /** What the agent calls it: the command, a path, or the tool's name. */
+  title: string;
+  /** The command line, for a shell command. */
+  command?: string;
+  /** Where the command runs. */
+  cwd?: string;
+  /** The files or folders it is about, absolute. */
+  paths: string[];
+  /** Whether the tool is from the user's MCP servers or plugins rather than the agent's own. */
+  extension: boolean;
+}
+
 export interface OpenOptions {
   environment: AgentEnvironment;
   /** The Session's working copy, where the agent works. */
   workingCopy: string;
+  /** The Environment's temp directory, where the agent works freely too. */
+  tempDir: string;
+  /** What the agent asks approval for, beyond its working copy and the temp directory. */
+  approvals: ApprovalPolicy;
   onEvent: (event: AgentEvent) => void;
 }
 
@@ -75,5 +104,5 @@ export interface AgentSession {
   close(): Promise<void>;
 }
 
-/** The user's response to an agent's request: an answer to its question (null dismisses it), or whether to trust. */
-export type AgentResponse = { kind: 'question'; answer: Answer | null } | { kind: 'trust'; trusted: boolean };
+/** The user's response to an agent's request: an answer to its question (null dismisses it), whether to trust, or whether to go ahead once. */
+export type AgentResponse = { kind: 'question'; answer: Answer | null } | { kind: 'trust'; trusted: boolean } | { kind: 'approval'; approved: boolean };
