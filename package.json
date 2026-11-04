@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.30.2",
   "scripts": {
+    "postinstall": "node scripts/ensure-electron.mjs",
     "bridge:build": "node scripts/build-bridge.mjs",
     "bridge:test": "cd bridge && go test ./...",
     "dev": "pnpm bridge:build && pnpm --filter @loom/client dev",

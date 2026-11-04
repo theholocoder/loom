@@ -6,13 +6,13 @@
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node ../../scripts/ensure-electron.mjs && electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:seam-a": "vitest run --project seam-a",
     "test:seam-b": "vitest run --project seam-b",
-    "test:e2e": "electron-vite build && playwright test"
+    "test:e2e": "node ../../scripts/ensure-electron.mjs && electron-vite build && playwright test"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "^5.3.0",
