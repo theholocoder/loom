@@ -2,9 +2,9 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type Answer, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
-import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
+import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, ApprovalAction } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
@@ -15,6 +15,7 @@ import { WorkingCopyDiff } from './diff';
 import { createWorktree, findWorktree, listBranches, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
 import { capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
+import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict } from './approvals';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -34,6 +35,8 @@ export interface SessionsOptions {
     /** Takes effect for `get` at once; resolves once saved. */
     set(projectId: number, trusted: boolean): Promise<void>;
   };
+  /** The approval settings, as they are now. */
+  approvals: () => ApprovalPolicy;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -42,6 +45,8 @@ export interface SessionEnvironment extends AgentEnvironment, GitEnvironment {
   ready(): Promise<void>;
   /** Starts the Environment again if it failed to start. */
   restart(): Promise<void>;
+  /** Its temp directory, where agents work freely: `/tmp`, or `%TEMP%` on native Windows. */
+  tempDir(): string;
 }
 
 /** What a Session whose agent ended with its Environment's bridge shows. */
@@ -78,6 +83,16 @@ export class Sessions {
   private restarted = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
   private readonly asks = new Map<number, Map<number, string>>();
+  /**
+   * The approval categories the user approved for the rest of each Session
+   * ("for this Session"), while the Client runs: an agent can't be resumed
+   * after a restart yet, so they would have nothing to answer.
+   */
+  private readonly grants = new Map<number, Set<ApprovalCategory>>();
+  /** The tool calls approved in each Session's current run: more asks for the same call go through. */
+  private readonly approvedCalls = new Map<number, Set<string>>();
+  /** What the user said on denying Approval requests, sent to the agent as the next prompt once its run ends. */
+  private readonly denyMessages = new Map<number, string>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -100,8 +115,8 @@ export class Sessions {
     const rows = await options.db.selectFrom('sessions').selectAll().execute();
     for (const row of rows) sessions.sessions.set(row.id, fromRow(row));
     for (const session of sessions.list()) {
-      // A Session waiting on a question was mid-run too: the agent's question went with its process.
-      if (session.status !== 'working' && !(session.status === 'waiting' && session.waitingReason === 'question')) continue;
+      // A Session waiting on a question or an Approval request was mid-run too: what the agent asked went with its process.
+      if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval'))) continue;
       await sessions.loadTranscript(session.id);
       sessions.endRun(session.id);
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
@@ -303,6 +318,104 @@ export class Sessions {
     await saved;
   }
 
+  /**
+   * Decides the Approval request in transcript item `itemId`: approves it
+   * once, or approves it and its category for the rest of the Session, whose
+   * later requests Loom then answers itself; or denies it, `message` going
+   * to the agent once its run ends.
+   */
+  async approve({ id, itemId, decision, message }: { id: number; itemId: number; decision: ApprovalDecision; message?: string }): Promise<void> {
+    this.get(id);
+    const item = (await this.loadTranscript(id)).value[itemId];
+    if (item?.kind !== 'approval') throw new Error('There is no such Approval request in this Session.');
+    const requestId = this.asks.get(id)?.get(itemId);
+    if (item.state !== 'asked' || requestId === undefined) throw new Error('The agent is no longer asking for this approval.');
+    if (decision !== 'once' && decision !== 'session' && decision !== 'deny') throw new Error(`"${String(decision)}" is not a decision on an Approval request.`);
+    if (decision === 'session' && item.defaultBranch) throw new Error(`A push to ${item.defaultBranch}, the default branch, always asks: approve it once, or deny it.`);
+    if (decision === 'session' && !item.category) throw new Error("Loom can't tell what kind of action this is, so it can only be approved once.");
+    if (message !== undefined && typeof message !== 'string') throw new Error('A message to the agent must be text.');
+    const agent = this.live.get(id);
+    if (decision === 'deny') {
+      const said = message?.trim();
+      if (said) this.denyMessages.set(id, [this.denyMessages.get(id), said].filter(Boolean).join('\n\n'));
+      this.settleAsk(id, itemId, { ...item, state: 'denied', ...(said ? { message: said } : {}) });
+      agent?.answer(requestId, { kind: 'approval', approved: false });
+      return;
+    }
+    this.approveCall(id, item.toolCallId);
+    this.settleAsk(id, itemId, { ...item, state: decision === 'session' ? 'approved-session' : 'approved' });
+    agent?.answer(requestId, { kind: 'approval', approved: true });
+    if (decision !== 'session') return;
+    const category = item.category!;
+    const grants = this.grants.get(id) ?? new Set();
+    grants.add(category);
+    this.grants.set(id, grants);
+  }
+
+  /** Records that the user approved tool call `toolCallId`'s card: more asks for it go ahead. */
+  private approveCall(id: number, toolCallId: string | undefined): void {
+    if (toolCallId === undefined) return;
+    let calls = this.approvedCalls.get(id);
+    if (!calls) this.approvedCalls.set(id, (calls = new Set()));
+    calls.add(toolCallId);
+  }
+
+  /**
+   * The agent asks approval for `action`. Loom answers it itself, once, when
+   * its policy allows it: the category is set to Allow or approved for the
+   * Session, or it is part of a tool call already approved. Otherwise it is
+   * an Approval request card: Waiting (approval), with no timeout.
+   */
+  private async askApproval(id: number, requestId: string, action: ApprovalAction): Promise<void> {
+    const agent = this.live.get(id);
+    const session = this.get(id);
+    const environment = this.environmentOf(session);
+    const context: ApprovalContext = {
+      workingCopy: session.workingCopy.path,
+      tempDir: environment.tempDir(),
+      home: environment.home(),
+      mergeRequest: session.mergeRequest?.number,
+    };
+    if (mayPush(action)) {
+      context.currentBranch = await this.currentBranch(id).catch(() => undefined);
+      context.defaultBranch = await this.defaultBranch(id).catch(() => undefined);
+      // The run may have ended while git answered.
+      if (this.live.get(id) !== agent || !this.inRun(id)) return;
+    }
+    const goAhead = () => agent?.answer(requestId, { kind: 'approval', approved: true });
+    // The user approved this call's card, which showed all of it.
+    if (action.toolCallId !== undefined && this.approvedCalls.get(id)?.has(action.toolCallId)) return goAhead();
+    const policy = this.options.approvals();
+    const goes = (v: ApprovalVerdict) => v.allowed || (!!v.category && !v.defaultBranch && (policy[v.category] === 'allow' || !!this.grants.get(id)?.has(v.category)));
+    const verdicts = classifyApproval(action, context);
+    // Most asking first: the card is about the first part that can't go ahead.
+    const blocking = verdicts.find((v) => !goes(v));
+    if (!blocking) return goAhead();
+    const { category, defaultBranch } = blocking.allowed ? {} : blocking;
+    const detail = action.command ?? (action.paths.join('\n') || action.title);
+    this.ask(
+      id,
+      requestId,
+      withoutUndefined({ kind: 'approval' as const, toolCallId: action.toolCallId, title: action.title, tool: action.tool, detail, category, defaultBranch, state: 'asked' as const }),
+      'approval',
+    );
+  }
+
+  /** Denies the Session's Approval requests still asked, as archiving it does. */
+  private denyApprovals(id: number): void {
+    const asked = this.asks.get(id);
+    if (!asked) return;
+    const agent = this.live.get(id);
+    for (const [seq, requestId] of [...asked.entries()]) {
+      const card = this.transcript(id).value[seq];
+      if (card?.kind !== 'approval') continue;
+      asked.delete(seq);
+      this.replaceItem(id, { ...card, state: 'denied' });
+      agent?.answer(requestId, { kind: 'approval', approved: false });
+    }
+    if (asked.size === 0) this.asks.delete(id);
+  }
+
   /** Records the user's response to an ask; with nothing else asked, the Session is Working again. */
   private settleAsk(id: number, itemId: number, settled: TranscriptItem): void {
     const asked = this.asks.get(id);
@@ -361,6 +474,8 @@ export class Sessions {
     if (session.status === 'archived' && !(await this.worktreeLeftOver(session))) return { archived: true };
     const environment = worktree === undefined ? undefined : this.environmentOf(session);
     if (!environment || worktree === undefined) {
+      // Archiving counts as Deny: the agent hears it before it stops.
+      this.denyApprovals(id);
       this.markArchived(id);
       await this.stopAgent(id);
       return { archived: true };
@@ -373,6 +488,7 @@ export class Sessions {
     // Confirmed: stop the agent, then look again in case it wrote in its last moment.
     // A run waiting on the user's answer ends here too, so it fails like a Working one.
     const evenIfWaiting = this.inRun(id);
+    this.denyApprovals(id);
     await this.stopAgent(id);
     if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
@@ -397,6 +513,7 @@ export class Sessions {
     // Also guards a concurrent archive of the same Session: it was archived while this one waited.
     if (this.get(id).status === 'archived') return;
     this.endRun(id);
+    this.denyMessages.delete(id);
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
     for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
@@ -498,6 +615,8 @@ export class Sessions {
     const agent = await this.options.adapter.open({
       environment,
       workingCopy: session.workingCopy.path,
+      tempDir: environment.tempDir(),
+      approvals: this.options.approvals(),
       // An agent the Session has moved on from, as after a restart, no longer counts.
       onEvent: (event) => {
         if (opened && this.live.get(id) !== opened) return;
@@ -545,10 +664,22 @@ export class Sessions {
         if (trusted !== undefined) return void this.live.get(id)?.answer(event.requestId, { kind: 'trust', trusted });
         return this.ask(id, event.requestId, { kind: 'trust', message: event.message, state: 'asked' });
       }
-      case 'run-settled':
+      case 'approval-asked':
+        if (!this.inRun(id)) return;
+        return void this.askApproval(id, event.requestId, event.action).catch((error: unknown) => console.error(`could not ask Session ${id}'s approval:`, error));
+      case 'run-settled': {
+        const followUp = this.denyMessages.get(id);
+        this.denyMessages.delete(id);
         this.endRun(id);
+        // What the user said on denying goes to the agent as the next prompt.
+        if (followUp) {
+          this.addItem(id, { kind: 'user', text: followUp });
+          this.setStatus(id, { status: 'working' });
+          return void this.run(id, followUp);
+        }
         this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
         return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
+      }
       case 'run-failed':
         this.fail(id, event.error);
         return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
@@ -558,15 +689,15 @@ export class Sessions {
     }
   }
 
-  /** Shows what the agent asked as a card, and waits on the user: Waiting (question). */
-  private ask(id: number, requestId: string, card: NewItem): void {
+  /** Shows what the agent asked as a card, and waits on the user: Waiting (question, or approval). */
+  private ask(id: number, requestId: string, card: NewItem, reason: Extract<WaitingReason, 'question' | 'approval'> = 'question'): void {
     this.endStreaming(id);
     this.addItem(id, card);
     const seq = this.transcript(id).value.length - 1;
     let asked = this.asks.get(id);
     if (!asked) this.asks.set(id, (asked = new Map()));
     asked.set(seq, requestId);
-    this.setStatus(id, { status: 'waiting', waitingReason: 'question' });
+    this.setStatus(id, { status: 'waiting', waitingReason: reason });
   }
 
   /**
@@ -725,6 +856,7 @@ export class Sessions {
     const { status } = this.get(id);
     if (!this.inRun(id) && !(evenIfWaiting && status === 'waiting')) return;
     this.endRun(id);
+    this.denyMessages.delete(id);
     this.addItem(id, { kind: 'error', message: error });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });
   }
@@ -779,6 +911,7 @@ export class Sessions {
   private endRun(id: number): void {
     this.endStreaming(id);
     this.asks.delete(id);
+    this.approvedCalls.delete(id);
     const items = this.transcript(id).value;
     if (!items.some(leftGoing)) return;
     const ended = items.map((i) => (!leftGoing(i) ? i : i.kind === 'tool' ? { ...i, status: 'failed' as const } : { ...i, state: 'expired' as const }));
@@ -980,10 +1113,11 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
   });
 }
 
-/** What a run leaves going until it ends: a tool call still running, or a question or trust request still asked. */
+/** What a run leaves going until it ends: a tool call still running, or a question, trust or Approval request still asked. */
 function leftGoing(item: TranscriptItem): boolean {
-  return (item.kind === 'tool' && item.status === 'running') || ((item.kind === 'question' || item.kind === 'trust') && item.state === 'asked');
+  return (item.kind === 'tool' && item.status === 'running') || ((item.kind === 'question' || item.kind === 'trust' || item.kind === 'approval') && item.state === 'asked');
 }
+
 
 /** Text the agent is still adding to: its reply or its thinking. */
 function isStreamingText(item: TranscriptItem | undefined): item is Extract<TranscriptItem, { kind: 'agent' | 'thinking' }> {

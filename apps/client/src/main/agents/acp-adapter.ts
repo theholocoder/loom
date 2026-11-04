@@ -2,7 +2,7 @@
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
 import type { Answer, QuestionField, QuestionOption, ToolStatus } from '../../shared/api';
-import type { AgentAdapter, AgentEvent, AgentResponse, AgentSession, OpenOptions } from './adapter';
+import type { AgentAdapter, AgentEvent, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection } from './acp';
 
@@ -11,6 +11,10 @@ export interface AcpProfile {
   name: string;
   command: string;
   args: string[];
+  /** Variables the agent's process gets for this Session: its approval rules. */
+  env?: (options: Pick<OpenOptions, 'approvals' | 'workingCopy' | 'tempDir'>) => Record<string, string>;
+  /** The agent's own tools; any other is from the user's MCP servers or plugins. */
+  ownTools: ReadonlySet<string>;
 }
 
 const PROTOCOL_VERSION = 1;
@@ -30,18 +34,32 @@ export class AcpAdapter implements AgentAdapter {
     return this.profile.name;
   }
 
-  async open({ environment, workingCopy, onEvent }: OpenOptions): Promise<AgentSession> {
+  async open({ environment, workingCopy, tempDir, approvals, onEvent }: OpenOptions): Promise<AgentSession> {
     // The user's own setup (OpenCode config, MCP servers, plugins, skills,
     // AGENTS.md) loads as it would in their terminal: the agent starts in the
-    // working copy with the Environment's own env and only the profile's args.
-    const channel = await environment.openChannel({ command: this.profile.command, args: this.profile.args, cwd: workingCopy }).catch((error: unknown) => {
+    // working copy with the Environment's own env and only the profile's args,
+    // plus the profile's variables for the Session's approval rules.
+    const env = this.profile.env?.({ approvals, workingCopy, tempDir });
+    const channel = await environment.openChannel({ command: this.profile.command, args: this.profile.args, cwd: workingCopy, ...(env ? { env } : {}) }).catch((error: unknown) => {
       if (isNotFound(error)) throw new Error(`${this.profile.name} isn't installed in ${environment.label}, or isn't on your shell's PATH.`);
       throw error;
     });
     let sessionId: string | undefined;
-    /** Elicitations waiting on the user, by the requestId Loom gave them. */
-    const asked = new Map<string, (response: ElicitationResponse) => void>();
+    /** Elicitations and permission requests waiting on the user, by the requestId Loom gave them. */
+    const asked = new Map<string, (response: AgentResponse) => void>();
     let asks = 0;
+    const ask = <T,>(prefix: string, event: (requestId: string) => AgentEvent, respond: (response: AgentResponse) => T | undefined) => {
+      const requestId = `${prefix}-${++asks}`;
+      return new Promise<T>((resolve) => {
+        asked.set(requestId, (response) => {
+          const result = respond(response);
+          if (result === undefined) return;
+          asked.delete(requestId);
+          resolve(result);
+        });
+        onEvent(event(requestId));
+      });
+    };
     const connection = new AcpConnection(channel, {
       onNotification: (method, params) => {
         if (method !== 'session/update') return;
@@ -51,17 +69,27 @@ export class AcpAdapter implements AgentAdapter {
         if (event) onEvent(event);
       },
       onRequest: (method, params) => {
+        if (method === 'session/request_permission') {
+          const request = params as PermissionRequest;
+          if (request.sessionId !== sessionId) return Promise.resolve({ outcome: { outcome: 'cancelled' } });
+          const action = approvalActionOf(request.toolCall ?? {}, this.profile.ownTools);
+          return ask(
+            'permission',
+            (requestId) => ({ type: 'approval-asked', requestId, action }),
+            (response) => (response.kind === 'approval' ? permissionResponse(request.options, response.approved) : undefined),
+          );
+        }
         if (method !== 'elicitation/create') return undefined;
         const request = params as ElicitationRequest;
         if (request.sessionId !== sessionId) return Promise.resolve({ action: 'cancel' });
         const fields = request.mode === 'form' ? fieldsOf(request.requestedSchema) : undefined;
         // A form Loom can't show is cancelled, as OpenCode does when it can't show one.
         if (!fields) return Promise.resolve({ action: 'cancel' });
-        const requestId = `elicitation-${++asks}`;
-        return new Promise<ElicitationResponse>((resolve) => {
-          asked.set(requestId, resolve);
-          onEvent({ type: 'question-asked', requestId, message: typeof request.message === 'string' ? request.message : '', fields });
-        });
+        return ask(
+          'elicitation',
+          (requestId) => ({ type: 'question-asked', requestId, message: typeof request.message === 'string' ? request.message : '', fields }),
+          (response) => (response.kind === 'question' ? elicitationResponse(response) : undefined),
+        );
       },
       onClose: (reason) => {
         asked.clear();
@@ -91,12 +119,7 @@ export class AcpAdapter implements AgentAdapter {
           (error: Error) => onEvent({ type: 'run-failed', error: error.message }),
         );
       },
-      answer: (requestId, response) => {
-        const resolve = asked.get(requestId);
-        if (!resolve || response.kind !== 'question') return;
-        asked.delete(requestId);
-        resolve(elicitationResponse(response));
-      },
+      answer: (requestId, response) => asked.get(requestId)?.(response),
       close: () => connection.end(),
     };
   }
@@ -167,6 +190,46 @@ function contentText(block: unknown): string {
 
 function stringOf(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? '';
+}
+
+// ACP v1's permission request: the tool call the agent wants to make, and the options to answer with.
+interface PermissionRequest {
+  sessionId?: unknown;
+  toolCall?: AcpToolCall & { name?: unknown; locations?: unknown };
+  options?: unknown;
+}
+
+/** What the agent wants to do, from its tool call: the command for a shell one, the paths for the rest. */
+function approvalActionOf(call: NonNullable<PermissionRequest['toolCall']>, ownTools: ReadonlySet<string>): ApprovalAction {
+  const input = (call.rawInput ?? {}) as { command?: unknown; cwd?: unknown; workdir?: unknown };
+  // OpenCode names the tool; ACP itself only gives its kind, which says nothing of whose it is.
+  const name = typeof call.name === 'string' && call.name ? call.name : undefined;
+  const tool = name ?? (typeof call.kind === 'string' ? call.kind : 'tool');
+  const command = typeof input.command === 'string' ? input.command : undefined;
+  const cwd = typeof input.workdir === 'string' ? input.workdir : typeof input.cwd === 'string' ? input.cwd : undefined;
+  const paths = Array.isArray(call.locations) ? call.locations.flatMap((l: { path?: unknown }) => (typeof l?.path === 'string' ? [l.path] : [])) : [];
+  return defined({
+    toolCallId: typeof call.toolCallId === 'string' ? call.toolCallId : undefined,
+    tool,
+    toolKind: typeof call.kind === 'string' ? call.kind : undefined,
+    title: typeof call.title === 'string' && call.title.trim() ? call.title : (command ?? tool),
+    command,
+    cwd: command === undefined ? undefined : cwd,
+    // A shell command's location is the folder it runs in, not what it touches.
+    paths: command === undefined ? paths : [],
+    extension: name !== undefined && !ownTools.has(name.toLowerCase()),
+  });
+}
+
+/**
+ * Loom answers only "once" or "reject", never "always": a grant for the
+ * Session lives in Loom. Options are picked by kind, falling back to
+ * OpenCode's ids.
+ */
+function permissionResponse(options: unknown, approved: boolean): { outcome: { outcome: 'selected'; optionId: string } } {
+  const kind = approved ? 'allow_once' : 'reject_once';
+  const option = Array.isArray(options) ? options.find((o: { kind?: unknown; optionId?: unknown }) => o?.kind === kind && typeof o.optionId === 'string') : undefined;
+  return { outcome: { outcome: 'selected', optionId: (option as { optionId: string } | undefined)?.optionId ?? (approved ? 'once' : 'reject') } };
 }
 
 // ACP v1's form elicitation: a flat JSON Schema object of primitive fields.

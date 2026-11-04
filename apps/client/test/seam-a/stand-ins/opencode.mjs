@@ -12,9 +12,11 @@
 // OpenCode 2.1.4 does: `initialize`, `session/new`, which answers a `ses_…`
 // id, and `session/prompt`, which plays the script's `turns` one per prompt
 // (see OpencodeScript in harness.ts); an `elicit` chunk sends Loom an
-// `elicitation/create` request and waits for its response. Every message it
-// receives is appended to <script.json>.acp.log as {pid, cwd, message}. It
-// exits when its stdin closes.
+// `elicitation/create` request and waits for its response, a `permission`
+// chunk a `session/request_permission` one (a reject ends the turn as
+// cancelled, as OpenCode does). Every message it receives is appended to
+// <script.json>.acp.log as {pid, cwd, config, message}, `config` being its
+// OPENCODE_CONFIG_CONTENT. It exits when its stdin closes.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
@@ -74,7 +76,7 @@ function acp() {
   lines.on('line', async (line) => {
     if (!line.trim()) return;
     const message = JSON.parse(line);
-    appendFileSync(`${scriptPath}.acp.log`, JSON.stringify({ pid: process.pid, cwd: process.cwd(), message }) + '\n');
+    appendFileSync(`${scriptPath}.acp.log`, JSON.stringify({ pid: process.pid, cwd: process.cwd(), config: process.env.OPENCODE_CONFIG_CONTENT, message }) + '\n');
     const { id, method, params } = message;
     if (method === undefined && responses.has(id)) {
       const resolve = responses.get(id);
@@ -90,11 +92,26 @@ function acp() {
       send({ id, result: { sessionId } });
     } else if (method === 'session/prompt') {
       const turn = turns[prompts++] ?? { chunks: [] };
+      let rejected = false;
       for (const text of turn.chunks ?? []) {
+        if (rejected) break;
         if (typeof text === 'object') {
           if (text.hold) await released(text.hold);
           // An elicitation (a question, or a plugin's form): the turn goes on once Loom answers it.
           if (text.elicit) await ask('elicitation/create', { sessionId, mode: 'form', ...text.elicit });
+          // A permission request, with OpenCode's options; a reject cancels the rest of the turn.
+          if (text.permission) {
+            const reply = await ask('session/request_permission', {
+              sessionId,
+              toolCall: { status: 'pending', ...text.permission },
+              options: [
+                { optionId: 'once', kind: 'allow_once', name: 'Allow once' },
+                { optionId: 'always', kind: 'allow_always', name: 'Always allow' },
+                { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
+              ],
+            });
+            if (reply.result?.outcome?.optionId !== 'once') rejected = true;
+          }
           if (text.update) send({ method: 'session/update', params: { sessionId, update: text.update } });
           // A tool output of `bytes` bytes, made here so the script stays small: HEAD>, x's, <TAIL.
           if (text.bigOutput) {
@@ -106,7 +123,9 @@ function acp() {
         }
         send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } } });
       }
-      if (turn.hold) await released(turn.hold);
+      if (rejected) send({ id, result: { stopReason: 'cancelled' } });
+      else if (turn.hold) await released(turn.hold);
+      if (rejected) return;
       if (turn.error) send({ id, error: { code: -32603, message: turn.error } });
       else send({ id, result: { stopReason: 'end_turn' } });
     } else if (id !== undefined) {

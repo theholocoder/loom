@@ -127,6 +127,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tool.ask .tool-head { cursor: default; }
 .ask-message { margin: 0 0 8px; white-space: pre-wrap; }
 .ask-hint { font-size: 12px; margin: 4px 0 0; }
+.approval-detail { margin: 0 0 4px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; background: var(--panel2); border-radius: 4px; }
+.approval-message { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
 .ask-step input[type='number']:focus-visible, .ask-choice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ask-choices { display: grid; gap: 6px; }
 .ask-choice { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); cursor: pointer; }
@@ -160,6 +162,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .pick:hover { background: var(--hover); color: var(--text); }
 .settings-fields { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; }
 .field-row { display: grid; grid-template-columns: 160px minmax(170px, 260px); align-items: center; gap: 12px; }
+.approval-row { grid-template-columns: minmax(260px, 420px) 120px; }
+.approval-description { display: block; font-size: 12px; }
 .pick b { color: var(--text); font-weight: 500; }
 .pick input.branch { border: 0; background: transparent; color: var(--text); outline: none; width: 22ch; padding: 0; }
 .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }

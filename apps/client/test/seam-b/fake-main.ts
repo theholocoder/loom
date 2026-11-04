@@ -59,6 +59,12 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setApproval': ({ category, setting }) => {
+        const current = this.value('settings');
+        const settings = { ...current, approvals: { ...current.approvals, [category]: setting } };
+        this.publish('settings', settings);
+        return settings;
+      },
       'sessions.list': () => this.value('sessions'),
       'sessions.create': () => {
         throw new Error('sessions.create is not scripted');
@@ -76,6 +82,7 @@ export class FakeMain implements LoomApi {
       'sessions.retry': () => {},
       'sessions.answer': () => {},
       'sessions.trust': () => {},
+      'sessions.approve': () => {},
       'database.restoreLatestSnapshot': () => {},
       ...handlers,
     };

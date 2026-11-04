@@ -40,3 +40,11 @@ LOOM_FORGE_CONTRACT_GITHUB=github.com/you/loom-sandbox \
 LOOM_FORGE_CONTRACT_GITLAB=gitlab.com/you/loom-sandbox \
 pnpm --filter @loom/client exec vitest run --project forge-contract
 ```
+
+### Real OpenCode contract suite
+
+Another opt-in suite (`apps/client/test/opencode-contract`) runs Loom's ACP adapter against your own installed, signed-in `opencode`, with your own OpenCode config. It checks that the approval rules Loom passes in `OPENCODE_CONFIG_CONTENT` ask what seam A's `opencode acp` stand-in assumes: a shell command under the `shell` rule, a write outside the working copy, and nothing for work inside it. Everything it asks is rejected. It spends a few prompts of your default model, and is skipped unless `LOOM_OPENCODE_CONTRACT=1`:
+
+```sh
+LOOM_OPENCODE_CONTRACT=1 pnpm --filter @loom/client exec vitest run --project opencode-contract
+```

@@ -76,8 +76,13 @@ export class AcpConnection {
     return this.send({ jsonrpc: '2.0', method, params });
   }
 
-  /** Closes the agent's stdin, which tells it to exit. */
-  end(): Promise<void> {
+  /**
+   * Closes the agent's stdin, which tells it to exit, once the answers to
+   * its requests already decided (such as a deny on archive) are written.
+   */
+  async end(): Promise<void> {
+    // An answer goes out a few promise hops after it is decided; this lets them all run first.
+    await new Promise((resolve) => setImmediate(resolve));
     return this.channel.closeStdin();
   }
 
