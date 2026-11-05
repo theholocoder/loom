@@ -120,12 +120,14 @@ describe('starting a Session from an issue', () => {
 });
 
 describe("a Session's linked issue", () => {
-  it('shows in its header, opening the issue', () => {
+  it('shows in Session info, opening the issue', () => {
     const main = renderApp(new FakeMain({ projects: [project], sessions: [fromIssue] }));
     fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: fromIssue.title }));
 
-    const link = within(screen.getByRole('region', { name: 'Session header' })).getByTitle('Issue');
-    expect(link.textContent).toBe('#31');
+    expect(within(screen.getByRole('region', { name: 'Session header' })).queryByText('#31')).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+    const git = within(screen.getByRole('tabpanel', { name: 'Session info' })).getByRole('region', { name: 'Git' });
+    const link = within(git).getByRole('button', { name: '#31' });
     fireEvent.click(link);
     expect(main.invoked).toContainEqual({ command: 'links.open', params: { url: loginBug.url } });
   });

@@ -186,7 +186,7 @@ function OpenCommands() {
           api.invoke('settings.setDiffCollapsedPatterns', { patterns: value.split(',') }).then((s) => s.diffCollapsedPatterns.join(', '))
         }
       >
-        Files the diff panel starts collapsed, besides binaries and very large changes: comma-separated patterns on a file name, or on its path when they
+        Files the Changes view starts collapsed, besides binaries and very large changes: comma-separated patterns on a file name, or on its path when they
         have a <span className="tech">/</span>, as in <span className="tech">*.lock</span>.
       </TextSetting>
     </>

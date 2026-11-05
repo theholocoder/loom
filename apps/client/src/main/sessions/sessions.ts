@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TokenCounts, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -76,6 +76,7 @@ export const IDLE_STOP_MS = 10 * 60_000;
 type Interruption = { sendNow?: number };
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
 const NO_TOKENS: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+const NO_USAGE: SessionUsage = { tokens: 0, reportedCost: 0, workingMs: 0 };
 /** The stretch of time a Session is in, for the dashboard: since when. */
 type OpenSpan = { kind: 'run' | 'wait'; since: number; carried?: number };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
@@ -166,6 +167,7 @@ export class Sessions {
       if (row.merge_request_branch !== null) sessions.mergeRequestLinks.set(row.id, { branch: row.merge_request_branch, byHand: row.merge_request_by_hand === 1 });
       if (row.reported_cost !== null) sessions.reportedCosts.set(row.id, row.reported_cost);
     }
+    await sessions.loadUsage();
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
     for (const { id, session_id, text, attachments } of queued) {
       const session = sessions.sessions.get(session_id);
@@ -191,6 +193,33 @@ export class Sessions {
     }
     await sessions.flush();
     return sessions;
+  }
+
+  /** Each Session's usage so far, from its usage buckets and its runs. */
+  private async loadUsage(): Promise<void> {
+    const { db } = this.options;
+    const [buckets, runs] = await Promise.all([
+      db
+        .selectFrom('usage_buckets')
+        .select((eb) => [
+          'session_id',
+          eb.fn.sum<number>(eb(eb(eb(eb('input_tokens', '+', eb.ref('output_tokens')), '+', eb.ref('cache_read_tokens')), '+', eb.ref('cache_write_tokens')), '+', eb.ref('reasoning_tokens'))).as('tokens'),
+          eb.fn.sum<number>('cost').as('cost'),
+        ])
+        .groupBy('session_id')
+        .execute(),
+      db
+        .selectFrom('session_spans')
+        .select((eb) => ['session_id', eb.fn.sum<number>(eb('ended_at', '-', eb.ref('started_at'))).as('ms')])
+        .where('kind', '=', 'run')
+        .groupBy('session_id')
+        .execute(),
+    ]);
+    const usage = new Map<number, SessionUsage>();
+    const of = (id: number) => usage.get(id) ?? usage.set(id, { ...NO_USAGE }).get(id)!;
+    for (const b of buckets) Object.assign(of(b.session_id), { tokens: Number(b.tokens), reportedCost: Number(b.cost) });
+    for (const r of runs) of(r.session_id).workingMs = Number(r.ms);
+    for (const [id, session] of this.sessions) this.sessions.set(id, { ...session, usage: usage.get(id) ?? { ...NO_USAGE } });
   }
 
   /**
@@ -322,7 +351,7 @@ export class Sessions {
     let id: number;
     try {
       ({ id } = await this.options.db.insertInto('sessions').values(values).returning('id').executeTakeFirstOrThrow());
-      this.sessions.set(id, this.withCapabilities(fromRow({ id, ...values })));
+      this.sessions.set(id, { ...this.withCapabilities(fromRow({ id, ...values })), usage: { ...NO_USAGE, workingSince: now } });
       this.spans.set(id, { kind: 'run', since: now });
       this.reportedCosts.set(id, 0);
     } finally {
@@ -910,6 +939,7 @@ export class Sessions {
       const found = await viewMergeRequest(this.environmentOf(session).request, project.forge, project.checkout.path, session.mergeRequest.number);
       if (this.shuttingDown || found.url !== session.mergeRequest.url) return;
       this.save(id, { merge_request_state: found.state });
+      this.update(id, { mergeRequestState: found.state });
     } catch {
       return;
     }
@@ -1180,6 +1210,13 @@ export class Sessions {
       cost,
     };
     this.write((trx) => recordTurn(trx, turn));
+    const usage = this.usageOf(id);
+    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
+    this.update(id, { usage: { ...usage, tokens: usage.tokens + total, reportedCost: usage.reportedCost + cost } });
+  }
+
+  private usageOf(id: number): SessionUsage {
+    return this.get(id).usage ?? NO_USAGE;
   }
 
   /** The model the Session runs with: the one picked, or else the agent's own. */
@@ -1234,7 +1271,7 @@ export class Sessions {
     this.save(id, { branch });
   }
 
-  /** Works out the Session's diff, and the Session header's changes control with it. */
+  /** Works out the Session's diff, and Session info's diff stat with it. */
   async diff(id: number, uncommittedOnly = false): Promise<DiffSummary> {
     const diff = await this.diffOf(id);
     if (!diff) return { available: false, reason: 'No diff available' };
@@ -1296,7 +1333,7 @@ export class Sessions {
     return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }, this.options.maxUntrackedCounted) : undefined;
   }
 
-  /** Records the Session header's changes control; keeps the last one known if git can't say. */
+  /** Records Session info's diff stat; keeps the last one known if git can't say. */
   private async lookUpDiffStat(id: number): Promise<void> {
     try {
       const session = this.get(id);
@@ -1362,7 +1399,7 @@ export class Sessions {
       merge_request_state: link ? 'open' : null,
     });
     if (same) return;
-    this.update(id, { mergeRequest: link });
+    this.update(id, { mergeRequest: link, mergeRequestState: link ? 'open' : undefined });
     if (link) {
       this.endStreaming(id);
       this.addItem(id, { kind: 'merge-request', ...link });
@@ -1618,6 +1655,13 @@ export class Sessions {
     }
     if (kind) this.spans.set(id, { kind, since: now });
     else this.spans.delete(id);
+    // The Session's Working time: its runs so far, and when the one going on started.
+    const session = this.sessions.get(id);
+    if (session && (open?.kind === 'run' || kind === 'run')) {
+      const usage = this.usageOf(id);
+      const workingMs = usage.workingMs + (open?.kind === 'run' ? Math.max(0, now - open.since) : 0);
+      this.sessions.set(id, { ...session, usage: withoutUndefined({ ...usage, workingMs, workingSince: kind === 'run' ? now : undefined }) });
+    }
   }
 
   /**
@@ -1798,6 +1842,7 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     branch: row.branch ?? undefined,
     issue: linkOf(row.issue_number, row.issue_url),
     mergeRequest: linkOf(row.merge_request_number, row.merge_request_url),
+    mergeRequestState: row.merge_request_number === null ? undefined : (row.merge_request_state ?? undefined),
     model: row.model ?? undefined,
     effort: row.effort ?? undefined,
     context: row.context_used === null || row.context_size === null ? undefined : { used: row.context_used, size: row.context_size },

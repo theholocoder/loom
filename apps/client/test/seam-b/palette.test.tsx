@@ -81,7 +81,6 @@ describe('palette actions', () => {
     expect(actionNames()).toEqual([
       'New Session',
       'Add Project from existing clone…',
-      'Toggle changes panel',
       'Theme: Midnight',
       'Theme: Paper',
       'Theme: Nord',
@@ -95,7 +94,6 @@ describe('palette actions', () => {
     const keys = (name: string) => within(within(palette()).getByRole('option', { name })).queryByText((_, el) => el?.tagName === 'KBD')?.textContent;
     expect(keys('New Session')).toBe('Ctrl N');
     expect(keys('Add Project from existing clone…')).toBe('Ctrl O');
-    expect(keys('Toggle changes panel')).toBe('D');
     expect(keys('Open Settings')).toBe('Ctrl ,');
   });
 
@@ -115,7 +113,9 @@ describe('palette actions', () => {
       'Link Merge request…',
       'Open in editor',
       'Open in terminal',
-      'Toggle changes panel',
+      'Toggle sidebar',
+      'Toggle diff',
+      'Toggle Session info',
       'Mark this Session unread',
       'Archive this Session',
       'Theme: Midnight',
@@ -260,7 +260,7 @@ describe('running palette actions', () => {
 describe('shortcuts', () => {
   const twoWaiting = () => new FakeMain({ projects: [billing], sessions: [session(1, { title: 'First', updatedAt: 9 }), session(2, { title: 'Second', updatedAt: 1 })] });
 
-  it('j goes to the next Waiting Session, d toggles the changes panel, e archives', async () => {
+  it('j goes to the next Waiting Session, d toggles the diff, e archives', async () => {
     const main = renderApp(twoWaiting());
 
     press('j');
@@ -269,9 +269,9 @@ describe('shortcuts', () => {
     expect(openSessionTitle()).toBe('Second');
 
     press('d');
-    expect(screen.getByRole('region', { name: 'Changes' })).toBeTruthy();
+    expect(screen.getByRole('tabpanel', { name: 'Changes' })).toBeTruthy();
     press('d');
-    expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
+    expect(screen.queryByRole('tabpanel', { name: 'Changes' })).toBeNull();
 
     press('e');
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.archive', params: { id: 2 } }));

@@ -83,6 +83,12 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setSidebar': (sidebar) => {
+        const current = this.value('settings');
+        const settings = { ...current, sidebar: { ...current.sidebar, ...sidebar } };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setApproval': ({ category, setting }) => {
         const current = this.value('settings');
         const settings = { ...current, approvals: { ...current.approvals, [category]: setting } };

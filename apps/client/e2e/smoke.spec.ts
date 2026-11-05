@@ -55,9 +55,9 @@ test('launches into the three-pane window and connects the native Environment', 
 
   await expect(window.getByRole('complementary', { name: 'Inbox' })).toBeVisible();
   await expect(window.getByRole('main', { name: 'Session' })).toBeVisible();
-  // The diff toggle lives in the Session header, which this empty start screen has none of; there is no rail.
-  await expect(window.getByRole('button', { name: /changes/i })).toHaveCount(0);
-  await expect(window.getByRole('region', { name: 'Changes' })).toHaveCount(0);
+  // The right sidebar is the open Session's: this empty start screen has none, nor its toggle.
+  await expect(window.getByRole('button', { name: /sidebar/i })).toHaveCount(0);
+  await expect(window.getByRole('complementary', { name: 'Session sidebar' })).toHaveCount(0);
 
   await window.getByRole('button', { name: 'Settings' }).click();
   const native = window.getByRole('row', { name: /Native/ });

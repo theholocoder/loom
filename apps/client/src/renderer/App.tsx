@@ -1,6 +1,6 @@
 // The window's three panes, following docs/prototypes/ui-layout.html: the
-// Inbox sidebar, the main pane and the Session header's changes control. Also
-// the Ctrl+K palette and the keyboard shortcuts, which run the same actions.
+// Inbox sidebar, the main pane and the open Session's right sidebar. Also the
+// Ctrl+K palette and the keyboard shortcuts, which run the same actions.
 import {
   Archive,
   ArrowLeftToLine,
@@ -14,11 +14,13 @@ import {
   FolderOpen,
   GitPullRequestArrow,
   GitPullRequestCreate,
+  Info,
   Keyboard,
   Link,
   Mail,
   MessageSquarePlus,
   Palette,
+  PanelRight,
   Plus,
   Reply,
   RotateCw,
@@ -35,7 +37,6 @@ import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { DatabaseProblem } from './DatabaseProblem';
-import { DiffPanel } from './DiffPanel';
 import { inboxOrder, InboxList } from './Inbox';
 import { Popover } from './Popover';
 import { ProjectPicker } from './ProjectPicker';
@@ -44,6 +45,7 @@ import { Projects, useExistingCloneLinker } from './Projects';
 import { NewSession, SessionView, type SessionCommand } from './Sessions';
 import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
+import { useSidebar, type SidebarControl } from './Sidebar';
 import { matchesShortcut, SHORTCUTS, type ShortcutName } from './shortcuts';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
@@ -74,8 +76,7 @@ function Workspace() {
     window.addEventListener('focus', check);
     return () => window.removeEventListener('focus', check);
   }, [api]);
-  const [diffOpen, setDiffOpen] = useState(false);
-  const toggleDiff = () => setDiffOpen((open) => !open);
+  const sidebar = useSidebar();
   const linker = useExistingCloneLinker();
   const sessions = useTopic('sessions') ?? [];
   const projects = useTopic('projects') ?? [];
@@ -133,7 +134,7 @@ function Workspace() {
     addExistingClone,
     select,
     command: setCommand,
-    toggleDiff,
+    sidebar,
     setTheme: (theme) => {
       api.invoke('settings.setAppearance', { theme }).catch((error: unknown) => console.error('theme change failed:', error));
     },
@@ -228,8 +229,7 @@ function Workspace() {
           command={command}
           onCommandDone={() => setCommand(undefined)}
           onRetryableChange={setRetryable}
-          diffOpen={diffOpen}
-          onToggleDiff={toggleDiff}
+          sidebar={sidebar}
           commands={actions}
         />
       ) : (
@@ -237,7 +237,6 @@ function Workspace() {
           <div className="empty">No Session selected.</div>
         </main>
       )}
-      <DiffPanel session={selected} open={diffOpen} onToggle={toggleDiff} />
       {picking && (
         <ProjectPicker
           projects={picking.fromIssue ? forgeProjects : projects}
@@ -314,7 +313,7 @@ function paletteActions(app: {
   addExistingClone: () => void;
   select: (session: Session) => void;
   command: (command: SessionCommand) => void;
-  toggleDiff: () => void;
+  sidebar: SidebarControl;
   setTheme: (theme: Theme) => void;
   setView: (view: View) => void;
   showHelp: (returnFocus: HTMLElement | null) => void;
@@ -350,7 +349,10 @@ function paletteActions(app: {
     active && project?.forge.state === 'available' && { label: 'Link Merge request…', icon: Link, run: () => app.command('linkMergeRequest') },
     open && shortcutAction('openInEditor', CodeXml, () => app.command('openInEditor')),
     open && shortcutAction('openInTerminal', SquareTerminal, () => app.command('openInTerminal')),
-    shortcutAction('toggleDiff', FileDiff, app.toggleDiff),
+    // The sidebar is the open Session's: with none, there is none to toggle.
+    session && shortcutAction('toggleSidebar', PanelRight, app.sidebar.toggle),
+    session && shortcutAction('toggleDiff', FileDiff, () => app.sidebar.toggleView('changes')),
+    session && shortcutAction('toggleInfo', Info, () => app.sidebar.toggleView('info')),
     active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
     open && shortcutAction('archive', Archive, () => app.command('archive')),
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),

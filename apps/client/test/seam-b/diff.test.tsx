@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
-import { DiffPanel } from '../../src/renderer/DiffPanel';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type Project, type Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
@@ -45,9 +44,15 @@ function renderOpen(main: FakeMain, s: Session = session) {
       <App />
     </ApiProvider>,
   );
-  fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: s.title }));
+  const inbox = within(screen.getByRole('complementary', { name: 'Inbox' }));
+  if (s.status === 'archived') fireEvent.click(inbox.getByRole('button', { name: 'Archived' }));
+  fireEvent.click(inbox.getByRole('button', { name: s.title }));
   return main;
 }
+
+/** Opens the sidebar's Changes view, as `d` does. */
+const showChanges = () => fireEvent.keyDown(document.body, { key: 'd' });
+const hideChanges = showChanges;
 
 function fakeMain(result: DiffSummary = summary, s: Session = session) {
   return new FakeMain(
@@ -59,32 +64,25 @@ function fakeMain(result: DiffSummary = summary, s: Session = session) {
   );
 }
 
-const panel = () => screen.getByRole('region', { name: 'Changes' });
+const panel = () => screen.getByRole('tabpanel', { name: 'Changes' });
 const diffCalls = (main: FakeMain, command: string) => main.invoked.filter((c) => c.command === command);
 
-describe('the diff panel', () => {
-  it('shows the files/+/− counts in the Session header control, with no rail, and works out the diff only once opened', () => {
+describe('the Changes view', () => {
+  it('works out the diff only once the Changes view is first shown', () => {
     const main = renderOpen(fakeMain());
-    const header = screen.getByRole('main', { name: 'Session' });
-    const control = within(header).getByRole('button', { name: 'Show changes: 4 files, 1210 added, 3 removed' });
-    expect(control.getAttribute('aria-expanded')).toBe('false');
-    expect(control.getAttribute('aria-controls')).toBe('diff-panel');
-    expect(control.getAttribute('title')).toBe('Show changes: 4 files, 1210 added, 3 removed');
-    expect(control.querySelector('.files')?.textContent).toBe('4');
-    expect(control.querySelector('.add')?.textContent).toBe('+1210');
-    expect(control.querySelector('.del')?.textContent).toBe('−3');
-    expect(document.querySelector('.diff-rail, .diff-badge')).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
+    expect(screen.queryByRole('tabpanel', { name: 'Changes' })).toBeNull();
+    expect(diffCalls(main, 'sessions.diff')).toHaveLength(0);
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
     expect(diffCalls(main, 'sessions.diff')).toHaveLength(0);
 
-    fireEvent.click(control);
-    expect(within(header).getByRole('button', { name: /^Hide changes: 4 files/ }).getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Changes' }));
     expect(panel()).toBeTruthy();
+    expect(diffCalls(main, 'sessions.diff')).toHaveLength(1);
   });
 
   it('shows a file tree and per-file sections, large, binary and lockfiles collapsed, loading a diff on expand', async () => {
     const main = renderOpen(fakeMain());
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    showChanges();
     await waitFor(() => expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy());
     const tree = within(panel()).getByRole('navigation', { name: 'Changed files' });
     expect(within(tree).getByRole('button', { name: 'src' }).getAttribute('aria-expanded')).toBe('true');
@@ -111,7 +109,7 @@ describe('the diff panel', () => {
 
   it('toggles to uncommitted changes only, and refreshes', async () => {
     const main = renderOpen(fakeMain());
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    showChanges();
     const only = await within(panel()).findByRole('button', { name: 'Uncommitted only' });
     fireEvent.click(only);
     await waitFor(() => expect(within(panel()).queryByRole('region', { name: 'src/auth/login.ts' })).toBeNull());
@@ -125,26 +123,25 @@ describe('the diff panel', () => {
 
   it('refreshes at the end of a turn and on reopening', async () => {
     const main = renderOpen(fakeMain());
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    showChanges();
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(1));
     act(() => main.publish('sessions', [{ ...session, status: 'working' }]));
     act(() => main.publish('sessions', [{ ...session, status: 'waiting', updatedAt: 5 }]));
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(2));
     // An update that isn't a turn ending doesn't refresh it.
     act(() => main.publish('sessions', [{ ...session, status: 'waiting', updatedAt: 6, unread: true }]));
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Hide changes' }));
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    hideChanges();
+    expect(screen.queryByRole('tabpanel', { name: 'Changes' })).toBeNull();
+    showChanges();
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
   });
 
   it("shows an archived Session's branch read-only, or no diff available", async () => {
     const archived = { ...session, status: 'archived' as const };
-    const renderPanel = (main: FakeMain) =>
-      render(
-        <ApiProvider api={main}>
-          <DiffPanel session={archived} open onToggle={() => {}} />
-        </ApiProvider>,
-      );
+    const renderPanel = (main: FakeMain) => {
+      renderOpen(main, archived);
+      showChanges();
+    };
     renderPanel(fakeMain({ ...summary, readOnly: true, files: [files[0]!] }, archived));
     await within(panel()).findByRole('region', { name: 'src/auth/login.ts' });
     expect(within(panel()).queryByRole('button', { name: 'Uncommitted only' })).toBeNull();
@@ -165,7 +162,7 @@ describe('the diff panel', () => {
       },
     );
     renderOpen(main);
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
+    showChanges();
     expect((await within(panel()).findByRole('alert')).textContent).toMatch(/no local origin\/main/);
   });
 });
@@ -186,8 +183,8 @@ describe("the diff's base", () => {
         },
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
-    const panel = await screen.findByRole('region', { name: 'Changes' });
+    showChanges();
+    const panel = await screen.findByRole('tabpanel', { name: 'Changes' });
 
     const picker = await within(panel).findByRole('button', { name: 'Compared with' });
     expect(picker.textContent).toBe('origin/main');
@@ -202,15 +199,15 @@ describe("the diff's base", () => {
 
   it('has no base control on an archived read-only diff, nor for uncommitted changes only', async () => {
     renderOpen(fakeMain({ ...summary, readOnly: true, baseSource: 'recorded' }));
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
-    const panel = await screen.findByRole('region', { name: 'Changes' });
+    showChanges();
+    const panel = await screen.findByRole('tabpanel', { name: 'Changes' });
     await waitFor(() => expect(panel.textContent).toContain('login.ts'));
     expect(within(panel).queryByRole('button', { name: 'Compared with' })).toBeNull();
     cleanup();
 
     renderOpen(fakeMain({ ...summary, baseSource: 'recorded' }));
-    fireEvent.click(screen.getByRole('button', { name: /^Show changes/ }));
-    const live = await screen.findByRole('region', { name: 'Changes' });
+    showChanges();
+    const live = await screen.findByRole('tabpanel', { name: 'Changes' });
     await within(live).findByRole('button', { name: 'Compared with' });
     fireEvent.click(within(live).getByRole('button', { name: 'Uncommitted only' }));
     await waitFor(() => expect(within(live).queryByRole('button', { name: 'Compared with' })).toBeNull());

@@ -4,7 +4,7 @@
 import type { Kysely, Transaction } from 'kysely';
 import { TOP_SESSIONS, USAGE_RANGES, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
 import type { Schema, SessionSpansTable } from '../storage/schema';
-import type { MergeRequestState } from '../projects/merge-requests';
+import type { MergeRequestState } from '../../shared/api';
 
 /** One turn's usage, as the Session service records it. */
 export interface TurnUsage {

@@ -48,6 +48,14 @@ function open(main: FakeMain) {
   return { header: screen.getByRole('region', { name: 'Session header' }), log: screen.getByRole('log', { name: 'Conversation' }) };
 }
 
+/** Session info's Git group, opening the view with Ctrl+I if it isn't shown. */
+function gitGroup(): HTMLElement {
+  if (!screen.queryByRole('tabpanel', { name: 'Session info' })) fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+  return within(screen.getByRole('tabpanel', { name: 'Session info' })).getByRole('region', { name: 'Git' });
+}
+
+const mergeRequestFact = (git: HTMLElement) => within(git).getAllByRole('term').find((t) => t.textContent === 'Merge request')!.nextElementSibling as HTMLElement;
+
 const calls = (main: FakeMain, command: string) => main.invoked.filter((i) => i.command === command).map((i) => i.params);
 
 describe("the Session's Merge request", () => {
@@ -73,64 +81,57 @@ describe("the Session's Merge request", () => {
     expect(within(log).getByRole('note').textContent).toBe("Couldn't link Merge request 41: That Merge request is closed: only an open one can be linked.");
   });
 
-  it("is a menu in the header once linked: open it, ask the agent to update it, or link another", async () => {
-    const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url } })] });
-    const { header } = open(main);
-    expect(within(header).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
-    const button = within(header).getByRole('button', { name: 'Merge request !12' });
-    expect(button.textContent).toBe('!12');
+  it('shows in Session info once linked, with its state: open it, ask the agent to update it, or link another', async () => {
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] });
+    open(main);
+    const git = gitGroup();
+    expect(within(git).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
+    expect(mergeRequestFact(git).querySelector('.value')!.textContent).toBe('!12open');
 
-    const pick = (name: string) => {
-      fireEvent.click(button);
-      const menu = screen.getByRole('menu', { name: 'Merge request !12' });
-      expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open !12', 'Update Merge request', 'Link another Merge request…']);
-      fireEvent.click(within(menu).getByRole('menuitem', { name }));
-      expect(screen.queryByRole('menu')).toBeNull();
-    };
-    pick('Open !12');
+    fireEvent.click(within(git).getByRole('button', { name: 'Open Merge request !12' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
-    pick('Update Merge request');
+    fireEvent.click(within(git).getByRole('button', { name: 'Update Merge request' }));
     await waitFor(() => expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]));
-    pick('Link another Merge request…');
+    fireEvent.click(within(git).getByRole('button', { name: 'Link Merge request' }));
     expect(screen.getByRole('dialog', { name: 'Link Merge request' })).toBeTruthy();
   });
 
-  it('just opens the linked one from the header of an archived Session', async () => {
-    const main = new FakeMain({ projects: [gitlab], sessions: [session({ status: 'archived', mergeRequest: { number: 12, url } })] });
+  it('just opens the linked one from Session info of an archived Session', async () => {
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ status: 'archived', mergeRequest: { number: 12, url }, mergeRequestState: 'merged' })] });
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: /Archive/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Fix login' }));
-    const header = screen.getByRole('region', { name: 'Session header' });
+    const git = gitGroup();
 
-    const button = within(header).getByRole('button', { name: 'Merge request !12' });
-    expect(button.getAttribute('aria-haspopup')).toBeNull();
-    fireEvent.click(button);
+    expect(within(git).queryByRole('button', { name: 'Update Merge request' })).toBeNull();
+    expect(within(git).queryByRole('button', { name: 'Link Merge request' })).toBeNull();
+    fireEvent.click(within(git).getByRole('button', { name: 'Open Merge request !12' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
   });
 
-  it('asks the agent to create one from the header when none is linked, and offers no actions with the Forge off', () => {
+  it('asks the agent to create one from Session info when none is linked, and offers no actions with the Forge off', () => {
     const main = new FakeMain({ projects: [gitlab], sessions: [session()] });
-    const { header } = open(main);
-    fireEvent.click(within(header).getByRole('button', { name: 'Create Merge request' }));
+    open(main);
+    fireEvent.click(within(gitGroup()).getByRole('button', { name: 'Create Merge request' }));
     expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]);
     cleanup();
 
     const off = new FakeMain({ projects: [{ ...gitlab, forge: { state: 'no-remote', checking: false } }], sessions: [session()] });
-    const second = open(off);
-    expect(within(second.header).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
-    expect(within(second.header).queryByRole('button', { name: 'Link Merge request' })).toBeNull();
+    open(off);
+    expect(within(gitGroup()).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
+    expect(within(gitGroup()).queryByRole('button', { name: 'Link Merge request' })).toBeNull();
   });
 
-  it('links one by hand from the header, showing why the Forge refused it', async () => {
+  it('links one by hand from Session info, showing why the Forge refused it', async () => {
     let refuse = true;
     const main = new FakeMain({ projects: [gitlab], sessions: [session()] }, {
       'sessions.linkMergeRequest': () => {
         if (refuse) throw new Error('That Merge request is closed: only an open one can be linked.');
       },
     });
-    const { header } = open(main);
+    open(main);
 
-    fireEvent.click(within(header).getByRole('button', { name: 'Link Merge request' }));
+    fireEvent.click(within(gitGroup()).getByRole('button', { name: 'Link Merge request' }));
     const dialog = screen.getByRole('dialog', { name: 'Link Merge request' });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Merge request number or URL' }), { target: { value: ' !41 ' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Link' }));

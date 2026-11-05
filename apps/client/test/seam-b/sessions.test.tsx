@@ -284,30 +284,37 @@ describe('starting a Session', () => {
   });
 });
 
+/** The sidebar's Session info view, opening it with Ctrl+I if it isn't shown. */
+function info(): HTMLElement {
+  if (!screen.queryByRole('tabpanel', { name: 'Session info' })) fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+  return screen.getByRole('tabpanel', { name: 'Session info' });
+}
+
 describe('a Session', () => {
-  it('shows its Project, repository, branch and working copy in its header', () => {
+  it('shows its Project and branch in its header, the rest in Session info', () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [inWorktree] })), inWorktree);
     const header = () => screen.getByRole('region', { name: 'Session header' });
 
     expect(within(header()).getByText('billing-api')).toBeTruthy();
-    expect(within(header()).getByText('acme/billing-api')).toBeTruthy();
     expect(within(header()).getByTitle('Branch').textContent).toBe('loom/login');
-    const chip = within(header()).getByText('worktree');
-    expect(chip.closest('[title]')?.getAttribute('title')).toBe('/home/dev/loom/worktrees/billing-api/login');
+    expect(within(header()).queryByText('acme/billing-api')).toBeNull();
+    const where = within(info()).getByRole('region', { name: 'Where' });
+    expect(within(where).getByText('acme/billing-api')).toBeTruthy();
+    expect(within(where).getByText('worktree')).toBeTruthy();
+    expect(within(where).getByText('/home/dev/loom/worktrees/billing-api/login')).toBeTruthy();
 
     act(() => main.publish('sessions', [{ ...inWorktree, branch: 'loom/login-v2' }]));
     expect(within(header()).getByTitle('Branch').textContent).toBe('loom/login-v2');
   });
 
-
-  it('archives from its header, which an archived Session no longer offers', async () => {
+  it('archives from Session info, which an archived Session no longer offers', async () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [inWorktree] })), inWorktree);
 
-    fireEvent.click(within(screen.getByRole('region', { name: 'Session header' })).getByRole('button', { name: 'Archive' }));
+    fireEvent.click(within(info()).getByRole('button', { name: 'Archive' }));
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive')).toEqual([{ command: 'sessions.archive', params: { id: inWorktree.id } }]));
 
     act(() => main.publish('sessions', [{ ...inWorktree, status: 'archived', waitingReason: undefined }]));
-    expect(within(screen.getByRole('region', { name: 'Session header' })).queryByRole('button', { name: 'Archive' })).toBeNull();
+    expect(within(info()).queryByRole('button', { name: 'Archive' })).toBeNull();
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('This Session is archived.');
   });
 
@@ -319,7 +326,7 @@ describe('a Session', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'More' } });
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe("This Session's worktree is missing; it can only be archived.");
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(within(screen.getByRole('region', { name: 'Session header' })).getByRole('button', { name: 'Archive' })).toBeTruthy();
+    expect(within(info()).getByRole('button', { name: 'Archive' })).toBeTruthy();
   });
 
   it('shows the user as bubbles and streams the agent reply', () => {
@@ -517,9 +524,9 @@ describe('a Session', () => {
 });
 
 describe('open in editor and terminal', () => {
-  const header = () => screen.getByRole('region', { name: 'Session header' });
+  const header = info;
 
-  it("opens the Session's working copy in the editor and in a terminal from its header", async () => {
+  it("opens the Session's working copy in the editor and in a terminal from Session info", async () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [finished] })), finished);
 
     fireEvent.click(within(header()).getByRole('button', { name: 'Open in editor' }));

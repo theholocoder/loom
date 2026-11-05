@@ -1,15 +1,15 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
-import { DiffToggle } from './DiffToggle';
 import { IssuePicker } from './IssuePicker';
-import { OpenActions } from './OpenActions';
-import { MergeRequestActions } from './MergeRequestActions';
+import { ChangesView } from './Changes';
+import { SessionInfo } from './SessionInfo';
+import { Sidebar, type SidebarControl } from './Sidebar';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
@@ -316,7 +316,8 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
 export type SessionCommand = 'archive' | 'openMergeRequest' | 'requestMergeRequest' | 'linkMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
 
 /**
- * One Session: its header, its conversation and the composer. Showing it
+ * One Session: its header, its conversation and the composer, and the right
+ * sidebar beside them while `sidebar` is open. Showing it
  * marks it read, as does a status change while it is shown. Changing
  * `replyRequest` focuses the composer. A `command` is run once, showing what
  * went wrong in the conversation like the header's own actions, then handed
@@ -329,8 +330,7 @@ export function SessionView({
   command,
   onCommandDone,
   onRetryableChange,
-  diffOpen,
-  onToggleDiff,
+  sidebar,
   commands,
 }: {
   session: Session;
@@ -338,8 +338,7 @@ export function SessionView({
   command?: SessionCommand;
   onCommandDone?: () => void;
   onRetryableChange?: (retryable: boolean) => void;
-  diffOpen: boolean;
-  onToggleDiff: () => void;
+  sidebar: SidebarControl;
   /** What the composer's `/` offers: the palette's actions. */
   commands?: PaletteAction[];
 }) {
@@ -347,7 +346,12 @@ export function SessionView({
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
   const [error, setError] = useState<string>();
-  const [linkRequest, setLinkRequest] = useState(0);
+  /** Whether Session info's Link Merge request popover is open. */
+  const [linking, setLinking] = useState(false);
+  const infoShown = sidebar.open && sidebar.view === 'info';
+  useEffect(() => {
+    if (!infoShown) setLinking(false);
+  }, [infoShown]);
   const archiver = useArchive();
   const status = statusOf(session);
   const working = session.status === 'working';
@@ -382,7 +386,10 @@ export function SessionView({
       archive: () => archiver.archive(session),
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
       requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
-      linkMergeRequest: async () => setLinkRequest((n) => n + 1),
+      linkMergeRequest: async () => {
+        sidebar.reveal('info');
+        setLinking(true);
+      },
       openInEditor: () => api.invoke('sessions.openInEditor', { id }),
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
       retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
@@ -444,175 +451,179 @@ export function SessionView({
   // Loom quit or crashed during the run, which the agent can go on with.
   const continuable = session.status === 'waiting' && session.waitingReason === 'interrupted' && !session.worktreeMissing;
 
+  const archive = () => {
+    setError(undefined);
+    archiver.archive(session).catch((e: unknown) => setError((e as Error).message));
+  };
+
   return (
-    <main className="main" aria-label="Session">
-      <div className="main-head" role="region" aria-label="Session header">
-        <div className="grow" style={{ minWidth: 0 }}>
-          <div className="crumb">
-            {project && <span>{project.name}</span>}
-            {project?.forge.repository && <span className="tech">{project.forge.repository}</span>}
-            {session.issue && (
-              <>
-                <ChevronRight className="sm" />
-                <button type="button" className="chip tech" title="Issue" onClick={() => void api.invoke('links.open', { url: session.issue!.url }).catch(() => {})}>
-                  <CircleDot className="sm" />#{session.issue.number}
-                </button>
-              </>
-            )}
-            {session.branch && (
-              <>
-                <ChevronRight className="sm" />
-                <GitBranch className="sm" />
-                <span className="tech ellipsis" title="Branch">
-                  {session.branch}
-                </span>
-              </>
-            )}
-            <ChevronRight className="sm" />
-            <span className="chip" title={session.workingCopy.path}>
-              <FolderTree className="sm" />
-              {session.workingCopy.kind}
-            </span>
+    <>
+      <main className="main" aria-label="Session">
+        <div className="main-head" role="region" aria-label="Session header">
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="crumb">
+              {project && <span>{project.name}</span>}
+              {project && session.branch && <span aria-hidden="true">·</span>}
+              {session.branch && (
+                <>
+                  <GitBranch className="sm" />
+                  <span className="tech ellipsis" title="Branch">
+                    {session.branch}
+                  </span>
+                </>
+              )}
+            </div>
+            <div className="row">
+              <h1 className="ellipsis">{session.title}</h1>
+              <StatusIcon session={session} />
+              <span className={`${status.className} chip`} role="status" aria-label="Session status">
+                {status.label}
+              </span>
+              {session.worktreeMissing && <WorktreeMissing />}
+            </div>
           </div>
-          <div className="row">
-            <h1 className="ellipsis">{session.title}</h1>
-            <StatusIcon session={session} />
-            <span className={`${status.className} chip`} role="status" aria-label="Session status">
-              {status.label}
-            </span>
-            {session.worktreeMissing && <WorktreeMissing />}
-          </div>
-        </div>
-        <DiffToggle stat={session.diffStat} open={diffOpen} onToggle={onToggleDiff} />
-        <MergeRequestActions session={session} project={project} linkRequest={linkRequest} onError={setError} />
-        <OpenActions session={session} onError={setError} />
-        {session.status !== 'archived' && (
           <button
             className="icon-btn"
             type="button"
-            title="Archive"
-            aria-label="Archive"
-            onClick={() => {
-              setError(undefined);
-              archiver.archive(session).catch((e: unknown) => setError((e as Error).message));
-            }}
+            title={sidebar.open ? 'Hide sidebar' : 'Show sidebar'}
+            aria-label={sidebar.open ? 'Hide sidebar' : 'Show sidebar'}
+            aria-expanded={sidebar.open}
+            aria-controls="session-sidebar"
+            onClick={sidebar.toggle}
           >
-            <Archive />
+            <PanelRight />
           </button>
-        )}
-        {archiver.dialog}
-      </div>
-      <div className="chat" role="log" aria-label="Conversation">
-        {items.map((item) =>
-          item.kind === 'user' ? (
-            <div key={item.id} className="msg user">
-              <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <div className="bubble">
-                  {item.text && <Markdown text={item.text} breaks />}
-                  {item.attachments && <AttachmentList attachments={item.attachments} />}
+          {archiver.dialog}
+        </div>
+        <div className="chat" role="log" aria-label="Conversation">
+          {items.map((item) =>
+            item.kind === 'user' ? (
+              <div key={item.id} className="msg user">
+                <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div className="bubble">
+                    {item.text && <Markdown text={item.text} breaks />}
+                    {item.attachments && <AttachmentList attachments={item.attachments} />}
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : item.kind === 'agent' ? (
-            <div key={item.id} className="msg agent">
-              <div className="who">
-                <Bot />
-              </div>
-              <div className="body">
-                <div className="name">{session.agent}</div>
-                <div className="bubble">
-                  <Markdown text={item.text} />
+            ) : item.kind === 'agent' ? (
+              <div key={item.id} className="msg agent">
+                <div className="who">
+                  <Bot />
+                </div>
+                <div className="body">
+                  <div className="name">{session.agent}</div>
+                  <div className="bubble">
+                    <Markdown text={item.text} />
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : item.kind === 'thinking' ? (
-            <ThinkingBlock key={item.id} item={item} />
-          ) : item.kind === 'tool' ? (
-            <ToolCard key={item.id} item={item} />
-          ) : item.kind === 'question' ? (
-            <QuestionCard key={item.id} item={item} />
-          ) : item.kind === 'approval' ? (
-            <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
-          ) : item.kind === 'trust' ? (
-            <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
-          ) : item.kind === 'interruption' ? (
-            <Interruption key={item.id} item={item} onContinue={continuable && item === items.at(-1) ? () => void runCommand(() => api.invoke('sessions.continue', { id: session.id })) : undefined} />
-          ) : item.kind === 'model' ? (
-            <ModelMarker key={item.id} item={item} />
-          ) : item.kind === 'merge-request-refused' ? (
-            <div key={item.id} className="interruption" role="note">
-              <TriangleAlert className="sm" />
-              <span>
-                Couldn't link Merge request <span className="tech">{item.mergeRequest}</span>: {item.reason}
-              </span>
-            </div>
-          ) : item.kind === 'merge-request' ? (
-            <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => void api.invoke('links.open', { url: item.url }).catch((e: unknown) => setError((e as Error).message))} />
-          ) : (
-            <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
-          ),
-        )}
-        {unshownError && <ErrorCard message={unshownError} />}
-        {starting && environment && (
-          <div className="tools">
-            <div className="tool" role="status">
-              <div className="tool-head">
-                <span className="spin">
-                  <LoaderCircle className="sm" />
+            ) : item.kind === 'thinking' ? (
+              <ThinkingBlock key={item.id} item={item} />
+            ) : item.kind === 'tool' ? (
+              <ToolCard key={item.id} item={item} />
+            ) : item.kind === 'question' ? (
+              <QuestionCard key={item.id} item={item} />
+            ) : item.kind === 'approval' ? (
+              <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
+            ) : item.kind === 'trust' ? (
+              <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
+            ) : item.kind === 'interruption' ? (
+              <Interruption key={item.id} item={item} onContinue={continuable && item === items.at(-1) ? () => void runCommand(() => api.invoke('sessions.continue', { id: session.id })) : undefined} />
+            ) : item.kind === 'model' ? (
+              <ModelMarker key={item.id} item={item} />
+            ) : item.kind === 'merge-request-refused' ? (
+              <div key={item.id} className="interruption" role="note">
+                <TriangleAlert className="sm" />
+                <span>
+                  Couldn't link Merge request <span className="tech">{item.mergeRequest}</span>: {item.reason}
                 </span>
-                <span className="grow">{`Starting ${environment.label}…`}</span>
+              </div>
+            ) : item.kind === 'merge-request' ? (
+              <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => void api.invoke('links.open', { url: item.url }).catch((e: unknown) => setError((e as Error).message))} />
+            ) : (
+              <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
+            ),
+          )}
+          {unshownError && <ErrorCard message={unshownError} />}
+          {starting && environment && (
+            <div className="tools">
+              <div className="tool" role="status">
+                <div className="tool-head">
+                  <span className="spin">
+                    <LoaderCircle className="sm" />
+                  </span>
+                  <span className="grow">{`Starting ${environment.label}…`}</span>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        {error && (
-          <div className="err" role="alert">
-            {error}
-          </div>
-        )}
-        <div ref={end} />
-      </div>
-      <Composer
-        agent={session.agent}
-        placeholder={composerPlaceholder()}
-        disabled={(session.status !== 'waiting' && !working) || (asked && !freeAnswer) || !!session.worktreeMissing}
-        dock={panel}
-        clearKey={stepKey}
-        focusRequest={replyRequest}
-        onSend={send}
-        canAttach={!freeAnswer}
-        loadFiles={session.status === 'archived' || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
-        commands={commands}
-        queueing={working}
-        tools={
-          <ModelPickers
-            agent={session.agent}
-            models={agentConfig ? { value: agentConfig.models } : checkoutModels.listed}
-            model={shownModel}
-            efforts={shownEfforts}
-            effort={session.effort ?? agentConfig?.effort}
-            disabled={pickersDisabled}
-            onOpen={checkoutModels.refresh}
-            onModel={(model) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, model }))}
-            onEffort={(effort) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, effort }))}
-          />
-        }
-        gauge={session.context && <ContextGauge context={session.context} />}
-        onStop={working ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
-        queue={
-          session.queue && session.status !== 'archived' ? (
-            <Queue
-              queue={session.queue}
-              // Steering needs a run going; otherwise Send now sends it as the reply.
-              steer={working && !!session.canSteer}
-              onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
-              onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
-              onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
+          )}
+          {error && (
+            <div className="err" role="alert">
+              {error}
+            </div>
+          )}
+          <div ref={end} />
+        </div>
+        <Composer
+          agent={session.agent}
+          placeholder={composerPlaceholder()}
+          disabled={(session.status !== 'waiting' && !working) || (asked && !freeAnswer) || !!session.worktreeMissing}
+          dock={panel}
+          clearKey={stepKey}
+          focusRequest={replyRequest}
+          onSend={send}
+          canAttach={!freeAnswer}
+          loadFiles={session.status === 'archived' || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
+          commands={commands}
+          queueing={working}
+          tools={
+            <ModelPickers
+              agent={session.agent}
+              models={agentConfig ? { value: agentConfig.models } : checkoutModels.listed}
+              model={shownModel}
+              efforts={shownEfforts}
+              effort={session.effort ?? agentConfig?.effort}
+              disabled={pickersDisabled}
+              onOpen={checkoutModels.refresh}
+              onModel={(model) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, model }))}
+              onEffort={(effort) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, effort }))}
             />
-          ) : undefined
-        }
-      />
-    </main>
+          }
+          gauge={session.context && <ContextGauge context={session.context} />}
+          onStop={working ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
+          queue={
+            session.queue && session.status !== 'archived' ? (
+              <Queue
+                queue={session.queue}
+                // Steering needs a run going; otherwise Send now sends it as the reply.
+                steer={working && !!session.canSteer}
+                onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
+                onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
+                onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
+              />
+            ) : undefined
+          }
+        />
+      </main>
+      {sidebar.open && (
+        <Sidebar control={sidebar}>
+          {sidebar.view === 'changes' ? (
+            <ChangesView session={session} />
+          ) : (
+            <SessionInfo
+              session={session}
+              project={project}
+              linking={linking}
+              onLinkingChange={setLinking}
+              onShowChanges={() => sidebar.reveal('changes')}
+              onArchive={archive}
+              onError={setError}
+            />
+          )}
+        </Sidebar>
+      )}
+    </>
   );
 }
 
