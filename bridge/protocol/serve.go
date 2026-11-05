@@ -27,9 +27,11 @@ const ProtocolVersion = 2
 const MaxFrameSize = 16 << 20
 
 // Info describes this bridge build. Version is the Client's version the
-// bridge was built with.
+// bridge was built with; Executable is the bridge binary's own path, which
+// agents run as `<executable> mcp` for Loom's tools (see package mcp).
 type Info struct {
-	Version string
+	Version    string
+	Executable string
 }
 
 // Machine is what the bridge needs from the machine (or WSL distro) it runs
@@ -74,6 +76,7 @@ type handshakeResult struct {
 	OS              string `json:"os"`
 	Arch            string `json:"arch"`
 	Home            string `json:"home"`
+	Executable      string `json:"executable,omitempty"`
 }
 
 // Serve answers requests read from r on w until r reaches EOF, which is how
@@ -137,6 +140,7 @@ func (s *server) handle(ctx context.Context, req request) response {
 			OS:              runtime.GOOS,
 			Arch:            runtime.GOARCH,
 			Home:            s.home,
+			Executable:      s.info.Executable,
 		}, nil)
 	case "ping":
 		return reply(struct{}{}, nil)

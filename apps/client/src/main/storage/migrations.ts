@@ -91,4 +91,7 @@ export const migrations: Migration[] = [
   async (db) => {
     await db.schema.alterTable('queued_messages').addColumn('attachments', 'text').execute();
   },
+  async (db) => {
+    await db.schema.alterTable('sessions').addColumn('merge_request_branch', 'text').execute();
+  },
 ];

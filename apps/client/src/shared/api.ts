@@ -13,6 +13,8 @@ export interface BridgeInfo {
   arch: string;
   /** The user's home folder in the Environment, which `~` means there. */
   home: string;
+  /** The bridge binary's path in the Environment, which agents run as `<executable> mcp` for Loom's tools. */
+  executable?: string;
 }
 
 /**
@@ -658,7 +660,9 @@ export type TranscriptItem =
    * next prompt: what they picked, `model` for a new model, `effort` for a
    * new Effort level (a new model without one goes back to its default).
    */
-  | { kind: 'model'; id: number; model?: string; effort?: string };
+  | { kind: 'model'; id: number; model?: string; effort?: string }
+  /** A Merge request was linked to the Session: found on its branch, linked by the user or by the agent's tool. */
+  | { kind: 'merge-request'; id: number; number: number; url: string };
 
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed
@@ -867,6 +871,16 @@ export interface Commands {
    * is on the default branch or on no branch. Queued while the Session is Working.
    */
   'sessions.requestMergeRequest': { params: { id: number }; result: void };
+  /**
+   * Links the Merge request `mergeRequest` names to the Session by hand, for
+   * what the lookup after each turn misses: its number (`12`, `#12`, `!12`)
+   * or its URL on the Project's Forge. Checked on the Forge first: rejects one
+   * it doesn't have, or that is merged or closed, and a Session on the
+   * default branch, archived, or whose Project's Forge is off. The link stays
+   * while the Session's branch does, even if no open Merge request is found
+   * on that branch.
+   */
+  'sessions.linkMergeRequest': { params: { id: number; mergeRequest: string }; result: void };
   /**
    * Runs the editor command on the Session's working copy, or on `file`, a
    * path relative to it, in the Session's Environment. Resolves once the

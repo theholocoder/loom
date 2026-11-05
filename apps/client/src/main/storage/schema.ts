@@ -48,6 +48,8 @@ export interface SessionsTable {
   /** The linked Merge request: both set, or both null. */
   merge_request_number: number | null;
   merge_request_url: string | null;
+  /** The Session's branch when its Merge request was linked: the link stays while the branch does. */
+  merge_request_branch: string | null;
   /** The model the user picked, `provider/model`, and its Effort level; null for the agent's own. */
   model: string | null;
   effort: string | null;
