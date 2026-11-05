@@ -122,8 +122,8 @@ describe('starting a Session', () => {
     const listbox = await screen.findByRole('listbox', { name: 'Worktrees' });
     await waitFor(() =>
       expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
-        'feat/49-cards/home/dev/loom-worktrees/49',
-        'detached HEAD/home/dev/loom-worktrees/scratch',
+        'feat/49-cards',
+        'detached HEAD',
         'loom/spikenew worktree',
         'origin/feature/loginnew worktree',
         'origin/release/1.2new worktree',
@@ -132,7 +132,7 @@ describe('starting a Session', () => {
     const search = screen.getByRole('textbox', { name: 'Search worktrees' });
     fireEvent.change(search, { target: { value: 'LOGIN' } });
     expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual(['origin/feature/loginnew worktree']);
-    fireEvent.change(search, { target: { value: 'worktrees/49' } });
+    fireEvent.change(search, { target: { value: '49-cards' } });
     fireEvent.click(within(listbox).getByRole('option'));
     expect(picker.textContent).toBe('feat/49-cards');
     fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));

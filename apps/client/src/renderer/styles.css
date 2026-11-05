@@ -265,7 +265,7 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .database-problem ul { margin: 0; padding-left: 20px; }
 .database-problem code { word-break: break-all; }
 .database-problem .error { color: var(--err); }
-.popover.search-popover { width: 360px; gap: 4px; }
+.popover.search-popover { width: max-content; min-width: 360px; gap: 4px; }
 .diff-base { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0 0; font-size: 12px; }
 
 /* the queue, above the composer, and where the user interrupted a run */
