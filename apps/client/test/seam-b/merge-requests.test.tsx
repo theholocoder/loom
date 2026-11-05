@@ -133,34 +133,19 @@ describe("the Session's Merge request", () => {
   });
 });
 
-describe('the /merge-request command', () => {
-  it('is offered as the prompt starts with /, and sending it asks the agent for the Merge request instead of sending the text', async () => {
+describe('the Merge request action from /', () => {
+  it('is among the commands / offers, and picking it asks the agent for the Merge request instead of sending the text', async () => {
     const main = new FakeMain({ projects: [gitlab], sessions: [session()] });
     open(main);
-    const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
 
-    fireEvent.change(prompt, { target: { value: '/me' } });
-    fireEvent.click(within(screen.getByRole('list', { name: 'Commands' })).getByRole('button', { name: /merge-request/ }));
-    expect((prompt as HTMLTextAreaElement).value).toBe('/merge-request');
-    expect(screen.queryByRole('list', { name: 'Commands' })).toBeNull();
+    fireEvent.change(prompt, { target: { value: '/create merge' } });
+    const commands = within(screen.getByRole('listbox', { name: 'Commands' }));
+    expect(commands.getAllByRole('option').map((o) => o.getAttribute('aria-label'))).toEqual(['Create Merge request for this Session']);
+    fireEvent.keyDown(prompt, { key: 'Enter' });
 
-    await act(async () => {
-      fireEvent.keyDown(prompt, { key: 'Enter' });
-    });
-    expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]);
+    await waitFor(() => expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]));
     expect(calls(main, 'sessions.send')).toEqual([]);
-    await waitFor(() => expect((prompt as HTMLTextAreaElement).value).toBe(''));
-  });
-
-  it("leaves the agent's own / commands alone", async () => {
-    const main = new FakeMain({ projects: [gitlab], sessions: [session()] });
-    open(main);
-    const prompt = screen.getByRole('textbox', { name: 'Prompt' });
-    fireEvent.change(prompt, { target: { value: '/init' } });
-    expect(screen.queryByRole('list', { name: 'Commands' })).toBeNull();
-    await act(async () => {
-      fireEvent.keyDown(prompt, { key: 'Enter' });
-    });
-    expect(calls(main, 'sessions.send')).toEqual([{ id: 1, prompt: '/init' }]);
+    expect(prompt.value).toBe('');
   });
 });
