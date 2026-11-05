@@ -72,4 +72,14 @@ export const migrations: Migration[] = [
   async (db) => {
     await db.schema.alterTable('projects').addColumn('trusted', 'integer').execute();
   },
+  async (db) => {
+    await db.schema
+      .createTable('queued_messages')
+      .addColumn('id', 'integer', (c) => c.primaryKey())
+      .addColumn('session_id', 'integer', (c) => c.notNull().references('sessions.id').onDelete('cascade'))
+      .addColumn('text', 'text', (c) => c.notNull())
+      .addColumn('created_at', 'integer', (c) => c.notNull())
+      .execute();
+    await db.schema.createIndex('queued_messages_session').on('queued_messages').column('session_id').execute();
+  },
 ];

@@ -45,17 +45,25 @@ export class AcpAdapter implements AgentAdapter {
       throw error;
     });
     let sessionId: string | undefined;
-    /** Elicitations and permission requests waiting on the user, by the requestId Loom gave them. */
-    const asked = new Map<string, (response: AgentResponse) => void>();
+    /**
+     * Elicitations and permission requests waiting on the user, by the
+     * requestId Loom gave them: answered by the user, or cancelled with the run.
+     */
+    const asked = new Map<string, { answer: (response: AgentResponse) => void; cancel: () => void }>();
     let asks = 0;
-    const ask = <T,>(prefix: string, event: (requestId: string) => AgentEvent, respond: (response: AgentResponse) => T | undefined) => {
+    const ask = <T,>(prefix: string, event: (requestId: string) => AgentEvent, respond: (response: AgentResponse) => T | undefined, cancelled: T) => {
       const requestId = `${prefix}-${++asks}`;
       return new Promise<T>((resolve) => {
-        asked.set(requestId, (response) => {
-          const result = respond(response);
-          if (result === undefined) return;
+        const settle = (result: T) => {
           asked.delete(requestId);
           resolve(result);
+        };
+        asked.set(requestId, {
+          answer: (response) => {
+            const result = respond(response);
+            if (result !== undefined) settle(result);
+          },
+          cancel: () => settle(cancelled),
         });
         onEvent(event(requestId));
       });
@@ -73,10 +81,11 @@ export class AcpAdapter implements AgentAdapter {
           const request = params as PermissionRequest;
           if (request.sessionId !== sessionId) return Promise.resolve({ outcome: { outcome: 'cancelled' } });
           const action = approvalActionOf(request.toolCall ?? {}, this.profile.ownTools);
-          return ask(
+          return ask<PermissionResponse>(
             'permission',
             (requestId) => ({ type: 'approval-asked', requestId, action }),
             (response) => (response.kind === 'approval' ? permissionResponse(request.options, response.approved) : undefined),
+            { outcome: { outcome: 'cancelled' } },
           );
         }
         if (method !== 'elicitation/create') return undefined;
@@ -85,10 +94,11 @@ export class AcpAdapter implements AgentAdapter {
         const fields = request.mode === 'form' ? fieldsOf(request.requestedSchema) : undefined;
         // A form Loom can't show is cancelled, as OpenCode does when it can't show one.
         if (!fields) return Promise.resolve({ action: 'cancel' });
-        return ask(
+        return ask<ElicitationResponse>(
           'elicitation',
           (requestId) => ({ type: 'question-asked', requestId, message: typeof request.message === 'string' ? request.message : '', fields }),
           (response) => (response.kind === 'question' ? elicitationResponse(response) : undefined),
+          { action: 'cancel' },
         );
       },
       onClose: (reason) => {
@@ -119,7 +129,12 @@ export class AcpAdapter implements AgentAdapter {
           (error: Error) => onEvent({ type: 'run-failed', error: error.message }),
         );
       },
-      answer: (requestId, response) => asked.get(requestId)?.(response),
+      answer: (requestId, response) => asked.get(requestId)?.answer(response),
+      // ACP: the client answers what the agent still asks as cancelled; the run then ends as cancelled.
+      cancel: () => {
+        for (const request of [...asked.values()]) request.cancel();
+        void connection.notify('session/cancel', { sessionId: id }).catch(() => {});
+      },
       close: () => connection.end(),
     };
   }
@@ -221,12 +236,15 @@ function approvalActionOf(call: NonNullable<PermissionRequest['toolCall']>, ownT
   });
 }
 
+/** ACP v1's answer to a permission request: an option picked, or cancelled with the run. */
+type PermissionResponse = { outcome: { outcome: 'selected'; optionId: string } } | { outcome: { outcome: 'cancelled' } };
+
 /**
  * Loom answers only "once" or "reject", never "always": a grant for the
  * Session lives in Loom. Options are picked by kind, falling back to
  * OpenCode's ids.
  */
-function permissionResponse(options: unknown, approved: boolean): { outcome: { outcome: 'selected'; optionId: string } } {
+function permissionResponse(options: unknown, approved: boolean): PermissionResponse {
   const kind = approved ? 'allow_once' : 'reject_once';
   const option = Array.isArray(options) ? options.find((o: { kind?: unknown; optionId?: unknown }) => o?.kind === kind && typeof o.optionId === 'string') : undefined;
   return { outcome: { outcome: 'selected', optionId: (option as { optionId: string } | undefined)?.optionId ?? (approved ? 'once' : 'reject') } };

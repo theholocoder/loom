@@ -36,6 +36,7 @@ class TrustAskingAgent implements AgentAdapter {
         // The run goes on after the answer, as an agent's would.
         setTimeout(resume, 0);
       },
+      cancel: () => {},
       close: async () => {},
     };
   }

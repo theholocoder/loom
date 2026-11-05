@@ -268,3 +268,10 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .database-problem .error { color: var(--err); }
 .popover.search-popover { width: 360px; gap: 4px; }
 .diff-base { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0 0; font-size: 12px; }
+
+/* the queue, above the composer, and where the user interrupted a run */
+.queue { list-style: none; margin: 0 8px 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.queue li { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); }
+.queue li .grow { color: var(--text); min-width: 0; }
+.queue li button:not(.icon-btn) { border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
+.interruption { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 4px 0; font-size: 12.5px; color: var(--muted); }

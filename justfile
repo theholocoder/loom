@@ -8,9 +8,6 @@ default:
 install:
     mise install
     pnpm install
-    # pnpm skips Electron's postinstall when it already considers the package built,
-    # so a failed binary download is never retried; re-run it if the binary is missing.
-    compgen -G "node_modules/.pnpm/electron@*/node_modules/electron/path.txt" >/dev/null || pnpm rebuild electron
 
 # Run every test: Go bridge (seam C), main and renderer (seams A and B), Electron smoke tests
 test:

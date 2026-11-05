@@ -63,10 +63,20 @@ export interface EventsTable {
   data: string;
 }
 
+/** The messages queued for Sessions while Working, sent in `id` order. */
+export interface QueuedMessagesTable {
+  id: number;
+  session_id: number;
+  text: string;
+  /** Clock time it was queued. */
+  created_at: number;
+}
+
 export interface Schema {
   settings: SettingsTable;
   projects: ProjectsTable;
   checkouts: CheckoutsTable;
   sessions: SessionsTable;
   events: EventsTable;
+  queued_messages: QueuedMessagesTable;
 }

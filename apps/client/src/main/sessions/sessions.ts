@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, ApprovalAction } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -57,6 +57,8 @@ const MAX_TITLE_LENGTH = 80;
 /** How often streaming agent text is checkpointed to the database. */
 export const CHECKPOINT_MS = 1000;
 
+/** What to do once a run the user interrupted has ended: send the queued message `sendNow`, or else stop. */
+type Interruption = { sendNow?: number };
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
 /** A transcript item before it has its place in the transcript. */
@@ -93,6 +95,13 @@ export class Sessions {
   private readonly approvedCalls = new Map<number, Set<string>>();
   /** What the user said on denying Approval requests, sent to the agent as the next prompt once its run ends. */
   private readonly denyMessages = new Map<number, string>();
+  /** The id the next queued message gets: ids are given here, so a message is queued at once. */
+  private nextQueuedId = 1;
+  /**
+   * The runs the user interrupted, by Session, until they end: with Stop, or
+   * to send the queued message `sendNow`.
+   */
+  private readonly interrupting = new Map<number, Interruption>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -113,7 +122,13 @@ export class Sessions {
   static async load(options: SessionsOptions): Promise<Sessions> {
     const sessions = new Sessions(options);
     const rows = await options.db.selectFrom('sessions').selectAll().execute();
-    for (const row of rows) sessions.sessions.set(row.id, fromRow(row));
+    for (const row of rows) sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
+    const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
+    for (const { id, session_id, text } of queued) {
+      const session = sessions.sessions.get(session_id);
+      if (session) sessions.sessions.set(session_id, { ...session, queue: [...(session.queue ?? []), { id, text }] });
+      sessions.nextQueuedId = Math.max(sessions.nextQueuedId, id + 1);
+    }
     for (const session of sessions.list()) {
       // A Session waiting on a question or an Approval request was mid-run too: what the agent asked went with its process.
       if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval'))) continue;
@@ -215,7 +230,7 @@ export class Sessions {
     let id: number;
     try {
       ({ id } = await this.options.db.insertInto('sessions').values(values).returning('id').executeTakeFirstOrThrow());
-      this.sessions.set(id, fromRow({ id, ...values }));
+      this.sessions.set(id, this.withCapabilities(fromRow({ id, ...values })));
     } finally {
       this.claimed.delete(path);
     }
@@ -231,8 +246,13 @@ export class Sessions {
     const text = promptText(prompt);
     this.get(id);
     await this.loadTranscript(id);
+    if (this.get(id).status === 'working') return this.enqueue(id, text);
+    this.reply(id, text);
+  }
+
+  /** Sends `text` to a Waiting Session as the user's reply: it becomes Working. Its transcript must be read. */
+  private reply(id: number, text: string): void {
     const session = this.get(id);
-    if (session.status === 'working') throw new Error('The agent is still working on this Session.');
     if (this.inRun(id)) throw new Error("The agent is waiting for an answer to what it asked; answer or dismiss it first.");
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
@@ -240,6 +260,102 @@ export class Sessions {
     this.addItem(id, { kind: 'user', text });
     this.setStatus(id, { status: 'working' });
     void this.run(id, text);
+  }
+
+  /** Drops a message from the Session's queue. */
+  removeQueued({ id, queuedId }: { id: number; queuedId: number }): void {
+    if (!this.dequeue(id, queuedId)) throw new Error('There is no such queued message.');
+  }
+
+  /**
+   * Interrupts the Session's run without sending its queue: once the run
+   * ends, the Session is Waiting (stopped), its queue kept.
+   */
+  async stop({ id }: { id: number }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    if (!this.inRun(id)) throw new Error('The agent is not working on this Session.');
+    this.interrupt(id, {});
+  }
+
+  /**
+   * Asks the Session's agent to end its run; what happens once it has is
+   * `interruption`. An agent still starting is never prompted.
+   */
+  private interrupt(id: number, interruption: Interruption): void {
+    this.interrupting.set(id, interruption);
+    // Asked again each time: the user stopping twice may be an agent that didn't hear it.
+    this.live.get(id)?.cancel();
+  }
+
+  /** Ends the run the user interrupted: sends the message they asked for, or else waits as stopped. */
+  private interrupted(id: number): void {
+    const { sendNow } = this.interrupting.get(id)!;
+    this.denyMessages.delete(id);
+    this.endRun(id);
+    const message = sendNow === undefined ? undefined : this.dequeue(id, sendNow);
+    this.addItem(id, { kind: 'interruption', by: message ? 'send-now' : 'stop' });
+    if (message) return this.sendNext(id, message.text);
+    this.setStatus(id, { status: 'waiting', waitingReason: 'stopped' });
+  }
+
+  /**
+   * Sends the queued message `queuedId` now: a run going is interrupted
+   * first, and the message sent once it has ended; a Waiting Session is sent
+   * it as its reply. The rest of the queue stays.
+   */
+  async sendNow({ id, queuedId }: { id: number; queuedId: number }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    const message = this.queued(id, queuedId);
+    if (this.inRun(id)) return this.interrupt(id, { sendNow: message.id });
+    this.reply(id, message.text);
+    this.dequeue(id, message.id);
+  }
+
+  /** The queued message `queuedId`, which must be there. */
+  private queued(id: number, queuedId: number): QueuedMessage {
+    const message = this.get(id).queue?.find((m) => m.id === queuedId);
+    if (!message) throw new Error('There is no such queued message.');
+    return message;
+  }
+
+  /** Gives the queued message `queuedId` to the agent in the run going, for an agent that can be steered. */
+  async steer({ id, queuedId }: { id: number; queuedId: number }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    const message = this.queued(id, queuedId);
+    const agent = this.live.get(id);
+    if (!this.options.adapter.canSteer || !agent?.steer) throw new Error(`${this.options.adapter.name} can't take a message mid-run: use Send now.`);
+    if (this.get(id).status !== 'working' || this.interrupting.has(id)) throw new Error('The agent is not working on this Session: use Send now.');
+    this.dequeue(id, message.id);
+    this.endStreaming(id);
+    this.addItem(id, { kind: 'user', text: message.text });
+    agent.steer(message.text);
+  }
+
+  /** Puts a message at the end of the Session's queue. */
+  private enqueue(id: number, text: string): void {
+    const message: QueuedMessage = { id: this.nextQueuedId++, text };
+    this.update(id, { queue: [...(this.get(id).queue ?? []), message] });
+    const row = { id: message.id, session_id: id, text, created_at: this.options.clock.now() };
+    this.write((trx) => trx.insertInto('queued_messages').values(row).execute());
+  }
+
+  /** Takes the message `queuedId` (or else the first) out of the Session's queue; undefined if there is none. */
+  private dequeue(id: number, queuedId?: number): QueuedMessage | undefined {
+    const queue = this.get(id).queue ?? [];
+    const message = queuedId === undefined ? queue[0] : queue.find((m) => m.id === queuedId);
+    if (!message) return undefined;
+    const rest = queue.filter((m) => m !== message);
+    this.update(id, { queue: rest.length ? rest : undefined });
+    this.write((trx) => trx.deleteFrom('queued_messages').where('id', '=', message.id).execute());
+    return message;
+  }
+
+  /** The Session, with what its agent can do. */
+  private withCapabilities(session: Session): Session {
+    return this.options.adapter.canSteer ? { ...session, canSteer: true } : session;
   }
 
   /**
@@ -514,6 +630,10 @@ export class Sessions {
     if (this.get(id).status === 'archived') return;
     this.endRun(id);
     this.denyMessages.delete(id);
+    if (this.get(id).queue) {
+      this.update(id, { queue: undefined });
+      this.write((trx) => trx.deleteFrom('queued_messages').where('session_id', '=', id).execute());
+    }
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
     for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
@@ -603,6 +723,8 @@ export class Sessions {
         return;
       }
     }
+    // Interrupted while the agent started: the prompt never goes.
+    if (this.interrupting.has(id)) return this.interrupted(id);
     agent.prompt(text);
   }
 
@@ -642,6 +764,8 @@ export class Sessions {
     if (event.type === 'closed' && this.archiving.has(id)) return void this.live.delete(id);
     // An archived Session's agent is on its way out; nothing it says counts.
     if (this.shuttingDown || this.get(id).status === 'archived') return;
+    // What an interrupted run asks is withdrawn as soon as it's asked.
+    if (this.interrupting.has(id) && (event.type === 'question-asked' || event.type === 'trust-asked' || event.type === 'approval-asked')) return this.live.get(id)?.cancel();
     switch (event.type) {
       case 'run-started':
         return;
@@ -668,25 +792,34 @@ export class Sessions {
         if (!this.inRun(id)) return;
         return void this.askApproval(id, event.requestId, event.action).catch((error: unknown) => console.error(`could not ask Session ${id}'s approval:`, error));
       case 'run-settled': {
+        if (this.interrupting.has(id)) return this.interrupted(id);
         const followUp = this.denyMessages.get(id);
         this.denyMessages.delete(id);
         this.endRun(id);
         // What the user said on denying goes to the agent as the next prompt.
-        if (followUp) {
-          this.addItem(id, { kind: 'user', text: followUp });
-          this.setStatus(id, { status: 'working' });
-          return void this.run(id, followUp);
-        }
+        if (followUp) return this.sendNext(id, followUp);
+        // Then the queue, one message per run.
+        const next = this.dequeue(id);
+        if (next) return this.sendNext(id, next.text);
         this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
         return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
       }
       case 'run-failed':
+        // An agent may fail the run it was asked to end; that's still the user's interruption.
+        if (this.interrupting.has(id)) return this.interrupted(id);
         this.fail(id, event.error);
         return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
       case 'closed':
         this.live.delete(id);
         return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
     }
+  }
+
+  /** Sends `text` as the next run, the Session staying Working. */
+  private sendNext(id: number, text: string): void {
+    this.addItem(id, { kind: 'user', text });
+    this.setStatus(id, { status: 'working' });
+    void this.run(id, text);
   }
 
   /** Shows what the agent asked as a card, and waits on the user: Waiting (question, or approval). */
@@ -909,6 +1042,7 @@ export class Sessions {
    * what it asked, which can't be answered any more.
    */
   private endRun(id: number): void {
+    this.interrupting.delete(id);
     this.endStreaming(id);
     this.asks.delete(id);
     this.approvedCalls.delete(id);

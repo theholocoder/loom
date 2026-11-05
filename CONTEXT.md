@@ -28,6 +28,9 @@ The agent is currently running; the **Session** does not need the user's attenti
 **Waiting** (Session status):
 The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, is held on an **Approval request**, or its **Merge request** has new feedback from **Babysit**; the **Session** needs the user's attention.
 
+**Queued message**:
+A message the user sent a **Working** Session, waiting in the Session's queue to be sent to the agent once the runs before it settle. The user can remove it, or send it now: interrupt the run and send it. **Stop** interrupts the run and keeps the queue. "The queue" always means a Session's queued messages, never the **Inbox**.
+
 **Approval request**:
 The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
 _Avoid_: Permission prompt, confirmation

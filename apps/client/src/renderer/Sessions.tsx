@@ -1,8 +1,8 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, OctagonX, Pause, RotateCw, ShieldAlert, SquareTerminal, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type Issue, type Session, type WaitingReason } from '../shared/api';
+import { OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type Issue, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -310,7 +310,7 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
 
   /** What the composer is for right now. */
   const composerPlaceholder = (): string => {
-    if (working) return `${session.agent} is working…`;
+    if (working) return `Queue a message for when ${session.agent} finishes…`;
     if (freeAnswer) return freeAnswer.placeholder;
     if (firstAsked?.kind === 'approval') return 'Approve or deny the request above to go on.';
     if (asked) return 'Answer the question above to go on.';
@@ -319,14 +319,16 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
     return `Reply to ${session.agent}…`;
   };
 
-  const retry = async () => {
+  /** Runs a command on the Session, showing why if it fails. */
+  const runCommand = async (run: () => Promise<unknown>) => {
     setError(undefined);
     try {
-      await api.invoke('sessions.retry', { id: session.id });
+      await run();
     } catch (e) {
       setError((e as Error).message);
     }
   };
+  const retry = () => runCommand(() => api.invoke('sessions.retry', { id: session.id }));
 
   return (
     <main className="main" aria-label="Session">
@@ -413,6 +415,8 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
             <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
           ) : item.kind === 'trust' ? (
             <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
+          ) : item.kind === 'interruption' ? (
+            <Interruption key={item.id} item={item} />
           ) : (
             <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
           ),
@@ -440,13 +444,79 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
       <Composer
         agent={session.agent}
         placeholder={composerPlaceholder()}
-        disabled={session.status !== 'waiting' || (asked && !freeAnswer) || !!session.worktreeMissing}
+        disabled={(session.status !== 'waiting' && !working) || (asked && !freeAnswer) || !!session.worktreeMissing}
         dock={panel}
         clearKey={stepKey}
         focusRequest={replyRequest}
         onSend={send}
+        queueing={working}
+        onStop={working ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
+        queue={
+          session.queue && session.status !== 'archived' ? (
+            <Queue
+              queue={session.queue}
+              // Steering needs a run going; otherwise Send now sends it as the reply.
+              steer={working && !!session.canSteer}
+              onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
+              onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
+              onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
+            />
+          ) : undefined
+        }
       />
     </main>
+  );
+}
+
+/** Where the user interrupted the run: with Stop, or to send a queued message now. */
+function Interruption({ item }: { item: Extract<TranscriptItem, { kind: 'interruption' }> }) {
+  return (
+    <div className="interruption" role="note">
+      {item.by === 'stop' ? <Square className="sm" /> : <SendHorizontal className="sm" />}
+      <span>{item.by === 'stop' ? 'Stopped' : 'Interrupted to send a queued message'}</span>
+    </div>
+  );
+}
+
+/** The messages waiting to be sent, oldest first: each can be removed, or sent now (or steered in, if the agent can be). */
+function Queue({
+  queue,
+  steer,
+  onSendNow,
+  onSteer,
+  onRemove,
+}: {
+  queue: QueuedMessage[];
+  steer: boolean;
+  onSendNow: (queuedId: number) => void;
+  onSteer: (queuedId: number) => void;
+  onRemove: (queuedId: number) => void;
+}) {
+  return (
+    <ul className="queue" aria-label="Queued messages">
+      {queue.map((message) => (
+        <li key={message.id}>
+          <ListPlus className="sm" />
+          <span className="grow ellipsis" title={message.text}>
+            {message.text}
+          </span>
+          {steer ? (
+            <button type="button" onClick={() => onSteer(message.id)}>
+              <Navigation className="sm" />
+              Steer
+            </button>
+          ) : (
+            <button type="button" onClick={() => onSendNow(message.id)}>
+              <SendHorizontal className="sm" />
+              Send now
+            </button>
+          )}
+          <button className="icon-btn sm" type="button" title="Remove" aria-label="Remove" onClick={() => onRemove(message.id)}>
+            <X className="sm" />
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -488,6 +558,9 @@ function Composer({
   canSendEmpty = false,
   dock,
   clearKey,
+  queueing = false,
+  onStop,
+  queue,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -505,6 +578,12 @@ function Composer({
   dock?: ReactNode;
   /** Changing it empties the prompt box: what was typed was for something else, such as another question. */
   clearKey?: string;
+  /** Whether what is sent joins the queue, the agent working: the button says Queue. */
+  queueing?: boolean;
+  /** Given while the agent works: Stop interrupts its run. */
+  onStop?: () => void;
+  /** The Session's queue, shown above the prompt box. */
+  queue?: ReactNode;
 }) {
   const [draft, setDraftState] = useState('');
   const setDraft = (value: string) => {
@@ -540,6 +619,7 @@ function Composer({
 
   return (
     <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
+      {queue}
       <div className={`composer${dock ? ' docked' : ''}`}>
         {dock}
         <textarea ref={prompt} aria-label="Prompt" rows={2} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} />
@@ -550,9 +630,15 @@ function Composer({
           </span>
           {tools}
           <span className="grow" />
+          {onStop && (
+            <button className="send" type="button" onClick={onStop}>
+              <Square />
+              Stop
+            </button>
+          )}
           <button className="primary send" type="submit" disabled={!canSend}>
-            <ArrowUp />
-            Send
+            {queueing ? <ListPlus /> : <ArrowUp />}
+            {queueing ? 'Queue' : 'Send'}
           </button>
         </div>
       </div>

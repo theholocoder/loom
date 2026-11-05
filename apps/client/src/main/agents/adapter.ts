@@ -85,6 +85,8 @@ export interface OpenOptions {
 export interface AgentAdapter {
   /** The agent's name, as the UI shows it. */
   readonly name: string;
+  /** Whether its sessions take a message mid-run (`AgentSession.steer`). */
+  readonly canSteer?: boolean;
   /** Starts the agent for a new conversation in the working copy. */
   open(options: OpenOptions): Promise<AgentSession>;
 }
@@ -100,6 +102,13 @@ export interface AgentSession {
    * the agent no longer waits on is ignored.
    */
   answer(requestId: string, response: AgentResponse): void;
+  /**
+   * Interrupts the run going, if any: what the agent asks is withdrawn, and
+   * the run ends (settles or fails) soon after.
+   */
+  cancel(): void;
+  /** Gives the agent `text` mid-run, for an agent that can be steered (`AgentAdapter.canSteer`). */
+  steer?(text: string): void;
   /** Ends the agent's process. */
   close(): Promise<void>;
 }
