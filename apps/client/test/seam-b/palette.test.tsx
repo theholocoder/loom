@@ -88,6 +88,7 @@ describe('palette actions', () => {
       'Theme: Mocha',
       'Theme: Daylight',
       'Open Projects',
+      'Open Dashboard',
       'Open Settings',
       'Show keyboard shortcuts',
     ]);
@@ -123,6 +124,7 @@ describe('palette actions', () => {
       'Theme: Mocha',
       'Theme: Daylight',
       'Open Projects',
+      'Open Dashboard',
       'Open Settings',
       'Show keyboard shortcuts',
     ]);

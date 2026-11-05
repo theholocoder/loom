@@ -1,5 +1,6 @@
 // The database's typed schema, as of the latest migration.
 import type { Generated } from 'kysely';
+import type { MergeRequestState } from '../projects/merge-requests';
 import type { SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
 
 export interface SettingsTable {
@@ -61,6 +62,45 @@ export interface SessionsTable {
   /** Clock times. */
   created_at: number;
   updated_at: number;
+  /** The cost the agent last reported for its conversation, in USD: what the next turn's cost is counted from. */
+  reported_cost: number;
+  /** Clock time it was archived; null while it isn't. */
+  archived_at: number | null;
+  /** How many times it went Waiting as stuck. */
+  stuck_count: number;
+  /** Its Merge request's state as Loom last saw it; null with none linked. */
+  merge_request_state: MergeRequestState | null;
+}
+
+/** The usage of one Session's turns on one day with one model: what they add up to. */
+export interface UsageBucketsTable {
+  session_id: number;
+  /** The day the turns ended, `YYYY-MM-DD` in local time. */
+  day: string;
+  /** The model Loom ran them with, `provider/model`. */
+  model: string;
+  project_id: number;
+  /** The Project's name when they were recorded, so usage outlives the Project. */
+  project_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  /** In USD, as the agent reported it. */
+  cost: number;
+}
+
+/**
+ * A stretch of a Session's time: a `run` (Working until it went Waiting or
+ * was archived) or a `wait` for the user (Waiting on a question or Approval
+ * request, or finished, while Loom ran).
+ */
+export interface SessionSpansTable {
+  session_id: number;
+  kind: 'run' | 'wait';
+  started_at: number;
+  ended_at: number;
 }
 
 /** A Session's transcript: its normalized events, in order. */
@@ -91,4 +131,6 @@ export interface Schema {
   sessions: SessionsTable;
   events: EventsTable;
   queued_messages: QueuedMessagesTable;
+  usage_buckets: UsageBucketsTable;
+  session_spans: SessionSpansTable;
 }

@@ -39,6 +39,7 @@ import { DiffPanel } from './DiffPanel';
 import { inboxOrder, InboxList } from './Inbox';
 import { Popover } from './Popover';
 import { ProjectPicker } from './ProjectPicker';
+import { Dashboard } from './Dashboard';
 import { Projects, useExistingCloneLinker } from './Projects';
 import { NewSession, SessionView, type SessionCommand } from './Sessions';
 import { Settings } from './Settings';
@@ -213,6 +214,8 @@ function Workspace() {
       </aside>
       {view === 'settings' ? (
         <Settings />
+      ) : view === 'dashboard' ? (
+        <Dashboard onOpenSession={select} />
       ) : view === 'projects' ? (
         <Projects linker={linker} />
       ) : view === 'new-session' ? (
@@ -352,6 +355,7 @@ function paletteActions(app: {
     open && shortcutAction('archive', Archive, () => app.command('archive')),
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.setView('projects') },
+    { label: 'Open Dashboard', icon: ChartColumn, run: () => app.setView('dashboard') },
     shortcutAction('settings', SettingsIcon, () => app.setView('settings')),
     shortcutAction('help', Keyboard, app.showHelp),
   ];

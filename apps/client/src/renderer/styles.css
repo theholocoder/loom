@@ -211,6 +211,27 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 /* dashboard (also the layout of other full pages, like Settings) */
 .dash { overflow: auto; padding: 20px 28px 90px; min-width: 0; }
 .dash h1 { font-size: 20px; margin: 0; }
+.dash-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 18px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.tile .k { color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+.tile .v { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.tile .d { font-size: 12px; color: var(--muted); }
+.legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--muted); }
+.legend.wrap { flex-wrap: wrap; gap: 6px 14px; }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart text { fill: var(--muted); font: 8.5px var(--mono); }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .hit:hover { fill: color-mix(in srgb, var(--text) 6%, transparent); }
+.hbars { list-style: none; margin: 0; padding: 0; }
+.hbar { display: grid; grid-template-columns: minmax(0, 170px) 1fr 64px; gap: 10px; align-items: center; padding: 5px 0; font-size: 13px; }
+.hbar .track { height: 12px; display: block; }
+.hbar .fill { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbar .val { text-align: right; font-family: var(--mono); font-size: 12px; }
+.share { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; margin: 8px 0 10px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
 .card.wide { grid-column: 1 / -1; }

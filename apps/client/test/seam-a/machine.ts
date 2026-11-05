@@ -83,6 +83,10 @@ export interface AcpTurn {
   error?: string;
   /** The run ends with a `usage_update` of this many context tokens used, out of the current model's `context`. */
   used?: number;
+  /** The session's cumulative cost after the run, in USD, which its `usage_update` carries. */
+  cost?: number;
+  /** The run's token usage, which the `session/prompt` response carries (cancelled or not). */
+  tokens?: { inputTokens: number; outputTokens: number; thoughtTokens?: number; cachedReadTokens?: number; cachedWriteTokens?: number };
 }
 
 /**

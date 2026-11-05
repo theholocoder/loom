@@ -97,4 +97,38 @@ export const migrations: Migration[] = [
     // A link made before keeps to the branch it was last seen on.
     await db.updateTable('sessions').set((eb) => ({ merge_request_branch: eb.ref('branch') })).where('merge_request_number', 'is not', null).execute();
   },
+  async (db) => {
+    // Usage outlives its Session's Project: no foreign keys, the Project's name copied in.
+    await db.schema
+      .createTable('usage_buckets')
+      .addColumn('session_id', 'integer', (c) => c.notNull())
+      .addColumn('day', 'text', (c) => c.notNull())
+      .addColumn('model', 'text', (c) => c.notNull())
+      .addColumn('project_id', 'integer', (c) => c.notNull())
+      .addColumn('project_name', 'text', (c) => c.notNull())
+      .addColumn('input_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('output_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_read_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addPrimaryKeyConstraint('usage_buckets_pk', ['session_id', 'day', 'model'])
+      .execute();
+    await db.schema.createIndex('usage_buckets_day').on('usage_buckets').column('day').execute();
+    await db.schema
+      .createTable('session_spans')
+      .addColumn('session_id', 'integer', (c) => c.notNull())
+      .addColumn('kind', 'text', (c) => c.notNull())
+      .addColumn('started_at', 'integer', (c) => c.notNull())
+      .addColumn('ended_at', 'integer', (c) => c.notNull())
+      .execute();
+    await db.schema.createIndex('session_spans_ended').on('session_spans').column('ended_at').execute();
+    await db.schema.alterTable('sessions').addColumn('reported_cost', 'real', (c) => c.notNull().defaultTo(0)).execute();
+    await db.schema.alterTable('sessions').addColumn('archived_at', 'integer').execute();
+    await db.schema.alterTable('sessions').addColumn('stuck_count', 'integer', (c) => c.notNull().defaultTo(0)).execute();
+    await db.schema.alterTable('sessions').addColumn('merge_request_state', 'text').execute();
+    // A Session archived before has its last status change as its archive time.
+    await db.updateTable('sessions').set((eb) => ({ archived_at: eb.ref('updated_at') })).where('status', '=', 'archived').execute();
+    await db.updateTable('sessions').set({ merge_request_state: 'open' }).where('merge_request_number', 'is not', null).execute();
+  },
 ];

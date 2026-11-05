@@ -660,6 +660,77 @@ export type TranscriptItem =
   /** The agent's Link merge request tool named a Merge request Loom couldn't link, as `mergeRequest` gave it, and why. */
   | { kind: 'merge-request-refused'; id: number; mergeRequest: string; reason: string };
 
+/** The ranges the usage dashboard covers, in days ending today. */
+export const USAGE_RANGES = [7, 30, 90] as const;
+export type UsageRange = (typeof USAGE_RANGES)[number];
+
+/** Tokens by kind, as the agent reported them per turn. */
+export interface TokenCounts {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number;
+}
+
+/**
+ * What became of a Session: its Merge request `merged` or `closed`,
+ * `archived` without a Merge request, or else `open` (not archived, or
+ * archived with its Merge request still open).
+ */
+export type SessionOutcome = 'merged' | 'closed' | 'archived' | 'open';
+
+/** A Session among the ones that used the most tokens in the range. */
+export interface TopSession {
+  sessionId: number;
+  title: string;
+  /** Its Project's name, as it was when the usage was recorded. */
+  project: string;
+  issue?: ForgeLink;
+  mergeRequest?: ForgeLink;
+  /** The model it used the most tokens with in the range. */
+  model: string;
+  tokens: number;
+  /** How long it was Working in the range, in ms. */
+  workingMs: number;
+  outcome: SessionOutcome;
+}
+
+/**
+ * The usage dashboard over the last `days` days, today included, from this
+ * machine's Sessions: tokens (all kinds summed) and reported cost from the
+ * turns that ended in the range, filed under the day each ended; Sessions
+ * started in the range and their outcomes; runs and waits that ended in it.
+ */
+export interface UsageDashboard {
+  days: UsageRange;
+  /** Every day of the range, oldest first, as `YYYY-MM-DD` in local time. */
+  perDay: Array<{ day: string; tokens: number; byProject: Record<string, number> }>;
+  tokens: number;
+  /** What the agents reported, in USD: subscription and local models report $0. */
+  reportedCost: number;
+  sessionsStarted: number;
+  /** Sessions archived in the range whose Merge request was merged. */
+  mergeRequestsMerged: number;
+  /** The median agent run (Working until Waiting or archived), in ms; absent with none. */
+  medianRunMs?: number;
+  /** The median wait for the user (on a question or Approval request, or finished and unanswered, while Loom ran), in ms; absent with none. */
+  medianWaitMs?: number;
+  /** By tokens, most first. */
+  perProject: Array<{ project: string; tokens: number }>;
+  perModel: Array<{ model: string; tokens: number }>;
+  mix: TokenCounts;
+  /** Cache reads out of all prompt tokens (input, cache read and cache write), 0 to 1; absent with none. */
+  cacheHitRate?: number;
+  /** Of the Sessions started in the range: how many ended each way, and how many were stuck at least once. */
+  outcomes: Record<SessionOutcome, number> & { stuck: number };
+  /** The Sessions that used the most tokens in the range, most first, at most TOP_SESSIONS. */
+  topSessions: TopSession[];
+}
+
+/** How many Sessions the dashboard's Top Sessions lists. */
+export const TOP_SESSIONS = 10;
+
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed
  * `PRAGMA quick_check` or isn't a database: main serves only this topic and
@@ -948,6 +1019,8 @@ export interface Commands {
   'sessions.approve': { params: { id: number; itemId: number; decision: ApprovalDecision; message?: string }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
+  /** The usage dashboard over the last `days` days (see UsageDashboard). Rejects a range not in USAGE_RANGES. */
+  'usage.dashboard': { params: { days: UsageRange }; result: UsageDashboard };
   /**
    * Moves the damaged database file (and its -wal and -shm) aside under a
    * timestamped name, copies the latest snapshot into its place, and starts.

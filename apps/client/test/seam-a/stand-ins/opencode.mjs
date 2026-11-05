@@ -24,7 +24,10 @@
 // running turn as cancelled, cutting short what it holds on; a
 // `session/prompt` while a turn runs is refused, as OpenCode 2.1.4's ACP
 // bridge does. A turn with `used` ends with a `usage_update` of that many
-// context tokens, out of the current model's `context`. `session/resume` and
+// context tokens, out of the current model's `context`; with `cost`, that
+// `usage_update` carries it as the session's cumulative cost (0 until a turn
+// gives one). A turn with `tokens` answers its `session/prompt` with them as
+// ACP's (unstable) `usage`, cancelled turns included, as OpenCode does. `session/resume` and
 // `session/load` take up the session they name (see `refuse`); a load first
 // replays its history as `session/update`s, as OpenCode does, and a process
 // that took one up plays `resumedTurns`, if given, instead of `turns`.
@@ -107,6 +110,8 @@ function acp() {
   let selection = { model: models[0], variant: undefined };
   // The turn running, if any: `cancelled` once Loom cancels it, `stopped` resolving then.
   let running;
+  /** The session's cumulative cost, as the last turn that gave one said. */
+  let cost = 0;
   // Requests this agent sent Loom, waiting on Loom's response.
   let nextRequestId = 1000;
   const responses = new Map();
@@ -204,12 +209,14 @@ function acp() {
       }
       if (!rejected && !current.cancelled && turn.hold) await hold(turn.hold);
       running = undefined;
-      if (turn.used && selection.model?.context) {
-        send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'usage_update', used: turn.used, size: selection.model.context, cost: { amount: 0, currency: 'USD' } } } });
+      if (turn.cost !== undefined) cost = turn.cost;
+      if ((turn.used || turn.cost !== undefined) && selection.model?.context) {
+        send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'usage_update', used: turn.used ?? 0, size: selection.model.context, cost: { amount: cost, currency: 'USD' } } } });
       }
-      if (rejected || current.cancelled) return send({ id, result: { stopReason: 'cancelled' } });
+      const usage = turn.tokens ? { usage: { totalTokens: Object.values(turn.tokens).reduce((a, b) => a + b, 0), ...turn.tokens } } : {};
+      if (rejected || current.cancelled) return send({ id, result: { stopReason: 'cancelled', ...usage } });
       if (turn.error) send({ id, error: { code: -32603, message: turn.error } });
-      else send({ id, result: { stopReason: 'end_turn' } });
+      else send({ id, result: { stopReason: 'end_turn', ...usage } });
     } else if (id !== undefined) {
       send({ id, error: { code: -32601, message: `opencode stand-in: unscripted method ${method}` } });
     }

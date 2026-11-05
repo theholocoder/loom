@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TokenCounts, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -18,6 +18,7 @@ import { capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
 import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict } from './approvals';
 import { checkAttachments, type Attachments } from './attachments';
+import { recordSpan, recordTurn } from '../usage/usage';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -74,6 +75,8 @@ export const IDLE_STOP_MS = 10 * 60_000;
 /** What to do once a run the user interrupted has ended: send the queued message `sendNow`, or else stop. */
 type Interruption = { sendNow?: number };
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
+/** The stretch of time a Session is in, for the dashboard: since when. */
+type OpenSpan = { kind: 'run' | 'wait'; since: number };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
 /** What the user sends the agent: text, and the files attached to it, stored already. */
 type Message = { text: string; attachments?: Attachment[] };
@@ -139,6 +142,14 @@ export class Sessions {
   private readonly mergeRequestLookups = new Map<number, number>();
   /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
   private readonly linkCalls = new Map<number, Set<string>>();
+  /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
+  private readonly reportedCosts = new Map<number, number>();
+  /** The cost the agent reported during each Session's run, until the run's usage is recorded. */
+  private readonly runCosts = new Map<number, number>();
+  /** The model each Session's run goes with, as Loom set it. */
+  private readonly runModels = new Map<number, string>();
+  /** The run or wait each Session is in, while the Client runs (see spanOf). */
+  private readonly spans = new Map<number, OpenSpan>();
 
   private constructor(private readonly options: SessionsOptions) {}
 
@@ -154,6 +165,7 @@ export class Sessions {
     for (const row of rows) {
       sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
       if (row.merge_request_branch !== null) sessions.mergeRequestLinks.set(row.id, { branch: row.merge_request_branch, byHand: row.merge_request_by_hand === 1 });
+      sessions.reportedCosts.set(row.id, row.reported_cost);
     }
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
     for (const { id, session_id, text, attachments } of queued) {
@@ -169,6 +181,12 @@ export class Sessions {
       sessions.endRun(session.id);
       sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
+    }
+    // A Session left finished is waiting for the user again, counted from now: not while Loom was closed.
+    const now = options.clock.now();
+    for (const session of sessions.list()) {
+      const kind = spanOf(session.status, session.waitingReason);
+      if (kind) sessions.spans.set(session.id, { kind, since: now });
     }
     await sessions.flush();
     return sessions;
@@ -294,11 +312,16 @@ export class Sessions {
       context_size: null,
       created_at: now,
       updated_at: now,
+      reported_cost: 0,
+      archived_at: null,
+      stuck_count: 0,
+      merge_request_state: null,
     };
     let id: number;
     try {
       ({ id } = await this.options.db.insertInto('sessions').values(values).returning('id').executeTakeFirstOrThrow());
       this.sessions.set(id, this.withCapabilities(fromRow({ id, ...values })));
+      this.spans.set(id, { kind: 'run', since: now });
     } finally {
       this.claimed.delete(path);
     }
@@ -866,7 +889,27 @@ export class Sessions {
     }
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
+    void this.lookUpMergeRequestState(id);
     for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
+  }
+
+  /**
+   * Records what became of the archived Session's Merge request, merged,
+   * closed or still open, as its Forge says, for the dashboard; keeps what
+   * was known if the Forge can't say.
+   */
+  private async lookUpMergeRequestState(id: number): Promise<void> {
+    const session = this.get(id);
+    const project = this.options.project(session.projectId);
+    if (!session.mergeRequest || project?.forge.state !== 'available') return;
+    try {
+      // In the Project's checkout: the worktree is gone.
+      const found = await viewMergeRequest(this.environmentOf(session).request, project.forge, project.checkout.path, session.mergeRequest.number);
+      if (this.shuttingDown || found.url !== session.mergeRequest.url) return;
+      this.save(id, { merge_request_state: found.state });
+    } catch {
+      return;
+    }
   }
 
   /** Closes the Session's agent, if it has one. */
@@ -941,6 +984,9 @@ export class Sessions {
     for (const handle of this.idleStops.values()) this.options.clock.clearTimeout(handle);
     this.idleStops.clear();
     for (const id of [...this.checkpoints.keys()]) this.checkpoint(id);
+    // Time while Loom is closed counts for nothing.
+    const now = this.options.clock.now();
+    for (const id of [...this.spans.keys()]) this.trackSpan(id, undefined, now);
     await this.flush();
   }
 
@@ -966,6 +1012,8 @@ export class Sessions {
       this.fail(id, (error as Error).message);
       return;
     }
+    // Usage is filed under the model the run goes with: the one picked, or else the agent's own.
+    this.runModels.set(id, model ?? this.get(id).agentConfig?.model ?? 'default');
     let files: PromptFile[];
     try {
       files = await this.deliver(id, attachments);
@@ -1021,12 +1069,20 @@ export class Sessions {
       throw new Error('This Session is archived.');
     }
     this.live.set(id, agent);
+    // A new conversation's reported cost starts again from nothing.
+    if (agent.id !== this.get(id).agentSessionId) {
+      this.reportedCosts.set(id, 0);
+      this.save(id, { reported_cost: 0 });
+    }
     this.update(id, { agentSessionId: agent.id });
     this.save(id, { agent_session_id: agent.id });
     return agent;
   }
 
   private onAgentEvent(id: number, event: AgentEvent): void {
+    // Usage counts however the run ended: cancelled, or by Archive.
+    if (event.type === 'usage' && event.cost !== undefined) this.runCosts.set(id, event.cost);
+    if (event.type === 'turn-usage') return this.shuttingDown ? undefined : this.recordUsage(id, event.tokens);
     // The agent closing is Archive's own doing; Archive reports it if the Session stays.
     if (event.type === 'closed' && this.archiving.has(id)) return void this.live.delete(id);
     // An archived Session's agent is on its way out; nothing it says counts.
@@ -1088,6 +1144,35 @@ export class Sessions {
         this.live.delete(id);
         return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
     }
+  }
+
+  /**
+   * Adds a turn's usage to the Session's bucket for today and the model it
+   * ran with: its tokens, and what the agent's reported cost went up by.
+   */
+  private recordUsage(id: number, tokens: TokenCounts): void {
+    const session = this.get(id);
+    const seen = this.runCosts.get(id);
+    this.runCosts.delete(id);
+    let cost = 0;
+    if (seen !== undefined) {
+      const before = this.reportedCosts.get(id) ?? 0;
+      // A cost that went down is a conversation the agent started afresh.
+      cost = seen >= before ? seen - before : seen;
+      this.reportedCosts.set(id, seen);
+      this.save(id, { reported_cost: seen });
+    }
+    const model = this.runModels.get(id) ?? session.model ?? session.agentConfig?.model ?? 'default';
+    const turn = {
+      sessionId: id,
+      projectId: session.projectId,
+      projectName: this.options.project(session.projectId)?.name ?? `Project ${session.projectId}`,
+      model,
+      endedAt: this.options.clock.now(),
+      tokens,
+      cost,
+    };
+    this.write((trx) => recordTurn(trx, turn));
   }
 
   /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */
@@ -1260,6 +1345,8 @@ export class Sessions {
       merge_request_url: link?.url ?? null,
       merge_request_branch: link ? linkage!.branch : null,
       merge_request_by_hand: link && linkage!.byHand ? 1 : 0,
+      // Only an open one is ever linked; Archive looks again.
+      merge_request_state: link ? 'open' : null,
     });
     if (same) return;
     this.update(id, { mergeRequest: link });
@@ -1495,9 +1582,24 @@ export class Sessions {
   private setStatus(id: number, { status, waitingReason, error }: StatusChange): void {
     const updatedAt = this.options.clock.now();
     const unread = status === 'waiting';
+    const was = this.get(id);
+    this.trackSpan(id, spanOf(status, waitingReason), updatedAt);
+    if (status === 'waiting' && waitingReason === 'stuck' && !(was.status === 'waiting' && was.waitingReason === 'stuck')) {
+      this.write((trx) => trx.updateTable('sessions').set((eb) => ({ stuck_count: eb('stuck_count', '+', 1) })).where('id', '=', id).execute());
+    }
+    if (status === 'archived' && was.status !== 'archived') this.save(id, { archived_at: updatedAt });
     this.update(id, { status, waitingReason, error, unread, updatedAt });
     this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt });
     this.watchIdle(id);
+  }
+
+  /** Ends the run or wait the Session was in, unless it goes on in `kind`, recording it, and starts the next. */
+  private trackSpan(id: number, kind: OpenSpan['kind'] | undefined, now: number): void {
+    const open = this.spans.get(id);
+    if (open && open.kind === kind) return;
+    if (open) this.write((trx) => recordSpan(trx, { session_id: id, kind: open.kind, started_at: open.since, ended_at: now }));
+    if (kind) this.spans.set(id, { kind, since: now });
+    else this.spans.delete(id);
   }
 
   /**
@@ -1564,7 +1666,7 @@ export class Sessions {
   }
 
   /** Commits the pending writes and waits for every write so far. */
-  private async flush(): Promise<void> {
+  async flush(): Promise<void> {
     this.commit();
     await this.saving;
   }
@@ -1578,6 +1680,17 @@ export class Sessions {
   private publish(): void {
     this.options.onChange(this.list());
   }
+}
+
+/**
+ * The stretch of time a status is, for the dashboard: a `run` while Working;
+ * a `wait` for the user while Waiting on a question or Approval request, or
+ * finished and unanswered; none otherwise.
+ */
+function spanOf(status: SessionStatus, waitingReason: WaitingReason | undefined): OpenSpan['kind'] | undefined {
+  if (status === 'working') return 'run';
+  if (status === 'waiting' && (waitingReason === 'question' || waitingReason === 'approval' || waitingReason === 'finished')) return 'wait';
+  return undefined;
 }
 
 /** The prompt's text, trimmed; it may be empty only with files attached. */
