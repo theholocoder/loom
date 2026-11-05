@@ -419,3 +419,39 @@ describe('Settings: editor and terminal', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('unclosed quote');
   });
 });
+
+describe('Settings: stuck Sessions', () => {
+  const field = (main: FakeMain) => {
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    return screen.getByRole('textbox', { name: 'Stuck after (minutes)' }) as HTMLInputElement;
+  };
+
+  it('shows how many minutes without a word make a Session stuck, 15 by default, and saves a new number', async () => {
+    const main = new FakeMain();
+    const input = field(main);
+    expect(input.value).toBe('15');
+
+    fireEvent.change(input, { target: { value: ' 30 ' } });
+    fireEvent.submit(input);
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'settings.setStuckAfterMinutes')).toEqual([{ command: 'settings.setStuckAfterMinutes', params: { minutes: 30 } }]));
+    expect(input.value).toBe('30');
+  });
+
+  it('says why a number was refused', async () => {
+    const input = field(
+      new FakeMain({}, {
+        'settings.setStuckAfterMinutes': () => {
+          throw new Error('A Session is stuck after a whole number of minutes, at least 1.');
+        },
+      }),
+    );
+
+    fireEvent.change(input, { target: { value: 'soon' } });
+    fireEvent.submit(input);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('a whole number of minutes');
+  });
+});

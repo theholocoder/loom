@@ -1,4 +1,4 @@
-import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, TriangleAlert } from 'lucide-react';
+import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, Timer, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { APPROVAL_CATEGORIES, OPENCODE_MIN_VERSION, type AgentStatus, type ApprovalCategory, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
@@ -55,6 +55,13 @@ export function Settings() {
           <h3>Approvals</h3>
         </div>
         <ApprovalSettings />
+      </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <Timer className="sm" />
+          <h3>Stuck Sessions</h3>
+        </div>
+        <StuckAfter />
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
@@ -142,6 +149,21 @@ function ApprovalSettings() {
       ))}
       <ErrorAlert error={error} />
     </div>
+  );
+}
+
+/** How long a Working Session's agent may say nothing before the Session is stuck. */
+function StuckAfter() {
+  const saved = useTopic('settings')?.stuckAfterMinutes;
+  return (
+    <TextSetting
+      label="Stuck after (minutes)"
+      saved={saved === undefined ? '' : String(saved)}
+      width="8ch"
+      save={(api, value) => api.invoke('settings.setStuckAfterMinutes', { minutes: Number(value.trim()) }).then((s) => String(s.stuckAfterMinutes))}
+    >
+      A Working Session whose agent says nothing for this long goes Waiting as stuck. Waiting on your answer or approval never counts.
+    </TextSetting>
   );
 }
 

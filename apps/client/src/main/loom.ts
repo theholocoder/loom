@@ -167,6 +167,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
+    stuckAfterMs: () => settingsService.value.stuckAfterMinutes * 60_000,
     attachments: new Attachments(options.userDataDir),
     // Only checking what the user picked: not worth holding the change while the Environment starts.
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
@@ -223,6 +224,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
     'settings.setEditorCommand': ({ editorCommand }) => settingsService.setEditorCommand(editorCommand),
     'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),
+    'settings.setStuckAfterMinutes': ({ minutes }) => settingsService.setStuckAfterMinutes(minutes),
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
     'settings.setSidebar': (sidebar) => settingsService.setSidebar(sidebar),

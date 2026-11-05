@@ -488,6 +488,11 @@ export interface Settings extends Appearance {
    * with an Approval request. Agents started from now on get the new rules.
    */
   approvals: ApprovalPolicy;
+  /**
+   * How many minutes a Working Session's agent may go without a word
+   * before the Session goes Waiting as stuck. A whole number, at least 1.
+   */
+  stuckAfterMinutes: number;
   /** The open Session's right sidebar, as the user left it: the same for every Session. */
   sidebar: SidebarSettings;
 }
@@ -577,6 +582,7 @@ export const DEFAULT_SETTINGS: Settings = {
   terminalCommand: '',
   diffCollapsedPatterns: DEFAULT_DIFF_COLLAPSED_PATTERNS,
   approvals: DEFAULT_APPROVALS,
+  stuckAfterMinutes: 15,
   sidebar: DEFAULT_SIDEBAR,
   ...DEFAULT_APPEARANCE,
 };
@@ -876,6 +882,12 @@ export interface Commands {
   'settings.setEditorCommand': { params: { editorCommand: string }; result: Settings };
   /** Sets the terminal command; empty turns "Open in terminal" off. Rejects an unclosed quote. */
   'settings.setTerminalCommand': { params: { terminalCommand: string }; result: Settings };
+  /**
+   * Sets how many minutes without a word from a Working Session's agent make
+   * it stuck, from the next agent event on. Rejects anything but a whole
+   * number of at least 1.
+   */
+  'settings.setStuckAfterMinutes': { params: { minutes: number }; result: Settings };
   /** Sets which files the Changes view shows collapsed; blank patterns are dropped. */
   'settings.setDiffCollapsedPatterns': { params: { patterns: string[] }; result: Settings };
   /**
@@ -944,7 +956,8 @@ export interface Commands {
   /**
    * Sends a prompt to a Waiting Session, which becomes Working. While the
    * Session is Working, the prompt joins its queue instead, sent once the runs
-   * before it settle. Rejects while the agent waits on an answer.
+   * before it settle. A stuck Session's run is interrupted for it, as with
+   * `sessions.sendNow`. Rejects while the agent waits on an answer.
    *
    * `attachments` are stored at once and go to the agent with the prompt;
    * the prompt may then be empty. Rejects more than MAX_ATTACHMENTS, one
