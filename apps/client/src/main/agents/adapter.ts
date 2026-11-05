@@ -2,7 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
-import type { AgentConfig, Answer, ApprovalPolicy, ModelPick, QuestionField, ToolStatus } from '../../shared/api';
+import type { AgentConfig, Answer, ApprovalPolicy, ModelPick, QuestionField, TokenCounts, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -36,8 +36,14 @@ export type AgentEvent =
   | { type: 'approval-asked'; requestId: string; action: ApprovalAction }
   /** What the agent offers to pick and runs with: when it starts, and whenever that changes. */
   | { type: 'config'; config: AgentConfig }
-  /** How full its context is, in tokens, out of the model's window: after a run. */
-  | { type: 'usage'; used: number; size: number }
+  /**
+   * How full its context is, in tokens, out of the model's window: after a
+   * run. `cost` is what the conversation has cost so far, in USD, as the agent
+   * reports it (0 for subscription and local models), when it says.
+   */
+  | { type: 'usage'; used: number; size: number; cost?: number }
+  /** The tokens the run used, by kind, once it has ended, cancelled or not: before its `run-settled`. */
+  | { type: 'turn-usage'; tokens: TokenCounts }
   /** The run ended normally. */
   | { type: 'run-settled' }
   /** The run ended in an error, such as a provider's (no credit, exhausted quota). */

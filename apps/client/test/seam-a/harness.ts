@@ -23,9 +23,10 @@ export const realBridgePath = bridgeBinaryPath(fileURLToPath(new URL('../../../.
 
 /** A clock that only moves when the test calls `advance`. */
 export class ManualClock implements Clock {
-  private time = 1_000_000;
   private nextId = 1;
   private timers = new Map<number, { at: number; fn: () => void }>();
+
+  constructor(private time = 1_000_000) {}
 
   now(): number {
     return this.time;
@@ -114,12 +115,14 @@ export async function startMain(
     maxUntrackedCounted?: number;
     /** An agent standing in for OpenCode over ACP, for what no ACP agent does yet. */
     adapter?: AgentAdapter;
+    /** The clock time main starts at. */
+    now?: number;
   } = {},
 ): Promise<MainHarness> {
   const ownDir = !options.userDataDir;
   const machine = options.machine ?? new Machine();
   const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), 'loom-seam-a-'));
-  const clock = new ManualClock();
+  const clock = new ManualClock(options.now);
   let bridge: ChildProcess | undefined;
   let bridgeStarts = 0;
   let bridgePath: string | undefined;

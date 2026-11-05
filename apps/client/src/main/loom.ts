@@ -16,6 +16,7 @@ import { Settings } from './settings';
 import { DATABASE_FILE, DatabaseDamagedError, openDatabase, type LoomDatabase } from './storage/database';
 import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
 import { Topic } from './topic';
+import { dashboard } from './usage/usage';
 import { isWebLink } from '../shared/links';
 
 export interface LoomOptions {
@@ -249,6 +250,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.answer': (params) => sessionService.answer(params),
     'sessions.trust': (params) => sessionService.trust(params),
     'sessions.approve': (params) => sessionService.approve(params),
+    'usage.dashboard': async ({ days }) => {
+      // What the Sessions have recorded so far counts.
+      await sessionService.flush();
+      return dashboard(db, days, options.clock.now());
+    },
     'database.restoreLatestSnapshot': () => {
       throw new Error('the database is not damaged');
     },

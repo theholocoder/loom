@@ -1,6 +1,27 @@
 // Seam B: a fake main implementing the same typed API the real one does, so
 // renderer tests control exactly what main reports.
-import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
+import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
+
+/** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
+export function emptyDashboard(days: UsageRange): UsageDashboard {
+  const perDay = Array.from({ length: days }, (_, i) => {
+    const day = new Date(2026, 10, 5 - (days - 1 - i));
+    return { day: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`, tokens: 0, byProject: {} };
+  });
+  return {
+    days,
+    perDay,
+    tokens: 0,
+    reportedCost: 0,
+    sessionsStarted: 0,
+    mergeRequestsMerged: 0,
+    perProject: [],
+    perModel: [],
+    mix: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+    outcomes: { merged: 0, closed: 0, archived: 0, open: 0, stuck: 0 },
+    topSessions: [],
+  };
+}
 
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
@@ -93,6 +114,7 @@ export class FakeMain implements LoomApi {
       'sessions.answer': () => {},
       'sessions.trust': () => {},
       'sessions.approve': () => {},
+      'usage.dashboard': ({ days }) => emptyDashboard(days),
       'database.restoreLatestSnapshot': () => {},
       ...handlers,
     };

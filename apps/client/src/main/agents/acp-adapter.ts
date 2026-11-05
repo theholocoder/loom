@@ -1,7 +1,7 @@
 // An AgentAdapter for any agent that speaks ACP v1 over stdio, one process per
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
-import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type ToolStatus } from '../../shared/api';
+import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type TokenCounts, type ToolStatus } from '../../shared/api';
 import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection, AcpError } from './acp';
@@ -198,8 +198,13 @@ export class AcpAdapter implements AgentAdapter {
       },
       prompt: (prompt) => {
         onEvent({ type: 'run-started' });
-        connection.request<{ stopReason: string }>('session/prompt', { sessionId: id, prompt: promptBlocks(prompt, images) }).then(
-          () => onEvent({ type: 'run-settled' }),
+        connection.request<{ stopReason: string; usage?: unknown }>('session/prompt', { sessionId: id, prompt: promptBlocks(prompt, images) }).then(
+          (response) => {
+            // ACP's per-turn usage is unstable: what doesn't fit is left out, never a failure.
+            const tokens = tokensOf(response?.usage);
+            if (tokens) onEvent({ type: 'turn-usage', tokens });
+            onEvent({ type: 'run-settled' });
+          },
           (error: Error) => onEvent({ type: 'run-failed', error: error.message }),
         );
       },
@@ -245,9 +250,12 @@ function fileUri(path: string): string {
 function translate(update: SessionUpdate): AgentEvent | undefined {
   switch (update.sessionUpdate) {
     case 'usage_update': {
-      const { used, size } = update as { used?: unknown; size?: unknown };
+      const { used, size, cost } = update as { used?: unknown; size?: unknown; cost?: { amount?: unknown; currency?: unknown } };
       if (!isCount(used) || !isCount(size) || size === 0) return undefined;
-      return { type: 'usage', used, size };
+      const amount = cost?.amount;
+      // Only USD is summed; a cost in another currency isn't one Loom can add up.
+      const reported = typeof amount === 'number' && Number.isFinite(amount) && amount >= 0 && (cost?.currency ?? 'USD') === 'USD' ? amount : undefined;
+      return { type: 'usage', used, size, ...(reported === undefined ? {} : { cost: reported }) };
     }
     case 'agent_message_chunk':
     case 'agent_thought_chunk': {
@@ -333,6 +341,15 @@ function configOf(options: ConfigOption[]): AgentConfig {
     ...(typeof effort?.currentValue === 'string' && efforts.length ? { effort: effort.currentValue } : {}),
     efforts,
   };
+}
+
+/** ACP's `PromptResponse.usage` (unstable) as Loom's token counts; undefined unless it has input and output counts. */
+function tokensOf(usage: unknown): TokenCounts | undefined {
+  if (typeof usage !== 'object' || usage === null) return undefined;
+  const u = usage as Record<string, unknown>;
+  if (!isCount(u.inputTokens) || !isCount(u.outputTokens)) return undefined;
+  const count = (value: unknown) => (isCount(value) ? value : 0);
+  return { input: u.inputTokens, output: u.outputTokens, reasoning: count(u.thoughtTokens), cacheRead: count(u.cachedReadTokens), cacheWrite: count(u.cachedWriteTokens) };
 }
 
 function isCount(value: unknown): value is number {
