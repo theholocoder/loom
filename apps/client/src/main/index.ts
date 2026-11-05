@@ -5,7 +5,7 @@ import { THEMES, type Theme } from '../shared/appearance';
 import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { serveApi } from './ipc';
-import { createLoom, type Loom } from './loom';
+import { createLoom, isWebLink, type Loom } from './loom';
 import { guardQuit, quitQuestion } from './quit';
 import type { Session } from '../shared/api';
 
@@ -23,6 +23,16 @@ function createWindow(theme: Theme): BrowserWindow {
     // The saved theme's background, so the window never shows another first.
     backgroundColor: THEMES[theme].background,
     webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), sandbox: true, contextIsolation: true },
+  });
+  // The window only ever shows Loom: a link that slips past the renderer's own
+  // handling opens in the system browser, if it's a web link, never in here.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isWebLink(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault();
+    if (isWebLink(url)) void shell.openExternal(url);
   });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadFile(join(import.meta.dirname, '../renderer/index.html'));

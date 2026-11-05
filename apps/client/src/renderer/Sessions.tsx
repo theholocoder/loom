@@ -10,6 +10,7 @@ import { DiffToggle } from './DiffToggle';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
 import { Select } from './Popover';
+import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
@@ -438,7 +439,9 @@ export function SessionView({
           item.kind === 'user' ? (
             <div key={item.id} className="msg user">
               <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <div className="bubble">{item.text}</div>
+                <div className="bubble">
+                  <Markdown text={item.text} breaks />
+                </div>
               </div>
             </div>
           ) : item.kind === 'agent' ? (
@@ -448,7 +451,9 @@ export function SessionView({
               </div>
               <div className="body">
                 <div className="name">{session.agent}</div>
-                <div className="bubble">{item.text}</div>
+                <div className="bubble">
+                  <Markdown text={item.text} />
+                </div>
               </div>
             </div>
           ) : item.kind === 'thinking' ? (

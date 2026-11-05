@@ -268,7 +268,8 @@ function tempDirOf(os: string | undefined, home: string | undefined): string {
   return '/tmp';
 }
 
-function isWebLink(url: string): boolean {
+/** Whether `url` is one Loom opens in the system browser: http or https. */
+export function isWebLink(url: string): boolean {
   if (!URL.canParse(url)) return false;
   const { protocol } = new URL(url);
   return protocol === 'https:' || protocol === 'http:';
