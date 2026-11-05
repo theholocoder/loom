@@ -31,6 +31,10 @@ export interface OpencodeScript {
     holdConfig?: string;
     /** Each process says in `initialize` that it takes images in prompts (`promptCapabilities.image`). */
     images?: boolean;
+    /** What a process that resumed or loaded a session plays instead of `turns`. */
+    resumedTurns?: AcpTurn[];
+    /** The ways of taking up a session each process turns down, as OpenCode does one it doesn't know. */
+    refuse?: Array<'session/resume' | 'session/load'>;
   };
 }
 

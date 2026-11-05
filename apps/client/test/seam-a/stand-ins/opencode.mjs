@@ -24,7 +24,11 @@
 // running turn as cancelled, cutting short what it holds on; a
 // `session/prompt` while a turn runs is refused, as OpenCode 2.1.4's ACP
 // bridge does. A turn with `used` ends with a `usage_update` of that many
-// context tokens, out of the current model's `context`. Every message it receives is appended to
+// context tokens, out of the current model's `context`. `session/resume` and
+// `session/load` take up the session they name (see `refuse`); a load first
+// replays its history as `session/update`s, as OpenCode does, and a process
+// that took one up plays `resumedTurns`, if given, instead of `turns`.
+// Every message it receives is appended to
 // <script.json>.acp.log as {pid, cwd, config, message}, `config` being its
 // OPENCODE_CONFIG_CONTENT. It exits when its stdin closes.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -94,7 +98,8 @@ function apiModel({ providerID, id, name, variants = [], context, enabled = true
 
 function acp() {
   const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
-  const turns = script.acp?.turns ?? [];
+  let resumed = false;
+  const turns = () => (resumed && script.acp?.resumedTurns) || script.acp?.turns || [];
   let prompts = 0;
   let sessionId;
   // The model and variant the session runs with, as OpenCode's ACP bridge keeps them.
@@ -124,11 +129,21 @@ function acp() {
       return;
     }
     if (method === 'initialize') {
-      send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true, ...(script.acp?.images ? { promptCapabilities: { image: true } } : {}) }, authMethods: [] } });
+      send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} }, ...(script.acp?.images ? { promptCapabilities: { image: true } } : {}) }, authMethods: [] } });
     } else if (method === 'session/new') {
       if (script.acp?.holdNew) await released(script.acp.holdNew);
       sessionId = `ses_standin${process.pid}`;
       send({ id, result: { sessionId, configOptions: configOptions(models, selection) } });
+    } else if (method === 'session/resume' || method === 'session/load') {
+      if ((script.acp?.refuse ?? []).includes(method)) return send({ id, error: { code: -32602, message: `Invalid params: session not found: ${params.sessionId}` } });
+      sessionId = params.sessionId;
+      resumed = true;
+      if (method === 'session/load') {
+        send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Replayed prompt' } } } });
+        send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Replayed reply' } } } });
+        send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'replayed', title: 'Replayed tool', kind: 'read', status: 'completed' } } });
+      }
+      send({ id, result: { configOptions: configOptions(models, selection) } });
     } else if (method === 'session/set_config_option') {
       if (script.acp?.holdConfig) await released(script.acp.holdConfig);
       const { configId, value } = params;
@@ -150,7 +165,7 @@ function acp() {
       }
     } else if (method === 'session/prompt') {
       if (running) return send({ id, error: { code: -32603, message: 'session is busy' } });
-      const turn = turns[prompts++] ?? { chunks: [] };
+      const turn = turns()[prompts++] ?? { chunks: [] };
       const current = { cancelled: false };
       current.stopped = new Promise((resolve) => (current.stop = resolve));
       running = current;

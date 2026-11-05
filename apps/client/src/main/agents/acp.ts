@@ -42,6 +42,9 @@ export class AcpConnection {
   private nextId = 1;
   private pending = new Map<number, { resolve: (result: unknown) => void; reject: (error: Error) => void }>();
   private closedReason: string | undefined;
+  private onExited!: () => void;
+  /** Resolves once the agent's process has ended. */
+  readonly exited = new Promise<void>((resolve) => (this.onExited = resolve));
 
   constructor(
     private readonly channel: Channel,
@@ -130,6 +133,7 @@ export class AcpConnection {
     this.closedReason = reason;
     for (const { reject } of this.pending.values()) reject(new Error(reason));
     this.pending.clear();
+    this.onExited();
     this.handlers.onClose(reason);
   }
 }

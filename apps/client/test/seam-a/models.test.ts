@@ -278,7 +278,7 @@ describe('changing the model and Effort between runs', () => {
     expect(after.agentConfig?.model).toBe('opencode/pulse-free');
   });
 
-  it("is refused for a Session whose agent has stopped, which can't be resumed yet", async () => {
+  it('applies to a Session whose agent stopped with the Client, once its conversation is resumed', async () => {
     const { machine, checkout } = machineWith();
     const userDataDir = tempDir('loom-stopped-');
     const first = await startMain({ machine, userDataDir });
@@ -289,8 +289,13 @@ describe('changing the model and Effort between runs', () => {
     await first.close();
     const second = await startMain({ machine, userDataDir });
 
-    expect((await second.api.invoke('sessions.list')).find((s) => s.id === id)!.agentStopped).toBe(true);
-    await expect(second.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' })).rejects.toThrow(/stopped/);
+    await waitFor(second.api, 'environments', ready);
+
+    await second.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' });
+    await second.api.invoke('sessions.send', { id, prompt: 'Again' });
+
+    await waitFor(second.api, 'sessions', session(id, finished));
+    expect(asked(machine).slice(-3)).toEqual(['session/resume', 'model=anthropic/claude-sonnet-5-5', 'session/prompt']);
   });
 
   it("checks a change against the checkout's models while no agent runs, and applies it once one does", async () => {

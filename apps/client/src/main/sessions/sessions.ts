@@ -4,7 +4,7 @@
 import type { Transaction } from 'kysely';
 import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
-import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, ApprovalAction, PromptFile } from '../agents/adapter';
+import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
@@ -65,6 +65,12 @@ const MAX_TITLE_LENGTH = 80;
 /** How often streaming agent text is checkpointed to the database. */
 export const CHECKPOINT_MS = 1000;
 
+/** What Continue sends the agent of a run Loom quit or crashed during. */
+export const CONTINUE_PROMPT = 'Loom stopped while you were working. Continue where you left off.';
+
+/** How long a Session waits with nothing in flight before its agent's process is stopped; its next prompt resumes it. */
+export const IDLE_STOP_MS = 10 * 60_000;
+
 /** What to do once a run the user interrupted has ended: send the queued message `sendNow`, or else stop. */
 type Interruption = { sendNow?: number };
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
@@ -84,6 +90,10 @@ export class Sessions {
   private checkpoints = new Map<number, TimerHandle>();
   /** The agent conversation of each Session whose agent process is running. */
   private live = new Map<number, AgentSession>();
+  /** The pending idle stop of each Waiting Session's agent (IDLE_STOP_MS). */
+  private readonly idleStops = new Map<number, TimerHandle>();
+  /** Idle agents still closing, by Session: the next one opened for the Session waits for the process to exit, so two never share its conversation. */
+  private readonly closing = new Map<number, Promise<void>>();
   /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
   private readonly diffSummaries = new Map<string, DiffSummary>();
   /**
@@ -91,14 +101,11 @@ export class Sessions {
    * outcome, and is closed if the Session was archived; its closing isn't a failure.
    */
   private readonly archiving = new Map<number, Promise<unknown>>();
-  /** Sessions whose agent ended with its Environment's bridge: their next prompt starts it again. */
-  private restarted = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
   private readonly asks = new Map<number, Map<number, string>>();
   /**
    * The approval categories the user approved for the rest of each Session
-   * ("for this Session"), while the Client runs: an agent can't be resumed
-   * after a restart yet, so they would have nothing to answer.
+   * ("for this Session"), while the Client runs.
    */
   private readonly grants = new Map<number, Set<ApprovalCategory>>();
   /** The tool calls approved in each Session's current run: more asks for the same call go through. */
@@ -138,7 +145,8 @@ export class Sessions {
   /**
    * The Session service, with the Sessions in the database. A Session that
    * was Working when the Client last stopped has lost its run: it is Waiting
-   * as interrupted, and its agent's last text as far as it was saved.
+   * as interrupted, its agent's last text as far as it was saved, and
+   * nothing resumes it until the user says so (Continue, or a reply).
    */
   static async load(options: SessionsOptions): Promise<Sessions> {
     const sessions = new Sessions(options);
@@ -159,6 +167,7 @@ export class Sessions {
       if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval'))) continue;
       await sessions.loadTranscript(session.id);
       sessions.endRun(session.id);
+      sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
     }
     await sessions.flush();
@@ -210,7 +219,7 @@ export class Sessions {
 
   /** Newest first. */
   list(): Session[] {
-    return [...this.sessions.values()].map((s) => (s.status !== 'archived' && this.agentStopped(s.id) ? { ...s, agentStopped: true } : s)).sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+    return [...this.sessions.values()].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
   }
 
   async create(params: Commands['sessions.create']['params']): Promise<Session> {
@@ -458,7 +467,11 @@ export class Sessions {
     try {
       await change;
     } finally {
-      if (this.switching.get(id) === change) this.switching.delete(id);
+      if (this.switching.get(id) === change) {
+        this.switching.delete(id);
+        // Talking to the agent counts as use: its 10 minutes start again.
+        this.watchIdle(id);
+      }
     }
   }
 
@@ -558,6 +571,16 @@ export class Sessions {
     // Starting again sets the Environment starting at once, so the run waits for it.
     environment.restart().catch(() => {});
     void this.run(id, messageOf(prompt));
+  }
+
+  /** Has the agent go on with the run Loom quit during: sends it CONTINUE_PROMPT, resuming its conversation. */
+  async continue({ id }: { id: number }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    await this.switched(id);
+    const session = this.get(id);
+    if (session.status !== 'waiting' || session.waitingReason !== 'interrupted') throw new Error('There is nothing to continue: send a new prompt instead.');
+    this.reply(id, { text: CONTINUE_PROMPT });
   }
 
   /** Sends the agent the Merge request prompt shortcut. */
@@ -753,17 +776,11 @@ export class Sessions {
     this.assertCanPrompt(id);
   }
 
-  /** Throws if the Session's agent has stopped for good: Loom can't resume agents yet. */
+  /** Throws if the Session can take no prompt: it is archived, or its worktree is gone. */
   private assertCanPrompt(id: number): void {
     const session = this.get(id);
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
-    if (this.agentStopped(id)) throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
-  }
-
-  /** Whether the Session's agent ran and has stopped for good: Loom can't resume agents yet. */
-  private agentStopped(id: number): boolean {
-    return !this.live.has(id) && !!this.get(id).agentSessionId && !this.restarted.has(id);
   }
 
   /**
@@ -903,14 +920,13 @@ export class Sessions {
   /**
    * The bridge of the Environment `environmentId` died, and with it the
    * agents running there: their Sessions go Waiting (error), and their next
-   * prompt starts the agent again.
+   * prompt resumes the agent's conversation.
    */
   environmentRestarted(environmentId: string): void {
     if (this.shuttingDown) return;
     for (const id of [...this.live.keys()]) {
       if (this.options.project(this.get(id).projectId)?.checkout.environmentId !== environmentId) continue;
       this.live.delete(id);
-      this.restarted.add(id);
       this.fail(id, ENVIRONMENT_RESTARTED, { evenIfWaiting: true });
     }
   }
@@ -922,6 +938,8 @@ export class Sessions {
    */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    for (const handle of this.idleStops.values()) this.options.clock.clearTimeout(handle);
+    this.idleStops.clear();
     for (const id of [...this.checkpoints.keys()]) this.checkpoint(id);
     await this.flush();
   }
@@ -932,8 +950,11 @@ export class Sessions {
       try {
         agent = await this.open(id);
       } catch (error) {
-        this.fail(id, (error as Error).message);
-        return;
+        if (!(error instanceof ResumeRefused)) return this.fail(id, (error as Error).message);
+        // That conversation is gone for good: the next prompt starts a new one rather than fail the same way.
+        this.update(id, { agentSessionId: undefined });
+        this.save(id, { agent_session_id: null });
+        return this.fail(id, `${error.message}. The next prompt starts a new conversation.`);
       }
     }
     // The model and Effort picked apply from this prompt; an agent already on them isn't asked.
@@ -968,11 +989,15 @@ export class Sessions {
     }
   }
 
-  /** Starts the Session's agent in its working copy and records the agent's id for it. */
+  /**
+   * Starts the Session's agent in its working copy, resuming the agent's
+   * conversation if it has one, and records the agent's id for it.
+   */
   private async open(id: number): Promise<AgentSession> {
     const session = this.get(id);
     const environment = this.environmentOf(session);
     await environment.ready();
+    await this.closing.get(id);
     let opened: AgentSession | undefined;
     const executable = environment.bridgeExecutable();
     const agent = await this.options.adapter.open({
@@ -981,6 +1006,7 @@ export class Sessions {
       tempDir: environment.tempDir(),
       approvals: this.options.approvals(),
       ...(executable ? { loomTools: { command: executable, args: ['mcp'] } } : {}),
+      ...(session.agentSessionId ? { resume: session.agentSessionId } : {}),
       // An agent the Session has moved on from, as after a restart, no longer counts.
       onEvent: (event) => {
         if (opened && this.live.get(id) !== opened) return;
@@ -995,7 +1021,6 @@ export class Sessions {
       throw new Error('This Session is archived.');
     }
     this.live.set(id, agent);
-    this.restarted.delete(id);
     this.update(id, { agentSessionId: agent.id });
     this.save(id, { agent_session_id: agent.id });
     return agent;
@@ -1472,6 +1497,39 @@ export class Sessions {
     const unread = status === 'waiting';
     this.update(id, { status, waitingReason, error, unread, updatedAt });
     this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt });
+    this.watchIdle(id);
+  }
+
+  /**
+   * Sets the Session's agent to stop once it has been Waiting IDLE_STOP_MS
+   * with nothing in flight (no run, question or Approval request), from now:
+   * called on each status change, which also cancels the stop set before.
+   */
+  private watchIdle(id: number): void {
+    const handle = this.idleStops.get(id);
+    if (handle !== undefined) this.options.clock.clearTimeout(handle);
+    this.idleStops.delete(id);
+    if (this.shuttingDown || this.get(id).status !== 'waiting' || this.inRun(id) || !this.live.has(id)) return;
+    this.idleStops.set(id, this.options.clock.setTimeout(() => this.stopIdle(id), IDLE_STOP_MS));
+  }
+
+  /** Stops the idle Session's agent, unless something is in flight after all. */
+  private stopIdle(id: number): void {
+    this.idleStops.delete(id);
+    if (this.shuttingDown || this.get(id).status !== 'waiting' || this.inRun(id)) return;
+    // A model change talks to the agent: the wait starts again once it is done (see setModel).
+    if (this.switching.has(id)) return;
+    const agent = this.live.get(id);
+    if (!agent) return;
+    // Out of `live` first, so its closing is no failure.
+    this.live.delete(id);
+    const closed = agent
+      .close()
+      .catch((error: unknown) => console.error(`could not stop Session ${id}'s idle agent:`, error))
+      .finally(() => {
+        if (this.closing.get(id) === closed) this.closing.delete(id);
+      });
+    this.closing.set(id, closed);
   }
 
   private update(id: number, change: Partial<Session>): void {

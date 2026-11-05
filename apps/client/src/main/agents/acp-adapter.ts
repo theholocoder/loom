@@ -2,9 +2,9 @@
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
 import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type ToolStatus } from '../../shared/api';
-import type { AgentAdapter, AgentEvent, AgentPrompt, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
+import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
-import { AcpConnection } from './acp';
+import { AcpConnection, AcpError } from './acp';
 
 /** How to start one ACP agent. */
 export interface AcpProfile {
@@ -18,6 +18,12 @@ export interface AcpProfile {
 }
 
 const PROTOCOL_VERSION = 1;
+
+/**
+ * How long an agent gets to exit once its stdin is closed before it is
+ * killed. Real time rather than the Clock, like the bridge's own shutdown.
+ */
+const EXIT_GRACE_MS = 5_000;
 
 /** The name Loom's MCP server goes by: agents prefix its tools with it (OpenCode: `loom_link_merge_request`). */
 export const LOOM_MCP_SERVER = 'loom';
@@ -37,7 +43,7 @@ export class AcpAdapter implements AgentAdapter {
     return this.profile.name;
   }
 
-  async open({ environment, workingCopy, tempDir, approvals, loomTools, onEvent }: OpenOptions): Promise<AgentSession> {
+  async open({ environment, workingCopy, tempDir, approvals, loomTools, resume, onEvent }: OpenOptions): Promise<AgentSession> {
     // The user's own setup (OpenCode config, MCP servers, plugins, skills,
     // AGENTS.md) loads as it would in their terminal: the agent starts in the
     // working copy with the Environment's own env and only the profile's args,
@@ -48,6 +54,10 @@ export class AcpAdapter implements AgentAdapter {
       throw error;
     });
     let sessionId: string | undefined;
+    /** While `session/load` replays the conversation's history, which Loom has already. */
+    let replaying = false;
+    /** Once opening has failed: the process is killed, and its end is no news for the Session. */
+    let abandoned = false;
     /** The agent's config options as it last reported them, and what Loom reads of them. */
     let options: ConfigOption[] = [];
     let config: AgentConfig = configOf(options);
@@ -84,7 +94,7 @@ export class AcpAdapter implements AgentAdapter {
       onNotification: (method, params) => {
         if (method !== 'session/update') return;
         const { sessionId: forSession, update } = params as { sessionId: string; update: SessionUpdate };
-        if (forSession !== sessionId) return;
+        if (forSession !== sessionId || replaying) return;
         if (update.sessionUpdate === 'config_option_update') return configured((update as { configOptions?: unknown }).configOptions);
         const event = translate(update);
         if (event) onEvent(event);
@@ -116,13 +126,14 @@ export class AcpAdapter implements AgentAdapter {
       },
       onClose: (reason) => {
         asked.clear();
+        if (abandoned) return;
         onEvent({ type: 'closed', error: reason });
       },
     });
     /** Whether the agent takes images inline in a prompt, as `initialize` said. */
     let images = false;
     try {
-      const initialized = await connection.request<{ agentCapabilities?: { promptCapabilities?: { image?: unknown } } }>('initialize', {
+      const initialized = await connection.request<{ agentCapabilities?: AgentCapabilities }>('initialize', {
         protocolVersion: PROTOCOL_VERSION,
         // Without `elicitation.form`, OpenCode skips its questions and tells the model the user couldn't be asked.
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } },
@@ -132,10 +143,38 @@ export class AcpAdapter implements AgentAdapter {
       // Beside the user's own tools, Loom's MCP server, whose one tool the agent calls to link a Merge request.
       const mcpServers = loomTools ? [{ name: LOOM_MCP_SERVER, command: loomTools.command, args: loomTools.args, env: [] }] : [];
       let reported: unknown;
-      ({ sessionId, configOptions: reported } = await connection.request<{ sessionId: string; configOptions?: unknown }>('session/new', { cwd: workingCopy, mcpServers }));
+      if (resume === undefined) {
+        ({ sessionId, configOptions: reported } = await connection.request<{ sessionId: string; configOptions?: unknown }>('session/new', { cwd: workingCopy, mcpServers }));
+      } else {
+        sessionId = resume;
+        const params = { sessionId, cwd: workingCopy, mcpServers };
+        const capabilities = initialized?.agentCapabilities;
+        // `session/resume` takes the conversation up as it is; failing that, `session/load` replays it first.
+        // Only the agent's own answer turns it down: a process or transport that fails is a failure to start.
+        const refusal = (error: unknown) => {
+          if (error instanceof AcpError) return error;
+          throw error;
+        };
+        const resumed = capabilities?.sessionCapabilities?.resume
+          ? await connection.request<{ configOptions?: unknown }>('session/resume', params).catch(refusal)
+          : new AcpError(0, `${this.profile.name} can't resume a conversation`);
+        let taken = resumed;
+        if (resumed instanceof AcpError && capabilities?.loadSession === true) {
+          replaying = true;
+          try {
+            taken = await connection.request<{ configOptions?: unknown }>('session/load', params).catch(refusal);
+          } finally {
+            replaying = false;
+          }
+        }
+        if (taken instanceof AcpError) throw new ResumeRefused(`${this.profile.name} could not resume this Session's conversation: ${taken.message.replace(/\.$/, '')}`);
+        reported = taken?.configOptions;
+      }
       configured(reported);
     } catch (error) {
+      abandoned = true;
       await channel.kill().catch(() => {});
+      if (error instanceof ResumeRefused) throw error;
       throw new Error(`${this.profile.name} could not start a session: ${(error as Error).message}`);
     }
     const id = sessionId;
@@ -170,7 +209,13 @@ export class AcpAdapter implements AgentAdapter {
         for (const request of [...asked.values()]) request.cancel();
         void connection.notify('session/cancel', { sessionId: id }).catch(() => {});
       },
-      close: () => connection.end(),
+      close: async () => {
+        await connection.end().catch(() => {});
+        let grace: ReturnType<typeof setTimeout> | undefined;
+        const kill = new Promise<void>((resolve) => (grace = setTimeout(resolve, EXIT_GRACE_MS)));
+        if ((await Promise.race([connection.exited.then(() => 'exited'), kill])) !== 'exited') await channel.kill().catch(() => {});
+        clearTimeout(grace);
+      },
     };
   }
 }
@@ -229,6 +274,14 @@ function translate(update: SessionUpdate): AgentEvent | undefined {
     }
   }
   return undefined;
+}
+
+/** What Loom reads of the capabilities an ACP agent reports in `initialize`. */
+interface AgentCapabilities {
+  loadSession?: unknown;
+  promptCapabilities?: { image?: unknown };
+  /** `resume` is ACP's unstable `session/resume`. */
+  sessionCapabilities?: { resume?: unknown };
 }
 
 // ACP v1's session config options: Loom reads the model and Effort ones, by

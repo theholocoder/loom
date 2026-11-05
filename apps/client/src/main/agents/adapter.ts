@@ -89,15 +89,24 @@ export interface OpenOptions {
    * call. None when the Environment can't run it.
    */
   loomTools?: { command: string; args: string[] };
+  /**
+   * The agent's id of a conversation to take up again (`AgentSession.id`)
+   * rather than start a new one; what it replays of its history isn't
+   * reported. Opening rejects with ResumeRefused if the agent can't take it up.
+   */
+  resume?: string;
   onEvent: (event: AgentEvent) => void;
 }
+
+/** The agent started but can't take up the conversation it was asked to resume, as when it no longer has it. */
+export class ResumeRefused extends Error {}
 
 export interface AgentAdapter {
   /** The agent's name, as the UI shows it. */
   readonly name: string;
   /** Whether its sessions take a message mid-run (`AgentSession.steer`). */
   readonly canSteer?: boolean;
-  /** Starts the agent for a new conversation in the working copy. */
+  /** Starts the agent in the working copy, for a new conversation or one it resumes. */
   open(options: OpenOptions): Promise<AgentSession>;
 }
 
@@ -126,7 +135,7 @@ export interface AgentSession {
   cancel(): void;
   /** Gives the agent `text` mid-run, for an agent that can be steered (`AgentAdapter.canSteer`). */
   steer?(prompt: AgentPrompt): void;
-  /** Ends the agent's process. */
+  /** Ends the agent's process; resolves once it has exited, killed if it doesn't within a few seconds. */
   close(): Promise<void>;
 }
 
