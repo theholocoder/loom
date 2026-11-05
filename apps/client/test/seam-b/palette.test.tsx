@@ -388,6 +388,11 @@ describe('Session search', () => {
     expect(sessionNames()).toEqual(['Old invoice export']);
     type('has:issue');
     expect(sessionNames()).toEqual(['Fix login']);
+    // An unknown has: narrows nothing, as if it were still being typed.
+    type('');
+    const all = sessionNames();
+    type('has:nonsense');
+    expect(sessionNames()).toEqual(all);
     type('project:web login');
     expect(sessionNames()).toEqual(['Login copy']);
     type('is:waiting project:billing');
@@ -573,8 +578,10 @@ describe('the keyboard shortcuts list', () => {
     ctrlQuestion();
     const searchBox = within(help()).getByRole('searchbox', { name: 'Search shortcuts' });
     fireEvent.change(searchBox, { target: { value: 'waiting' } });
-    // Ctrl ones first, under Anywhere.
+    // Ctrl ones first: they work even while typing.
     expect(rows().map((r) => r[0])).toEqual(['Open the nth Waiting Session in the Inbox', 'Go to next Waiting Session', 'Go to previous Waiting Session']);
+    expect(within(help()).getByText('Even while typing')).toBeTruthy();
+    expect(within(help()).getByText('Outside text fields')).toBeTruthy();
     fireEvent.change(searchBox, { target: { value: 'ctrl shift' } });
     expect(rows().every((r) => r[1]!.startsWith('Ctrl Shift'))).toBe(true);
     expect(rows().length).toBeGreaterThan(2);

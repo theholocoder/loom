@@ -41,7 +41,7 @@ import { Projects, useExistingCloneLinker } from './Projects';
 import { NewSession, SessionView, type SessionCommand } from './Sessions';
 import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
-import { matchesShortcut, SHORTCUTS } from './shortcuts';
+import { matchesShortcut, SHORTCUTS, type ShortcutName } from './shortcuts';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
 
@@ -321,36 +321,38 @@ function paletteActions(app: {
   const canCreateMergeRequest = active && !mergeRequest && project?.forge.state === 'available';
   const open = session && session.status !== 'archived' ? session : undefined;
   const actions: Array<PaletteAction | false | undefined> = [
-    { label: 'New Session', icon: MessageSquarePlus, shortcut: SHORTCUTS.newSession.shortcut, run: app.newSession },
-    app.forgeProjects.length > 0 && { label: 'New Session from an issue…', icon: CircleDot, shortcut: SHORTCUTS.newSessionFromIssue.shortcut, run: app.newSessionFromIssue },
-    { label: 'Add Project from existing clone…', icon: FolderOpen, shortcut: SHORTCUTS.addExistingClone.shortcut, run: app.addExistingClone },
-    nextWaiting && { label: 'Go to next Waiting Session', icon: ArrowRightToLine, shortcut: SHORTCUTS.nextWaiting.shortcut, run: () => app.select(nextWaiting) },
-    previousWaiting && { label: 'Go to previous Waiting Session', icon: ArrowLeftToLine, shortcut: SHORTCUTS.previousWaiting.shortcut, run: () => app.select(previousWaiting) },
-    active?.status === 'waiting' && { label: 'Reply to this Session', icon: Reply, shortcut: SHORTCUTS.reply.shortcut, run: () => app.reply(active) },
-    app.retryable && { label: 'Retry the last prompt', icon: RotateCw, shortcut: SHORTCUTS.retry.shortcut, run: () => app.command('retry') },
+    shortcutAction('newSession', MessageSquarePlus, app.newSession),
+    app.forgeProjects.length > 0 && shortcutAction('newSessionFromIssue', CircleDot, app.newSessionFromIssue),
+    shortcutAction('addExistingClone', FolderOpen, app.addExistingClone),
+    nextWaiting && shortcutAction('nextWaiting', ArrowRightToLine, () => app.select(nextWaiting)),
+    previousWaiting && shortcutAction('previousWaiting', ArrowLeftToLine, () => app.select(previousWaiting)),
+    active?.status === 'waiting' && shortcutAction('reply', Reply, () => app.reply(active)),
+    app.retryable && shortcutAction('retry', RotateCw, () => app.command('retry')),
     mergeRequest && {
+      ...shortcutAction('mergeRequest', ExternalLink, () => app.command('openMergeRequest')),
       label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} for this Session`,
-      icon: ExternalLink,
-      shortcut: SHORTCUTS.mergeRequest.shortcut,
-      run: () => app.command('openMergeRequest'),
     },
     canCreateMergeRequest && {
+      ...shortcutAction('mergeRequest', GitPullRequestCreate, () => app.command('createMergeRequest')),
       label: 'Create Merge request for this Session',
-      icon: GitPullRequestCreate,
-      shortcut: SHORTCUTS.mergeRequest.shortcut,
-      run: () => app.command('createMergeRequest'),
     },
-    open && { label: 'Open in editor', icon: CodeXml, shortcut: SHORTCUTS.openInEditor.shortcut, run: () => app.command('openInEditor') },
-    open && { label: 'Open in terminal', icon: SquareTerminal, shortcut: SHORTCUTS.openInTerminal.shortcut, run: () => app.command('openInTerminal') },
-    { label: 'Toggle changes panel', icon: FileDiff, shortcut: SHORTCUTS.toggleDiff.shortcut, run: app.toggleDiff },
-    active && !active.unread && { label: 'Mark this Session unread', icon: Mail, shortcut: SHORTCUTS.markUnread.shortcut, run: () => app.command('markUnread') },
-    open && { label: 'Archive this Session', icon: Archive, shortcut: SHORTCUTS.archive.shortcut, run: () => app.command('archive') },
+    open && shortcutAction('openInEditor', CodeXml, () => app.command('openInEditor')),
+    open && shortcutAction('openInTerminal', SquareTerminal, () => app.command('openInTerminal')),
+    shortcutAction('toggleDiff', FileDiff, app.toggleDiff),
+    active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
+    open && shortcutAction('archive', Archive, () => app.command('archive')),
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.setView('projects') },
-    { label: 'Open Settings', icon: SettingsIcon, shortcut: SHORTCUTS.settings.shortcut, run: () => app.setView('settings') },
-    { label: 'Show keyboard shortcuts', icon: Keyboard, shortcut: SHORTCUTS.help.shortcut, run: app.showHelp },
+    shortcutAction('settings', SettingsIcon, () => app.setView('settings')),
+    shortcutAction('help', Keyboard, app.showHelp),
   ];
   return actions.filter((action): action is PaletteAction => !!action);
+}
+
+/** An action named and keyed as the shortcuts catalog has it. */
+function shortcutAction(name: ShortcutName, icon: LucideIcon, run: PaletteAction['run']): PaletteAction {
+  const { label, shortcut } = SHORTCUTS[name];
+  return { label, icon, shortcut, run };
 }
 
 /** The + button's menu of things to start: a Session or a Project. */

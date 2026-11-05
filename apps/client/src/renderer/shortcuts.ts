@@ -36,7 +36,7 @@ export function shortcutLabel({ key, ctrl, shift }: Shortcut): string {
 }
 
 export interface ShortcutEntry {
-  /** What it does, in general: the palette may say it more precisely. */
+  /** What it does: the palette's name for it too, unless it says it more precisely. */
   label: string;
   shortcut: Shortcut;
   /** How the list shows it, when that isn't shortcutLabel's. */
@@ -48,20 +48,20 @@ export const SHORTCUTS = {
   palette: { label: 'Open the command palette', shortcut: { key: 'k', ctrl: true } },
   help: { label: 'Show keyboard shortcuts', shortcut: { key: '?', ctrl: true } },
   newSession: { label: 'New Session', shortcut: { key: 'n', ctrl: true } },
-  newSessionFromIssue: { label: 'New Session from an issue', shortcut: { key: 'n', ctrl: true, shift: true } },
-  addExistingClone: { label: 'Add Project from existing clone', shortcut: { key: 'o', ctrl: true } },
+  newSessionFromIssue: { label: 'New Session from an issue…', shortcut: { key: 'n', ctrl: true, shift: true } },
+  addExistingClone: { label: 'Add Project from existing clone…', shortcut: { key: 'o', ctrl: true } },
   nextWaiting: { label: 'Go to next Waiting Session', shortcut: { key: 'j' } },
   previousWaiting: { label: 'Go to previous Waiting Session', shortcut: { key: 'k' } },
   // The App reads the digit itself: Ctrl+1 to Ctrl+9, by physical key (AZERTY's 1 types &).
   inboxPosition: { label: 'Open the nth Waiting Session in the Inbox', shortcut: { key: '1', ctrl: true, code: 'Digit1' }, display: 'Ctrl 1…9' },
-  reply: { label: 'Reply to the open Session', shortcut: { key: 'r' } },
+  reply: { label: 'Reply to this Session', shortcut: { key: 'r' } },
   retry: { label: 'Retry the last prompt', shortcut: { key: 'enter', ctrl: true, shift: true } },
   mergeRequest: { label: 'Create or open the Merge request', shortcut: { key: 'm', ctrl: true, shift: true } },
   openInEditor: { label: 'Open in editor', shortcut: { key: 'e', ctrl: true, shift: true } },
   openInTerminal: { label: 'Open in terminal', shortcut: { key: '`', ctrl: true, code: 'Backquote' } },
   toggleDiff: { label: 'Toggle changes panel', shortcut: { key: 'd' } },
-  markUnread: { label: 'Mark the open Session unread', shortcut: { key: 'u' } },
-  archive: { label: 'Archive the open Session', shortcut: { key: 'e' } },
+  markUnread: { label: 'Mark this Session unread', shortcut: { key: 'u' } },
+  archive: { label: 'Archive this Session', shortcut: { key: 'e' } },
   settings: { label: 'Open Settings', shortcut: { key: ',', ctrl: true } },
 } satisfies Record<string, ShortcutEntry>;
 

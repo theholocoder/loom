@@ -62,7 +62,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
   );
 }
 
-/** The Waiting Sessions in the order the Inbox lists them; what `j` steps through. */
+/** The Waiting Sessions in the order the Inbox lists them: what `j` and `k` step through, and Ctrl+1 to Ctrl+9 count. */
 export function inboxOrder(sessions: Session[], projects: Project[]): Session[] {
   return groupByProject(
     sessions.filter((s) => s.status === 'waiting'),

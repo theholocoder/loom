@@ -1,7 +1,7 @@
 // Searching Sessions from the Ctrl+K palette: free text, narrowed by filters.
 //   is:waiting | is:working | is:archived | is:unread
 //   project:<name>   Projects whose name starts with it; quote names with spaces
-//   has:mr | has:issue
+//   has:mr | has:issue   any other has: narrows nothing
 import { mergeRequestRef, type Project, type Session } from '../shared/api';
 
 export type Filter = { kind: 'is' | 'project' | 'has'; value: string };
@@ -58,7 +58,7 @@ export function searchSessions(sessions: Session[], projects: Project[], { filte
       case 'is':
         return value === 'unread' ? s.unread : s.status === value;
       case 'has':
-        return value === 'mr' ? !!s.mergeRequest : value === 'issue' ? !!s.issue : false;
+        return value === 'mr' ? !!s.mergeRequest : value === 'issue' ? !!s.issue : true;
       case 'project':
         return !!projectOf(s)?.name.toLowerCase().startsWith(value);
     }
