@@ -13,6 +13,7 @@ import {
   FolderGit2,
   FolderOpen,
   GitPullRequestCreate,
+  Keyboard,
   Mail,
   MessageSquarePlus,
   Palette,
@@ -30,7 +31,7 @@ import { mergeRequestRef, type Project, type Session } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
-import { CommandPalette, matchesShortcut, type PaletteAction } from './CommandPalette';
+import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { DatabaseProblem } from './DatabaseProblem';
 import { DiffPanel } from './DiffPanel';
 import { inboxOrder, InboxList } from './Inbox';
@@ -39,6 +40,8 @@ import { ProjectPicker } from './ProjectPicker';
 import { Projects, useExistingCloneLinker } from './Projects';
 import { NewSession, SessionView, type SessionCommand } from './Sessions';
 import { Settings } from './Settings';
+import { ShortcutHelp } from './ShortcutHelp';
+import { matchesShortcut, SHORTCUTS } from './shortcuts';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
 
@@ -85,6 +88,8 @@ function Workspace() {
   const [picking, setPicking] = useState<Picking>();
   /** The palette, while open, and where focus was before it. */
   const [palette, setPalette] = useState<{ returnFocus: HTMLElement | null }>();
+  /** The shortcuts list, while open, and where focus was before it. */
+  const [help, setHelp] = useState<{ returnFocus: HTMLElement | null }>();
   const selected = sessions.find((s) => s.id === selectedId);
   const shown = view === 'session' ? selected : undefined;
   const select = (session: Session) => {
@@ -130,6 +135,7 @@ function Workspace() {
       api.invoke('settings.setAppearance', { theme }).catch((error: unknown) => console.error('theme change failed:', error));
     },
     setView,
+    showHelp: (returnFocus) => setHelp({ returnFocus }),
   });
 
   const openPalette = () => setPalette({ returnFocus: focusedElement() });
@@ -137,17 +143,27 @@ function Workspace() {
     palette?.returnFocus?.focus();
     setPalette(undefined);
   };
-  const latest = useRef({ palette, openPalette, closePalette, actions, waiting, select });
-  latest.current = { palette, openPalette, closePalette, actions, waiting, select };
+  const closeHelp = () => {
+    help?.returnFocus?.focus();
+    setHelp(undefined);
+  };
+  const latest = useRef({ palette, openPalette, closePalette, help, closeHelp, actions, waiting, select });
+  latest.current = { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const { palette, openPalette, closePalette, actions, waiting, select } = latest.current;
+      const { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select } = latest.current;
       // Not over a dialog, nor a menu or picker, which have keys of their own.
       const covered = () => !!document.querySelector('[aria-modal="true"], .popover');
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+      // The palette and the shortcuts list close on their own key too.
+      if (matchesShortcut(SHORTCUTS.palette.shortcut, event)) {
         event.preventDefault();
         if (palette) closePalette();
         else if (!covered()) openPalette();
+        return;
+      }
+      if (help && matchesShortcut(SHORTCUTS.help.shortcut, event)) {
+        event.preventDefault();
+        closeHelp();
         return;
       }
       const ctrl = event.ctrlKey || event.metaKey;
@@ -229,6 +245,7 @@ function Workspace() {
           }}
         />
       )}
+      {help && <ShortcutHelp onClose={closeHelp} />}
       {palette && (
         <CommandPalette
           actions={actions}
@@ -294,6 +311,7 @@ function paletteActions(app: {
   toggleDiff: () => void;
   setTheme: (theme: Theme) => void;
   setView: (view: View) => void;
+  showHelp: (returnFocus: HTMLElement | null) => void;
 }): PaletteAction[] {
   const { session, nextWaiting, previousWaiting } = app;
   const project = session && app.projects.find((p) => p.id === session.projectId);
@@ -303,33 +321,34 @@ function paletteActions(app: {
   const canCreateMergeRequest = active && !mergeRequest && project?.forge.state === 'available';
   const open = session && session.status !== 'archived' ? session : undefined;
   const actions: Array<PaletteAction | false | undefined> = [
-    { label: 'New Session', icon: MessageSquarePlus, shortcut: { key: 'n', ctrl: true }, run: app.newSession },
-    app.forgeProjects.length > 0 && { label: 'New Session from an issue…', icon: CircleDot, shortcut: { key: 'n', ctrl: true, shift: true }, run: app.newSessionFromIssue },
-    { label: 'Add Project from existing clone…', icon: FolderOpen, shortcut: { key: 'o', ctrl: true }, run: app.addExistingClone },
-    nextWaiting && { label: 'Go to next Waiting Session', icon: ArrowRightToLine, shortcut: { key: 'j' }, run: () => app.select(nextWaiting) },
-    previousWaiting && { label: 'Go to previous Waiting Session', icon: ArrowLeftToLine, shortcut: { key: 'k' }, run: () => app.select(previousWaiting) },
-    active?.status === 'waiting' && { label: 'Reply to this Session', icon: Reply, shortcut: { key: 'r' }, run: () => app.reply(active) },
-    app.retryable && { label: 'Retry the last prompt', icon: RotateCw, shortcut: { key: 'enter', ctrl: true, shift: true }, run: () => app.command('retry') },
+    { label: 'New Session', icon: MessageSquarePlus, shortcut: SHORTCUTS.newSession.shortcut, run: app.newSession },
+    app.forgeProjects.length > 0 && { label: 'New Session from an issue…', icon: CircleDot, shortcut: SHORTCUTS.newSessionFromIssue.shortcut, run: app.newSessionFromIssue },
+    { label: 'Add Project from existing clone…', icon: FolderOpen, shortcut: SHORTCUTS.addExistingClone.shortcut, run: app.addExistingClone },
+    nextWaiting && { label: 'Go to next Waiting Session', icon: ArrowRightToLine, shortcut: SHORTCUTS.nextWaiting.shortcut, run: () => app.select(nextWaiting) },
+    previousWaiting && { label: 'Go to previous Waiting Session', icon: ArrowLeftToLine, shortcut: SHORTCUTS.previousWaiting.shortcut, run: () => app.select(previousWaiting) },
+    active?.status === 'waiting' && { label: 'Reply to this Session', icon: Reply, shortcut: SHORTCUTS.reply.shortcut, run: () => app.reply(active) },
+    app.retryable && { label: 'Retry the last prompt', icon: RotateCw, shortcut: SHORTCUTS.retry.shortcut, run: () => app.command('retry') },
     mergeRequest && {
       label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} for this Session`,
       icon: ExternalLink,
-      shortcut: { key: 'm', ctrl: true, shift: true },
+      shortcut: SHORTCUTS.mergeRequest.shortcut,
       run: () => app.command('openMergeRequest'),
     },
     canCreateMergeRequest && {
       label: 'Create Merge request for this Session',
       icon: GitPullRequestCreate,
-      shortcut: { key: 'm', ctrl: true, shift: true },
+      shortcut: SHORTCUTS.mergeRequest.shortcut,
       run: () => app.command('createMergeRequest'),
     },
-    open && { label: 'Open in editor', icon: CodeXml, shortcut: { key: 'e', ctrl: true, shift: true }, run: () => app.command('openInEditor') },
-    open && { label: 'Open in terminal', icon: SquareTerminal, shortcut: { key: '`', ctrl: true, code: 'Backquote' }, run: () => app.command('openInTerminal') },
-    { label: 'Toggle changes panel', icon: FileDiff, shortcut: { key: 'd' }, run: app.toggleDiff },
-    active && !active.unread && { label: 'Mark this Session unread', icon: Mail, shortcut: { key: 'u' }, run: () => app.command('markUnread') },
-    open && { label: 'Archive this Session', icon: Archive, shortcut: { key: 'e' }, run: () => app.command('archive') },
+    open && { label: 'Open in editor', icon: CodeXml, shortcut: SHORTCUTS.openInEditor.shortcut, run: () => app.command('openInEditor') },
+    open && { label: 'Open in terminal', icon: SquareTerminal, shortcut: SHORTCUTS.openInTerminal.shortcut, run: () => app.command('openInTerminal') },
+    { label: 'Toggle changes panel', icon: FileDiff, shortcut: SHORTCUTS.toggleDiff.shortcut, run: app.toggleDiff },
+    active && !active.unread && { label: 'Mark this Session unread', icon: Mail, shortcut: SHORTCUTS.markUnread.shortcut, run: () => app.command('markUnread') },
+    open && { label: 'Archive this Session', icon: Archive, shortcut: SHORTCUTS.archive.shortcut, run: () => app.command('archive') },
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.setView('projects') },
-    { label: 'Open Settings', icon: SettingsIcon, shortcut: { key: ',', ctrl: true }, run: () => app.setView('settings') },
+    { label: 'Open Settings', icon: SettingsIcon, shortcut: SHORTCUTS.settings.shortcut, run: () => app.setView('settings') },
+    { label: 'Show keyboard shortcuts', icon: Keyboard, shortcut: SHORTCUTS.help.shortcut, run: app.showHelp },
   ];
   return actions.filter((action): action is PaletteAction => !!action);
 }

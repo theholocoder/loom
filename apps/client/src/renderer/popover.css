@@ -44,3 +44,8 @@ button.select-field:focus-visible { border-color: var(--accent); }
 .palette-project { max-width: 30%; font-size: 12px; }
 .palette-empty { padding: 16px; text-align: center; }
 .palette-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+/* The Ctrl+? list of shortcuts. */
+.shortcut-table { width: 100%; border-collapse: collapse; }
+.shortcut-table th { text-align: left; }
+.shortcut-table td { padding: 6px 10px; }
+.shortcut-table td:last-child { text-align: right; white-space: nowrap; }

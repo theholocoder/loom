@@ -89,6 +89,7 @@ describe('palette actions', () => {
       'Theme: Daylight',
       'Open Projects',
       'Open Settings',
+      'Show keyboard shortcuts',
     ]);
     const keys = (name: string) => within(within(palette()).getByRole('option', { name })).queryByText((_, el) => el?.tagName === 'KBD')?.textContent;
     expect(keys('New Session')).toBe('Ctrl N');
@@ -122,6 +123,7 @@ describe('palette actions', () => {
       'Theme: Daylight',
       'Open Projects',
       'Open Settings',
+      'Show keyboard shortcuts',
     ]);
   });
 
@@ -533,5 +535,60 @@ describe('more shortcuts', () => {
     expect(keys('Open in editor')).toBe('Ctrl Shift E');
     expect(keys('Open in terminal')).toBe('Ctrl `');
     expect(actionNames()).not.toContain('Retry the last prompt');
+  });
+});
+
+describe('the keyboard shortcuts list', () => {
+  const ctrlQuestion = (target: Element = document.body) => fireEvent.keyDown(target, { key: '?', ctrlKey: true, shiftKey: true });
+  const help = () => screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+  const rows = () => within(help()).queryAllByRole('row').filter((r) => within(r).queryAllByRole('cell').length).map((r) => within(r).getAllByRole('cell').map((c) => c.textContent));
+
+  it('opens on Ctrl+?, listing every shortcut whether it applies now or not', () => {
+    renderApp();
+    ctrlQuestion();
+    const all = rows();
+    expect(all).toContainEqual(['Open the command palette', 'Ctrl K']);
+    expect(all).toContainEqual(['Show keyboard shortcuts', 'Ctrl ?']);
+    expect(all).toContainEqual(['Go to next Waiting Session', 'J']);
+    expect(all).toContainEqual(['Retry the last prompt', 'Ctrl Shift Enter']);
+    expect(all).toContainEqual(['Open the nth Waiting Session in the Inbox', 'Ctrl 1…9']);
+    expect(document.activeElement).toBe(within(help()).getByRole('searchbox', { name: 'Search shortcuts' }));
+    press('Escape', document.activeElement!);
+    expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).toBeNull();
+  });
+
+  it('opens from the composer too, and puts focus back there', () => {
+    renderApp(new FakeMain({ sessions: [session(1, { title: 'One' })] }));
+    press('j');
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+    prompt.focus();
+    ctrlQuestion(prompt);
+    expect(help()).toBeTruthy();
+    press('Escape', document.activeElement!);
+    expect(document.activeElement).toBe(prompt);
+  });
+
+  it('searches by action or by key', () => {
+    renderApp();
+    ctrlQuestion();
+    const searchBox = within(help()).getByRole('searchbox', { name: 'Search shortcuts' });
+    fireEvent.change(searchBox, { target: { value: 'waiting' } });
+    // Ctrl ones first, under Anywhere.
+    expect(rows().map((r) => r[0])).toEqual(['Open the nth Waiting Session in the Inbox', 'Go to next Waiting Session', 'Go to previous Waiting Session']);
+    fireEvent.change(searchBox, { target: { value: 'ctrl shift' } });
+    expect(rows().every((r) => r[1]!.startsWith('Ctrl Shift'))).toBe(true);
+    expect(rows().length).toBeGreaterThan(2);
+    fireEvent.change(searchBox, { target: { value: 'zzz' } });
+    expect(within(help()).getByText('No matching shortcut.')).toBeTruthy();
+  });
+
+  it('closes on Ctrl+? again, and opens from the palette', () => {
+    renderApp();
+    ctrlQuestion();
+    ctrlQuestion(within(help()).getByRole('searchbox'));
+    expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).toBeNull();
+
+    runAction('Show keyboard shortcuts');
+    expect(help()).toBeTruthy();
   });
 });

@@ -8,34 +8,8 @@ import { mergeRequestRef, type Project, type Session } from '../shared/api';
 import { stepIndex } from './Popover';
 import { ProjectAvatar } from './ProjectAvatar';
 import { filterToken, parseQuery, searchSessions, suggestedFilters, toggleFilter } from './session-search';
+import { shortcutLabel, type Shortcut } from './shortcuts';
 import { StatusIcon } from './Sessions';
-
-/**
- * A key and the modifiers held with it. A Ctrl shortcut (Cmd works too) runs
- * anywhere, even in a text field; one without Ctrl only outside one.
- */
-export interface Shortcut {
-  /** `KeyboardEvent.key`, lower-cased: `n`, `enter`. */
-  key: string;
-  ctrl?: boolean;
-  shift?: boolean;
-  /**
-   * Matched against `KeyboardEvent.code` instead, for keys that type
-   * different characters on other layouts: Ctrl+` is Ctrl+² on AZERTY.
-   */
-  code?: string;
-}
-
-export function matchesShortcut(shortcut: Shortcut, event: KeyboardEvent): boolean {
-  if (event.altKey || !!shortcut.ctrl !== (event.ctrlKey || event.metaKey) || !!shortcut.shift !== event.shiftKey) return false;
-  return shortcut.code ? event.code === shortcut.code : event.key.toLowerCase() === shortcut.key;
-}
-
-/** How a shortcut reads in a `<kbd>`: `Ctrl Shift N`, `J`, `Ctrl Shift Enter`. */
-export function shortcutLabel({ key, ctrl, shift }: Shortcut): string {
-  const name = key.length === 1 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1);
-  return [ctrl && 'Ctrl', shift && 'Shift', name].filter(Boolean).join(' ');
-}
 
 export interface PaletteAction {
   label: string;
