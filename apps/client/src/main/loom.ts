@@ -15,6 +15,7 @@ import { Settings } from './settings';
 import { DATABASE_FILE, DatabaseDamagedError, openDatabase, type LoomDatabase } from './storage/database';
 import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
 import { Topic } from './topic';
+import { isWebLink } from '../shared/links';
 
 export interface LoomOptions {
   userDataDir: string;
@@ -266,11 +267,4 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
 function tempDirOf(os: string | undefined, home: string | undefined): string {
   if (os === 'windows' && home) return `${home.replaceAll('\\', '/')}/AppData/Local/Temp`;
   return '/tmp';
-}
-
-/** Whether `url` is one Loom opens in the system browser: http or https. */
-export function isWebLink(url: string): boolean {
-  if (!URL.canParse(url)) return false;
-  const { protocol } = new URL(url);
-  return protocol === 'https:' || protocol === 'http:';
 }

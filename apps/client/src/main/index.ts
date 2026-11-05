@@ -5,7 +5,8 @@ import { THEMES, type Theme } from '../shared/appearance';
 import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { serveApi } from './ipc';
-import { createLoom, isWebLink, type Loom } from './loom';
+import { createLoom, type Loom } from './loom';
+import { isWebLink } from '../shared/links';
 import { guardQuit, quitQuestion } from './quit';
 import type { Session } from '../shared/api';
 
@@ -26,13 +27,16 @@ function createWindow(theme: Theme): BrowserWindow {
   });
   // The window only ever shows Loom: a link that slips past the renderer's own
   // handling opens in the system browser, if it's a web link, never in here.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  const openOutside = (url: string) => {
     if (isWebLink(url)) void shell.openExternal(url);
+  };
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openOutside(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => {
     event.preventDefault();
-    if (isWebLink(url)) void shell.openExternal(url);
+    openOutside(url);
   });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadFile(join(import.meta.dirname, '../renderer/index.html'));

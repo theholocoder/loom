@@ -286,18 +286,21 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.08em; } .md h4, .md h5, .md h6 { font-size: 1em; }
 .md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
-.md :not(pre) > code { background: var(--code); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: .9em; }
+.md :not(pre) > code { font-size: .9em; }
 .md table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
 .md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
 .md th { background: var(--panel2); font-weight: 600; }
 .md .code-block { border: 1px solid var(--line); border-radius: 6px; background: var(--code); overflow: hidden; }
 .md .code-block figcaption { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
-.md .code-block pre { margin: 0; padding: 8px 10px; overflow-x: auto; white-space: pre; overflow-wrap: normal; color: var(--text); }
+/* the figure is the block's frame: its pre and code take none of the global code styles */
+.md .code-block pre { margin: 0; padding: 8px 10px; border: 0; border-radius: 0; background: none; overflow-x: auto; white-space: pre; overflow-wrap: normal; color: var(--text); }
+.md .code-block pre code { background: none; border: 0; padding: 0; border-radius: 0; }
 .md .quote-block { position: relative; }
 .md blockquote { margin: 0; padding: 2px 64px 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
 .md .quote-block > .copy-btn { position: absolute; top: 0; right: 0; }
 .copy-btn { padding: 1px 6px; font-size: 11.5px; background: transparent; border-color: transparent; color: var(--muted); }
 .copy-btn:hover { background: var(--hover); color: var(--text); }
+.copy-btn.failed { color: var(--err); }
 .hljs-comment, .hljs-quote { color: var(--muted); font-style: italic; }
 .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-doctag, .hljs-meta .hljs-keyword { color: var(--accent); }
 .hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute, .hljs-template-tag, .hljs-template-variable { color: var(--ok); }

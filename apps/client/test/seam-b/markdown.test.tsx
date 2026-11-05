@@ -115,6 +115,17 @@ describe('Markdown in chat messages', () => {
     expect(within(chat()).getByText('<b>bold?</b>')).toBeTruthy();
   });
 
+  it('keeps the lines of a raw HTML block', () => {
+    const { chat, show } = openSession();
+
+    show(user('Show'), agent('<div>\n  one\n</div>'));
+
+    const block = within(chat()).getByText('<div>', { exact: false });
+    expect(block.tagName).toBe('P');
+    expect(block.querySelectorAll('br')).toHaveLength(2);
+    expect(block.textContent?.split('\n')).toEqual(['<div>', 'one', '</div>']);
+  });
+
   it('shows a fenced code block with its language and highlighting, and copies its raw contents', async () => {
     const { chat, show } = openSession();
     const code = 'const answer = 42;\nconsole.log("hi");';
@@ -149,6 +160,16 @@ describe('Markdown in chat messages', () => {
     expect(within(chat()).getByText('Done.').tagName).toBe('P');
   });
 
+  it('says so when the clipboard refuses the copy', async () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
+    const { chat, show } = openSession();
+
+    show(user('Show me'), agent('```\nplain\n```'));
+
+    fireEvent.click(within(chat()).getByRole('button', { name: 'Copy code' }));
+    expect(await within(chat()).findByRole('button', { name: 'Copy failed' })).toBeTruthy();
+  });
+
   it('copies the text of a blockquote, without its quote markers', async () => {
     const { chat, show } = openSession();
 
@@ -172,6 +193,19 @@ describe('Markdown in chat messages', () => {
       { url: 'https://github.com/acme/billing-api/issues/12' },
       { url: 'https://example.com/docs' },
     ]);
+  });
+
+  it('shows links Loom cannot open in the browser as plain text, and keeps footnote jumps in the message', () => {
+    const { main, chat, show } = openSession();
+
+    show(user('Where?'), agent('See [the readme](./README.md), [mail](mailto:dev@example.com) and a note[^1].\n\n[^1]: The note.'));
+
+    expect(within(chat()).queryByRole('link', { name: 'the readme' })).toBeNull();
+    expect(within(chat()).getByText('the readme').getAttribute('title')).toBe('./README.md');
+    expect(within(chat()).queryByRole('link', { name: 'mail' })).toBeNull();
+    const note = within(chat()).getByRole('link', { name: '1' });
+    expect(fireEvent.click(note)).toBe(true); // left to jump within the page
+    expect(main.invoked.filter((i) => i.command === 'links.open')).toEqual([]);
   });
 
   it('renders a replayed transcript on an Archived Session the same as a live one', () => {
