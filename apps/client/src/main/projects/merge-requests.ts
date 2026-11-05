@@ -3,12 +3,10 @@
 // branch is a given branch (`gh pr list --head`, `glab mr list
 // --source-branch`), or one by its number (`gh pr view`, `glab mr view`).
 // Loom never creates or changes a Merge request itself.
-import { FORGE_CLI, type ForgeKind, type ForgeLink, type ForgeStatus } from '../../shared/api';
+import { FORGE_CLI, type ForgeKind, type ForgeLink, type ForgeStatus, type MergeRequestState } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 
 const MERGE_REQUEST_TIMEOUT_MS = 20_000;
-
-export type MergeRequestState = 'open' | 'merged' | 'closed';
 
 /** A Merge request as the Forge has it now. */
 export interface FoundMergeRequest extends ForgeLink {

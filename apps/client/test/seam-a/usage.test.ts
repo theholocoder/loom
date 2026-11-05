@@ -341,3 +341,35 @@ describe('reported cost after upgrading', () => {
     expect(dashboard.reportedCost).toBeCloseTo(0.2);
   });
 });
+
+describe("a Session's own usage", () => {
+  it('gives its tokens, Reported cost and Working time as they grow, the run going on with when it started, and keeps them', async () => {
+    const { machine, checkout } = machineWith([
+      { chunks: ['One.'], hold: 'first', tokens: { inputTokens: 1000, outputTokens: 200 }, cost: 0.12 },
+      { chunks: ['Two.'], hold: 'second', tokens: { inputTokens: 500, outputTokens: 100 }, cost: 0.2 },
+    ]);
+    const userDataDir = tempDir('loom-usage-');
+    const { main, project } = await start(machine, checkout, { userDataDir });
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
+    const startedAt = main.clock.now();
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)!.usage).toEqual({ tokens: 0, reportedCost: 0, workingMs: 0, workingSince: startedAt });
+    await main.elapse(60_000);
+    machine.release('first');
+    const first = await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.usage?.tokens === 1200));
+    expect(first.find((s) => s.id === id)!.usage).toEqual({ tokens: 1200, reportedCost: expect.closeTo(0.12) as number, workingMs: 60_000 });
+
+    await main.elapse(5 * 60_000);
+    await main.api.invoke('sessions.send', { id, prompt: 'Next' });
+    await waitFor(main.api, 'transcript', (items) => items.filter((i) => i.kind === 'agent').length === 2, { sessionId: id });
+    await main.elapse(3 * 60_000);
+    machine.release('second');
+    const second = await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.usage?.tokens === 1800));
+    expect(second.find((s) => s.id === id)!.usage).toEqual({ tokens: 1800, reportedCost: expect.closeTo(0.2) as number, workingMs: 4 * 60_000 });
+    await main.close();
+
+    const later = await startMain({ machine, userDataDir });
+    const restored = await waitFor(later.api, 'sessions', session(id, () => true));
+    expect(restored.find((s) => s.id === id)!.usage).toEqual({ tokens: 1800, reportedCost: expect.closeTo(0.2) as number, workingMs: 4 * 60_000 });
+  });
+});

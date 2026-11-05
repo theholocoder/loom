@@ -63,6 +63,19 @@ describe('Merge request linking after each turn', () => {
   });
 });
 
+describe("the Merge request's state", () => {
+  it('is open once linked, and what the Forge says once the Session is archived', async () => {
+    const { machine, checkout, forge } = machineOn('gh', GITHUB, { turns: [{ chunks: ['Opened it.'] }], mergeRequests: [{ number: 12, url: pr(12), branch: 'loom/fix-login' }] });
+    const { main, id } = await withSession(machine, checkout);
+    const linked = await waitFor(main.api, 'sessions', session(id, (s) => !!s.mergeRequest && s.status === 'waiting'));
+    expect(linked.find((s) => s.id === id)!.mergeRequestState).toBe('open');
+
+    forge([{ number: 12, url: pr(12), branch: 'loom/fix-login', state: 'merged' }]);
+    await main.api.invoke('sessions.archive', { id });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequestState === 'merged'));
+  });
+});
+
 describe('Merge request linking on GitLab', () => {
   it("links the open merge request of the Session's branch through glab, in its working copy", async () => {
     const { machine, checkout } = machineOn('glab', GITLAB, { mergeRequests: [{ number: 87, url: mr(87), branch: 'loom/fix-login' }] });

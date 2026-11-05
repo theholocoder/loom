@@ -1,7 +1,6 @@
 // The database's typed schema, as of the latest migration.
 import type { Generated } from 'kysely';
-import type { MergeRequestState } from '../projects/merge-requests';
-import type { SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
+import type { MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
 
 export interface SettingsTable {
   key: string;

@@ -93,7 +93,7 @@ function Content({
     <>
       <div className="tiles">
         <Tile icon={Coins} label="Tokens" value={formatTokens(data.tokens)} detail={`over the last ${data.days} days`} />
-        <Tile icon={Receipt} label="Reported cost" value={`$${data.reportedCost.toFixed(2)}`} detail="As agents report it. Subscription and local models report $0." />
+        <Tile icon={Receipt} label="Reported cost" value={formatCost(data.reportedCost)} detail="As agents report it. Subscription and local models report $0." />
         <Tile icon={MessagesSquare} label="Sessions started" value={String(data.sessionsStarted)} detail={`${data.outcomes.stuck} stuck at least once`} />
         <Tile icon={GitMerge} label="Merge requests merged" value={String(data.mergeRequestsMerged)} detail={`${data.outcomes.open} Sessions still open`} />
         <Tile
@@ -355,6 +355,11 @@ export function formatTokens(n: number): string {
   if (n >= 999.5e3) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 999.5) return `${Math.round(n / 1e3)}k`;
   return String(Math.round(n));
+}
+
+/** A Reported cost, in USD to the cent: $1.23. */
+export function formatCost(usd: number): string {
+  return `$${usd.toFixed(2)}`;
 }
 
 /** A duration, short: 30s, 6m 40s, 22m, 1h 12m; a dash for none. */

@@ -1,5 +1,5 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
-import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, type ApprovalCategory, type ApprovalSetting, type Settings as SettingsValues } from '../shared/api';
+import { clampSidebarWidth, DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isSidebarView, type ApprovalCategory, type ApprovalSetting, type Settings as SettingsValues, type SidebarSettings } from '../shared/api';
 import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
@@ -27,6 +27,15 @@ export class Settings {
       const approvals = { ...DEFAULT_APPROVALS };
       for (const [category, setting] of Object.entries(stored.approvals)) if (isApprovalCategory(category) && isApprovalSetting(setting)) approvals[category] = setting;
       current.approvals = approvals;
+    }
+    // Each part of the sidebar's state stands alone: one Loom no longer takes falls back to its default.
+    if (typeof stored.sidebar === 'object' && stored.sidebar !== null) {
+      const { open, view, width } = stored.sidebar as Record<string, unknown>;
+      current.sidebar = {
+        open: typeof open === 'boolean' ? open : current.sidebar.open,
+        view: isSidebarView(view) ? view : current.sidebar.view,
+        width: typeof width === 'number' && Number.isFinite(width) ? clampSidebarWidth(width) : current.sidebar.width,
+      };
     }
     // A value Loom no longer offers falls back to the default.
     if (isTheme(stored.theme)) current.theme = stored.theme;
@@ -75,6 +84,19 @@ export class Settings {
     if (uiFont !== undefined) await this.set('uiFont', uiFont);
     if (monoFont !== undefined) await this.set('monoFont', monoFont);
     return this.current;
+  }
+
+  /** Sets what is given of the sidebar's state, keeping the width within bounds; rejects a view Loom has not. */
+  async setSidebar(sidebar: Partial<SidebarSettings>): Promise<SettingsValues> {
+    const { open, view, width } = sidebar;
+    if (open !== undefined && typeof open !== 'boolean') throw new Error('Whether the sidebar is open must be true or false.');
+    if (view !== undefined && !isSidebarView(view)) throw new Error(`"${String(view)}" is not a sidebar view.`);
+    if (width !== undefined && (typeof width !== 'number' || !Number.isFinite(width))) throw new Error("The sidebar's width must be a number of pixels.");
+    return this.set('sidebar', {
+      open: open ?? this.current.sidebar.open,
+      view: view ?? this.current.sidebar.view,
+      width: width === undefined ? this.current.sidebar.width : clampSidebarWidth(width),
+    });
   }
 
   private async set<K extends keyof SettingsValues>(key: K, value: SettingsValues[K]): Promise<SettingsValues> {

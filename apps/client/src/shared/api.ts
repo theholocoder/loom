@@ -198,6 +198,9 @@ export type WaitingReason = 'finished' | 'stopped' | 'question' | 'approval' | '
  */
 export type WorkingCopyKind = 'worktree' | 'checkout';
 
+/** Where a Merge request is on its Forge. */
+export type MergeRequestState = 'open' | 'merged' | 'closed';
+
 /** An issue or Merge request on the Project's Forge. */
 export interface ForgeLink {
   /** Its number on the Forge (see mergeRequestRef). */
@@ -295,6 +298,8 @@ export interface Session {
   issue?: ForgeLink;
   /** Its current branch's Merge request, once linked. */
   mergeRequest?: ForgeLink;
+  /** Where its Merge request is, as Loom last knew: `open` while linked, looked up again on Archive. */
+  mergeRequestState?: MergeRequestState;
   status: SessionStatus;
   /**
    * Set when a worktree Session's worktree is gone, deleted outside Loom: it
@@ -304,7 +309,7 @@ export interface Session {
   worktreeMissing?: boolean;
   /**
    * What its branch changed against the merge-base with its start base, for
-   * the Session header's changes control: worked out after each turn and when the Session is
+   * Session info's diff stat: worked out after each turn and when the Session is
    * opened, kept in memory only. Absent until known.
    */
   diffStat?: DiffStat;
@@ -330,6 +335,8 @@ export interface Session {
   agentConfig?: AgentConfig;
   /** How full the agent's context was after its last run that reported it. */
   context?: ContextUsage;
+  /** What the Session has used so far, from its usage buckets and its runs; updated as turns end and runs start and stop. */
+  usage?: SessionUsage;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
@@ -343,6 +350,18 @@ export interface Session {
   createdAt: number;
   /** Clock time its status last changed. */
   updatedAt: number;
+}
+
+/** A Session's usage so far. */
+export interface SessionUsage {
+  /** Tokens of every kind, summed. */
+  tokens: number;
+  /** What its agent reported, in USD. */
+  reportedCost: number;
+  /** How long it was Working, in ms, the run going on left out. */
+  workingMs: number;
+  /** Clock time the run going on started, while Working. */
+  workingSince?: number;
 }
 
 /** A message waiting in a Session's queue. */
@@ -461,7 +480,7 @@ export interface Settings extends Appearance {
    * until the user sets it.
    */
   terminalCommand: string;
-  /** Files the diff panel shows collapsed, as glob patterns on a path or file name (`*` matches within a folder). */
+  /** Files the Changes view shows collapsed, as glob patterns on a path or file name (`*` matches within a folder). */
   diffCollapsedPatterns: string[];
   /**
    * Whether the agent goes ahead with each category of action reaching
@@ -469,6 +488,41 @@ export interface Settings extends Appearance {
    * with an Approval request. Agents started from now on get the new rules.
    */
   approvals: ApprovalPolicy;
+  /** The open Session's right sidebar, as the user left it: the same for every Session. */
+  sidebar: SidebarSettings;
+}
+
+/** The right sidebar's views: Session info, or the Changes (the diff). */
+export const SIDEBAR_VIEWS = ['info', 'changes'] as const;
+/** One of the right sidebar's views. */
+export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
+
+/** How narrow the right sidebar can be dragged, in pixels. */
+export const SIDEBAR_MIN_WIDTH = 280;
+/** How wide the right sidebar can be dragged, in pixels; a narrower window caps it lower still (see the renderer's Sidebar). */
+export const SIDEBAR_MAX_WIDTH = 1200;
+
+/** The right sidebar's state, kept in settings. */
+export interface SidebarSettings {
+  /** Whether it shows, while a Session is selected. */
+  open: boolean;
+  /** The view it shows, or last showed. */
+  view: SidebarView;
+  /** Its width in pixels, one for all views, within SIDEBAR_MIN_WIDTH and SIDEBAR_MAX_WIDTH. */
+  width: number;
+}
+
+/** The sidebar until the user changes it: closed, on Session info. */
+export const DEFAULT_SIDEBAR: SidebarSettings = { open: false, view: 'info', width: 420 };
+
+/** Whether `value` names a sidebar view Loom has. */
+export function isSidebarView(value: unknown): value is SidebarView {
+  return typeof value === 'string' && (SIDEBAR_VIEWS as readonly string[]).includes(value);
+}
+
+/** A sidebar width, rounded and kept within the minimum and maximum. */
+export function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
 /**
@@ -523,6 +577,7 @@ export const DEFAULT_SETTINGS: Settings = {
   terminalCommand: '',
   diffCollapsedPatterns: DEFAULT_DIFF_COLLAPSED_PATTERNS,
   approvals: DEFAULT_APPROVALS,
+  sidebar: DEFAULT_SIDEBAR,
   ...DEFAULT_APPEARANCE,
 };
 
@@ -673,6 +728,11 @@ export interface TokenCounts {
   reasoning: number;
 }
 
+/** Tokens of every kind, summed. */
+export function totalTokens(tokens: TokenCounts): number {
+  return tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
+}
+
 /**
  * What became of a Session: its Merge request `merged` or `closed`,
  * `archived` without a Merge request, or else `open` (not archived, or
@@ -816,7 +876,7 @@ export interface Commands {
   'settings.setEditorCommand': { params: { editorCommand: string }; result: Settings };
   /** Sets the terminal command; empty turns "Open in terminal" off. Rejects an unclosed quote. */
   'settings.setTerminalCommand': { params: { terminalCommand: string }; result: Settings };
-  /** Sets which files the diff panel shows collapsed; blank patterns are dropped. */
+  /** Sets which files the Changes view shows collapsed; blank patterns are dropped. */
   'settings.setDiffCollapsedPatterns': { params: { patterns: string[] }; result: Settings };
   /**
    * Sets whether the agent asks before actions of `category`. Agents
@@ -827,6 +887,8 @@ export interface Commands {
   'settings.setApproval': { params: { category: ApprovalCategory; setting: ApprovalSetting }; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
+  /** Sets what is given of the right sidebar's state; a width is kept within its minimum and maximum. Rejects a view Loom has not. */
+  'settings.setSidebar': { params: Partial<SidebarSettings>; result: Settings };
   'sessions.list': { params: void; result: Session[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with
@@ -957,7 +1019,7 @@ export interface Commands {
    */
   'sessions.openInEditor': { params: { id: number; file?: string }; result: void };
   /**
-   * Works out the Session's diff (and the Session header's changes control) again, in its
+   * Works out the Session's diff (and Session info's diff stat) again, in its
    * Environment. Never fetches. Not available for an archived checkout
    * Session, or an archived worktree Session whose branch is gone.
    */

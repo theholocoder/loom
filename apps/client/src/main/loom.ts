@@ -225,6 +225,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
+    'settings.setSidebar': (sidebar) => settingsService.setSidebar(sidebar),
     'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),

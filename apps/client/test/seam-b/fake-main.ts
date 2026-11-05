@@ -1,6 +1,6 @@
 // Seam B: a fake main implementing the same typed API the real one does, so
 // renderer tests control exactly what main reports.
-import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
+import { clampSidebarWidth, DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
 export function emptyDashboard(days: UsageRange): UsageDashboard {
@@ -80,6 +80,13 @@ export class FakeMain implements LoomApi {
       },
       'settings.setAppearance': (appearance) => {
         const settings = { ...this.value('settings'), ...appearance };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setSidebar': (sidebar) => {
+        const current = this.value('settings');
+        const next = { ...current.sidebar, ...sidebar };
+        const settings = { ...current, sidebar: { ...next, width: clampSidebarWidth(next.width) } };
         this.publish('settings', settings);
         return settings;
       },

@@ -2,9 +2,8 @@
 // the dashboard measures, and computes the dashboard from them and the
 // Sessions' facts. Usage is kept indefinitely; nothing here deletes any.
 import type { Kysely, Transaction } from 'kysely';
-import { TOP_SESSIONS, USAGE_RANGES, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
+import { TOP_SESSIONS, totalTokens, USAGE_RANGES, type MergeRequestState, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
 import type { Schema, SessionSpansTable } from '../storage/schema';
-import type { MergeRequestState } from '../projects/merge-requests';
 
 /** One turn's usage, as the Session service records it. */
 export interface TurnUsage {
@@ -152,7 +151,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   return withoutUndefined({
     days,
     perDay: [...perDay.values()],
-    tokens: mix.input + mix.output + mix.cacheRead + mix.cacheWrite + mix.reasoning,
+    tokens: totalTokens(mix),
     reportedCost,
     sessionsStarted: started.length,
     mergeRequestsMerged: sessions.filter((s) => s.merge_request_state === 'merged' && s.archived_at !== null && s.archived_at >= since && s.archived_at <= now).length,

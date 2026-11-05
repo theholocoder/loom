@@ -1,6 +1,7 @@
-// The diff panel: what the open Session's branch changed, as a file tree and
-// unified per-file diffs loaded as they are expanded or scrolled to.
-import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon, Folder, GitBranch, PanelRightClose, RefreshCw, SquarePen } from 'lucide-react';
+// The sidebar's Changes view: what the open Session's branch changed, as a
+// file tree and unified per-file diffs loaded as they are expanded or
+// scrolled to.
+import { ChevronDown, ChevronRight, Folder, GitBranch, RefreshCw, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DiffFile, DiffSummary, FileDiff, Session } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -12,50 +13,22 @@ export const LARGE_FILE_LINES = 1000;
 const STATUS_LABEL: Record<DiffFile['status'], string> = { committed: 'committed', modified: 'modified', untracked: 'untracked' };
 
 /**
- * The open diff panel; nothing at all when closed (the Session header's
- * DiffToggle, the palette or `d` opens it). `onToggle` closes it.
+ * The Session's changes, worked out when the view is shown: on first show,
+ * on each show after, at each turn end while shown, and on Refresh.
  */
-export function DiffPanel({ session, open, onToggle }: { session?: Session; open: boolean; onToggle: () => void }) {
-  if (!open) return null;
-  return (
-    <section className="diff" id="diff-panel" aria-label="Changes">
-      {session ? (
-        <SessionDiff key={session.id} session={session} onClose={onToggle} />
-      ) : (
-        <>
-          <DiffHeader onClose={onToggle} />
-          <div className="scroll">
-            <div className="empty">No Session selected.</div>
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-function DiffHeader({ onClose, children }: { onClose: () => void; children?: React.ReactNode }) {
-  return (
-    <header>
-      <FileDiffIcon />
-      <b>Changes</b>
-      <span className="grow" />
-      {children}
-      <button className="icon-btn sm" type="button" title="Close" aria-label="Hide changes" aria-controls="diff-panel" aria-expanded onClick={onClose}>
-        <PanelRightClose />
-      </button>
-    </header>
-  );
+export function ChangesView({ session }: { session: Session }) {
+  return <SessionDiff key={session.id} session={session} />;
 }
 
 type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; summary: DiffSummary };
 
-function SessionDiff({ session, onClose }: { session: Session; onClose: () => void }) {
+function SessionDiff({ session }: { session: Session }) {
   const api = useApi();
   const patterns = useTopic('settings')?.diffCollapsedPatterns;
   const [uncommittedOnly, setUncommittedOnly] = useState(false);
   const [refreshes, setRefreshes] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
-  // A turn ending refreshes it; so do opening it again and the refresh button.
+  // A turn ending refreshes it; so do showing it again and the refresh button.
   const turnEnded = useTurnsEnded(session.status);
   useEffect(() => {
     let current = true;
@@ -73,7 +46,8 @@ function SessionDiff({ session, onClose }: { session: Session; onClose: () => vo
   const readOnly = !summary?.available || summary.readOnly;
   return (
     <>
-      <DiffHeader onClose={onClose}>
+      <div className="changes-bar">
+        <span className="grow" />
         {summary?.available && !summary.readOnly ? (
           <button className="diff-toggle" type="button" aria-pressed={uncommittedOnly} onClick={() => setUncommittedOnly((u) => !u)}>
             <span className="knob" aria-hidden />
@@ -83,7 +57,7 @@ function SessionDiff({ session, onClose }: { session: Session; onClose: () => vo
         <button className="icon-btn sm" type="button" title="Refresh" aria-label="Refresh changes" onClick={() => setRefreshes((r) => r + 1)}>
           <RefreshCw />
         </button>
-      </DiffHeader>
+      </div>
       <div className="scroll">
         {summary?.available && !summary.readOnly && !uncommittedOnly && summary.baseSource && <DiffBase session={session} summary={summary} onChanged={() => setRefreshes((r) => r + 1)} />}
         {loaded.state === 'loading' ? (
