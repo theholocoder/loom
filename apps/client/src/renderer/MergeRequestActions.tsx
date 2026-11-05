@@ -1,53 +1,91 @@
-// The Session header's Merge request: its chip, which opens it on the Forge;
-// the Merge request action, a prompt shortcut asking the agent to open or
-// update it; and Link Merge request, for linking one by hand.
-import { GitPullRequest, GitPullRequestArrow, GitPullRequestCreate, Link } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
+// The Session header's Merge request: opening it on the Forge; the Merge
+// request action, a prompt shortcut asking the agent to open or update it;
+// and Link Merge request, for linking one by hand.
+import { ChevronDown, ExternalLink, GitPullRequest, GitPullRequestArrow, GitPullRequestCreate, Link } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
 import { Popover } from './Popover';
 
-/** The linked Merge request's number, opening it on the Forge. */
-export function MergeRequestChip({ session, forge }: { session: Session; forge: ForgeKind | undefined }) {
-  const api = useApi();
-  const { mergeRequest } = session;
-  if (!mergeRequest) return null;
-  return (
-    <button type="button" className="chip tech" title="Merge request" aria-label={`Merge request ${mergeRequestRef(forge, mergeRequest.number)}`} onClick={() => void api.invoke('links.open', { url: mergeRequest.url }).catch(() => {})}>
-      <GitPullRequest className="sm" />
-      {mergeRequestRef(forge, mergeRequest.number)}
-    </button>
-  );
-}
-
 /**
- * The header's Merge request actions, for a Session that can take a prompt
- * on a Project whose Forge is on. `linkRequest` changing opens the Link
- * Merge request popover, as the palette does.
+ * The header's Merge request: with one linked, a button showing its number
+ * whose menu opens it, asks the agent to update it, or links another; with
+ * none, Create Merge request and Link Merge request. Asking and linking need
+ * a Session that can take a prompt, on a Project whose Forge is on: without,
+ * the linked one's button just opens it. `linkRequest` changing opens the
+ * Link Merge request popover, as the palette does.
  */
 export function MergeRequestActions({ session, project, linkRequest = 0, onError }: { session: Session; project: Project | undefined; linkRequest?: number; onError: (message: string | undefined) => void }) {
   const api = useApi();
+  const [menu, setMenu] = useState(false);
   const [linking, setLinking] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const canAct = session.status !== 'archived' && !session.worktreeMissing && project?.forge.state === 'available';
   useEffect(() => {
-    if (linkRequest) setLinking(true);
+    if (linkRequest && canAct) {
+      setMenu(false);
+      setLinking(true);
+    }
   }, [linkRequest]);
-  if (session.status === 'archived' || session.worktreeMissing || project?.forge.state !== 'available') return null;
   const { mergeRequest } = session;
-  const label = mergeRequest ? `Update Merge request ${mergeRequestRef(project.forge.kind, mergeRequest.number)}` : 'Create Merge request';
+  if (!mergeRequest && !canAct) return null;
+  const ref = mergeRequest && mergeRequestRef(project?.forge.kind, mergeRequest.number);
+  const openIt = () => mergeRequest && void api.invoke('links.open', { url: mergeRequest.url }).catch(() => {});
   const ask = () => {
     onError(undefined);
     api.invoke('sessions.requestMergeRequest', { id: session.id }).catch((e: unknown) => onError((e as Error).message));
   };
+  const item = (label: string, icon: ReactNode, run: () => void) => (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={() => {
+        setMenu(false);
+        run();
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+  const linkPopover = linking && <LinkMergeRequest session={session} anchor={trigger} onClose={() => setLinking(false)} />;
+
+  if (mergeRequest && ref) {
+    const label = `Merge request ${ref}`;
+    if (!canAct)
+      return (
+        <button className="icon-btn mr-btn tech" type="button" title={label} aria-label={label} onClick={openIt}>
+          <GitPullRequest />
+          {ref}
+        </button>
+      );
+    return (
+      <>
+        <button ref={trigger} className="icon-btn mr-btn tech" type="button" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+          <GitPullRequest />
+          {ref}
+          <ChevronDown className="sm chev" aria-hidden />
+        </button>
+        {menu && (
+          <Popover anchor={trigger} role="menu" label={label} onClose={() => setMenu(false)}>
+            {item(`Open ${ref}`, <ExternalLink className="sm" />, openIt)}
+            {item('Update Merge request', <GitPullRequestArrow className="sm" />, ask)}
+            {item('Link another Merge request…', <Link className="sm" />, () => setLinking(true))}
+          </Popover>
+        )}
+        {linkPopover}
+      </>
+    );
+  }
   return (
     <>
-      <button className="icon-btn" type="button" title={label} aria-label={label} onClick={ask}>
-        {mergeRequest ? <GitPullRequestArrow /> : <GitPullRequestCreate />}
+      <button className="icon-btn" type="button" title="Create Merge request" aria-label="Create Merge request" onClick={ask}>
+        <GitPullRequestCreate />
       </button>
       <button ref={trigger} className="icon-btn" type="button" title="Link Merge request" aria-label="Link Merge request" aria-haspopup="dialog" aria-expanded={linking} onClick={() => setLinking(!linking)}>
         <Link />
       </button>
-      {linking && <LinkMergeRequest session={session} anchor={trigger} onClose={() => setLinking(false)} />}
+      {linkPopover}
     </>
   );
 }

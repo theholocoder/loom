@@ -9,7 +9,7 @@ import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { DiffToggle } from './DiffToggle';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
-import { MergeRequestActions, MergeRequestChip } from './MergeRequestActions';
+import { MergeRequestActions } from './MergeRequestActions';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
@@ -455,12 +455,6 @@ export function SessionView({
                 <button type="button" className="chip tech" title="Issue" onClick={() => void api.invoke('links.open', { url: session.issue!.url }).catch(() => {})}>
                   <CircleDot className="sm" />#{session.issue.number}
                 </button>
-              </>
-            )}
-            {session.mergeRequest && (
-              <>
-                <ChevronRight className="sm" />
-                <MergeRequestChip session={session} forge={project?.forge.kind} />
               </>
             )}
             {session.branch && (

@@ -73,14 +73,39 @@ describe("the Session's Merge request", () => {
     expect(within(log).getByRole('note').textContent).toBe("Couldn't link Merge request 41: That Merge request is closed: only an open one can be linked.");
   });
 
-  it('is in the header, opening it, with the action to ask the agent to update it', async () => {
+  it("is a menu in the header once linked: open it, ask the agent to update it, or link another", async () => {
     const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url } })] });
     const { header } = open(main);
+    expect(within(header).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
+    const button = within(header).getByRole('button', { name: 'Merge request !12' });
+    expect(button.textContent).toBe('!12');
 
-    fireEvent.click(within(header).getByRole('button', { name: 'Merge request !12' }));
-    fireEvent.click(within(header).getByRole('button', { name: 'Update Merge request !12' }));
+    const pick = (name: string) => {
+      fireEvent.click(button);
+      const menu = screen.getByRole('menu', { name: 'Merge request !12' });
+      expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open !12', 'Update Merge request', 'Link another Merge request…']);
+      fireEvent.click(within(menu).getByRole('menuitem', { name }));
+      expect(screen.queryByRole('menu')).toBeNull();
+    };
+    pick('Open !12');
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
+    pick('Update Merge request');
     await waitFor(() => expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]));
+    pick('Link another Merge request…');
+    expect(screen.getByRole('dialog', { name: 'Link Merge request' })).toBeTruthy();
+  });
+
+  it('just opens the linked one from the header of an archived Session', async () => {
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ status: 'archived', mergeRequest: { number: 12, url } })] });
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: /Archive/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Fix login' }));
+    const header = screen.getByRole('region', { name: 'Session header' });
+
+    const button = within(header).getByRole('button', { name: 'Merge request !12' });
+    expect(button.getAttribute('aria-haspopup')).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
   });
 
   it('asks the agent to create one from the header when none is linked, and offers no actions with the Forge off', () => {
