@@ -2,7 +2,7 @@
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
 import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type ToolStatus } from '../../shared/api';
-import type { AgentAdapter, AgentEvent, AgentPrompt, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
+import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection } from './acp';
 
@@ -141,32 +141,26 @@ export class AcpAdapter implements AgentAdapter {
         const params = { sessionId, cwd: workingCopy, mcpServers };
         const capabilities = initialized?.agentCapabilities;
         // `session/resume` takes the conversation up as it is; failing that, `session/load` replays it first.
-        let resumed = false;
-        let refused: unknown = new Error(`${this.profile.name} can't resume a conversation`);
-        if (capabilities?.sessionCapabilities?.resume) {
-          try {
-            ({ configOptions: reported } = await connection.request<{ configOptions?: unknown }>('session/resume', params));
-            resumed = true;
-          } catch (error) {
-            refused = error;
-          }
-        }
-        if (!resumed && capabilities?.loadSession === true) {
+        const resumed = capabilities?.sessionCapabilities?.resume
+          ? await connection.request<{ configOptions?: unknown }>('session/resume', params).catch((error: Error) => error)
+          : new Error(`${this.profile.name} can't resume a conversation`);
+        let taken = resumed;
+        if (resumed instanceof Error && capabilities?.loadSession === true) {
           replaying = true;
-          try {
-            ({ configOptions: reported } = await connection.request<{ configOptions?: unknown }>('session/load', params));
-          } finally {
-            replaying = false;
-          }
-        } else if (!resumed) {
-          throw refused;
+          taken = await connection.request<{ configOptions?: unknown }>('session/load', params).catch((error: Error) => error);
+          replaying = false;
         }
+        if (taken instanceof Error) {
+          await channel.kill().catch(() => {});
+          throw new ResumeRefused(`${this.profile.name} could not resume this Session's conversation: ${taken.message}`);
+        }
+        reported = taken?.configOptions;
       }
       configured(reported);
     } catch (error) {
+      if (error instanceof ResumeRefused) throw error;
       await channel.kill().catch(() => {});
-      const what = resume === undefined ? 'start a session' : "resume this Session's conversation";
-      throw new Error(`${this.profile.name} could not ${what}: ${(error as Error).message}`);
+      throw new Error(`${this.profile.name} could not start a session: ${(error as Error).message}`);
     }
     const id = sessionId;
     const name = this.profile.name;

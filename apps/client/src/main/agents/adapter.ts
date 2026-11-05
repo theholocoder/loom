@@ -92,11 +92,14 @@ export interface OpenOptions {
   /**
    * The agent's id of a conversation to take up again (`AgentSession.id`)
    * rather than start a new one; what it replays of its history isn't
-   * reported. Opening rejects if the agent can't take it up.
+   * reported. Opening rejects with ResumeRefused if the agent can't take it up.
    */
   resume?: string;
   onEvent: (event: AgentEvent) => void;
 }
+
+/** The agent started but can't take up the conversation it was asked to resume, as when it no longer has it. */
+export class ResumeRefused extends Error {}
 
 export interface AgentAdapter {
   /** The agent's name, as the UI shows it. */

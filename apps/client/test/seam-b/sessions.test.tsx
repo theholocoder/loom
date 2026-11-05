@@ -459,7 +459,7 @@ describe('a Session', () => {
     act(() => main.publish('transcript', transcript, { sessionId: 7 }));
     const chat = within(screen.getByRole('log', { name: 'Conversation' }));
 
-    expect(chat.getByRole('note').textContent).toContain('Loom quit during this run');
+    expect(chat.getByRole('note').textContent).toContain('Loom quit or crashed during this run');
     fireEvent.click(chat.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.continue')).toEqual([{ command: 'sessions.continue', params: { id: 7 } }]));

@@ -4,7 +4,7 @@
 import type { Transaction } from 'kysely';
 import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
-import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, ApprovalAction, PromptFile } from '../agents/adapter';
+import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
@@ -66,7 +66,7 @@ const MAX_TITLE_LENGTH = 80;
 export const CHECKPOINT_MS = 1000;
 
 /** What Continue sends the agent of a run Loom quit or crashed during. */
-export const CONTINUE_PROMPT = 'Loom quit while you were working. Continue where you left off.';
+export const CONTINUE_PROMPT = 'Loom stopped while you were working. Continue where you left off.';
 
 /** How long a Session waits with nothing in flight before its agent's process is stopped; its next prompt resumes it. */
 export const IDLE_STOP_MS = 10 * 60_000;
@@ -92,6 +92,8 @@ export class Sessions {
   private live = new Map<number, AgentSession>();
   /** The pending idle stop of each Waiting Session's agent (IDLE_STOP_MS). */
   private readonly idleStops = new Map<number, TimerHandle>();
+  /** Idle agents still closing, by Session: the next one opened for the Session waits, so two never share its conversation. */
+  private readonly closing = new Map<number, Promise<void>>();
   /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
   private readonly diffSummaries = new Map<string, DiffSummary>();
   /**
@@ -465,7 +467,11 @@ export class Sessions {
     try {
       await change;
     } finally {
-      if (this.switching.get(id) === change) this.switching.delete(id);
+      if (this.switching.get(id) === change) {
+        this.switching.delete(id);
+        // Talking to the agent counts as use: its 10 minutes start again.
+        this.watchIdle(id);
+      }
     }
   }
 
@@ -944,8 +950,11 @@ export class Sessions {
       try {
         agent = await this.open(id);
       } catch (error) {
-        this.fail(id, (error as Error).message);
-        return;
+        if (!(error instanceof ResumeRefused)) return this.fail(id, (error as Error).message);
+        // That conversation is gone for good: the next prompt starts a new one rather than fail the same way.
+        this.update(id, { agentSessionId: undefined });
+        this.save(id, { agent_session_id: null });
+        return this.fail(id, `${error.message}. The next prompt starts a new conversation.`);
       }
     }
     // The model and Effort picked apply from this prompt; an agent already on them isn't asked.
@@ -988,6 +997,7 @@ export class Sessions {
     const session = this.get(id);
     const environment = this.environmentOf(session);
     await environment.ready();
+    await this.closing.get(id);
     let opened: AgentSession | undefined;
     const executable = environment.bridgeExecutable();
     const agent = await this.options.adapter.open({
@@ -1507,12 +1517,19 @@ export class Sessions {
   private stopIdle(id: number): void {
     this.idleStops.delete(id);
     if (this.shuttingDown || this.get(id).status !== 'waiting' || this.inRun(id)) return;
-    // A model change talks to the agent: the wait starts again once it is done.
-    if (this.switching.has(id)) return void this.switched(id).then(() => this.watchIdle(id));
+    // A model change talks to the agent: the wait starts again once it is done (see setModel).
+    if (this.switching.has(id)) return;
     const agent = this.live.get(id);
+    if (!agent) return;
     // Out of `live` first, so its closing is no failure.
     this.live.delete(id);
-    agent?.close().catch((error: unknown) => console.error(`could not stop Session ${id}'s idle agent:`, error));
+    const closed = agent
+      .close()
+      .catch((error: unknown) => console.error(`could not stop Session ${id}'s idle agent:`, error))
+      .finally(() => {
+        if (this.closing.get(id) === closed) this.closing.delete(id);
+      });
+    this.closing.set(id, closed);
   }
 
   private update(id: number, change: Partial<Session>): void {

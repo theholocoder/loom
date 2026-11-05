@@ -635,7 +635,7 @@ function MergeRequestCard({ item, forge, onOpen }: { item: Extract<TranscriptIte
 const INTERRUPTIONS = {
   stop: { icon: Square, label: 'Stopped' },
   'send-now': { icon: SendHorizontal, label: 'Interrupted to send a queued message' },
-  quit: { icon: CirclePause, label: 'Loom quit during this run' },
+  quit: { icon: CirclePause, label: 'Loom quit or crashed during this run' },
 } satisfies Record<Extract<TranscriptItem, { kind: 'interruption' }>['by'], { icon: LucideIcon; label: string }>;
 
 /**

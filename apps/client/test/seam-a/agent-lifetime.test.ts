@@ -9,9 +9,14 @@ import { CONTINUE_PROMPT, IDLE_STOP_MS } from '../../src/main/sessions/sessions'
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
 const signedIn = [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }];
 
+const models = [
+  { providerID: 'opencode', id: 'pulse-free', name: 'Pulse Free' },
+  { providerID: 'anthropic', id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+];
+
 function machineWith(acp: OpencodeScript['acp']): { machine: Machine; checkout: string } {
   const machine = tempMachine();
-  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp });
+  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, models, acp });
   return { machine, checkout: machine.gitRepo('billing-api') };
 }
 
@@ -116,7 +121,7 @@ describe("a Session's agent process", () => {
     ]);
   });
 
-  it('waits on an error when the agent can neither resume nor load its conversation', async () => {
+  it('waits on an error when the agent can neither resume nor load its conversation, and starts a new one with the next prompt', async () => {
     const { machine, main, id } = await finishedSession({ turns: [{ chunks: ['Done.'] }], refuse: ['session/resume', 'session/load'] });
     await main.elapse(IDLE_STOP_MS);
     await processEnded(agentPids(machine)[0]!);
@@ -124,8 +129,29 @@ describe("a Session's agent process", () => {
     await main.api.invoke('sessions.send', { id, prompt: 'Second' });
 
     const failed = (await waitFor(main.api, 'sessions', session(id, waiting('error')))).find((s) => s.id === id)!;
-    expect(failed.error).toMatch(/^OpenCode could not resume this Session's conversation: .*session not found/);
+    expect(failed.error).toMatch(/^OpenCode could not resume this Session's conversation: .*session not found.*The next prompt starts a new conversation\.$/);
     expect(methods(machine).filter((m) => m === 'session/prompt')).toHaveLength(1);
+
+    await main.api.invoke('sessions.send', { id, prompt: 'Third' });
+
+    const fresh = (await waitFor(main.api, 'sessions', session(id, waiting('finished')))).find((s) => s.id === id)!;
+    expect(methods(machine).slice(-3)).toEqual(['initialize', 'session/new', 'session/prompt']);
+    expect(fresh.agentSessionId).toMatch(/^ses_/);
+    expect(fresh.agentSessionId).not.toBe(failed.agentSessionId);
+  });
+
+  it('starts its 10 minutes again when the model changes', async () => {
+    const { machine, main, id } = await finishedSession({ turns: [{ chunks: ['Done.'] }] });
+    const [pid] = agentPids(machine);
+
+    await main.elapse(IDLE_STOP_MS / 2);
+    await main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' });
+    await main.elapse(IDLE_STOP_MS - 1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(alive(pid!)).toBe(true);
+
+    await main.elapse(1);
+    await processEnded(pid!);
   });
 
   it('is never stopped while the Session is Working', async () => {
