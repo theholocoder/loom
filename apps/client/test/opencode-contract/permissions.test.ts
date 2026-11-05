@@ -59,7 +59,7 @@ async function run(workingCopy: string, prompt: string): Promise<ApprovalAction[
     },
   });
   cleanups.push(() => void agent.close());
-  agent.prompt(prompt);
+  agent.prompt({ text: prompt, files: [] });
   const outcome = await ended;
   if (outcome.type !== 'run-settled') throw new Error(`the run ended with ${JSON.stringify(outcome)}`);
   return asked;

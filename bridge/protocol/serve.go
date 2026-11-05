@@ -168,6 +168,12 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(copyFiles(params))
+	case "files.write":
+		var params fileWriteParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(writeFile(params))
 	case "opencode.probe":
 		var params probeParams
 		if err := decodeParams(req.Params, &params); err != nil {

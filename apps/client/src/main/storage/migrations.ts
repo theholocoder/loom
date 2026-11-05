@@ -88,4 +88,7 @@ export const migrations: Migration[] = [
     await db.schema.alterTable('sessions').addColumn('context_used', 'integer').execute();
     await db.schema.alterTable('sessions').addColumn('context_size', 'integer').execute();
   },
+  async (db) => {
+    await db.schema.alterTable('queued_messages').addColumn('attachments', 'text').execute();
+  },
 ];

@@ -107,7 +107,7 @@ export interface AgentSession {
    */
   configure(choice: ModelPick): Promise<void>;
   /** Starts a run; its progress and outcome arrive as events. */
-  prompt(text: string): void;
+  prompt(prompt: AgentPrompt): void;
   /**
    * Answers what the agent asked under `requestId` in this run. A request
    * the agent no longer waits on is ignored.
@@ -119,9 +119,27 @@ export interface AgentSession {
    */
   cancel(): void;
   /** Gives the agent `text` mid-run, for an agent that can be steered (`AgentAdapter.canSteer`). */
-  steer?(text: string): void;
+  steer?(prompt: AgentPrompt): void;
   /** Ends the agent's process. */
   close(): Promise<void>;
+}
+
+/** What a run is asked: the user's text, and the files they attached, written where the agent can read them. */
+export interface AgentPrompt {
+  /** May be empty when files are attached. */
+  text: string;
+  files: PromptFile[];
+}
+
+/** A file attached to a prompt, as the agent gets it: a copy in its Environment. */
+export interface PromptFile {
+  /** Its path in the Environment. */
+  path: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  /** Its content, for an agent that takes images inline. */
+  data: Uint8Array;
 }
 
 /** The user's response to an agent's request: an answer to its question (null dismisses it), whether to trust, or whether to go ahead once. */

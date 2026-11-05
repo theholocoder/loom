@@ -1,8 +1,8 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, ArrowUp, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type Issue, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { Archive, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -16,6 +16,8 @@ import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
+import { AttachmentList, Composer } from './Composer';
+import type { PaletteAction } from './CommandPalette';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -97,7 +99,18 @@ function workingCopyParams(
 
 /** Starting a Session: which Project, which working copy, and the first prompt. */
 /** `pickIssue` opens the issue picker at once, for starting from an issue. */
-export function NewSession({ initialProjectId, pickIssue, onStarted }: { initialProjectId?: number; pickIssue?: boolean; onStarted: (session: Session) => void }) {
+/** `commands` are what the composer's `/` offers: the palette's actions. */
+export function NewSession({
+  initialProjectId,
+  pickIssue,
+  onStarted,
+  commands,
+}: {
+  initialProjectId?: number;
+  pickIssue?: boolean;
+  onStarted: (session: Session) => void;
+  commands?: PaletteAction[];
+}) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
   const [projectId, setProjectId] = useState(initialProjectId);
@@ -123,13 +136,13 @@ export function NewSession({ initialProjectId, pickIssue, onStarted }: { initial
   const [effort, setEffort] = useState<string>();
   const efforts = effortsOf(models.listed, model);
 
-  const start = async (prompt: string) => {
+  const start = async (prompt: string, attachments: NewAttachment[]) => {
     if (!chosen) return false;
     setError(undefined);
     const params = workingCopyParams(workingCopy, { existing, branch: editedBranch, base: pickedBase });
     try {
       const pick = { ...(model !== undefined && { model }), ...(effort !== undefined && efforts.includes(effort) && { effort }) };
-      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, ...params, ...(issue ? { issue } : {}), ...pick, prompt }));
+      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, ...params, ...(issue ? { issue } : {}), ...pick, prompt, ...(attachments.length ? { attachments } : {}) }));
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -156,6 +169,9 @@ export function NewSession({ initialProjectId, pickIssue, onStarted }: { initial
           placeholder={`Tell ${OPENCODE_NAME} what to do…`}
           onSend={start}
           onDraftChange={setDraft}
+          // A new worktree starts from the checkout's files.
+          loadFiles={() => api.invoke('projects.files', { id: chosen.id })}
+          commands={commands}
           canSendEmpty={!!issue}
           disabled={workingCopy === 'existing' && !existing}
           tools={
@@ -302,6 +318,7 @@ export function SessionView({
   onRetryableChange,
   diffOpen,
   onToggleDiff,
+  commands,
 }: {
   session: Session;
   replyRequest?: number;
@@ -310,6 +327,8 @@ export function SessionView({
   onRetryableChange?: (retryable: boolean) => void;
   diffOpen: boolean;
   onToggleDiff: () => void;
+  /** What the composer's `/` offers: the palette's actions. */
+  commands?: PaletteAction[];
 }) {
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
@@ -374,11 +393,11 @@ export function SessionView({
     if (session.unread) api.invoke('sessions.setUnread', { id: session.id, unread: false }).catch(() => {});
   }, [session.id, session.updatedAt]);
 
-  const send = async (prompt: string) => {
+  const send = async (prompt: string, attachments: NewAttachment[]) => {
     setError(undefined);
     try {
       if (freeAnswer) return await freeAnswer.send(prompt);
-      await api.invoke('sessions.send', { id: session.id, prompt });
+      await api.invoke('sessions.send', { id: session.id, prompt, ...(attachments.length ? { attachments } : {}) });
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -471,7 +490,8 @@ export function SessionView({
             <div key={item.id} className="msg user">
               <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <div className="bubble">
-                  <Markdown text={item.text} breaks />
+                  {item.text && <Markdown text={item.text} breaks />}
+                  {item.attachments && <AttachmentList attachments={item.attachments} />}
                 </div>
               </div>
             </div>
@@ -533,6 +553,9 @@ export function SessionView({
         clearKey={stepKey}
         focusRequest={replyRequest}
         onSend={send}
+        canAttach={!freeAnswer}
+        loadFiles={session.status === 'archived' || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
+        commands={commands}
         queueing={working}
         tools={
           <ModelPickers
@@ -598,6 +621,12 @@ function Queue({
           <span className="grow ellipsis" title={message.text}>
             {message.text}
           </span>
+          {message.attachments && (
+            <span className="row muted" title={message.attachments.map((a) => a.name).join('\n')} aria-label={`${message.attachments.length} attached`}>
+              <Paperclip className="sm" />
+              {message.attachments.length}
+            </span>
+          )}
           {steer ? (
             <button type="button" onClick={() => onSteer(message.id)}>
               <Navigation className="sm" />
@@ -638,120 +667,5 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry?: () => void
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * The prompt box, with the agent's label and `tools` in its toolbar. Enter
- * sends, Shift+Enter adds a line. `onSend` resolves to whether to clear it.
- */
-function Composer({
-  agent,
-  placeholder,
-  disabled = false,
-  tools,
-  focusRequest = 0,
-  onSend,
-  onDraftChange,
-  canSendEmpty = false,
-  dock,
-  clearKey,
-  queueing = false,
-  onStop,
-  queue,
-  gauge,
-}: {
-  /** The agent Sessions run on; a label, not a picker, in v1. */
-  agent: string;
-  placeholder: string;
-  disabled?: boolean;
-  tools?: ReactNode;
-  /** Changing it focuses the prompt box. */
-  focusRequest?: number;
-  onSend: (prompt: string) => Promise<boolean>;
-  /** Called with the prompt as the user types it. */
-  onDraftChange?: (draft: string) => void;
-  /** Whether an empty prompt can be sent. */
-  canSendEmpty?: boolean;
-  /** What sits on the prompt box, part of it: the panel of a question it answers. */
-  dock?: ReactNode;
-  /** Changing it empties the prompt box: what was typed was for something else, such as another question. */
-  clearKey?: string;
-  /** Whether what is sent joins the queue, the agent working: the button says Queue. */
-  queueing?: boolean;
-  /** Given while the agent works: Stop interrupts its run. */
-  onStop?: () => void;
-  /** The Session's queue, shown above the prompt box. */
-  queue?: ReactNode;
-  /** How full the agent's context is, by the send button. */
-  gauge?: ReactNode;
-}) {
-  const [draft, setDraftState] = useState('');
-  const setDraft = (value: string) => {
-    setDraftState(value);
-    onDraftChange?.(value);
-  };
-  const prompt = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (focusRequest) prompt.current?.focus();
-  }, [focusRequest]);
-  const clearedFor = useRef(clearKey);
-  useEffect(() => {
-    if (clearedFor.current === clearKey) return;
-    clearedFor.current = clearKey;
-    setDraft('');
-  }, [clearKey]);
-  const [sending, setSending] = useState(false);
-  const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '');
-
-  const send = async (event?: FormEvent) => {
-    event?.preventDefault();
-    if (!canSend) return;
-    setSending(true);
-    try {
-      if (await onSend(draft)) setDraft('');
-    } finally {
-      setSending(false);
-    }
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) void send(event);
-  };
-
-  return (
-    <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
-      {queue}
-      <div className={`composer${dock ? ' docked' : ''}`}>
-        {dock}
-        <textarea ref={prompt} aria-label="Prompt" rows={2} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} />
-        <div className="ctoolbar">
-          <span className="pick" title="Agent" style={{ cursor: 'default' }}>
-            <SquareTerminal className="sm" />
-            <b>{agent}</b>
-          </span>
-          {tools}
-          <span className="grow" />
-          {gauge}
-          {onStop && (
-            <button className="send" type="button" onClick={onStop}>
-              <Square />
-              Stop
-            </button>
-          )}
-          <button className="primary send" type="submit" disabled={!canSend}>
-            {queueing ? <ListPlus /> : <ArrowUp />}
-            {queueing ? 'Queue' : 'Send'}
-          </button>
-        </div>
-      </div>
-      <div className="hint">
-        <span>
-          <kbd>Enter</kbd> send
-        </span>
-        <span>
-          <kbd>Shift Enter</kbd> newline
-        </span>
-      </div>
-    </form>
   );
 }

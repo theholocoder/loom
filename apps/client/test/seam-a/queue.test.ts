@@ -281,7 +281,7 @@ class SteerableAgent implements AgentAdapter {
         emit({ type: 'run-started' });
         emit({ type: 'text-delta', text: 'On it.' });
       },
-      steer: (text) => this.steered.push(text),
+      steer: ({ text }) => this.steered.push(text),
       answer: () => {},
       cancel: () => {},
       close: async () => {},

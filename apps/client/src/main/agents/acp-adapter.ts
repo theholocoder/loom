@@ -2,7 +2,7 @@
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
 import type { AgentConfig, Answer, ModelChoice, ModelPick, QuestionField, QuestionOption, ToolStatus } from '../../shared/api';
-import type { AgentAdapter, AgentEvent, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
+import type { AgentAdapter, AgentEvent, AgentPrompt, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection } from './acp';
 
@@ -116,13 +116,16 @@ export class AcpAdapter implements AgentAdapter {
         onEvent({ type: 'closed', error: reason });
       },
     });
+    /** Whether the agent takes images inline in a prompt, as `initialize` said. */
+    let images = false;
     try {
-      await connection.request('initialize', {
+      const initialized = await connection.request<{ agentCapabilities?: { promptCapabilities?: { image?: unknown } } }>('initialize', {
         protocolVersion: PROTOCOL_VERSION,
         // Without `elicitation.form`, OpenCode skips its questions and tells the model the user couldn't be asked.
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } },
         clientInfo: { name: 'loom', version: this.clientVersion },
       });
+      images = initialized?.agentCapabilities?.promptCapabilities?.image === true;
       // Loom adds no tools of its own (ADR 0006): the agent's are the user's.
       let reported: unknown;
       ({ sessionId, configOptions: reported } = await connection.request<{ sessionId: string; configOptions?: unknown }>('session/new', { cwd: workingCopy, mcpServers: [] }));
@@ -150,9 +153,9 @@ export class AcpAdapter implements AgentAdapter {
         if (model !== undefined && model !== config.model) await set(MODEL, model, 'the model');
         if (effort !== undefined && effort !== config.effort) await set(EFFORT, effort, 'Effort');
       },
-      prompt: (text) => {
+      prompt: (prompt) => {
         onEvent({ type: 'run-started' });
-        connection.request<{ stopReason: string }>('session/prompt', { sessionId: id, prompt: [{ type: 'text', text }] }).then(
+        connection.request<{ stopReason: string }>('session/prompt', { sessionId: id, prompt: promptBlocks(prompt, images) }).then(
           () => onEvent({ type: 'run-settled' }),
           (error: Error) => onEvent({ type: 'run-failed', error: error.message }),
         );
@@ -166,6 +169,28 @@ export class AcpAdapter implements AgentAdapter {
       close: () => connection.end(),
     };
   }
+}
+
+/**
+ * A prompt as ACP content blocks: its text, then a link to each attached
+ * file's copy in the Environment, which every ACP agent takes; an image goes
+ * inline instead to an agent that takes images, still naming its copy.
+ */
+function promptBlocks({ text, files }: AgentPrompt, images: boolean): Array<Record<string, unknown>> {
+  return [
+    ...(text ? [{ type: 'text', text }] : []),
+    ...files.map(({ path, name, mimeType, size, data }) => {
+      const uri = fileUri(path);
+      if (images && mimeType.startsWith('image/')) return { type: 'image', mimeType, data: Buffer.from(data).toString('base64'), uri };
+      return { type: 'resource_link', name, uri, mimeType, size };
+    }),
+  ];
+}
+
+/** A `file://` URI for an absolute path, `/home/…` or `C:/…`. */
+function fileUri(path: string): string {
+  const slashed = path.replaceAll('\\', '/');
+  return `file://${slashed.startsWith('/') ? '' : '/'}${encodeURI(slashed).replaceAll('?', '%3F').replaceAll('#', '%23')}`;
 }
 
 function translate(update: SessionUpdate): AgentEvent | undefined {

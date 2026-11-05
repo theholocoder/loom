@@ -2,9 +2,9 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
-import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, ApprovalAction } from '../agents/adapter';
+import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, ApprovalAction, PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
@@ -12,10 +12,11 @@ import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { WorkingCopyDiff } from './diff';
-import { createWorktree, findWorktree, listBranches, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
+import { createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
 import { capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
 import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict } from './approvals';
+import { checkAttachments, type Attachments } from './attachments';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -39,6 +40,8 @@ export interface SessionsOptions {
   approvals: () => ApprovalPolicy;
   /** The models the agent offers in the Project's checkout (see `projects.models`); may reject when they can't be listed now. */
   models: (projectId: number) => Promise<ModelChoice[]>;
+  /** Where the files attached to messages are kept. */
+  attachments: Attachments;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -63,6 +66,8 @@ export const CHECKPOINT_MS = 1000;
 type Interruption = { sendNow?: number };
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
+/** What the user sends the agent: text, and the files attached to it, stored already. */
+type Message = { text: string; attachments?: Attachment[] };
 /** A transcript item before it has its place in the transcript. */
 type NewItem = TranscriptItem extends infer I ? (I extends TranscriptItem ? Omit<I, 'id'> : never) : never;
 
@@ -128,9 +133,10 @@ export class Sessions {
     const rows = await options.db.selectFrom('sessions').selectAll().execute();
     for (const row of rows) sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
-    for (const { id, session_id, text } of queued) {
+    for (const { id, session_id, text, attachments } of queued) {
       const session = sessions.sessions.get(session_id);
-      if (session) sessions.sessions.set(session_id, { ...session, queue: [...(session.queue ?? []), { id, text }] });
+      const message: QueuedMessage = attachments ? { id, text, attachments: JSON.parse(attachments) as Attachment[] } : { id, text };
+      if (session) sessions.sessions.set(session_id, { ...session, queue: [...(session.queue ?? []), message] });
       sessions.nextQueuedId = Math.max(sessions.nextQueuedId, id + 1);
     }
     for (const session of sessions.list()) {
@@ -162,6 +168,25 @@ export class Sessions {
     return [...this.sessions.values()].find((session) => session.status !== 'archived' && session.workingCopy.kind === 'worktree' && session.workingCopy.path === path);
   }
 
+  /** The files in the Session's working copy, for @-mentions. */
+  async files(id: number): Promise<string[]> {
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
+    const environment = this.environmentOf(session);
+    await environment.ready();
+    return listFiles(environment, session.workingCopy.path, MAX_LISTED_FILES);
+  }
+
+  /** The files in the Project's checkout, for @-mentions before a Session exists. */
+  async projectFiles(projectId: number): Promise<string[]> {
+    const project = this.options.project(projectId);
+    if (!project) throw new Error(`unknown Project ${projectId}`);
+    const environment = this.environmentOf({ projectId });
+    await environment.ready();
+    return listFiles(environment, project.checkout.path, MAX_LISTED_FILES);
+  }
+
   /** Newest first. */
   list(): Session[] {
     return [...this.sessions.values()].map((s) => (s.status !== 'archived' && this.agentStopped(s.id) ? { ...s, agentStopped: true } : s)).sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
@@ -180,7 +205,8 @@ export class Sessions {
       if (workingCopy !== 'worktree') throw new Error('Only a worktree Session works on an existing branch or worktree.');
       if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch or worktree doesn't name or base a new one.");
     }
-    const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt);
+    const newAttachments = checkAttachments(params.attachments);
+    const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt, newAttachments.length > 0);
     let path = project.checkout.path;
     let branch: string | null = null;
     if (existing && 'worktree' in existing) {
@@ -215,7 +241,7 @@ export class Sessions {
     const now = this.options.clock.now();
     const values = {
       project_id: projectId,
-      title: titleOf(text),
+      title: titleOf(text || newAttachments[0]!.name),
       working_copy_kind: workingCopy,
       working_copy_path: path,
       agent: this.options.adapter.name,
@@ -244,31 +270,46 @@ export class Sessions {
     } finally {
       this.claimed.delete(path);
     }
+    let attachments: Attachment[] | undefined;
+    try {
+      if (newAttachments.length) attachments = await this.options.attachments.store(id, newAttachments);
+    } catch (error) {
+      // A Session without its first message would be nothing to come back to.
+      this.sessions.delete(id);
+      await this.options.db.deleteFrom('sessions').where('id', '=', id).execute();
+      await this.options.attachments.remove(id).catch(() => {});
+      throw new Error(`Loom could not keep the attachments: ${(error as Error).message}`);
+    }
+    const message = withoutUndefined({ text, attachments });
     this.transcripts.set(id, new Topic<TranscriptItem[]>([]));
-    this.addItem(id, { kind: 'user', text });
+    this.addItem(id, { kind: 'user', ...message });
     this.publish();
     void this.lookUpBranch(id);
-    void this.run(id, text);
+    void this.run(id, message);
     return this.sessions.get(id)!;
   }
 
-  async send({ id, prompt }: { id: number; prompt: string }): Promise<void> {
-    const text = promptText(prompt);
+  async send({ id, prompt, attachments: attached }: Commands['sessions.send']['params']): Promise<void> {
+    const newAttachments = checkAttachments(attached);
+    const text = promptText(prompt, newAttachments.length > 0);
     this.get(id);
+    // Kept at once: a message held back by a change of model, or queued, keeps them too.
+    const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
+    const message = withoutUndefined({ text, attachments });
     await this.loadTranscript(id);
     // A change of model or Effort made just before goes first: the marker, then this prompt on it.
     await this.switched(id);
-    if (this.get(id).status === 'working') return this.enqueue(id, text);
-    this.reply(id, text);
+    if (this.get(id).status === 'working') return this.enqueue(id, message);
+    this.reply(id, message);
   }
 
-  /** Sends `text` to a Waiting Session as the user's reply: it becomes Working. Its transcript must be read. */
-  private reply(id: number, text: string): void {
+  /** Sends `message` to a Waiting Session as the user's reply: it becomes Working. Its transcript must be read. */
+  private reply(id: number, message: Message): void {
     if (this.inRun(id)) throw new Error("The agent is waiting for an answer to what it asked; answer or dismiss it first.");
     this.assertCanPrompt(id);
-    this.addItem(id, { kind: 'user', text });
+    this.addItem(id, { kind: 'user', ...message });
     this.setStatus(id, { status: 'working' });
-    void this.run(id, text);
+    void this.run(id, message);
   }
 
   /** Drops a message from the Session's queue. */
@@ -304,7 +345,7 @@ export class Sessions {
     this.endRun(id);
     const message = sendNow === undefined ? undefined : this.dequeue(id, sendNow);
     this.addItem(id, { kind: 'interruption', by: message ? 'send-now' : 'stop' });
-    if (message) return this.sendNext(id, message.text);
+    if (message) return this.sendNext(id, messageOf(message));
     this.setStatus(id, { status: 'waiting', waitingReason: 'stopped' });
   }
 
@@ -319,7 +360,7 @@ export class Sessions {
     await this.switched(id);
     const message = this.queued(id, queuedId);
     if (this.inRun(id)) return this.interrupt(id, { sendNow: message.id });
-    this.reply(id, message.text);
+    this.reply(id, messageOf(message));
     this.dequeue(id, message.id);
   }
 
@@ -336,12 +377,20 @@ export class Sessions {
     await this.loadTranscript(id);
     const message = this.queued(id, queuedId);
     const agent = this.live.get(id);
-    if (!this.options.adapter.canSteer || !agent?.steer) throw new Error(`${this.options.adapter.name} can't take a message mid-run: use Send now.`);
-    if (this.get(id).status !== 'working' || this.interrupting.has(id)) throw new Error('The agent is not working on this Session: use Send now.');
+    const steerable = () => {
+      if (!this.options.adapter.canSteer || !agent?.steer) throw new Error(`${this.options.adapter.name} can't take a message mid-run: use Send now.`);
+      if (this.get(id).status !== 'working' || this.interrupting.has(id) || this.live.get(id) !== agent) throw new Error('The agent is not working on this Session: use Send now.');
+      return agent.steer.bind(agent);
+    };
+    steerable();
+    const files = await this.deliver(id, message.attachments);
+    // The run may have ended, or the message gone, while the files were written.
+    const steer = steerable();
+    this.queued(id, queuedId);
     this.dequeue(id, message.id);
     this.endStreaming(id);
-    this.addItem(id, { kind: 'user', text: message.text });
-    agent.steer(message.text);
+    this.addItem(id, { kind: 'user', ...messageOf(message) });
+    steer({ text: message.text, files });
   }
 
   /**
@@ -423,10 +472,10 @@ export class Sessions {
   }
 
   /** Puts a message at the end of the Session's queue. */
-  private enqueue(id: number, text: string): void {
-    const message: QueuedMessage = { id: this.nextQueuedId++, text };
+  private enqueue(id: number, { text, attachments }: Message): void {
+    const message: QueuedMessage = withoutUndefined({ id: this.nextQueuedId++, text, attachments });
     this.update(id, { queue: [...(this.get(id).queue ?? []), message] });
-    const row = { id: message.id, session_id: id, text, created_at: this.options.clock.now() };
+    const row = { id: message.id, session_id: id, text, attachments: attachments ? JSON.stringify(attachments) : null, created_at: this.options.clock.now() };
     this.write((trx) => trx.insertInto('queued_messages').values(row).execute());
   }
 
@@ -465,7 +514,7 @@ export class Sessions {
     this.setStatus(id, { status: 'working' });
     // Starting again sets the Environment starting at once, so the run waits for it.
     environment.restart().catch(() => {});
-    void this.run(id, prompt.text);
+    void this.run(id, withoutUndefined({ text: prompt.text, attachments: prompt.attachments }));
   }
 
   /** Sends the agent the Merge request prompt shortcut. */
@@ -808,7 +857,7 @@ export class Sessions {
     await this.flush();
   }
 
-  private async run(id: number, text: string): Promise<void> {
+  private async run(id: number, { text, attachments }: Message): Promise<void> {
     let agent = this.live.get(id);
     if (!agent) {
       try {
@@ -827,9 +876,27 @@ export class Sessions {
       this.fail(id, (error as Error).message);
       return;
     }
+    let files: PromptFile[];
+    try {
+      files = await this.deliver(id, attachments);
+    } catch (error) {
+      this.fail(id, (error as Error).message);
+      return;
+    }
     // Interrupted while the agent started: the prompt never goes.
     if (this.interrupting.has(id)) return this.interrupted(id);
-    agent.prompt(text);
+    agent.prompt({ text, files });
+  }
+
+  /** Writes the attachments into the Session's Environment, for its agent to read. */
+  private async deliver(id: number, attachments: Attachment[] | undefined): Promise<PromptFile[]> {
+    if (!attachments?.length) return [];
+    const environment = this.environmentOf(this.get(id));
+    try {
+      return await this.options.attachments.deliver(id, attachments, { request: environment.request, tempDir: environment.tempDir() });
+    } catch (error) {
+      throw new Error(`Loom could not give ${this.options.adapter.name} the attachments: ${(error as Error).message}`);
+    }
   }
 
   /** Starts the Session's agent in its working copy and records the agent's id for it. */
@@ -908,10 +975,10 @@ export class Sessions {
         this.denyMessages.delete(id);
         this.endRun(id);
         // What the user said on denying goes to the agent as the next prompt.
-        if (followUp) return this.sendNext(id, followUp);
+        if (followUp) return this.sendNext(id, { text: followUp });
         // Then the queue, one message per run.
         const next = this.dequeue(id);
-        if (next) return this.sendNext(id, next.text);
+        if (next) return this.sendNext(id, messageOf(next));
         this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
         return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
       }
@@ -926,11 +993,11 @@ export class Sessions {
     }
   }
 
-  /** Sends `text` as the next run, the Session staying Working. */
-  private sendNext(id: number, text: string): void {
-    this.addItem(id, { kind: 'user', text });
+  /** Sends `message` as the next run, the Session staying Working. */
+  private sendNext(id: number, message: Message): void {
+    this.addItem(id, { kind: 'user', ...message });
     this.setStatus(id, { status: 'working' });
-    void this.run(id, text);
+    void this.run(id, message);
   }
 
   /** Shows what the agent asked as a card, and waits on the user: Waiting (question, or approval). */
@@ -1295,10 +1362,17 @@ export class Sessions {
   }
 }
 
-function promptText(prompt: string): string {
+/** The prompt's text, trimmed; it may be empty only with files attached. */
+function promptText(prompt: string, attached = false): string {
+  if (typeof prompt !== 'string') throw new Error('A prompt must be text.');
   const text = prompt.trim();
-  if (!text) throw new Error('A prompt needs some text.');
+  if (!text && !attached) throw new Error('A prompt needs some text.');
   return text;
+}
+
+/** A queued message as what is sent: its text and attachments. */
+function messageOf({ text, attachments }: QueuedMessage): Message {
+  return withoutUndefined({ text, attachments });
 }
 
 /** Rejects an issue Loom couldn't link to, or open in the browser. */
