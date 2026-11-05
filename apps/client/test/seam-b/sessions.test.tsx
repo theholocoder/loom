@@ -448,6 +448,25 @@ describe('a Session', () => {
     expect(marks.map((m) => m.textContent)).toEqual(['Interrupted to send a queued message', 'Stopped']);
   });
 
+  it('offers Continue on a run Loom quit during, until the Session moves on', async () => {
+    const interrupted: Session = { ...working, status: 'waiting', waitingReason: 'interrupted' };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [interrupted] })), interrupted);
+    const transcript = [
+      { kind: 'user' as const, id: 0, text: 'Say hello' },
+      { kind: 'agent' as const, id: 1, text: 'Hel', streaming: false },
+      { kind: 'interruption' as const, id: 2, by: 'quit' as const },
+    ];
+    act(() => main.publish('transcript', transcript, { sessionId: 7 }));
+    const chat = within(screen.getByRole('log', { name: 'Conversation' }));
+
+    expect(chat.getByRole('note').textContent).toContain('Loom quit during this run');
+    fireEvent.click(chat.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.continue')).toEqual([{ command: 'sessions.continue', params: { id: 7 } }]));
+    act(() => main.publish('sessions', [{ ...interrupted, status: 'working', waitingReason: undefined }]));
+    expect(chat.queryByRole('button', { name: 'Continue' })).toBeNull();
+  });
+
   it('sends a reply once the agent has finished', async () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [finished] })), finished);
     expect(screen.getByRole('status', { name: 'Session status' }).textContent).toBe('Finished');

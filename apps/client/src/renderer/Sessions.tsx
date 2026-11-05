@@ -363,7 +363,7 @@ export function SessionView({
   const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust' || i.kind === 'approval') && i.state === 'asked') : undefined;
   const asked = firstAsked !== undefined;
   // Between runs only: not while the agent works, or waits on an answer.
-  const pickersDisabled = working || asked || session.status === 'archived' || !!session.worktreeMissing || !!session.agentStopped;
+  const pickersDisabled = working || asked || session.status === 'archived' || !!session.worktreeMissing;
   const { agentConfig } = session;
   // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
   const checkoutModels = useCheckoutModels(agentConfig ? undefined : session.projectId);
@@ -441,6 +441,8 @@ export function SessionView({
     }
   };
   const retry = () => runCommand(() => api.invoke('sessions.retry', { id: session.id }));
+  // Loom quit or crashed during the run, which the agent can go on with.
+  const continuable = session.status === 'waiting' && session.waitingReason === 'interrupted' && !session.worktreeMissing;
 
   return (
     <main className="main" aria-label="Session">
@@ -534,7 +536,7 @@ export function SessionView({
           ) : item.kind === 'trust' ? (
             <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
           ) : item.kind === 'interruption' ? (
-            <Interruption key={item.id} item={item} />
+            <Interruption key={item.id} item={item} onContinue={continuable && item === items.at(-1) ? () => void runCommand(() => api.invoke('sessions.continue', { id: session.id })) : undefined} />
           ) : item.kind === 'model' ? (
             <ModelMarker key={item.id} item={item} />
           ) : item.kind === 'merge-request-refused' ? (
@@ -630,12 +632,30 @@ function MergeRequestCard({ item, forge, onOpen }: { item: Extract<TranscriptIte
   );
 }
 
-/** Where the user interrupted the run: with Stop, or to send a queued message now. */
-function Interruption({ item }: { item: Extract<TranscriptItem, { kind: 'interruption' }> }) {
+const INTERRUPTIONS = {
+  stop: { icon: Square, label: 'Stopped' },
+  'send-now': { icon: SendHorizontal, label: 'Interrupted to send a queued message' },
+  quit: { icon: CirclePause, label: 'Loom quit during this run' },
+} satisfies Record<Extract<TranscriptItem, { kind: 'interruption' }>['by'], { icon: LucideIcon; label: string }>;
+
+/**
+ * Where the run was interrupted: by the user, with Stop or to send a queued
+ * message now, or by Loom quitting, with Continue when `onContinue` is given.
+ */
+function Interruption({ item, onContinue }: { item: Extract<TranscriptItem, { kind: 'interruption' }>; onContinue?: () => void }) {
+  const { icon: Icon, label } = INTERRUPTIONS[item.by];
   return (
     <div className="interruption" role="note">
-      {item.by === 'stop' ? <Square className="sm" /> : <SendHorizontal className="sm" />}
-      <span>{item.by === 'stop' ? 'Stopped' : 'Interrupted to send a queued message'}</span>
+      <Icon className="sm" />
+      <span>{label}</span>
+      {onContinue && (
+        <>
+          <span aria-hidden="true">·</span>
+          <button type="button" className="link" onClick={onContinue}>
+            Continue
+          </button>
+        </>
+      )}
     </div>
   );
 }

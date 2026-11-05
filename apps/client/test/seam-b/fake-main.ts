@@ -89,6 +89,7 @@ export class FakeMain implements LoomApi {
       'sessions.diffBases': () => [],
       'sessions.setDiffBase': () => {},
       'sessions.retry': () => {},
+      'sessions.continue': () => {},
       'sessions.answer': () => {},
       'sessions.trust': () => {},
       'sessions.approve': () => {},

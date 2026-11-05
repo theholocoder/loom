@@ -245,6 +245,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.diff': ({ id, uncommittedOnly }) => sessionService.diff(id, uncommittedOnly),
     'sessions.diffFile': ({ id, path, uncommittedOnly }) => sessionService.diffFile(id, path, uncommittedOnly),
     'sessions.retry': (params) => sessionService.retry(params),
+    'sessions.continue': (params) => sessionService.continue(params),
     'sessions.answer': (params) => sessionService.answer(params),
     'sessions.trust': (params) => sessionService.trust(params),
     'sessions.approve': (params) => sessionService.approve(params),

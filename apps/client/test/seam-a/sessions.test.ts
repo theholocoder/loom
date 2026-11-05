@@ -420,6 +420,7 @@ describe("a Session's transcript", () => {
     expect(await waitFor(again.api, 'transcript', (items) => items.length > 0, { sessionId: id })).toEqual([
       { kind: 'user', id: expect.any(Number), text: 'Say hello' },
       { kind: 'agent', id: expect.any(Number), text: 'Hello, wor', streaming: false },
+      { kind: 'interruption', id: expect.any(Number), by: 'quit' },
     ]);
     expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting', waitingReason: 'interrupted' });
   });

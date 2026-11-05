@@ -13,6 +13,7 @@ import type { Clock, TimerHandle } from '../../src/main/clock';
 import type { AgentAdapter } from '../../src/main/agents/adapter';
 import type { LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
 import { bridgeBinaryPath } from '../../src/main/environments/bridge-path';
+import { PING_INTERVAL_MS } from '../../src/main/environments/environment';
 import clientPackage from '../../package.json';
 
 export const appVersion = clientPackage.version;
@@ -73,6 +74,12 @@ export interface MainHarness {
   bridgeStarts(): number;
   /** Starts bridges from `path` from now on; undefined goes back to the real one. */
   setBridgePath(path: string | undefined): void;
+  /**
+   * Moves the clock forward `ms` as time passes for real: what the bridges
+   * were asked before lands first, and the native Environment's bridge
+   * answers each ping it is sent on the way, so it isn't taken for frozen.
+   */
+  elapse(ms: number): Promise<void>;
   /** Shuts main down; the harness also does this after each test. */
   close(): Promise<void>;
 }
@@ -153,6 +160,22 @@ export async function startMain(
     },
     bridgeStarts: () => bridgeStarts,
     setBridgePath: (path) => (bridgePath = path),
+    elapse: async (ms) => {
+      // Bridge requests still going (such as the ack of a write to an agent,
+      // which may come after the agent's answer to it) time out on this clock:
+      // they land first, as they would long before that much time had passed.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const end = clock.now() + ms;
+      while (clock.now() < end) {
+        const native = (await loom.api.invoke('environments.list')).find((e) => e.id === 'native');
+        // A ping goes PING_INTERVAL_MS after the last one answered: the clock stops there until it is answered.
+        if (native && native.state !== 'connected') throw new Error(`elapse: the native Environment is ${native.state}`);
+        const ping = native?.lastSeenAt !== undefined ? native.lastSeenAt + PING_INTERVAL_MS : Infinity;
+        const to = Math.min(end, ping);
+        clock.advance(to - clock.now());
+        if (to === ping) await waitFor(loom.api, 'environments', (envs) => envs.some((e) => e.id === 'native' && e.lastSeenAt === ping));
+      }
+    },
     close,
   };
 }

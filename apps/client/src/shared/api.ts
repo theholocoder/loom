@@ -317,12 +317,6 @@ export interface Session {
   /** Set when its agent can take a queued message mid-run (Steer); otherwise Send now interrupts the run. */
   canSteer?: boolean;
   /**
-   * Set when its agent ran and has stopped for good, as after the Client
-   * restarted: Loom can't resume agents yet, so it takes no prompt, and its
-   * model and Effort can't change.
-   */
-  agentStopped?: boolean;
-  /**
    * The model the user picked, `provider/model`, and its Effort level: what
    * each prompt runs with, from the next one. Absent for the agent's own
    * choice (OpenCode's default model, or the model's default Effort).
@@ -653,8 +647,8 @@ export type TranscriptItem =
     }
   /** A run that failed, with the agent's message. */
   | { kind: 'error'; id: number; message: string }
-  /** The user interrupted the run: with Stop, or to send a queued message now. */
-  | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' }
+  /** The run was interrupted: by the user, with Stop or to send a queued message now, or by Loom quitting or crashing. */
+  | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' | 'quit' }
   /**
    * The user changed the model or Effort between runs, applying from the
    * next prompt: what they picked, `model` for a new model, `effort` for a
@@ -848,7 +842,7 @@ export interface Commands {
    * A new model goes back to its default Effort unless one is given. Only
    * between runs: rejects while the agent is Working or waits on an answer,
    * and for a Session that can take no prompt (archived, its worktree
-   * missing, its agent stopped). A running agent is switched at once and
+   * missing). A running agent is switched at once and
    * rejects a model or Effort level it doesn't offer, changing nothing;
    * with none running, the change is checked against `projects.models`
    * when they can be listed. Changes go one at a time, in order, and a
@@ -921,6 +915,12 @@ export interface Commands {
    * prompt went unanswered: its conversation ends with the error right after it.
    */
   'sessions.retry': { params: { id: number }; result: void };
+  /**
+   * Has the agent go on with the run Loom quit or crashed during: the
+   * Session, Waiting as interrupted, becomes Working, and its agent is sent
+   * CONTINUE_PROMPT in its resumed conversation. Rejects for any other Session.
+   */
+  'sessions.continue': { params: { id: number }; result: void };
   /**
    * Answers the question of the transcript item `itemId`, or dismisses it
    * when `answer` is null; once nothing else is asked, the Session is
