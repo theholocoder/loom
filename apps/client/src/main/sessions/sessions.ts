@@ -123,8 +123,13 @@ export class Sessions {
   private creatingWorktree = new Map<number, Promise<unknown>>();
   /** Existing worktrees a starting Session has taken, until its record exists. */
   private claimed = new Set<string>();
-  /** The branch each Session's Merge request was linked on: the link stays while the branch does. */
-  private readonly mergeRequestBranches = new Map<number, string>();
+  /**
+   * How each Session's Merge request was linked: on which branch, and whether
+   * by hand (the user or the agent's tool) rather than found on the branch.
+   */
+  private readonly mergeRequestLinks = new Map<number, MergeRequestLinkage>();
+  /** Each Session's latest Merge request lookup: an earlier one still going is stale. */
+  private readonly mergeRequestLookups = new Map<number, number>();
   /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
   private readonly linkCalls = new Map<number, Set<string>>();
 
@@ -140,7 +145,7 @@ export class Sessions {
     const rows = await options.db.selectFrom('sessions').selectAll().execute();
     for (const row of rows) {
       sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
-      if (row.merge_request_branch !== null) sessions.mergeRequestBranches.set(row.id, row.merge_request_branch);
+      if (row.merge_request_branch !== null) sessions.mergeRequestLinks.set(row.id, { branch: row.merge_request_branch, byHand: row.merge_request_by_hand === 1 });
     }
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
     for (const { id, session_id, text, attachments } of queued) {
@@ -272,6 +277,7 @@ export class Sessions {
       merge_request_number: null,
       merge_request_url: null,
       merge_request_branch: null,
+      merge_request_by_hand: 0,
       model: params.model ?? null,
       // An Effort level is the model's: without a model picked, it is the agent's default model's.
       effort: params.effort ?? null,
@@ -573,17 +579,18 @@ export class Sessions {
     const session = this.get(id);
     if (session.status === 'archived') throw new Error('This Session is archived.');
     const forge = this.options.project(session.projectId)?.forge;
+    // Checked before anything runs: a Forge that's off says so first.
     mergeRequestForge(forge);
     const named = mergeRequestNamed(mergeRequest);
     if (!named) throw new Error('Name a Merge request by its number, such as 12, or by its URL.');
     const branch = await this.currentBranch(id);
     if (branch && branch === (await this.defaultBranch(id))) throw new Error(`This Session is on ${branch}, the default branch, which has no Merge request.`);
-    const found = await viewMergeRequest(this.environmentOf(session).request, forge!, session.workingCopy.path, named.number);
+    const found = await viewMergeRequest(this.environmentOf(session).request, forge, session.workingCopy.path, named.number);
     if (named.url && !isPageOf(named.url, found.url)) throw new Error(`${named.url} isn't a Merge request of this Project's repository.`);
     if (found.state !== 'open') throw new Error(`That Merge request is ${found.state}: only an open one can be linked.`);
     await this.loadTranscript(id);
     if (this.get(id).status === 'archived') return;
-    this.setMergeRequest(id, found, branch ?? found.branch);
+    this.setMergeRequest(id, found, { branch: branch ?? found.branch, byHand: true });
   }
 
   /**
@@ -1183,11 +1190,15 @@ export class Sessions {
   /**
    * Links the open Merge request of the Session's current branch, after each
    * turn: it follows the branch, and there is none on the default branch. A
-   * link stays while its branch does, whatever is found there: one linked by
-   * hand or by the agent's tool wins, and one just merged or closed is Babysit's.
-   * Keeps the link as it is if git or the Forge can't say, and on a detached HEAD.
+   * link stays while its branch does: one linked by hand (by the user or the
+   * agent's tool) whatever is found there, one found there until another open
+   * one is (one just merged or closed is Babysit's). Keeps the link as it is
+   * if git or the Forge can't say, and on a detached HEAD. Only the latest
+   * lookup counts.
    */
   private async lookUpMergeRequest(id: number): Promise<void> {
+    const lookup = (this.mergeRequestLookups.get(id) ?? 0) + 1;
+    this.mergeRequestLookups.set(id, lookup);
     const session = this.get(id);
     const forge = this.options.project(session.projectId)?.forge;
     if (session.status === 'archived' || session.worktreeMissing || forge?.state !== 'available') return;
@@ -1202,22 +1213,29 @@ export class Sessions {
     } catch {
       return;
     }
-    if (this.shuttingDown || this.get(id).status === 'archived') return;
     await this.loadTranscript(id);
-    const kept = !onDefault && !!this.get(id).mergeRequest && this.mergeRequestBranches.get(id) === branch;
-    if (kept) return;
-    this.setMergeRequest(id, found, found && branch);
+    if (this.shuttingDown || this.get(id).status === 'archived' || this.mergeRequestLookups.get(id) !== lookup) return;
+    const linked = this.get(id).mergeRequest && this.mergeRequestLinks.get(id);
+    if (onDefault) return this.setMergeRequest(id, undefined);
+    if (linked?.branch === branch && (linked.byHand || !found)) return;
+    this.setMergeRequest(id, found, found && { branch, byHand: false });
   }
 
-  /** Links `mergeRequest` to the Session as the one of `branch`, with a card when it is a new one; or unlinks it. */
-  private setMergeRequest(id: number, mergeRequest: ForgeLink | undefined, branch?: string): void {
+  /** Links `mergeRequest` to the Session as `linkage` says, with a card when it is a new one; or unlinks it. */
+  private setMergeRequest(id: number, mergeRequest: ForgeLink | undefined, linkage?: MergeRequestLinkage): void {
     const known = this.get(id).mergeRequest;
-    const link = mergeRequest && { number: mergeRequest.number, url: mergeRequest.url };
+    const link = mergeRequest && linkage && { number: mergeRequest.number, url: mergeRequest.url };
     const same = known?.number === link?.number && known?.url === link?.url;
-    if (same && this.mergeRequestBranches.get(id) === (link ? branch : undefined)) return;
-    if (link && branch !== undefined) this.mergeRequestBranches.set(id, branch);
-    else this.mergeRequestBranches.delete(id);
-    this.save(id, { merge_request_number: link?.number ?? null, merge_request_url: link?.url ?? null, merge_request_branch: (link && branch) ?? null });
+    const was = this.mergeRequestLinks.get(id);
+    if (same && was?.branch === linkage?.branch && was?.byHand === linkage?.byHand) return;
+    if (link) this.mergeRequestLinks.set(id, linkage!);
+    else this.mergeRequestLinks.delete(id);
+    this.save(id, {
+      merge_request_number: link?.number ?? null,
+      merge_request_url: link?.url ?? null,
+      merge_request_branch: link ? linkage!.branch : null,
+      merge_request_by_hand: link && linkage!.byHand ? 1 : 0,
+    });
     if (same) return;
     this.update(id, { mergeRequest: link });
     if (link) {
@@ -1547,6 +1565,12 @@ function checkExisting(existing: ExistingWorkingCopy): void {
 function issuePrompt(issue: Issue): string {
   const heading = `#${issue.number} ${(issue.title ?? '').trim()}`.trimEnd();
   return [`${heading}\n${issue.url}`, (issue.body ?? '').trim()].filter(Boolean).join('\n\n');
+}
+
+/** How a Session's Merge request was linked: on which branch, and whether by hand rather than found there. */
+interface MergeRequestLinkage {
+  branch: string;
+  byHand: boolean;
 }
 
 /** Loom's `link_merge_request` tool, as agents name it: prefixed with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others. */

@@ -266,3 +266,20 @@ describe('review follow-ups', () => {
     expect(linked.find((s) => s.id === id)).toMatchObject({ waitingReason: 'stopped', mergeRequest: { number: 12, url: pr(12) } });
   });
 });
+
+describe('a found link on the same branch', () => {
+  it('gives way to the next open Merge request found there, once the first is merged', async () => {
+    const { machine, checkout, forge } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 5, url: pr(5), branch: 'loom/fix-login' }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 5));
+
+    forge([
+      { number: 5, url: pr(5), branch: 'loom/fix-login', state: 'merged' },
+      { number: 9, url: pr(9), branch: 'loom/fix-login' },
+    ]);
+    await main.api.invoke('sessions.send', { id, prompt: 'Open a follow-up' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 9));
+    const items = await waitFor(main.api, 'transcript', (list) => cards(list).length === 2, { sessionId: id });
+    expect(cards(items).map((c) => c.kind === 'merge-request' && c.number)).toEqual([5, 9]);
+  });
+});

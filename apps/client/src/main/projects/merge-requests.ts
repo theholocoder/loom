@@ -18,13 +18,13 @@ export interface FoundMergeRequest extends ForgeLink {
 }
 
 /** The open Merge request whose source branch is `branch`, if there is one; the lowest-numbered of several. */
-export async function findMergeRequest(call: BridgeCall, forge: ForgeStatus, workingCopy: string, branch: string): Promise<FoundMergeRequest | undefined> {
+export async function findMergeRequest(call: BridgeCall, forge: ForgeStatus | undefined, workingCopy: string, branch: string): Promise<FoundMergeRequest | undefined> {
   const { kind, repo } = mergeRequestForge(forge);
   const args =
     kind === 'github'
       ? ['pr', 'list', ...repo, '--head', branch, '--state', 'open', '--json', 'number,url,state,headRefName', '--limit', '20']
       : ['mr', 'list', '--source-branch', branch, '--output', 'json', '--per-page', '20'];
-  const listed = await run(call, forge, args, workingCopy);
+  const listed = await run(call, kind, args, workingCopy);
   if (!Array.isArray(listed)) throw new Error(`${FORGE_CLI[kind]} ${args[0]} list printed something other than a list.`);
   return listed
     .map((item) => mergeRequestOf(kind, item))
@@ -33,10 +33,10 @@ export async function findMergeRequest(call: BridgeCall, forge: ForgeStatus, wor
 }
 
 /** The Merge request numbered `number`, in whatever state; rejects when the Forge has none. */
-export async function viewMergeRequest(call: BridgeCall, forge: ForgeStatus, workingCopy: string, number: number): Promise<FoundMergeRequest> {
+export async function viewMergeRequest(call: BridgeCall, forge: ForgeStatus | undefined, workingCopy: string, number: number): Promise<FoundMergeRequest> {
   const { kind, repo } = mergeRequestForge(forge);
   const args = kind === 'github' ? ['pr', 'view', String(number), ...repo, '--json', 'number,url,state,headRefName'] : ['mr', 'view', String(number), '--output', 'json'];
-  const found = mergeRequestOf(kind, await run(call, forge, args, workingCopy));
+  const found = mergeRequestOf(kind, await run(call, kind, args, workingCopy));
   if (!found || found.number !== number) throw new Error(`${FORGE_CLI[kind]} ${args[0]} view printed something unexpected.`);
   return found;
 }
@@ -53,9 +53,9 @@ export function mergeRequestForge(forge: ForgeStatus | undefined): { kind: Forge
 }
 
 /** Runs the Forge's CLI, in the working copy for glab, and parses the JSON it prints. */
-async function run(call: BridgeCall, forge: ForgeStatus, args: string[], workingCopy: string): Promise<unknown> {
-  const cli = FORGE_CLI[forge.kind!];
-  const result = await exec(call, cli, args, MERGE_REQUEST_TIMEOUT_MS, forge.kind === 'gitlab' ? workingCopy : undefined);
+async function run(call: BridgeCall, kind: ForgeKind, args: string[], workingCopy: string): Promise<unknown> {
+  const cli = FORGE_CLI[kind];
+  const result = await exec(call, cli, args, MERGE_REQUEST_TIMEOUT_MS, kind === 'gitlab' ? workingCopy : undefined);
   const what = `${cli} ${args[0]} ${args[1]}`;
   if (result.exitCode !== 0) throw new Error(`${what} exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);
   try {

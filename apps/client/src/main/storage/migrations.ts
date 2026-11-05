@@ -93,6 +93,7 @@ export const migrations: Migration[] = [
   },
   async (db) => {
     await db.schema.alterTable('sessions').addColumn('merge_request_branch', 'text').execute();
+    await db.schema.alterTable('sessions').addColumn('merge_request_by_hand', 'integer', (c) => c.notNull().defaultTo(0)).execute();
     // A link made before keeps to the branch it was last seen on.
     await db.updateTable('sessions').set((eb) => ({ merge_request_branch: eb.ref('branch') })).where('merge_request_number', 'is not', null).execute();
   },
