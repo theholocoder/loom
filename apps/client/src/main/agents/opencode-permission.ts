@@ -69,6 +69,8 @@ export function openCodePermission({ policy, workingCopy, tempDir }: PermissionS
   if (policy.mcp === 'ask') {
     permission['*'] = 'ask';
     for (const tool of OPENCODE_TOOLS) if (tool !== 'shell' && tool !== 'bash' && tool !== 'external_directory') permission[tool] = 'allow';
+    // Loom's own tools only tell Loom something.
+    permission['loom_*'] = 'allow';
   }
   const shell: Record<string, Effect> = policy.mcp === 'ask' ? { '*': 'allow' } : {};
   // Always: a push to the default branch asks whatever the settings say.

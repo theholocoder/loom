@@ -11,6 +11,10 @@
 // And the issue picker's `issue list`: the script's open `issues`, filtered by
 // `--search` (case-insensitive, in title or body), printed as JSON the way the
 // CLI it stands in for (named by the script file, gh.json or glab.json) does.
+// And Merge request linking: `pr list --head <branch>` / `mr list
+// --source-branch <branch>` list the script's open `mergeRequests` on that
+// branch, and `pr view <n>` / `mr view <n>` print one of them in any state,
+// failing like the real CLI when there is none.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
@@ -46,7 +50,26 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
       ? issues.map((i) => ({ id: 9000 + i.number, iid: i.number, title: i.title, description: i.body, state: 'opened', web_url: i.url }))
       : issues.map((i) => ({ number: i.number, title: i.title, body: i.body, url: i.url }));
   process.stdout.write(JSON.stringify(json));
+} else if ((args[0] === 'pr' || args[0] === 'mr') && args[1] === 'list') {
+  const flag = args[0] === 'pr' ? '--head' : '--source-branch';
+  const branch = args[args.indexOf(flag) + 1];
+  const listed = (script.mergeRequests ?? []).filter((m) => m.branch === branch && (m.state ?? 'open') === 'open');
+  process.stdout.write(JSON.stringify(listed.map(asCli)));
+} else if ((args[0] === 'pr' || args[0] === 'mr') && args[1] === 'view') {
+  const found = (script.mergeRequests ?? []).find((m) => String(m.number) === args[2]);
+  if (!found) {
+    process.stderr.write(args[0] === 'pr' ? `GraphQL: Could not resolve to a PullRequest with the number of ${args[2]}.\n` : '404 Not Found\n');
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify(asCli(found)));
 } else {
   process.stderr.write(`forge CLI stand-in: unscripted command ${JSON.stringify(args)}\n`);
   process.exit(1);
+}
+
+/** A scripted Merge request as `gh` or `glab` prints it in JSON. */
+function asCli({ number, url, branch, state = 'open' }) {
+  return basename(scriptPath, '.json') === 'glab'
+    ? { id: 5000 + number, iid: number, web_url: url, source_branch: branch, state: state === 'open' ? 'opened' : state }
+    : { number, url, headRefName: branch, state: state.toUpperCase() };
 }

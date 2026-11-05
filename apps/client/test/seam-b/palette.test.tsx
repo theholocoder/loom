@@ -111,6 +111,7 @@ describe('palette actions', () => {
       'Go to previous Waiting Session',
       'Reply to this Session',
       'Create Merge request for this Session',
+      'Link Merge request…',
       'Open in editor',
       'Open in terminal',
       'Toggle changes panel',

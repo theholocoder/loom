@@ -65,7 +65,7 @@ _Avoid_: Watch, monitor
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**
 - A **Project** checkout on a **Client** machine runs in exactly one **Environment**; its **Sessions** run there too
-- A **Session** is on one branch at a time and has at most one linked issue and one **Merge request** (its current branch's)
+- A **Session** is on one branch at a time and has at most one linked issue and one **Merge request**: its current branch's, found after each turn, or one the user or the agent linked by hand for an edge case (a differently named source branch), which stays linked while the branch does
 - A **Session** runs on exactly one agent, chosen when the Session is created; it cannot change afterwards
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
 

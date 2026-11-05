@@ -1,14 +1,15 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { Archive, Bot, ChevronRight, CircleCheckBig, CircleDot, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { DiffToggle } from './DiffToggle';
 import { IssuePicker } from './IssuePicker';
 import { OpenActions } from './OpenActions';
+import { MergeRequestActions } from './MergeRequestActions';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
@@ -312,7 +313,7 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
 }
 
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */
-export type SessionCommand = 'archive' | 'openMergeRequest' | 'createMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
+export type SessionCommand = 'archive' | 'openMergeRequest' | 'requestMergeRequest' | 'linkMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
 
 /**
  * One Session: its header, its conversation and the composer. Showing it
@@ -346,6 +347,7 @@ export function SessionView({
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
   const [error, setError] = useState<string>();
+  const [linkRequest, setLinkRequest] = useState(0);
   const archiver = useArchive();
   const status = statusOf(session);
   const working = session.status === 'working';
@@ -379,7 +381,8 @@ export function SessionView({
     const runs: Record<SessionCommand, () => Promise<void>> = {
       archive: () => archiver.archive(session),
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
-      createMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
+      requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
+      linkMergeRequest: async () => setLinkRequest((n) => n + 1),
       openInEditor: () => api.invoke('sessions.openInEditor', { id }),
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
       retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
@@ -479,6 +482,7 @@ export function SessionView({
           </div>
         </div>
         <DiffToggle stat={session.diffStat} open={diffOpen} onToggle={onToggleDiff} />
+        <MergeRequestActions session={session} project={project} linkRequest={linkRequest} onError={setError} />
         <OpenActions session={session} onError={setError} />
         {session.status !== 'archived' && (
           <button
@@ -533,6 +537,15 @@ export function SessionView({
             <Interruption key={item.id} item={item} />
           ) : item.kind === 'model' ? (
             <ModelMarker key={item.id} item={item} />
+          ) : item.kind === 'merge-request-refused' ? (
+            <div key={item.id} className="interruption" role="note">
+              <TriangleAlert className="sm" />
+              <span>
+                Couldn't link Merge request <span className="tech">{item.mergeRequest}</span>: {item.reason}
+              </span>
+            </div>
+          ) : item.kind === 'merge-request' ? (
+            <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => void api.invoke('links.open', { url: item.url }).catch((e: unknown) => setError((e as Error).message))} />
           ) : (
             <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
           ),
@@ -598,6 +611,22 @@ export function SessionView({
         }
       />
     </main>
+  );
+}
+
+/** A Merge request linked to the Session: "Merge request !12 opened · Open". */
+function MergeRequestCard({ item, forge, onOpen }: { item: Extract<TranscriptItem, { kind: 'merge-request' }>; forge: ForgeKind | undefined; onOpen: () => void }) {
+  return (
+    <div className="interruption merge-request" role="note">
+      <GitPullRequest className="sm" />
+      <span>
+        Merge request <span className="tech">{mergeRequestRef(forge, item.number)}</span> opened
+      </span>
+      <span aria-hidden="true">·</span>
+      <button type="button" className="link" onClick={onOpen}>
+        Open
+      </button>
+    </div>
   );
 }
 

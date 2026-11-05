@@ -110,11 +110,11 @@ describe("how a Session's agent worked", () => {
     ]);
   });
 
-  it("leaves the user's own OpenCode setup to OpenCode: no tools added, nothing but `acp`, in the working copy", async () => {
+  it("leaves the user's own OpenCode setup to OpenCode: only Loom's MCP server added, nothing but `acp`, in the working copy", async () => {
     const { machine, checkout } = await ranThrough([{ chunks: ['Done.'] }]);
 
     expect(machine.opencodeInvocations().filter((argv) => argv[0] === 'acp')).toEqual([['acp']]);
     const created = machine.acpMessages().filter((m) => m.message.method === 'session/new');
-    expect(created.map((m) => [m.cwd, m.message.params])).toEqual([[checkout, { cwd: checkout, mcpServers: [] }]]);
+    expect(created.map((m) => [m.cwd, m.message.params])).toEqual([[checkout, { cwd: checkout, mcpServers: [{ name: 'loom', command: expect.stringMatching(/loom-bridge/), args: ['mcp'], env: [] }] }]]);
   });
 });

@@ -118,6 +118,8 @@ export interface ForgeCliScript {
   repoView?: { stdout?: string | object; stderr?: string; exitCode?: number };
   /** The open issues `issue list` lists. */
   issues?: { number: number; title: string; body: string; url: string }[];
+  /** The Merge requests `pr`/`mr list` and `view` know of; `state` defaults to open. */
+  mergeRequests?: { number: number; url: string; branch: string; state?: 'open' | 'merged' | 'closed' }[];
 }
 
 export type ForgeCli = 'gh' | 'glab';

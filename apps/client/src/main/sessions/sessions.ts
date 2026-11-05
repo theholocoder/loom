@@ -8,6 +8,7 @@ import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, Approval
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
+import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
@@ -52,6 +53,8 @@ export interface SessionEnvironment extends AgentEnvironment, GitEnvironment {
   restart(): Promise<void>;
   /** Its temp directory, where agents work freely: `/tmp`, or `%TEMP%` on native Windows. */
   tempDir(): string;
+  /** The bridge binary's path there, which runs Loom's MCP server; undefined if the bridge didn't say. */
+  bridgeExecutable(): string | undefined;
 }
 
 /** What a Session whose agent ended with its Environment's bridge shows. */
@@ -120,6 +123,15 @@ export class Sessions {
   private creatingWorktree = new Map<number, Promise<unknown>>();
   /** Existing worktrees a starting Session has taken, until its record exists. */
   private claimed = new Set<string>();
+  /**
+   * How each Session's Merge request was linked: on which branch, and whether
+   * by hand (the user or the agent's tool) rather than found on the branch.
+   */
+  private readonly mergeRequestLinks = new Map<number, MergeRequestLinkage>();
+  /** Each Session's latest Merge request lookup: an earlier one still going is stale. */
+  private readonly mergeRequestLookups = new Map<number, number>();
+  /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
+  private readonly linkCalls = new Map<number, Set<string>>();
 
   private constructor(private readonly options: SessionsOptions) {}
 
@@ -131,7 +143,10 @@ export class Sessions {
   static async load(options: SessionsOptions): Promise<Sessions> {
     const sessions = new Sessions(options);
     const rows = await options.db.selectFrom('sessions').selectAll().execute();
-    for (const row of rows) sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
+    for (const row of rows) {
+      sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
+      if (row.merge_request_branch !== null) sessions.mergeRequestLinks.set(row.id, { branch: row.merge_request_branch, byHand: row.merge_request_by_hand === 1 });
+    }
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
     for (const { id, session_id, text, attachments } of queued) {
       const session = sessions.sessions.get(session_id);
@@ -261,6 +276,8 @@ export class Sessions {
       issue_url: issue?.url ?? null,
       merge_request_number: null,
       merge_request_url: null,
+      merge_request_branch: null,
+      merge_request_by_hand: 0,
       model: params.model ?? null,
       // An Effort level is the model's: without a model picked, it is the agent's default model's.
       effort: params.effort ?? null,
@@ -368,6 +385,7 @@ export class Sessions {
     this.endRun(id);
     const message = sendNow === undefined ? undefined : this.dequeue(id, sendNow);
     this.addItem(id, { kind: 'interruption', by: message ? 'send-now' : 'stop' });
+    this.afterTurn(id);
     if (message) return this.sendNext(id, messageOf(message));
     this.setStatus(id, { status: 'waiting', waitingReason: 'stopped' });
   }
@@ -544,15 +562,35 @@ export class Sessions {
 
   /** Sends the agent the Merge request prompt shortcut. */
   async requestMergeRequest({ id }: { id: number }): Promise<void> {
-    const forge = this.options.project(this.get(id).projectId)?.forge;
-    if (forge?.state === 'unknown') throw new Error("Loom hasn't checked this Project's Forge yet.");
-    if (forge?.state !== 'available' || !forge.kind) throw new Error("Merge requests need the Project's Forge, which is off.");
+    const { kind } = mergeRequestForge(this.options.project(this.get(id).projectId)?.forge);
     const branch = await this.currentBranch(id);
     if (!branch) throw new Error("This Session's working copy isn't on a branch.");
     if (branch === (await this.defaultBranch(id))) {
       throw new Error(`This Session is on ${branch}, the default branch. A Merge request needs a branch of its own.`);
     }
-    await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[forge.kind]) });
+    await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[kind]) });
+  }
+
+  /**
+   * Links the Merge request `mergeRequest` names (its number, `#12`, `!12`, or
+   * its URL) to the Session, once the Forge says it is open.
+   */
+  async linkMergeRequest({ id, mergeRequest }: { id: number; mergeRequest: string }): Promise<void> {
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    const forge = this.options.project(session.projectId)?.forge;
+    // Checked before anything runs: a Forge that's off says so first.
+    mergeRequestForge(forge);
+    const named = mergeRequestNamed(mergeRequest);
+    if (!named) throw new Error('Name a Merge request by its number, such as 12, or by its URL.');
+    const branch = await this.currentBranch(id);
+    if (branch && branch === (await this.defaultBranch(id))) throw new Error(`This Session is on ${branch}, the default branch, which has no Merge request.`);
+    const found = await viewMergeRequest(this.environmentOf(session).request, forge, session.workingCopy.path, named.number);
+    if (named.url && !isPageOf(named.url, found.url)) throw new Error(`${named.url} isn't a Merge request of this Project's repository.`);
+    if (found.state !== 'open') throw new Error(`That Merge request is ${found.state}: only an open one can be linked.`);
+    await this.loadTranscript(id);
+    if (this.get(id).status === 'archived') return;
+    this.setMergeRequest(id, found, { branch: branch ?? found.branch, byHand: true });
   }
 
   /**
@@ -936,11 +974,13 @@ export class Sessions {
     const environment = this.environmentOf(session);
     await environment.ready();
     let opened: AgentSession | undefined;
+    const executable = environment.bridgeExecutable();
     const agent = await this.options.adapter.open({
       environment,
       workingCopy: session.workingCopy.path,
       tempDir: environment.tempDir(),
       approvals: this.options.approvals(),
+      ...(executable ? { loomTools: { command: executable, args: ['mcp'] } } : {}),
       // An agent the Session has moved on from, as after a restart, no longer counts.
       onEvent: (event) => {
         if (opened && this.live.get(id) !== opened) return;
@@ -986,7 +1026,8 @@ export class Sessions {
       case 'tool-updated':
         // A run's cards are settled when it ends; what comes after can't reopen them.
         if (!this.inRun(id)) return;
-        return this.recordTool(id, event);
+        this.recordTool(id, event);
+        return this.noticeLinkCall(id, event);
       case 'question-asked':
         if (!this.inRun(id)) return;
         return this.ask(id, event.requestId, { kind: 'question', message: event.message, fields: event.fields, state: 'asked' });
@@ -1005,23 +1046,28 @@ export class Sessions {
         const followUp = this.denyMessages.get(id);
         this.denyMessages.delete(id);
         this.endRun(id);
+        this.afterTurn(id);
         // What the user said on denying goes to the agent as the next prompt.
         if (followUp) return this.sendNext(id, { text: followUp });
         // Then the queue, one message per run.
         const next = this.dequeue(id);
         if (next) return this.sendNext(id, messageOf(next));
-        this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
-        return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
+        return this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
       }
       case 'run-failed':
         // An agent may fail the run it was asked to end; that's still the user's interruption.
         if (this.interrupting.has(id)) return this.interrupted(id);
         this.fail(id, event.error);
-        return void this.lookUpBranch(id).then(() => this.lookUpDiffStat(id));
+        return this.afterTurn(id);
       case 'closed':
         this.live.delete(id);
         return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
     }
+  }
+
+  /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */
+  private afterTurn(id: number): void {
+    void this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
   }
 
   /** Sends `message` as the next run, the Session staying Working. */
@@ -1141,6 +1187,88 @@ export class Sessions {
     }
   }
 
+  /**
+   * Links the open Merge request of the Session's current branch, after each
+   * turn: it follows the branch, and there is none on the default branch. A
+   * link stays while its branch does: one linked by hand (by the user or the
+   * agent's tool) whatever is found there, one found there until another open
+   * one is (one just merged or closed is Babysit's). Keeps the link as it is
+   * if git or the Forge can't say, and on a detached HEAD. Only the latest
+   * lookup counts.
+   */
+  private async lookUpMergeRequest(id: number): Promise<void> {
+    const lookup = (this.mergeRequestLookups.get(id) ?? 0) + 1;
+    this.mergeRequestLookups.set(id, lookup);
+    const session = this.get(id);
+    const forge = this.options.project(session.projectId)?.forge;
+    if (session.status === 'archived' || session.worktreeMissing || forge?.state !== 'available') return;
+    let branch: string | undefined;
+    let onDefault = false;
+    let found: FoundMergeRequest | undefined;
+    try {
+      branch = await this.currentBranch(id);
+      if (!branch) return;
+      onDefault = branch === (await this.defaultBranch(id));
+      if (!onDefault) found = await findMergeRequest(this.environmentOf(session).request, forge, session.workingCopy.path, branch);
+    } catch {
+      return;
+    }
+    await this.loadTranscript(id);
+    if (this.shuttingDown || this.get(id).status === 'archived' || this.mergeRequestLookups.get(id) !== lookup) return;
+    const linked = this.get(id).mergeRequest && this.mergeRequestLinks.get(id);
+    if (onDefault) return this.setMergeRequest(id, undefined);
+    if (linked?.branch === branch && (linked.byHand || !found)) return;
+    this.setMergeRequest(id, found, found && { branch, byHand: false });
+  }
+
+  /** Links `mergeRequest` to the Session as `linkage` says, with a card when it is a new one; or unlinks it. */
+  private setMergeRequest(id: number, mergeRequest: ForgeLink | undefined, linkage?: MergeRequestLinkage): void {
+    const known = this.get(id).mergeRequest;
+    const link = mergeRequest && linkage && { number: mergeRequest.number, url: mergeRequest.url };
+    const same = known?.number === link?.number && known?.url === link?.url;
+    const was = this.mergeRequestLinks.get(id);
+    if (same && was?.branch === linkage?.branch && was?.byHand === linkage?.byHand) return;
+    if (link) this.mergeRequestLinks.set(id, linkage!);
+    else this.mergeRequestLinks.delete(id);
+    this.save(id, {
+      merge_request_number: link?.number ?? null,
+      merge_request_url: link?.url ?? null,
+      merge_request_branch: link ? linkage!.branch : null,
+      merge_request_by_hand: link && linkage!.byHand ? 1 : 0,
+    });
+    if (same) return;
+    this.update(id, { mergeRequest: link });
+    if (link) {
+      this.endStreaming(id);
+      this.addItem(id, { kind: 'merge-request', ...link });
+    }
+  }
+
+  /**
+   * Links the Merge request the agent named with Loom's `link_merge_request`
+   * tool, once the call has completed: Loom's MCP server only answers it.
+   */
+  private noticeLinkCall(id: number, { toolCallId, title, status }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
+    let calls = this.linkCalls.get(id);
+    if (title !== undefined && LINK_TOOL.test(title.trim())) {
+      if (!calls) this.linkCalls.set(id, (calls = new Set()));
+      calls.add(toolCallId);
+    }
+    if (!calls?.has(toolCallId) || (status !== 'completed' && status !== 'failed')) return;
+    calls.delete(toolCallId);
+    if (calls.size === 0) this.linkCalls.delete(id);
+    if (status === 'failed') return;
+    const card = this.transcript(id).value.findLast((i) => i.kind === 'tool' && i.toolCallId === toolCallId);
+    const named = card?.kind === 'tool' ? linkToolInput(card.input) : undefined;
+    if (!named) return;
+    // The agent was only told Loom checks it; the user sees why it wasn't linked.
+    this.linkMergeRequest({ id, mergeRequest: named }).catch((error: unknown) => {
+      if (this.shuttingDown || this.get(id).status === 'archived') return;
+      this.endStreaming(id);
+      this.addItem(id, { kind: 'merge-request-refused', mergeRequest: named, reason: (error as Error).message });
+    });
+  }
+
   private recordDiffStat(id: number, diffStat: DiffStat): void {
     if (this.shuttingDown || this.get(id).status === 'archived') return;
     const known = this.get(id).diffStat;
@@ -1255,6 +1383,7 @@ export class Sessions {
     this.endStreaming(id);
     this.asks.delete(id);
     this.approvedCalls.delete(id);
+    this.linkCalls.delete(id);
     const items = this.transcript(id).value;
     if (!items.some(leftGoing)) return;
     const ended = items.map((i) => (!leftGoing(i) ? i : i.kind === 'tool' ? { ...i, status: 'failed' as const } : { ...i, state: 'expired' as const }));
@@ -1436,6 +1565,26 @@ function checkExisting(existing: ExistingWorkingCopy): void {
 function issuePrompt(issue: Issue): string {
   const heading = `#${issue.number} ${(issue.title ?? '').trim()}`.trimEnd();
   return [`${heading}\n${issue.url}`, (issue.body ?? '').trim()].filter(Boolean).join('\n\n');
+}
+
+/** How a Session's Merge request was linked: on which branch, and whether by hand rather than found there. */
+interface MergeRequestLinkage {
+  branch: string;
+  byHand: boolean;
+}
+
+/** Loom's `link_merge_request` tool, as agents name it: prefixed with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others. */
+const LINK_TOOL = /^(?:mcp__)?loom(?:__|[_.:-])link_merge_request$/i;
+
+/** What the agent gave Loom's `link_merge_request` tool, as `linkMergeRequest` takes it: the number, or else the URL. */
+function linkToolInput(input: string | undefined): string | undefined {
+  try {
+    const { number, url } = JSON.parse(input ?? '') as { number?: unknown; url?: unknown };
+    if ((typeof number === 'number' || typeof number === 'string') && String(number).trim()) return String(number).trim();
+    return typeof url === 'string' && url.trim() ? url.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The prompt shortcut asking the agent to open or update its branch's Merge request. */

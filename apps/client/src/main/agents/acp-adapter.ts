@@ -19,6 +19,9 @@ export interface AcpProfile {
 
 const PROTOCOL_VERSION = 1;
 
+/** The name Loom's MCP server goes by: agents prefix its tools with it (OpenCode: `loom_link_merge_request`). */
+export const LOOM_MCP_SERVER = 'loom';
+
 interface SessionUpdate {
   sessionUpdate: string;
 }
@@ -34,7 +37,7 @@ export class AcpAdapter implements AgentAdapter {
     return this.profile.name;
   }
 
-  async open({ environment, workingCopy, tempDir, approvals, onEvent }: OpenOptions): Promise<AgentSession> {
+  async open({ environment, workingCopy, tempDir, approvals, loomTools, onEvent }: OpenOptions): Promise<AgentSession> {
     // The user's own setup (OpenCode config, MCP servers, plugins, skills,
     // AGENTS.md) loads as it would in their terminal: the agent starts in the
     // working copy with the Environment's own env and only the profile's args,
@@ -126,9 +129,10 @@ export class AcpAdapter implements AgentAdapter {
         clientInfo: { name: 'loom', version: this.clientVersion },
       });
       images = initialized?.agentCapabilities?.promptCapabilities?.image === true;
-      // Loom adds no tools of its own (ADR 0006): the agent's are the user's.
+      // Beside the user's own tools, Loom's MCP server, whose one tool the agent calls to link a Merge request.
+      const mcpServers = loomTools ? [{ name: LOOM_MCP_SERVER, command: loomTools.command, args: loomTools.args, env: [] }] : [];
       let reported: unknown;
-      ({ sessionId, configOptions: reported } = await connection.request<{ sessionId: string; configOptions?: unknown }>('session/new', { cwd: workingCopy, mcpServers: [] }));
+      ({ sessionId, configOptions: reported } = await connection.request<{ sessionId: string; configOptions?: unknown }>('session/new', { cwd: workingCopy, mcpServers }));
       configured(reported);
     } catch (error) {
       await channel.kill().catch(() => {});

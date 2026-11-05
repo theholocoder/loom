@@ -321,3 +321,10 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .composer-menu [role="option"][aria-selected="true"] { background: var(--sel); }
 .composer-menu [role="option"] kbd { margin-left: auto; }
 .composer-menu-empty { padding: 6px 10px; font-size: 13px; }
+/* Merge request: the timeline card's Open, the Link popover. */
+.merge-request .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.merge-request .link:hover { text-decoration: underline; }
+.icon-btn.mr-btn { width: auto; gap: 4px; padding: 0 10px; border-radius: 15px; font-size: 12px; }
+.link-mr form { display: flex; flex-direction: column; gap: 8px; padding: 10px; width: 280px; }
+.link-mr label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.link-mr .primary { align-self: flex-end; }

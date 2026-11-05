@@ -36,7 +36,7 @@ func startBridgeOn(t *testing.T, machine protocol.Machine) *peer {
 	outR, outW := io.Pipe()
 	p := &peer{t: t, stdin: inW, stdout: outR, done: make(chan error, 1), frames: make(chan map[string]any, 1024), responses: map[float64]map[string]any{}}
 	go func() {
-		err := protocol.Serve(inR, outW, protocol.Info{Version: "1.2.3"}, machine)
+		err := protocol.Serve(inR, outW, protocol.Info{Version: "1.2.3", Executable: "/opt/loom/loom-bridge"}, machine)
 		outW.Close()
 		p.done <- err
 	}()
@@ -172,7 +172,7 @@ func (p *peer) waitExit() error {
 	}
 }
 
-func TestHandshakeReportsProtocolVersionOSAndArchitecture(t *testing.T) {
+func TestHandshakeReportsProtocolVersionOSArchitectureAndExecutable(t *testing.T) {
 	p := startBridge(t)
 
 	p.send(map[string]any{"id": 1, "method": "handshake"})
@@ -190,6 +190,7 @@ func TestHandshakeReportsProtocolVersionOSAndArchitecture(t *testing.T) {
 		"version":         "1.2.3",
 		"os":              runtime.GOOS,
 		"arch":            runtime.GOARCH,
+		"executable":      "/opt/loom/loom-bridge",
 	}
 	for key, value := range want {
 		if result[key] != value {

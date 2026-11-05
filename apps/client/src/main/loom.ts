@@ -144,6 +144,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     ready: () => native.ready(),
     restart: () => native.restart(),
     tempDir: () => tempDirOf(native.status.bridge?.os, native.status.bridge?.home),
+    bridgeExecutable: () => native.status.bridge?.executable || undefined,
   };
   /** The models the agent offers in the Project's checkout, once its Environment is up. */
   const listModels = async (projectId: number) => {
@@ -237,6 +238,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.setModel': (params) => sessionService.setModel(params),
     'sessions.archive': (params) => sessionService.archive(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
+    'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
