@@ -40,6 +40,8 @@ export interface SessionsOptions {
   };
   /** The approval settings, as they are now. */
   approvals: () => ApprovalPolicy;
+  /** How long a Working Session's agent may say nothing before the Session is stuck, as the setting is now. */
+  stuckAfterMs: () => number;
   /** The models the agent offers in the Project's checkout (see `projects.models`); may reject when they can't be listed now. */
   models: (projectId: number) => Promise<ModelChoice[]>;
   /** Where the files attached to messages are kept. */
@@ -74,6 +76,12 @@ export const IDLE_STOP_MS = 10 * 60_000;
 
 /** What to do once a run the user interrupted has ended: send the queued message `sendNow`, or else stop. */
 type Interruption = { sendNow?: number };
+/**
+ * The agent events that always set the Session's status themselves: a stuck
+ * run they come in isn't Working again first. A trust or Approval request
+ * isn't one: Loom may answer it itself, the agent going on.
+ */
+const SETTLING_EVENTS = new Set<AgentEvent['type']>(['run-settled', 'run-failed', 'closed', 'question-asked']);
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
 const NO_TOKENS: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
 const NO_USAGE: SessionUsage = { tokens: 0, reportedCost: 0, workingMs: 0 };
@@ -97,6 +105,8 @@ export class Sessions {
   private live = new Map<number, AgentSession>();
   /** The pending idle stop of each Waiting Session's agent (IDLE_STOP_MS). */
   private readonly idleStops = new Map<number, TimerHandle>();
+  /** The stuck watchdog of each Working Session: it fires once the agent has said nothing for `stuckAfterMs`. */
+  private readonly stuckWatches = new Map<number, TimerHandle>();
   /** Idle agents still closing, by Session: the next one opened for the Session waits for the process to exit, so two never share its conversation. */
   private readonly closing = new Map<number, Promise<void>>();
   /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
@@ -184,8 +194,8 @@ export class Sessions {
       if (spanOf(session.status, session.waitingReason) === 'wait') sessions.spans.set(session.id, { kind: 'wait', since: now, carried: carried.get(session.id) || undefined });
     }
     for (const session of sessions.list()) {
-      // A Session waiting on a question or an Approval request was mid-run too: what the agent asked went with its process.
-      if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval'))) continue;
+      // A Session waiting on a question or an Approval request, or stuck, was mid-run too: what the agent asked went with its process.
+      if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval' || session.waitingReason === 'stuck'))) continue;
       await sessions.loadTranscript(session.id);
       sessions.endRun(session.id);
       sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
@@ -402,10 +412,16 @@ export class Sessions {
     // A change of model or Effort made just before goes first: the marker, then this prompt on it.
     await this.switched(id);
     // A prompt that can't go is turned down before its attachments are kept.
-    if (this.get(id).status !== 'working') this.assertCanReply(id);
+    if (this.get(id).status !== 'working' && !this.isStuck(id)) this.assertCanReply(id);
     const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
     const message = messageOf({ text, attachments });
-    if (this.get(id).status === 'working') return this.enqueue(id, message);
+    if (this.get(id).status === 'working') return void this.enqueue(id, message);
+    // A stuck run gives way to the message, as with Send now; one sent meanwhile waits its turn behind it.
+    if (this.isStuck(id)) {
+      const queued = this.enqueue(id, message);
+      if (this.interrupting.get(id)?.sendNow !== undefined) return;
+      return this.interrupt(id, { sendNow: queued.id });
+    }
     this.reply(id, message);
   }
 
@@ -584,11 +600,12 @@ export class Sessions {
   }
 
   /** Puts a message at the end of the Session's queue. */
-  private enqueue(id: number, { text, attachments }: Message): void {
+  private enqueue(id: number, { text, attachments }: Message): QueuedMessage {
     const message: QueuedMessage = withoutUndefined({ id: this.nextQueuedId++, text, attachments });
     this.update(id, { queue: [...(this.get(id).queue ?? []), message] });
     const row = { id: message.id, session_id: id, text, attachments: attachments ? JSON.stringify(attachments) : null, created_at: this.options.clock.now() };
     this.write((trx) => trx.insertInto('queued_messages').values(row).execute());
+    return message;
   }
 
   /** Takes the message `queuedId` (or else the first) out of the Session's queue; undefined if there is none. */
@@ -821,9 +838,15 @@ export class Sessions {
     if (!this.asks.has(id)) this.setStatus(id, { status: 'working' });
   }
 
-  /** Whether the Session's agent is mid-run: working, or waiting on the user's answer to something it asked. */
+  /** Whether the Session's agent is mid-run: working, stuck, or waiting on the user's answer to something it asked. */
   private inRun(id: number): boolean {
-    return this.get(id).status === 'working' || this.asks.has(id);
+    return this.get(id).status === 'working' || this.asks.has(id) || this.isStuck(id);
+  }
+
+  /** Whether the Session is Waiting as stuck: its run is still going, as far as Loom knows, but its agent has said nothing for a while. */
+  private isStuck(id: number): boolean {
+    const { status, waitingReason } = this.get(id);
+    return status === 'waiting' && waitingReason === 'stuck';
   }
 
   /** Throws unless the Session can take a reply: its agent waits on no answer, and can be prompted. */
@@ -1017,6 +1040,8 @@ export class Sessions {
     this.shuttingDown = true;
     for (const handle of this.idleStops.values()) this.options.clock.clearTimeout(handle);
     this.idleStops.clear();
+    for (const handle of this.stuckWatches.values()) this.options.clock.clearTimeout(handle);
+    this.stuckWatches.clear();
     for (const id of [...this.checkpoints.keys()]) this.checkpoint(id);
     // Time while Loom is closed counts for nothing: a wait goes on once it starts again, a run is over.
     const now = this.options.clock.now();
@@ -1125,6 +1150,9 @@ export class Sessions {
     if (event.type === 'closed' && this.archiving.has(id)) return void this.live.delete(id);
     // An archived Session's agent is on its way out; nothing it says counts.
     if (this.shuttingDown || this.get(id).status === 'archived') return;
+    // The agent said something: its stuck watchdog starts again, and a stuck run is going again.
+    this.watchStuck(id);
+    if (this.isStuck(id) && !SETTLING_EVENTS.has(event.type)) this.setStatus(id, { status: 'working' });
     // What an interrupted run asks is withdrawn as soon as it's asked.
     if (this.interrupting.has(id) && (event.type === 'question-asked' || event.type === 'trust-asked' || event.type === 'approval-asked')) return this.live.get(id)?.cancel();
     switch (event.type) {
@@ -1641,6 +1669,27 @@ export class Sessions {
     this.update(id, { status, waitingReason, error, unread, updatedAt });
     this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt });
     this.watchIdle(id);
+    this.watchStuck(id);
+  }
+
+  /**
+   * Sets a Working Session to go Waiting (stuck) once its agent has said
+   * nothing for `stuckAfterMs`, from now: called on each status change and
+   * each agent event, which also cancels the watch set before. A Session
+   * Waiting, on a question or Approval request among others, is never watched.
+   */
+  private watchStuck(id: number): void {
+    const handle = this.stuckWatches.get(id);
+    if (handle !== undefined) this.options.clock.clearTimeout(handle);
+    this.stuckWatches.delete(id);
+    if (this.shuttingDown || this.get(id).status !== 'working') return;
+    this.stuckWatches.set(
+      id,
+      this.options.clock.setTimeout(() => {
+        this.stuckWatches.delete(id);
+        if (!this.shuttingDown && this.get(id).status === 'working' && !this.asks.has(id)) this.setStatus(id, { status: 'waiting', waitingReason: 'stuck' });
+      }, this.options.stuckAfterMs()),
+    );
   }
 
   /** Ends the run or wait the Session was in, unless it goes on in `kind`, recording it, and starts the next. */

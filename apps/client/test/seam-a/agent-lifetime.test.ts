@@ -157,6 +157,8 @@ describe("a Session's agent process", () => {
   it('is never stopped while the Session is Working', async () => {
     const { machine, checkout } = machineWith({ turns: [{ chunks: ['Busy'], hold: 'long' }] });
     const { main, project } = await withProject(machine, checkout);
+    // Not long enough to be stuck: that's a Working Session gone quiet.
+    await main.api.invoke('settings.setStuckAfterMinutes', { minutes: 60 });
     const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Go' });
     await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
 

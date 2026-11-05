@@ -22,6 +22,7 @@ export class Settings {
     if (Array.isArray(stored.diffCollapsedPatterns) && stored.diffCollapsedPatterns.every((p) => typeof p === 'string')) {
       current.diffCollapsedPatterns = stored.diffCollapsedPatterns as string[];
     }
+    if (isStuckAfterMinutes(stored.stuckAfterMinutes)) current.stuckAfterMinutes = stored.stuckAfterMinutes;
     // Categories stored are kept; one Loom no longer has is dropped, and a new one gets its default.
     if (typeof stored.approvals === 'object' && stored.approvals !== null) {
       const approvals = { ...DEFAULT_APPROVALS };
@@ -67,6 +68,11 @@ export class Settings {
     return this.set('diffCollapsedPatterns', patterns.map((p) => p.trim()).filter(Boolean));
   }
 
+  async setStuckAfterMinutes(minutes: number): Promise<SettingsValues> {
+    if (!isStuckAfterMinutes(minutes)) throw new Error('A Session is stuck after a whole number of minutes, at least 1.');
+    return this.set('stuckAfterMinutes', minutes);
+  }
+
   /** Sets whether the agent asks before actions of `category`; rejects an unknown category or setting. */
   async setApproval(category: ApprovalCategory, setting: ApprovalSetting): Promise<SettingsValues> {
     if (!isApprovalCategory(category)) throw new Error(`"${String(category)}" is not an approval category`);
@@ -110,6 +116,11 @@ export class Settings {
     this.onChange(this.current);
     return this.current;
   }
+}
+
+/** Whether `value` is a whole number of minutes, at least 1. */
+function isStuckAfterMinutes(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
 }
 
 /** Whether `value` is Allow or Ask. */

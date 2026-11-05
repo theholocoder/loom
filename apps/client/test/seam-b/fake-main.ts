@@ -73,6 +73,11 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setStuckAfterMinutes': ({ minutes }) => {
+        const settings = { ...this.value('settings'), stuckAfterMinutes: minutes };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setDiffCollapsedPatterns': ({ patterns }) => {
         const settings = { ...this.value('settings'), diffCollapsedPatterns: patterns };
         this.publish('settings', settings);
