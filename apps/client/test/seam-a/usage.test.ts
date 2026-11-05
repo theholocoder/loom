@@ -281,6 +281,27 @@ describe('reported cost', () => {
   });
 });
 
+describe('a wait on a question when Loom quits', () => {
+  it('ends there, counted up to the quit', async () => {
+    const question = { message: 'Which color?', requestedSchema: { type: 'object', properties: { q0: { type: 'string', title: 'Color' } }, required: [] } };
+    const { machine, checkout } = machineWith([{ chunks: [{ elicit: question }] }]);
+    const userDataDir = tempDir('loom-usage-');
+    const first = await start(machine, checkout, { userDataDir });
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waitFor(first.main.api, 'sessions', session(id, (s) => s.waitingReason === 'question'));
+    await first.main.elapse(4 * 60_000);
+    const closedAt = first.main.clock.now();
+    await first.main.close();
+
+    const later = await startMain({ machine, userDataDir, now: closedAt + DAY_MS });
+    await waitFor(later.api, 'sessions', session(id, (s) => s.waitingReason === 'interrupted'));
+    await later.elapse(60_000);
+
+    const dashboard = await later.api.invoke('usage.dashboard', { days: 7 });
+    expect(dashboard.medianWaitMs).toBe(4 * 60_000);
+  });
+});
+
 describe('reported cost after upgrading', () => {
   it('counts a conversation from before Loom kept its cost only from its first report', async () => {
     const { machine, checkout } = machineWith([]);

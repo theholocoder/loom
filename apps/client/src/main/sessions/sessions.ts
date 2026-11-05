@@ -173,6 +173,14 @@ export class Sessions {
       if (session) sessions.sessions.set(session_id, { ...session, queue: [...(session.queue ?? []), message] });
       sessions.nextQueuedId = Math.max(sessions.nextQueuedId, id + 1);
     }
+    // A wait for the user goes on from now, as the same wait, without the time Loom was closed: a
+    // Session left finished is waiting again; one left on a question or Approval request ends its wait
+    // as it's interrupted just below.
+    const now = options.clock.now();
+    const carried = new Map(rows.map((row) => [row.id, row.wait_carried_ms]));
+    for (const session of sessions.list()) {
+      if (spanOf(session.status, session.waitingReason) === 'wait') sessions.spans.set(session.id, { kind: 'wait', since: now, carried: carried.get(session.id) || undefined });
+    }
     for (const session of sessions.list()) {
       // A Session waiting on a question or an Approval request was mid-run too: what the agent asked went with its process.
       if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval'))) continue;
@@ -180,13 +188,6 @@ export class Sessions {
       sessions.endRun(session.id);
       sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
-    }
-    // A Session left finished is waiting for the user again, from now: the same wait, without the time Loom was closed.
-    const now = options.clock.now();
-    const carried = new Map(rows.map((row) => [row.id, row.wait_carried_ms]));
-    for (const session of sessions.list()) {
-      const kind = spanOf(session.status, session.waitingReason);
-      if (kind) sessions.spans.set(session.id, { kind, since: now, carried: carried.get(session.id) || undefined });
     }
     await sessions.flush();
     return sessions;
