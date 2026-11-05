@@ -77,7 +77,7 @@ function openDashboard(main: FakeMain) {
 const tile = (view: HTMLElement, name: string) => within(view).getByRole('group', { name });
 
 describe('the dashboard', () => {
-  it('shows the headline tiles over the last 7 days, with cost labelled as reported', async () => {
+  it('shows the headline tiles over the last 7 days, with cost labelled as reported, and no wait tile', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session] }, { 'usage.dashboard': ({ days }) => dashboard(days) });
     const view = openDashboard(main);
 
@@ -90,7 +90,7 @@ describe('the dashboard', () => {
     expect(tile(view, 'Merge requests merged').textContent).toContain('2');
     expect(tile(view, 'Cache hit rate').textContent).toContain('67%');
     expect(tile(view, 'Median agent run').textContent).toContain('6m 40s');
-    expect(tile(view, 'Median wait for you').textContent).toContain('22m');
+    expect(within(view).queryByRole('group', { name: 'Median wait for you' })).toBeNull();
   });
 
   it('switches between 7, 30 and 90 days', async () => {
