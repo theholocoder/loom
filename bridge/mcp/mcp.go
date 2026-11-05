@@ -34,7 +34,7 @@ type rpcError struct {
 var tools = []map[string]any{{
 	"name":  LinkMergeRequest,
 	"title": "Link Merge request",
-	"description": "Link a Merge request (a pull request on GitHub) to this Loom Session, so Loom shows it and watches it. " +
+	"description": "Link a Merge request (a pull request on GitHub) to this Loom Session, so Loom shows it with the Session. " +
 		"Call it after opening a Merge request whose source branch isn't this Session's current branch, or when Loom hasn't linked it: " +
 		"Loom links the open Merge request on the current branch by itself after each turn. Give its number, or its URL.",
 	"inputSchema": map[string]any{
@@ -125,7 +125,7 @@ func handle(out *json.Encoder, line []byte, version string) error {
 		if which == "" {
 			return reply(toolResult("Give the Merge request's number, or its URL.", true), nil)
 		}
-		return reply(toolResult(fmt.Sprintf("Loom links Merge request %s to this Session once it has found it open on the Forge.", which), false), nil)
+		return reply(toolResult(fmt.Sprintf("Loom checks Merge request %s on the Forge and links it to this Session if it is open; the user sees if it isn't.", which), false), nil)
 	default:
 		return reply(nil, &rpcError{-32601, fmt.Sprintf("method not found: %s", m.Method)})
 	}

@@ -217,3 +217,52 @@ describe('the Merge request action', () => {
     expect(prompts(machine)).toEqual(['Fix the login bug', canned]);
   });
 });
+
+describe('review follow-ups', () => {
+  const toolCall = (title: string, rawInput: Record<string, unknown>): AcpTurn['chunks'] => [
+    { update: { sessionUpdate: 'tool_call', toolCallId: 'call_link', title, kind: 'other', status: 'pending', rawInput } },
+    { update: { sessionUpdate: 'tool_call_update', toolCallId: 'call_link', status: 'completed' } },
+    'Done.',
+  ];
+
+  it("shows why Loom couldn't link what the agent's tool named", async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 41, url: pr(41), branch: 'old', state: 'closed' }], turns: [{ chunks: toolCall('loom_link_merge_request', { number: 41 }) }] });
+    const { main, id } = await withSession(machine, checkout);
+
+    const items = await waitFor(main.api, 'transcript', (list) => list.some((i) => i.kind === 'merge-request-refused'), { sessionId: id });
+    expect(items.find((i) => i.kind === 'merge-request-refused')).toEqual({
+      kind: 'merge-request-refused',
+      id: expect.any(Number),
+      mergeRequest: '41',
+      reason: 'That Merge request is closed: only an open one can be linked.',
+    });
+  });
+
+  it('keeps a Merge request the agent linked over the one found on the branch, and knows the mcp__loom__ name', async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, {
+      mergeRequests: [
+        { number: 12, url: pr(12), branch: 'loom/fix-login' },
+        { number: 40, url: pr(40), branch: 'someone/fork-branch' },
+      ],
+      turns: [{ chunks: toolCall('mcp__loom__link_merge_request', { url: pr(40) }) }, { chunks: ['Again.'] }],
+    });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 40));
+
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await waitFor(main.api, 'transcript', (list) => list.some((i) => i.kind === 'agent' && i.text === 'Again.'), { sessionId: id });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)!.mergeRequest).toEqual({ number: 40, url: pr(40) });
+  });
+
+  it('looks up the Merge request after a turn the user stopped', async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 12, url: pr(12), branch: 'loom/fix-login' }], turns: [{ chunks: ['Pushing…'], hold: 'never' }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
+
+    await main.api.invoke('sessions.stop', { id });
+    const linked = await waitFor(main.api, 'sessions', session(id, (s) => !!s.mergeRequest));
+    expect(linked.find((s) => s.id === id)).toMatchObject({ waitingReason: 'stopped', mergeRequest: { number: 12, url: pr(12) } });
+  });
+});

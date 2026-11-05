@@ -8,7 +8,7 @@ import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, Approval
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
-import { findMergeRequest, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
+import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
@@ -379,6 +379,7 @@ export class Sessions {
     this.endRun(id);
     const message = sendNow === undefined ? undefined : this.dequeue(id, sendNow);
     this.addItem(id, { kind: 'interruption', by: message ? 'send-now' : 'stop' });
+    this.afterTurn(id);
     if (message) return this.sendNext(id, messageOf(message));
     this.setStatus(id, { status: 'waiting', waitingReason: 'stopped' });
   }
@@ -555,15 +556,13 @@ export class Sessions {
 
   /** Sends the agent the Merge request prompt shortcut. */
   async requestMergeRequest({ id }: { id: number }): Promise<void> {
-    const forge = this.options.project(this.get(id).projectId)?.forge;
-    if (forge?.state === 'unknown') throw new Error("Loom hasn't checked this Project's Forge yet.");
-    if (forge?.state !== 'available' || !forge.kind) throw new Error("Merge requests need the Project's Forge, which is off.");
+    const { kind } = mergeRequestForge(this.options.project(this.get(id).projectId)?.forge);
     const branch = await this.currentBranch(id);
     if (!branch) throw new Error("This Session's working copy isn't on a branch.");
     if (branch === (await this.defaultBranch(id))) {
       throw new Error(`This Session is on ${branch}, the default branch. A Merge request needs a branch of its own.`);
     }
-    await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[forge.kind]) });
+    await this.send({ id, prompt: mergeRequestPrompt(FORGE_CLI[kind]) });
   }
 
   /**
@@ -574,14 +573,13 @@ export class Sessions {
     const session = this.get(id);
     if (session.status === 'archived') throw new Error('This Session is archived.');
     const forge = this.options.project(session.projectId)?.forge;
-    if (forge?.state === 'unknown') throw new Error("Loom hasn't checked this Project's Forge yet.");
-    if (forge?.state !== 'available' || !forge.kind) throw new Error("Merge requests need the Project's Forge, which is off.");
+    mergeRequestForge(forge);
     const named = mergeRequestNamed(mergeRequest);
     if (!named) throw new Error('Name a Merge request by its number, such as 12, or by its URL.');
     const branch = await this.currentBranch(id);
     if (branch && branch === (await this.defaultBranch(id))) throw new Error(`This Session is on ${branch}, the default branch, which has no Merge request.`);
-    const found = await viewMergeRequest(this.environmentOf(session).request, forge, session.workingCopy.path, named.number);
-    if (named.url && !sameMergeRequest(named.url, found.url)) throw new Error(`${named.url} isn't a Merge request of this Project's repository.`);
+    const found = await viewMergeRequest(this.environmentOf(session).request, forge!, session.workingCopy.path, named.number);
+    if (named.url && !isPageOf(named.url, found.url)) throw new Error(`${named.url} isn't a Merge request of this Project's repository.`);
     if (found.state !== 'open') throw new Error(`That Merge request is ${found.state}: only an open one can be linked.`);
     await this.loadTranscript(id);
     if (this.get(id).status === 'archived') return;
@@ -969,12 +967,13 @@ export class Sessions {
     const environment = this.environmentOf(session);
     await environment.ready();
     let opened: AgentSession | undefined;
+    const executable = environment.bridgeExecutable();
     const agent = await this.options.adapter.open({
       environment,
       workingCopy: session.workingCopy.path,
       tempDir: environment.tempDir(),
       approvals: this.options.approvals(),
-      ...(environment.bridgeExecutable() ? { loomTools: { command: environment.bridgeExecutable()!, args: ['mcp'] } } : {}),
+      ...(executable ? { loomTools: { command: executable, args: ['mcp'] } } : {}),
       // An agent the Session has moved on from, as after a restart, no longer counts.
       onEvent: (event) => {
         if (opened && this.live.get(id) !== opened) return;
@@ -1040,23 +1039,28 @@ export class Sessions {
         const followUp = this.denyMessages.get(id);
         this.denyMessages.delete(id);
         this.endRun(id);
+        this.afterTurn(id);
         // What the user said on denying goes to the agent as the next prompt.
         if (followUp) return this.sendNext(id, { text: followUp });
         // Then the queue, one message per run.
         const next = this.dequeue(id);
         if (next) return this.sendNext(id, messageOf(next));
-        this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
-        return void this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
+        return this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
       }
       case 'run-failed':
         // An agent may fail the run it was asked to end; that's still the user's interruption.
         if (this.interrupting.has(id)) return this.interrupted(id);
         this.fail(id, event.error);
-        return void this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
+        return this.afterTurn(id);
       case 'closed':
         this.live.delete(id);
         return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
     }
+  }
+
+  /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */
+  private afterTurn(id: number): void {
+    void this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
   }
 
   /** Sends `message` as the next run, the Session staying Working. */
@@ -1179,8 +1183,8 @@ export class Sessions {
   /**
    * Links the open Merge request of the Session's current branch, after each
    * turn: it follows the branch, and there is none on the default branch. A
-   * link stays while its branch does, even with no open Merge request found
-   * there (one linked by hand; one just merged or closed, which Babysit sees).
+   * link stays while its branch does, whatever is found there: one linked by
+   * hand or by the agent's tool wins, and one just merged or closed is Babysit's.
    * Keeps the link as it is if git or the Forge can't say, and on a detached HEAD.
    */
   private async lookUpMergeRequest(id: number): Promise<void> {
@@ -1200,8 +1204,9 @@ export class Sessions {
     }
     if (this.shuttingDown || this.get(id).status === 'archived') return;
     await this.loadTranscript(id);
-    if (found) return this.setMergeRequest(id, found, branch);
-    if (onDefault || this.mergeRequestBranches.get(id) !== branch) this.setMergeRequest(id, undefined);
+    const kept = !onDefault && !!this.get(id).mergeRequest && this.mergeRequestBranches.get(id) === branch;
+    if (kept) return;
+    this.setMergeRequest(id, found, found && branch);
   }
 
   /** Links `mergeRequest` to the Session as the one of `branch`, with a card when it is a new one; or unlinks it. */
@@ -1238,7 +1243,12 @@ export class Sessions {
     const card = this.transcript(id).value.findLast((i) => i.kind === 'tool' && i.toolCallId === toolCallId);
     const named = card?.kind === 'tool' ? linkToolInput(card.input) : undefined;
     if (!named) return;
-    this.linkMergeRequest({ id, mergeRequest: named }).catch((error: unknown) => console.error(`could not link Session ${id}'s Merge request ${named}:`, error));
+    // The agent was only told Loom checks it; the user sees why it wasn't linked.
+    this.linkMergeRequest({ id, mergeRequest: named }).catch((error: unknown) => {
+      if (this.shuttingDown || this.get(id).status === 'archived') return;
+      this.endStreaming(id);
+      this.addItem(id, { kind: 'merge-request-refused', mergeRequest: named, reason: (error as Error).message });
+    });
   }
 
   private recordDiffStat(id: number, diffStat: DiffStat): void {
@@ -1539,8 +1549,8 @@ function issuePrompt(issue: Issue): string {
   return [`${heading}\n${issue.url}`, (issue.body ?? '').trim()].filter(Boolean).join('\n\n');
 }
 
-/** Loom's `link_merge_request` tool, as agents name it: OpenCode prefixes it with its server's name. */
-const LINK_TOOL = /^loom[_.-]link_merge_request$/i;
+/** Loom's `link_merge_request` tool, as agents name it: prefixed with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others. */
+const LINK_TOOL = /^(?:mcp__)?loom(?:__|[_.:-])link_merge_request$/i;
 
 /** What the agent gave Loom's `link_merge_request` tool, as `linkMergeRequest` takes it: the number, or else the URL. */
 function linkToolInput(input: string | undefined): string | undefined {
@@ -1551,25 +1561,6 @@ function linkToolInput(input: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** A Merge request as the user or the agent names it: `12`, `#12`, `!12`, or its URL (`…/pull/12`, `…/merge_requests/12`). */
-function mergeRequestNamed(text: unknown): { number: number; url?: string } | undefined {
-  if (typeof text !== 'string' && typeof text !== 'number') return undefined;
-  const trimmed = String(text).trim();
-  const plain = /^[#!]?(\d+)$/.exec(trimmed);
-  if (plain) return Number(plain[1]) > 0 ? { number: Number(plain[1]) } : undefined;
-  if (!/^https?:\/\//i.test(trimmed)) return undefined;
-  const inUrl = /\/(?:pull|pulls|merge_requests)\/(\d+)(?:[/?#]|$)/.exec(trimmed);
-  return inUrl && Number(inUrl[1]) > 0 ? { number: Number(inUrl[1]), url: trimmed } : undefined;
-}
-
-/** Whether the URL the user gave is of the Merge request the Forge found: its page, or one under it. */
-function sameMergeRequest(given: string, found: string): boolean {
-  const normal = (url: string) => url.toLowerCase().replace(/[?#].*$/, '').replace(/\/+$/, '');
-  const a = normal(given);
-  const b = normal(found);
-  return a === b || a.startsWith(`${b}/`);
 }
 
 /** The prompt shortcut asking the agent to open or update its branch's Merge request. */

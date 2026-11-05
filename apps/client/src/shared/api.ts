@@ -662,7 +662,9 @@ export type TranscriptItem =
    */
   | { kind: 'model'; id: number; model?: string; effort?: string }
   /** A Merge request was linked to the Session: found on its branch, linked by the user or by the agent's tool. */
-  | { kind: 'merge-request'; id: number; number: number; url: string };
+  | { kind: 'merge-request'; id: number; number: number; url: string }
+  /** The agent's Link merge request tool named a Merge request Loom couldn't link, as `mergeRequest` gave it, and why. */
+  | { kind: 'merge-request-refused'; id: number; mergeRequest: string; reason: string };
 
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed

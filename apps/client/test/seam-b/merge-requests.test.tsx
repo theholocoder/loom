@@ -66,6 +66,13 @@ describe("the Session's Merge request", () => {
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
   });
 
+  it("shows why the agent's tool couldn't link one", () => {
+    const main = new FakeMain({ projects: [gitlab], sessions: [session()] });
+    main.publish('transcript', [{ kind: 'merge-request-refused', id: 0, mergeRequest: '41', reason: 'That Merge request is closed: only an open one can be linked.' }], { sessionId: 1 });
+    const { log } = open(main);
+    expect(within(log).getByRole('note').textContent).toBe("Couldn't link Merge request 41: That Merge request is closed: only an open one can be linked.");
+  });
+
   it('is in the header, opening it, with the action to ask the agent to update it', async () => {
     const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url } })] });
     const { header } = open(main);

@@ -313,7 +313,7 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
 }
 
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */
-export type SessionCommand = 'archive' | 'openMergeRequest' | 'createMergeRequest' | 'linkMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
+export type SessionCommand = 'archive' | 'openMergeRequest' | 'requestMergeRequest' | 'linkMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
 
 /**
  * One Session: its header, its conversation and the composer. Showing it
@@ -381,7 +381,7 @@ export function SessionView({
     const runs: Record<SessionCommand, () => Promise<void>> = {
       archive: () => archiver.archive(session),
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
-      createMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
+      requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
       linkMergeRequest: async () => setLinkRequest((n) => n + 1),
       openInEditor: () => api.invoke('sessions.openInEditor', { id }),
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
@@ -543,6 +543,13 @@ export function SessionView({
             <Interruption key={item.id} item={item} />
           ) : item.kind === 'model' ? (
             <ModelMarker key={item.id} item={item} />
+          ) : item.kind === 'merge-request-refused' ? (
+            <div key={item.id} className="interruption" role="note">
+              <TriangleAlert className="sm" />
+              <span>
+                Couldn't link Merge request <span className="tech">{item.mergeRequest}</span>: {item.reason}
+              </span>
+            </div>
           ) : item.kind === 'merge-request' ? (
             <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => void api.invoke('links.open', { url: item.url }).catch((e: unknown) => setError((e as Error).message))} />
           ) : (
