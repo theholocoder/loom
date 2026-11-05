@@ -88,6 +88,7 @@ describe('the dashboard', () => {
     expect(tile(view, 'Reported cost').textContent).toContain('Subscription and local models report $0');
     expect(tile(view, 'Sessions started').textContent).toContain('5');
     expect(tile(view, 'Merge requests merged').textContent).toContain('2');
+    expect(tile(view, 'Cache hit rate').textContent).toContain('67%');
     expect(tile(view, 'Median agent run').textContent).toContain('6m 40s');
     expect(tile(view, 'Median wait for you').textContent).toContain('22m');
   });
@@ -185,5 +186,6 @@ describe('the dashboard', () => {
 
     await within(view).findByText('No usage recorded in the last 7 days.');
     expect(tile(view, 'Median agent run').textContent).toContain('—');
+    expect(tile(view, 'Cache hit rate').textContent).toContain('—');
   });
 });

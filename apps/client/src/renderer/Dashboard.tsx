@@ -1,6 +1,6 @@
 // The usage dashboard: tokens, reported cost and outcomes across this
 // machine's Sessions over 7, 30 or 90 days, as main computes them.
-import { Coins, GitMerge, Inbox, MessagesSquare, Receipt, Timer, type LucideIcon } from 'lucide-react';
+import { Coins, DatabaseZap, GitMerge, Inbox, MessagesSquare, Receipt, Timer, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -96,6 +96,12 @@ function Content({
         <Tile icon={Receipt} label="Reported cost" value={`$${data.reportedCost.toFixed(2)}`} detail="As agents report it. Subscription and local models report $0." />
         <Tile icon={MessagesSquare} label="Sessions started" value={String(data.sessionsStarted)} detail={`${data.outcomes.stuck} stuck at least once`} />
         <Tile icon={GitMerge} label="Merge requests merged" value={String(data.mergeRequestsMerged)} detail={`${data.outcomes.open} Sessions still open`} />
+        <Tile
+          icon={DatabaseZap}
+          label="Cache hit rate"
+          value={data.cacheHitRate === undefined ? '—' : percent(data.cacheHitRate)}
+          detail="Cache reads out of all prompt tokens"
+        />
         <Tile icon={Timer} label="Median agent run" value={formatDuration(data.medianRunMs)} detail="Working → Waiting" />
         <Tile icon={Inbox} label="Median wait for you" value={formatDuration(data.medianWaitMs)} detail="On a question, an approval, or a finished run" />
       </div>
