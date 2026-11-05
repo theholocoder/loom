@@ -8,7 +8,6 @@ import { exec, type BridgeCall } from '../environments/exec';
 
 const MERGE_REQUEST_TIMEOUT_MS = 20_000;
 
-
 /** A Merge request as the Forge has it now. */
 export interface FoundMergeRequest extends ForgeLink {
   state: MergeRequestState;

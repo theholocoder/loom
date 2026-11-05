@@ -24,7 +24,7 @@ describe("the right sidebar's settings", () => {
     const main = await startMain({ userDataDir: tempDir('loom-sidebar-') });
     expect((await main.api.invoke('settings.setSidebar', { width: 10 })).sidebar.width).toBe(SIDEBAR_MIN_WIDTH);
     expect((await main.api.invoke('settings.setSidebar', { width: 99_999 })).sidebar.width).toBe(SIDEBAR_MAX_WIDTH);
-    await expect(main.api.invoke('settings.setSidebar', { view: 'terminal' as never })).rejects.toThrow('"terminal" is not a sidebar view');
+    await expect(main.api.invoke('settings.setSidebar', { view: 'terminal' as never })).rejects.toThrow('"terminal" is not a sidebar view.');
     await expect(main.api.invoke('settings.setSidebar', { width: Number.NaN })).rejects.toThrow('width');
     await main.close();
   });

@@ -91,6 +91,8 @@ describe('the right sidebar', () => {
 
 const tab = (name: string) => within(sidebar()!).getByRole('tab', { name });
 const view = () => within(sidebar()!).getByRole('tabpanel');
+/** The shown view's name, as its tab gives it. */
+const viewName = () => document.getElementById(view().getAttribute('aria-labelledby')!)!.getAttribute('aria-label');
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
 
 describe("the sidebar's views", () => {
@@ -98,20 +100,34 @@ describe("the sidebar's views", () => {
     const main = renderApp(fakeMain({ open: true }));
     openSession();
     expect(tab('Session info').getAttribute('aria-selected')).toBe('true');
-    expect(view().getAttribute('aria-label')).toBe('Session info');
+    expect(viewName()).toBe('Session info');
 
     fireEvent.click(tab('Changes'));
     expect(tab('Changes').getAttribute('aria-selected')).toBe('true');
     expect(tab('Session info').getAttribute('aria-selected')).toBe('false');
-    expect(view().getAttribute('aria-label')).toBe('Changes');
+    expect(viewName()).toBe('Changes');
     expect(within(view()).queryByRole('region', { name: 'Where' })).toBeNull();
     expect(sidebarCalls(main)).toEqual([{ open: true, view: 'changes' }]);
+  });
+
+  it('has its tabs as one Tab stop, the arrow keys moving between them', () => {
+    renderApp(fakeMain({ open: true }));
+    openSession();
+    expect(tab('Session info').tabIndex).toBe(0);
+    expect(tab('Changes').tabIndex).toBe(-1);
+    fireEvent.keyDown(tab('Session info'), { key: 'ArrowRight' });
+    expect(viewName()).toBe('Changes');
+    expect(document.activeElement).toBe(tab('Changes'));
+    expect(tab('Changes').tabIndex).toBe(0);
+    fireEvent.keyDown(tab('Changes'), { key: 'ArrowRight' });
+    expect(viewName()).toBe('Session info');
+    expect(screen.getByRole('tabpanel', { name: 'Session info' })).toBeTruthy();
   });
 
   it('opens on the view, open state and width settings had, at startup', () => {
     renderApp(fakeMain({ open: true, view: 'changes', width: 555 }));
     openSession();
-    expect(view().getAttribute('aria-label')).toBe('Changes');
+    expect(viewName()).toBe('Changes');
     expect(sidebar()!.style.width).toBe('555px');
   });
 
@@ -135,6 +151,29 @@ describe("the sidebar's views", () => {
     expect(sidebar()!.style.width).toBe('280px');
   });
 
+  it('takes at most 70% of the window, however wide settings say, dragging from what shows', () => {
+    // jsdom's window is 1024px wide.
+    const main = renderApp(fakeMain({ open: true, width: 1000 }));
+    openSession();
+    expect(sidebar()!.style.width).toBe('716px');
+    const edge = within(sidebar()!).getByRole('separator', { name: 'Resize sidebar' });
+    expect(edge.getAttribute('aria-valuemax')).toBe('716');
+    fireEvent.mouseDown(edge, { clientX: 500 });
+    fireEvent.mouseUp(window, { clientX: 600 });
+    expect(sidebarCalls(main)).toEqual([{ width: 616 }]);
+  });
+
+  it('keeps a drag going through an unrelated settings change', () => {
+    const main = renderApp(fakeMain({ open: true, width: 420 }));
+    openSession();
+    const edge = within(sidebar()!).getByRole('separator', { name: 'Resize sidebar' });
+    fireEvent.mouseDown(edge, { clientX: 1000 });
+    fireEvent.mouseMove(window, { clientX: 900 });
+    act(() => main.publish('settings', { ...main.value('settings'), theme: 'nord' }));
+    expect(sidebar()!.style.width).toBe('520px');
+    fireEvent.mouseUp(window, { clientX: 900 });
+  });
+
   it('is resized with the arrow keys on its edge too', () => {
     const main = renderApp(fakeMain({ open: true, width: 420 }));
     openSession();
@@ -150,14 +189,14 @@ describe("the sidebar's shortcuts", () => {
     const main = renderApp(fakeMain({ view: 'changes' }));
     openSession();
     press('b', { ctrlKey: true });
-    expect(view().getAttribute('aria-label')).toBe('Changes');
+    expect(viewName()).toBe('Changes');
     press('b', { ctrlKey: true });
     expect(sidebar()).toBeNull();
 
     press('i', { ctrlKey: true });
-    expect(view().getAttribute('aria-label')).toBe('Session info');
+    expect(viewName()).toBe('Session info');
     press('d');
-    expect(view().getAttribute('aria-label')).toBe('Changes');
+    expect(viewName()).toBe('Changes');
     press('d');
     expect(sidebar()).toBeNull();
     press('i', { ctrlKey: true });
@@ -186,7 +225,7 @@ describe("the sidebar's shortcuts", () => {
     press('k', { ctrlKey: true });
     expect(names()).toEqual(expect.arrayContaining(['Toggle sidebar', 'Toggle diff', 'Toggle Session info']));
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Command palette' })).getByRole('option', { name: 'Toggle Session info' }));
-    expect(view().getAttribute('aria-label')).toBe('Session info');
+    expect(viewName()).toBe('Session info');
 
     press('?', { ctrlKey: true });
     const help = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
@@ -307,7 +346,7 @@ describe('the Session info view', () => {
     expect(main.invoked).toContainEqual({ command: 'sessions.linkMergeRequest', params: { id: 7, mergeRequest: '41' } });
 
     fireEvent.click(within(git).getByRole('button', { name: 'Show changes: 4 files, 1210 added, 3 removed' }));
-    expect(view().getAttribute('aria-label')).toBe('Changes');
+    expect(viewName()).toBe('Changes');
   });
 
   it('offers to create a Merge request when none is linked', () => {
@@ -325,7 +364,7 @@ describe('the Session info view', () => {
     expect(sidebar()).toBeNull();
     press('k', { ctrlKey: true });
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Command palette' })).getByRole('option', { name: 'Link Merge request…' }));
-    expect(view().getAttribute('aria-label')).toBe('Session info');
+    expect(viewName()).toBe('Session info');
     expect(screen.getByRole('dialog', { name: 'Link Merge request' })).toBeTruthy();
     // Closing the sidebar drops it, and opening it again doesn't bring it back.
     fireEvent.click(within(header()).getByRole('button', { name: 'Hide sidebar' }));
@@ -389,6 +428,13 @@ describe('the Session info view', () => {
     const main = renderInfo();
     fireEvent.click(within(view()).getByRole('button', { name: 'Archive' }));
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.archive', params: { id: 7 } }));
+  });
+
+  it('offers no editor nor terminal when the worktree is missing, only Archive', () => {
+    renderInfo({ ...full, worktreeMissing: true });
+    expect(within(view()).queryByRole('button', { name: 'Open in editor' })).toBeNull();
+    expect(within(view()).queryByRole('button', { name: 'Open in terminal' })).toBeNull();
+    expect(within(view()).getByRole('button', { name: 'Archive' })).toBeTruthy();
   });
 
   it("shows an archived Session's facts read-only: no editor, terminal, Archive, nor Merge request actions", () => {

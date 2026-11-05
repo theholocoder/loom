@@ -5,7 +5,7 @@ import { Archive, Check, CircleDot, CodeXml, Copy, ExternalLink, FileDiff, GitPu
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type DiffStat, type EnvironmentStatus, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
-import { formatDuration, formatTokens } from './Dashboard';
+import { formatCost, formatDuration, formatTokens } from './Dashboard';
 import { Popover } from './Popover';
 
 /** A diff stat's file count: "1 file", "4 files". */
@@ -18,12 +18,13 @@ function diffStatLabel(stat: DiffStat): string {
   return `${filesText(stat)}, ${stat.added} added, ${stat.removed} removed`;
 }
 
-const count = new Intl.NumberFormat('en');
+/** Whole numbers with thousands separators: 12,345. */
+const wholeNumber = new Intl.NumberFormat('en');
 
 /**
  * The Session's details in their four groups, with their actions; an
  * archived Session's without editor, terminal, Archive or Merge request
- * actions. `linking` opens the Link Merge request popover, as the palette asks;
+ * actions, and one whose worktree is missing without editor or terminal. `linking` opens the Link Merge request popover, as the palette asks;
  * `onLinkingChange` says when it opens or closes. What goes wrong running
  * an action goes to `onError`.
  */
@@ -47,6 +48,8 @@ export function SessionInfo({
   const api = useApi();
   const environment = useTopic('environments')?.find((e) => e.id === project?.checkout.environmentId);
   const archived = session.status === 'archived';
+  // A missing worktree has no folder to open.
+  const openable = !archived && !session.worktreeMissing;
   const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal' | 'sessions.requestMergeRequest') => {
     onError(undefined);
     api.invoke(command, { id: session.id }).catch((e: unknown) => onError((e as Error).message));
@@ -67,7 +70,7 @@ export function SessionInfo({
         <Fact
           label="Working copy"
           actions={
-            !archived && (
+            openable && (
               <>
                 <IconAction label="Open in editor" icon={<CodeXml />} onClick={() => run('sessions.openInEditor')} />
                 <IconAction label="Open in terminal" icon={<SquareTerminal />} onClick={() => run('sessions.openInTerminal')} />
@@ -115,14 +118,14 @@ export function SessionInfo({
         <Fact label="Agent session" actions={session.agentSessionId && <CopyAction text={session.agentSessionId} label="Copy agent session id" />}>
           {session.agentSessionId ? <span className="tech path">{session.agentSessionId}</span> : <span className="muted">Not started yet</span>}
         </Fact>
-        <Fact label="Queued messages">{count.format(queued)}</Fact>
+        <Fact label="Queued messages">{wholeNumber.format(queued)}</Fact>
       </Group>
       <Group label="Usage">
         <Fact label="Context">
           {session.context ? <ContextBar used={session.context.used} size={session.context.size} /> : <span className="muted">Not reported yet</span>}
         </Fact>
         <Fact label="Tokens">{formatTokens(session.usage?.tokens ?? 0)}</Fact>
-        <Fact label="Reported cost">${(session.usage?.reportedCost ?? 0).toFixed(2)}</Fact>
+        <Fact label="Reported cost">{formatCost(session.usage?.reportedCost ?? 0)}</Fact>
         <Fact label="Working time">
           <WorkingTime session={session} />
         </Fact>
@@ -312,7 +315,7 @@ function ContextBar({ used, size }: { used: number; size: number }) {
       <span>
         {formatTokens(used)} / {formatTokens(size)} <span className="muted">({percent}%)</span>
       </span>
-      <span className="bar" role="meter" aria-label="Context used" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} title={`${count.format(used)} of ${count.format(size)} tokens`}>
+      <span className="bar" role="meter" aria-label="Context used" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} title={`${wholeNumber.format(used)} of ${wholeNumber.format(size)} tokens`}>
         <span style={{ width: `${percent}%` }} />
       </span>
     </span>

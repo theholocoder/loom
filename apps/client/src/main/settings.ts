@@ -90,7 +90,7 @@ export class Settings {
   async setSidebar(sidebar: Partial<SidebarSettings>): Promise<SettingsValues> {
     const { open, view, width } = sidebar;
     if (open !== undefined && typeof open !== 'boolean') throw new Error('Whether the sidebar is open must be true or false.');
-    if (view !== undefined && !isSidebarView(view)) throw new Error(`"${String(view)}" is not a sidebar view`);
+    if (view !== undefined && !isSidebarView(view)) throw new Error(`"${String(view)}" is not a sidebar view.`);
     if (width !== undefined && (typeof width !== 'number' || !Number.isFinite(width))) throw new Error("The sidebar's width must be a number of pixels.");
     return this.set('sidebar', {
       open: open ?? this.current.sidebar.open,

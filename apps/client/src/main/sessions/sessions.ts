@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -201,6 +201,7 @@ export class Sessions {
     const [buckets, runs] = await Promise.all([
       db
         .selectFrom('usage_buckets')
+        // totalTokens, in SQL.
         .select((eb) => [
           'session_id',
           eb.fn.sum<number>(eb(eb(eb(eb('input_tokens', '+', eb.ref('output_tokens')), '+', eb.ref('cache_read_tokens')), '+', eb.ref('cache_write_tokens')), '+', eb.ref('reasoning_tokens'))).as('tokens'),
@@ -216,9 +217,9 @@ export class Sessions {
         .execute(),
     ]);
     const usage = new Map<number, SessionUsage>();
-    const of = (id: number) => usage.get(id) ?? usage.set(id, { ...NO_USAGE }).get(id)!;
-    for (const b of buckets) Object.assign(of(b.session_id), { tokens: Number(b.tokens), reportedCost: Number(b.cost) });
-    for (const r of runs) of(r.session_id).workingMs = Number(r.ms);
+    const usageFor = (id: number) => usage.get(id) ?? usage.set(id, { ...NO_USAGE }).get(id)!;
+    for (const b of buckets) Object.assign(usageFor(b.session_id), { tokens: Number(b.tokens), reportedCost: Number(b.cost) });
+    for (const r of runs) usageFor(r.session_id).workingMs = Number(r.ms);
     for (const [id, session] of this.sessions) this.sessions.set(id, { ...session, usage: usage.get(id) ?? { ...NO_USAGE } });
   }
 
@@ -1211,8 +1212,7 @@ export class Sessions {
     };
     this.write((trx) => recordTurn(trx, turn));
     const usage = this.usageOf(id);
-    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
-    this.update(id, { usage: { ...usage, tokens: usage.tokens + total, reportedCost: usage.reportedCost + cost } });
+    this.update(id, { usage: { ...usage, tokens: usage.tokens + totalTokens(tokens), reportedCost: usage.reportedCost + cost } });
   }
 
   private usageOf(id: number): SessionUsage {
@@ -1655,13 +1655,21 @@ export class Sessions {
     }
     if (kind) this.spans.set(id, { kind, since: now });
     else this.spans.delete(id);
-    // The Session's Working time: its runs so far, and when the one going on started.
+    this.trackWorkingTime(id, open, kind, now);
+  }
+
+  /**
+   * Keeps the Session's Working time as its span changes from `open` to
+   * `kind`: its runs so far, and when the one going on started. Published
+   * with the status change that caused it.
+   */
+  private trackWorkingTime(id: number, open: OpenSpan | undefined, kind: OpenSpan['kind'] | undefined, now: number): void {
     const session = this.sessions.get(id);
-    if (session && (open?.kind === 'run' || kind === 'run')) {
-      const usage = this.usageOf(id);
-      const workingMs = usage.workingMs + (open?.kind === 'run' ? Math.max(0, now - open.since) : 0);
-      this.sessions.set(id, { ...session, usage: withoutUndefined({ ...usage, workingMs, workingSince: kind === 'run' ? now : undefined }) });
-    }
+    // An undone Session is gone already.
+    if (!session || (open?.kind !== 'run' && kind !== 'run')) return;
+    const usage = this.usageOf(id);
+    const workingMs = usage.workingMs + (open?.kind === 'run' ? Math.max(0, now - open.since) : 0);
+    this.sessions.set(id, { ...session, usage: withoutUndefined({ ...usage, workingMs, workingSince: kind === 'run' ? now : undefined }) });
   }
 
   /**

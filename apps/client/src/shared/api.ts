@@ -494,10 +494,12 @@ export interface Settings extends Appearance {
 
 /** The right sidebar's views: Session info, or the Changes (the diff). */
 export const SIDEBAR_VIEWS = ['info', 'changes'] as const;
+/** One of the right sidebar's views. */
 export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
 
-/** How narrow and how wide the right sidebar can be dragged, in pixels. */
+/** How narrow the right sidebar can be dragged, in pixels. */
 export const SIDEBAR_MIN_WIDTH = 280;
+/** How wide the right sidebar can be dragged, in pixels; a narrower window caps it lower still (see the renderer's Sidebar). */
 export const SIDEBAR_MAX_WIDTH = 1200;
 
 /** The right sidebar's state, kept in settings. */
@@ -724,6 +726,11 @@ export interface TokenCounts {
   cacheRead: number;
   cacheWrite: number;
   reasoning: number;
+}
+
+/** Tokens of every kind, summed. */
+export function totalTokens(tokens: TokenCounts): number {
+  return tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
 }
 
 /**
