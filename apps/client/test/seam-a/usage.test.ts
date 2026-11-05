@@ -1,4 +1,8 @@
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { openDatabase } from '../../src/main/storage/database';
+import { migrations } from '../../src/main/storage/migrations';
 import { git, startMain, tempDir, tempMachine, waitFor, type AcpTurn, type MainHarness, type Machine } from './harness';
 import type { EnvironmentStatus, Session } from '../../src/shared/api';
 
@@ -155,7 +159,7 @@ describe('Session time', () => {
     expect(dashboard.topSessions[0]).toMatchObject({ sessionId: id, workingMs: 4 * 60_000 });
   });
 
-  it('doesn’t count the time Loom was closed as a wait', async () => {
+  it('counts a wait that goes on after Loom restarts as one, without the time Loom was closed', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Done.'], tokens: { inputTokens: 10, outputTokens: 1 } }]);
     const userDataDir = tempDir('loom-usage-');
     const first = await start(machine, checkout, { userDataDir });
@@ -171,8 +175,9 @@ describe('Session time', () => {
     await later.api.invoke('sessions.send', { id, prompt: 'Thanks' });
     await waiting(later, id);
 
+    // One wait, both sides of the restart: not two, nor the day Loom was closed.
     const dashboard = await later.api.invoke('usage.dashboard', { days: 7 });
-    expect(dashboard.medianWaitMs).toBe((60_000 + 2 * 60_000) / 2);
+    expect(dashboard.medianWaitMs).toBe(3 * 60_000);
   });
 });
 
@@ -273,5 +278,45 @@ describe('reported cost', () => {
 
     expect(dashboard.reportedCost).toBeCloseTo(0.3);
     expect(dashboard.tokens).toBe(0);
+  });
+});
+
+describe('reported cost after upgrading', () => {
+  it('counts a conversation from before Loom kept its cost only from its first report', async () => {
+    const { machine, checkout } = machineWith([]);
+    machine.installOpencode({
+      version: 'opencode v2.1.4',
+      integrations: signedIn,
+      models,
+      acp: {
+        turns: [],
+        resumedTurns: [
+          { chunks: ['Back.'], tokens: { inputTokens: 10, outputTokens: 1 }, cost: 4.3 },
+          { chunks: ['Again.'], tokens: { inputTokens: 10, outputTokens: 1 }, cost: 4.5 },
+        ],
+      },
+    });
+    // A database as the release before usage left it, with a Session whose conversation has cost $4.30 so far.
+    const userDataDir = tempDir('loom-usage-');
+    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, migrations.length - 1) })).destroy();
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.prepare("insert into projects (id, name, branch_prefix, created_at) values (1, 'loom', 'loom', 0)").run();
+    db.prepare("insert into checkouts (project_id, environment_id, path) values (1, 'native', ?)").run(checkout);
+    db.prepare(
+      "insert into sessions (id, project_id, title, working_copy_kind, working_copy_path, agent, agent_session_id, status, waiting_reason, created_at, updated_at) values (1, 1, 'Old work', 'checkout', ?, 'OpenCode', 'ses_old', 'waiting', 'finished', 0, 0)",
+    ).run(checkout);
+    db.close();
+
+    const main = await startMain({ machine, userDataDir });
+    await waitFor(main.api, 'environments', ready);
+    await main.api.invoke('sessions.send', { id: 1, prompt: 'Carry on' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Back.'), { sessionId: 1 });
+    await waiting(main, 1);
+    await main.api.invoke('sessions.send', { id: 1, prompt: 'And again' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Again.'), { sessionId: 1 });
+    await waiting(main, 1);
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+    expect(dashboard.reportedCost).toBeCloseTo(0.2);
   });
 });

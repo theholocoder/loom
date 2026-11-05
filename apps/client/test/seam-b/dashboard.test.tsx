@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
@@ -135,6 +135,41 @@ describe('the dashboard', () => {
 
     fireEvent.click(rows[0]!);
     await waitFor(() => expect(screen.queryByRole('main', { name: 'Dashboard' })).toBeNull());
+  });
+
+  it('moves between ranges with the arrow keys', async () => {
+    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': ({ days }) => dashboard(days) });
+    const view = openDashboard(main);
+    await within(view).findByRole('group', { name: 'Tokens' });
+
+    fireEvent.keyDown(within(view).getByRole('radio', { name: '7 days' }), { key: 'ArrowRight' });
+
+    expect(within(view).getByRole('radio', { name: '30 days' }).getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(within(view).getByRole('radio', { name: '30 days' }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'usage.dashboard', params: { days: 30 } }));
+  });
+
+  it('opens a Top Session with Enter', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [session] }, { 'usage.dashboard': ({ days }) => dashboard(days) });
+    const view = openDashboard(main);
+    await within(view).findByRole('group', { name: 'Tokens' });
+
+    const row = within(within(view).getByRole('table', { name: 'Top Sessions by tokens' })).getAllByRole('row')[1]!;
+    fireEvent.keyDown(row, { key: 'Enter' });
+
+    await waitFor(() => expect(screen.queryByRole('main', { name: 'Dashboard' })).toBeNull());
+  });
+
+  it('works the numbers out again when a Session’s status changes', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [session] }, { 'usage.dashboard': ({ days }) => dashboard(days) });
+    const view = openDashboard(main);
+    await within(view).findByRole('group', { name: 'Tokens' });
+    const asked = () => main.invoked.filter((i) => i.command === 'usage.dashboard').length;
+    const before = asked();
+
+    act(() => main.publish('sessions', [{ ...session, updatedAt: 99 }]));
+
+    await waitFor(() => expect(asked()).toBe(before + 1));
   });
 
   it('rounds token counts up into the next unit', async () => {

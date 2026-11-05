@@ -77,7 +77,7 @@ type Interruption = { sendNow?: number };
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
 const NO_TOKENS: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
 /** The stretch of time a Session is in, for the dashboard: since when. */
-type OpenSpan = { kind: 'run' | 'wait'; since: number };
+type OpenSpan = { kind: 'run' | 'wait'; since: number; carried?: number };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
 /** What the user sends the agent: text, and the files attached to it, stored already. */
 type Message = { text: string; attachments?: Attachment[] };
@@ -164,7 +164,7 @@ export class Sessions {
     for (const row of rows) {
       sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
       if (row.merge_request_branch !== null) sessions.mergeRequestLinks.set(row.id, { branch: row.merge_request_branch, byHand: row.merge_request_by_hand === 1 });
-      sessions.reportedCosts.set(row.id, row.reported_cost);
+      if (row.reported_cost !== null) sessions.reportedCosts.set(row.id, row.reported_cost);
     }
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
     for (const { id, session_id, text, attachments } of queued) {
@@ -181,11 +181,12 @@ export class Sessions {
       sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
     }
-    // A Session left finished is waiting for the user again, counted from now: not while Loom was closed.
+    // A Session left finished is waiting for the user again, from now: the same wait, without the time Loom was closed.
     const now = options.clock.now();
+    const carried = new Map(rows.map((row) => [row.id, row.wait_carried_ms]));
     for (const session of sessions.list()) {
       const kind = spanOf(session.status, session.waitingReason);
-      if (kind) sessions.spans.set(session.id, { kind, since: now });
+      if (kind) sessions.spans.set(session.id, { kind, since: now, carried: carried.get(session.id) || undefined });
     }
     await sessions.flush();
     return sessions;
@@ -312,6 +313,7 @@ export class Sessions {
       created_at: now,
       updated_at: now,
       reported_cost: 0,
+      wait_carried_ms: 0,
       archived_at: null,
       stuck_count: 0,
       merge_request_state: null,
@@ -321,6 +323,7 @@ export class Sessions {
       ({ id } = await this.options.db.insertInto('sessions').values(values).returning('id').executeTakeFirstOrThrow());
       this.sessions.set(id, this.withCapabilities(fromRow({ id, ...values })));
       this.spans.set(id, { kind: 'run', since: now });
+      this.reportedCosts.set(id, 0);
     } finally {
       this.claimed.delete(path);
     }
@@ -983,9 +986,13 @@ export class Sessions {
     for (const handle of this.idleStops.values()) this.options.clock.clearTimeout(handle);
     this.idleStops.clear();
     for (const id of [...this.checkpoints.keys()]) this.checkpoint(id);
-    // Time while Loom is closed counts for nothing.
+    // Time while Loom is closed counts for nothing: a wait goes on once it starts again, a run is over.
     const now = this.options.clock.now();
-    for (const id of [...this.spans.keys()]) this.trackSpan(id, undefined, now);
+    for (const [id, span] of [...this.spans]) {
+      if (span.kind === 'run') this.trackSpan(id, undefined, now);
+      else this.save(id, { wait_carried_ms: (span.carried ?? 0) + now - span.since });
+    }
+    this.spans.clear();
     await this.flush();
   }
 
@@ -1151,12 +1158,12 @@ export class Sessions {
    * turn it came with and however that turn ended.
    */
   private recordCost(id: number, reported: number): void {
-    const before = this.reportedCosts.get(id) ?? 0;
+    const before = this.reportedCosts.get(id);
     if (reported === before) return;
     this.reportedCosts.set(id, reported);
     this.save(id, { reported_cost: reported });
-    // A cost that went down was corrected: nothing to add.
-    if (reported > before) this.recordUsage(id, NO_TOKENS, reported - before);
+    // Unknown before (a conversation from before Loom kept it): counted from here. One that went down was corrected: nothing to add.
+    if (before !== undefined && reported > before) this.recordUsage(id, NO_TOKENS, reported - before);
   }
 
   /** Adds tokens and cost to the Session's bucket for today and the model its run went with. */
@@ -1602,7 +1609,12 @@ export class Sessions {
   private trackSpan(id: number, kind: OpenSpan['kind'] | undefined, now: number): void {
     const open = this.spans.get(id);
     if (open && open.kind === kind) return;
-    if (open) this.write((trx) => recordSpan(trx, { session_id: id, kind: open.kind, started_at: open.since, ended_at: now }));
+    if (open) {
+      // A wait carried over from before Loom last closed counts its earlier time too, as if it had all been in a row.
+      const started = open.since - (open.carried ?? 0);
+      this.write((trx) => recordSpan(trx, { session_id: id, kind: open.kind, started_at: started, ended_at: now }));
+      if (open.carried) this.save(id, { wait_carried_ms: 0 });
+    }
     if (kind) this.spans.set(id, { kind, since: now });
     else this.spans.delete(id);
   }

@@ -62,8 +62,10 @@ export interface SessionsTable {
   /** Clock times. */
   created_at: number;
   updated_at: number;
-  /** The cost the agent last reported for its conversation, in USD: what the next turn's cost is counted from. */
-  reported_cost: number;
+  /** The cost the agent last reported for its conversation, in USD, which more cost is counted from; null until known. */
+  reported_cost: number | null;
+  /** How long the wait for the user it is in had lasted when Loom last closed, in ms: it goes on as the same wait. */
+  wait_carried_ms: number;
   /** Clock time it was archived; null while it isn't. */
   archived_at: number | null;
   /** How many times it went Waiting as stuck. */

@@ -123,7 +123,9 @@ export const migrations: Migration[] = [
       .addColumn('ended_at', 'integer', (c) => c.notNull())
       .execute();
     await db.schema.createIndex('session_spans_ended').on('session_spans').column('ended_at').execute();
-    await db.schema.alterTable('sessions').addColumn('reported_cost', 'real', (c) => c.notNull().defaultTo(0)).execute();
+    // Unknown for a conversation from before: its first report is where its cost is counted from.
+    await db.schema.alterTable('sessions').addColumn('reported_cost', 'real').execute();
+    await db.schema.alterTable('sessions').addColumn('wait_carried_ms', 'integer', (c) => c.notNull().defaultTo(0)).execute();
     await db.schema.alterTable('sessions').addColumn('archived_at', 'integer').execute();
     await db.schema.alterTable('sessions').addColumn('stuck_count', 'integer', (c) => c.notNull().defaultTo(0)).execute();
     await db.schema.alterTable('sessions').addColumn('merge_request_state', 'text').execute();

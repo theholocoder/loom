@@ -1,7 +1,7 @@
 // The usage dashboard: tokens, reported cost and outcomes across this
 // machine's Sessions over 7, 30 or 90 days, as main computes them.
 import { Coins, GitMerge, Inbox, MessagesSquare, Receipt, Timer, type LucideIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
 import { useApi, useTopic } from './api';
 
@@ -17,6 +17,8 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
   const [days, setDays] = useState<UsageRange>(7);
   const [data, setData] = useState<UsageDashboard>();
   const [error, setError] = useState<string>();
+  // Worked out again whenever a Session's status changes, as runs end and Sessions are archived.
+  const changed = sessions.reduce((latest, s) => Math.max(latest, s.updatedAt), 0);
 
   useEffect(() => {
     let current = true;
@@ -28,7 +30,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
     return () => {
       current = false;
     };
-  }, [api, days]);
+  }, [api, days, changed]);
 
   // Projects coloured by their place in the per-Project chart, the same in every chart.
   const colorOf = (projectId: number) => {
@@ -47,13 +49,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
         </span>
       </div>
       <div className="dash-filters">
-        <span className="seg" role="radiogroup" aria-label="Range">
-          {USAGE_RANGES.map((range) => (
-            <span key={range} role="radio" tabIndex={0} aria-checked={range === days} className={range === days ? 'on' : ''} onClick={() => setDays(range)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setDays(range)}>
-              {range} days
-            </span>
-          ))}
-        </span>
+        <RangePicker days={days} onChange={setDays} />
       </div>
       {error && (
         <div className="err" role="alert">
@@ -183,7 +179,14 @@ function Content({
                 {data.topSessions.map((top) => {
                   const found = sessions.find((s) => s.id === top.sessionId);
                   return (
-                    <tr key={top.sessionId} className={found ? 'click' : undefined} onClick={found ? () => onOpenSession(found) : undefined}>
+                    <tr
+                      key={top.sessionId}
+                      className={found ? 'click' : undefined}
+                      tabIndex={found ? 0 : undefined}
+                      title={found ? 'Open this Session' : undefined}
+                      onClick={found ? () => onOpenSession(found) : undefined}
+                      onKeyDown={found ? (e) => e.key === 'Enter' && onOpenSession(found) : undefined}
+                    >
                       <td>{top.title}</td>
                       <td>{top.project}</td>
                       <td>{references(top, projects)}</td>
@@ -202,6 +205,35 @@ function Content({
         </section>
       </div>
     </>
+  );
+}
+
+/** 7, 30 or 90 days, as a radio group: one tab stop, arrows to move. */
+function RangePicker({ days, onChange }: { days: UsageRange; onChange: (days: UsageRange) => void }) {
+  const group = useRef<HTMLSpanElement>(null);
+  const step = (by: number) => {
+    const next = USAGE_RANGES[(USAGE_RANGES.indexOf(days) + by + USAGE_RANGES.length) % USAGE_RANGES.length]!;
+    onChange(next);
+    group.current?.querySelectorAll('button')[USAGE_RANGES.indexOf(next)]?.focus();
+  };
+  return (
+    <span
+      ref={group}
+      className="seg"
+      role="radiogroup"
+      aria-label="Range"
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        step(e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1);
+      }}
+    >
+      {USAGE_RANGES.map((range) => (
+        <button key={range} type="button" role="radio" aria-checked={range === days} tabIndex={range === days ? 0 : -1} className={range === days ? 'on' : ''} onClick={() => onChange(range)}>
+          {range} days
+        </button>
+      ))}
+    </span>
   );
 }
 
