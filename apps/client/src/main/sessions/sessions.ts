@@ -37,7 +37,7 @@ export interface SessionsOptions {
   };
   /** The approval settings, as they are now. */
   approvals: () => ApprovalPolicy;
-  /** The models the agent offers in the Project's checkout (see `projects.models`). */
+  /** The models the agent offers in the Project's checkout (see `projects.models`); may reject when they can't be listed now. */
   models: (projectId: number) => Promise<ModelChoice[]>;
 }
 
@@ -164,7 +164,7 @@ export class Sessions {
 
   /** Newest first. */
   list(): Session[] {
-    return [...this.sessions.values()].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+    return [...this.sessions.values()].map((s) => (s.status !== 'archived' && this.agentStopped(s.id) ? { ...s, agentStopped: true } : s)).sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
   }
 
   async create(params: Commands['sessions.create']['params']): Promise<Session> {
@@ -264,10 +264,7 @@ export class Sessions {
 
   /** Sends `text` to a Waiting Session as the user's reply: it becomes Working. Its transcript must be read. */
   private reply(id: number, text: string): void {
-    const session = this.get(id);
     if (this.inRun(id)) throw new Error("The agent is waiting for an answer to what it asked; answer or dismiss it first.");
-    if (session.status === 'archived') throw new Error('This Session is archived.');
-    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     this.assertCanPrompt(id);
     this.addItem(id, { kind: 'user', text });
     this.setStatus(id, { status: 'working' });
@@ -319,6 +316,7 @@ export class Sessions {
   async sendNow({ id, queuedId }: { id: number; queuedId: number }): Promise<void> {
     this.get(id);
     await this.loadTranscript(id);
+    await this.switched(id);
     const message = this.queued(id, queuedId);
     if (this.inRun(id)) return this.interrupt(id, { sendNow: message.id });
     this.reply(id, message.text);
@@ -356,10 +354,14 @@ export class Sessions {
    */
   async setModel({ id, model, effort }: { id: number } & ModelPick): Promise<void> {
     this.get(id);
-    await this.loadTranscript(id);
     checkPick({ model, effort });
-    await this.switched(id);
-    const change = this.switchModel(id, { model, effort });
+    // Claimed at once, after the change before it, so changes go in the order they were made.
+    const before = this.switching.get(id);
+    const change = (async () => {
+      await before?.catch(() => {});
+      await this.loadTranscript(id);
+      await this.switchModel(id, { model, effort });
+    })();
     this.switching.set(id, change);
     try {
       await change;
@@ -374,12 +376,10 @@ export class Sessions {
   }
 
   private async switchModel(id: number, { model, effort }: ModelPick): Promise<void> {
-    const session = this.get(id);
-    if (session.status === 'archived') throw new Error('This Session is archived.');
-    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     if (this.inRun(id)) throw new Error('The model and Effort change only between runs: wait for the agent to finish, or stop it.');
-    // A change that could never apply: the agent's next prompt is refused.
+    // A change that could never apply is refused, as the prompt it would apply to is.
     this.assertCanPrompt(id);
+    const session = this.get(id);
     const was = { model: session.agentConfig?.model, effort: session.agentConfig?.effort };
     const running = { model: session.model ?? was.model, effort: session.effort ?? was.effort };
     const newModel = model !== undefined && model !== running.model;
@@ -393,6 +393,7 @@ export class Sessions {
         await agent.configure(next);
       } catch (error) {
         // Switched to the model but not to its Effort: back to what it ran with, so it shows what the Session runs.
+        // Should that fail too, the next prompt still sets what the Session runs, if a model was picked before.
         await agent.configure(was).catch(() => {});
         throw error;
       }
@@ -452,6 +453,7 @@ export class Sessions {
   async retry({ id }: { id: number }): Promise<void> {
     this.get(id);
     const items = (await this.loadTranscript(id)).value;
+    await this.switched(id);
     const session = this.get(id);
     const [prompt, error] = items.slice(-2);
     if (session.status !== 'waiting' || session.waitingReason !== 'error' || prompt?.kind !== 'user' || error?.kind !== 'error') {
@@ -635,9 +637,15 @@ export class Sessions {
 
   /** Throws if the Session's agent has stopped for good: Loom can't resume agents yet. */
   private assertCanPrompt(id: number): void {
-    if (!this.live.has(id) && this.get(id).agentSessionId && !this.restarted.has(id)) {
-      throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
-    }
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
+    if (this.agentStopped(id)) throw new Error("This Session's agent has stopped, and Loom can't resume it yet.");
+  }
+
+  /** Whether the Session's agent ran and has stopped for good: Loom can't resume agents yet. */
+  private agentStopped(id: number): boolean {
+    return !this.live.has(id) && !!this.get(id).agentSessionId && !this.restarted.has(id);
   }
 
   /**

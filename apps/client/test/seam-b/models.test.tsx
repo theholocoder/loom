@@ -193,6 +193,14 @@ describe('the model and Effort pickers in a Session', () => {
     expect(within(composer).getByRole('button', { name: 'Effort' })).toHaveProperty('disabled', true);
   });
 
+  it("are disabled once the Session's agent has stopped for good", () => {
+    const stopped: Session = { ...finished, agentConfig: undefined, model: 'opencode/pulse-free', agentStopped: true };
+    renderApp(new FakeMain({ projects: [project], sessions: [stopped] }));
+    const composer = open(stopped);
+
+    expect(within(composer).getByRole('button', { name: 'Model' })).toHaveProperty('disabled', true);
+  });
+
   it('shows why a change was refused', async () => {
     renderApp(
       new FakeMain(

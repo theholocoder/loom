@@ -224,6 +224,49 @@ describe('changing the model and Effort between runs', () => {
     expect(items.filter((i) => i.kind === 'user' || i.kind === 'model').map((i) => i.kind)).toEqual(['user', 'model', 'user']);
   });
 
+  it('makes changes given back to back one at a time, in order', async () => {
+    const { machine, checkout } = machineWith([], { holdConfig: 'switch' });
+    const { main, id } = await finishedSession(machine, checkout);
+
+    const changes = [
+      main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' }),
+      main.api.invoke('sessions.setModel', { id, effort: 'max' }),
+      main.api.invoke('sessions.setModel', { id, effort: 'low' }),
+    ];
+    machine.release('switch');
+    await Promise.all(changes);
+
+    expect(asked(machine).slice(3)).toEqual(['model=anthropic/claude-sonnet-5-5', 'effort=max', 'effort=low']);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ model: 'anthropic/claude-sonnet-5-5', effort: 'low' });
+    const items = await waitFor(main.api, 'transcript', (all) => markers(all).length === 3, { sessionId: id });
+    expect(markers(items).map(({ id: _, ...marker }) => marker)).toEqual([
+      { kind: 'model', model: 'anthropic/claude-sonnet-5-5' },
+      { kind: 'model', effort: 'max' },
+      { kind: 'model', effort: 'low' },
+    ]);
+  });
+
+  it('sends a queued message now only after a change in flight, after its marker', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['One.'], hold: 'first' }], { holdConfig: 'switch' });
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'First' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
+    await main.api.invoke('sessions.send', { id, prompt: 'Queued' });
+    await main.api.invoke('sessions.stop', { id });
+    machine.release('first');
+    const stopped = await waitFor(main.api, 'sessions', session(id, (s) => s.waitingReason === 'stopped'));
+    const queuedId = stopped.find((s) => s.id === id)!.queue![0]!.id;
+
+    const switching = main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' });
+    await until(() => asked(machine).includes('model=anthropic/claude-sonnet-5-5'));
+    const sending = main.api.invoke('sessions.sendNow', { id, queuedId });
+    machine.release('switch');
+    await Promise.all([switching, sending]);
+
+    const items = await waitFor(main.api, 'transcript', (all) => all.some((i) => i.kind === 'user' && i.text === 'Queued'), { sessionId: id });
+    expect(items.filter((i) => i.kind === 'user' || i.kind === 'model').map((i) => (i.kind === 'user' ? i.text : i.kind))).toEqual(['First', 'model', 'Queued']);
+  });
+
   it("puts the agent back on what it ran with when it takes the new model but turns down the Effort level", async () => {
     const { machine, checkout } = machineWith();
     const { main, id } = await finishedSession(machine, checkout);
@@ -246,6 +289,7 @@ describe('changing the model and Effort between runs', () => {
     await first.close();
     const second = await startMain({ machine, userDataDir });
 
+    expect((await second.api.invoke('sessions.list')).find((s) => s.id === id)!.agentStopped).toBe(true);
     await expect(second.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' })).rejects.toThrow(/stopped/);
   });
 
@@ -259,7 +303,7 @@ describe('changing the model and Effort between runs', () => {
     await exited;
     await waitFor(main.api, 'sessions', session(id, (s) => s.waitingReason === 'error'));
     main.clock.advance(1_000);
-    await waitFor(main.api, 'environments', ready);
+    await waitFor(main.api, 'environments', (envs) => envs.some((e) => e.id === 'native' && e.state === 'connected' && e.agent?.state === 'ready' && !e.agent.checking));
 
     await expect(main.api.invoke('sessions.setModel', { id, model: 'openai/gpt-old' })).rejects.toThrow(/openai\/gpt-old/);
     await expect(main.api.invoke('sessions.setModel', { id, model: 'opencode/pulse-free', effort: 'max' })).rejects.toThrow(/Effort/);

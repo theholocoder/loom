@@ -315,6 +315,12 @@ export interface Session {
   /** Set when its agent can take a queued message mid-run (Steer); otherwise Send now interrupts the run. */
   canSteer?: boolean;
   /**
+   * Set when its agent ran and has stopped for good, as after the Client
+   * restarted: Loom can't resume agents yet, so it takes no prompt, and its
+   * model and Effort can't change.
+   */
+  agentStopped?: boolean;
+  /**
    * The model the user picked, `provider/model`, and its Effort level: what
    * each prompt runs with, from the next one. Absent for the agent's own
    * choice (OpenCode's default model, or the model's default Effort).
@@ -773,8 +779,12 @@ export interface Commands {
    * level, or both, from the next prompt, adding a marker to its timeline.
    * A new model goes back to its default Effort unless one is given. Only
    * between runs: rejects while the agent is Working or waits on an answer,
-   * and for an archived Session. A running agent is switched at once, and
-   * rejects a model or Effort level it doesn't offer, changing nothing.
+   * and for a Session that can take no prompt (archived, its worktree
+   * missing, its agent stopped). A running agent is switched at once and
+   * rejects a model or Effort level it doesn't offer, changing nothing;
+   * with none running, the change is checked against `projects.models`
+   * when they can be listed. Changes go one at a time, in order, and a
+   * prompt sent meanwhile waits for them, coming after their markers.
    */
   'sessions.setModel': { params: { id: number } & ModelPick; result: void };
   /** Gives a queued message to the agent mid-run, for an agent that can be steered (`canSteer`). */

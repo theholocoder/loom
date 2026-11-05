@@ -330,7 +330,7 @@ export function SessionView({
   const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust' || i.kind === 'approval') && i.state === 'asked') : undefined;
   const asked = firstAsked !== undefined;
   // Between runs only: not while the agent works, or waits on an answer.
-  const pickersDisabled = working || asked || session.status === 'archived' || !!session.worktreeMissing;
+  const pickersDisabled = working || asked || session.status === 'archived' || !!session.worktreeMissing || !!session.agentStopped;
   const { agentConfig } = session;
   // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
   const checkoutModels = useCheckoutModels(agentConfig ? undefined : session.projectId);
