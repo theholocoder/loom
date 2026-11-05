@@ -66,7 +66,7 @@ function branchLabel(branch: ExistingBranch): string {
 /** The existing-worktree picker's options: the worktrees first, by branch, then the branches a new worktree can check out. */
 function existingOptions(branches: Branches): PickerOption<ExistingPick>[] {
   return [
-    ...branches.worktrees.map((worktree) => ({ ...existingKey({ worktree }), detail: worktree.path, value: { worktree } })),
+    ...branches.worktrees.map((worktree) => ({ ...existingKey({ worktree }), value: { worktree } })),
     ...branches.existing.map((branch) => ({ ...existingKey({ branch }), detail: 'new worktree', value: { branch } })),
   ];
 }
