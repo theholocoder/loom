@@ -135,7 +135,7 @@ export interface AgentSession {
   cancel(): void;
   /** Gives the agent `text` mid-run, for an agent that can be steered (`AgentAdapter.canSteer`). */
   steer?(prompt: AgentPrompt): void;
-  /** Ends the agent's process. */
+  /** Ends the agent's process; resolves once it has exited, killed if it doesn't within a few seconds. */
   close(): Promise<void>;
 }
 

@@ -92,7 +92,7 @@ export class Sessions {
   private live = new Map<number, AgentSession>();
   /** The pending idle stop of each Waiting Session's agent (IDLE_STOP_MS). */
   private readonly idleStops = new Map<number, TimerHandle>();
-  /** Idle agents still closing, by Session: the next one opened for the Session waits, so two never share its conversation. */
+  /** Idle agents still closing, by Session: the next one opened for the Session waits for the process to exit, so two never share its conversation. */
   private readonly closing = new Map<number, Promise<void>>();
   /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
   private readonly diffSummaries = new Map<string, DiffSummary>();

@@ -4,7 +4,7 @@
 import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type ToolStatus } from '../../shared/api';
 import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
-import { AcpConnection } from './acp';
+import { AcpConnection, AcpError } from './acp';
 
 /** How to start one ACP agent. */
 export interface AcpProfile {
@@ -18,6 +18,12 @@ export interface AcpProfile {
 }
 
 const PROTOCOL_VERSION = 1;
+
+/**
+ * How long an agent gets to exit once its stdin is closed before it is
+ * killed. Real time rather than the Clock, like the bridge's own shutdown.
+ */
+const EXIT_GRACE_MS = 5_000;
 
 /** The name Loom's MCP server goes by: agents prefix its tools with it (OpenCode: `loom_link_merge_request`). */
 export const LOOM_MCP_SERVER = 'loom';
@@ -50,6 +56,8 @@ export class AcpAdapter implements AgentAdapter {
     let sessionId: string | undefined;
     /** While `session/load` replays the conversation's history, which Loom has already. */
     let replaying = false;
+    /** Once opening has failed: the process is killed, and its end is no news for the Session. */
+    let abandoned = false;
     /** The agent's config options as it last reported them, and what Loom reads of them. */
     let options: ConfigOption[] = [];
     let config: AgentConfig = configOf(options);
@@ -118,6 +126,7 @@ export class AcpAdapter implements AgentAdapter {
       },
       onClose: (reason) => {
         asked.clear();
+        if (abandoned) return;
         onEvent({ type: 'closed', error: reason });
       },
     });
@@ -141,25 +150,31 @@ export class AcpAdapter implements AgentAdapter {
         const params = { sessionId, cwd: workingCopy, mcpServers };
         const capabilities = initialized?.agentCapabilities;
         // `session/resume` takes the conversation up as it is; failing that, `session/load` replays it first.
+        // Only the agent's own answer turns it down: a process or transport that fails is a failure to start.
+        const refusal = (error: unknown) => {
+          if (error instanceof AcpError) return error;
+          throw error;
+        };
         const resumed = capabilities?.sessionCapabilities?.resume
-          ? await connection.request<{ configOptions?: unknown }>('session/resume', params).catch((error: Error) => error)
-          : new Error(`${this.profile.name} can't resume a conversation`);
+          ? await connection.request<{ configOptions?: unknown }>('session/resume', params).catch(refusal)
+          : new AcpError(0, `${this.profile.name} can't resume a conversation`);
         let taken = resumed;
-        if (resumed instanceof Error && capabilities?.loadSession === true) {
+        if (resumed instanceof AcpError && capabilities?.loadSession === true) {
           replaying = true;
-          taken = await connection.request<{ configOptions?: unknown }>('session/load', params).catch((error: Error) => error);
-          replaying = false;
+          try {
+            taken = await connection.request<{ configOptions?: unknown }>('session/load', params).catch(refusal);
+          } finally {
+            replaying = false;
+          }
         }
-        if (taken instanceof Error) {
-          await channel.kill().catch(() => {});
-          throw new ResumeRefused(`${this.profile.name} could not resume this Session's conversation: ${taken.message}`);
-        }
+        if (taken instanceof AcpError) throw new ResumeRefused(`${this.profile.name} could not resume this Session's conversation: ${taken.message.replace(/\.$/, '')}`);
         reported = taken?.configOptions;
       }
       configured(reported);
     } catch (error) {
-      if (error instanceof ResumeRefused) throw error;
+      abandoned = true;
       await channel.kill().catch(() => {});
+      if (error instanceof ResumeRefused) throw error;
       throw new Error(`${this.profile.name} could not start a session: ${(error as Error).message}`);
     }
     const id = sessionId;
@@ -194,7 +209,13 @@ export class AcpAdapter implements AgentAdapter {
         for (const request of [...asked.values()]) request.cancel();
         void connection.notify('session/cancel', { sessionId: id }).catch(() => {});
       },
-      close: () => connection.end(),
+      close: async () => {
+        await connection.end().catch(() => {});
+        let grace: ReturnType<typeof setTimeout> | undefined;
+        const kill = new Promise<void>((resolve) => (grace = setTimeout(resolve, EXIT_GRACE_MS)));
+        if ((await Promise.race([connection.exited.then(() => 'exited'), kill])) !== 'exited') await channel.kill().catch(() => {});
+        clearTimeout(grace);
+      },
     };
   }
 }
