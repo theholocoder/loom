@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { git, startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine } from './harness';
@@ -65,7 +65,7 @@ describe('attachments', () => {
     ]);
     // The agent reads the copy in its own Environment, under its real name.
     const copy = fileURLToPath(prompt![1]!.uri as string);
-    expect(copy.endsWith('/config.yaml')).toBe(true);
+    expect(basename(copy)).toBe('config.yaml');
     expect(readFileSync(copy, 'utf8')).toBe(content);
   });
 
