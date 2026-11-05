@@ -4,7 +4,7 @@
 import type { Element, ElementContent } from 'hast';
 import { Check, Copy, TriangleAlert } from 'lucide-react';
 import type { Html, Nodes, PhrasingContent, Root } from 'mdast';
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
@@ -151,10 +151,12 @@ const USER_REMARK = [...REMARK, remarkBreaks];
 const REHYPE = [rehypeHighlight];
 
 export function Markdown({ text, breaks = false }: { text: string; breaks?: boolean }) {
+  // Each message's own prefix for its ids, so its footnote links find its own footnotes.
+  const prefix = `md${useId().replace(/[^\w-]/g, '')}-`;
   return (
     <div className="md">
       <MessageSource value={text}>
-        <ReactMarkdown remarkPlugins={breaks ? USER_REMARK : REMARK} rehypePlugins={REHYPE} components={COMPONENTS}>
+        <ReactMarkdown remarkPlugins={breaks ? USER_REMARK : REMARK} rehypePlugins={REHYPE} remarkRehypeOptions={{ clobberPrefix: prefix }} components={COMPONENTS}>
           {text}
         </ReactMarkdown>
       </MessageSource>

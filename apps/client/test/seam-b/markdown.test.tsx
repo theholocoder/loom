@@ -208,6 +208,16 @@ describe('Markdown in chat messages', () => {
     expect(main.invoked.filter((i) => i.command === 'links.open')).toEqual([]);
   });
 
+  it("jumps from a footnote reference to its own message's footnote", () => {
+    const { chat, show } = openSession();
+
+    show({ kind: 'agent', id: 1, text: 'First[^1].\n\n[^1]: One.', streaming: false }, { kind: 'agent', id: 2, text: 'Second[^1].\n\n[^1]: Two.', streaming: false });
+
+    const [, second] = within(chat()).getAllByRole('link', { name: '1' }) as [HTMLElement, HTMLElement];
+    const target = chat().querySelector(`[id="${second.getAttribute('href')!.slice(1)}"]`);
+    expect(target?.textContent).toContain('Two.');
+  });
+
   it('renders a replayed transcript on an Archived Session the same as a live one', () => {
     const { chat, show } = openSession({ ...finished, status: 'archived', waitingReason: undefined });
 
