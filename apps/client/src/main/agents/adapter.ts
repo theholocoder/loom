@@ -135,11 +135,13 @@ export interface AgentPrompt {
 export interface PromptFile {
   /** Its path in the Environment. */
   path: string;
+  /** Its file name, as the user attached it. */
   name: string;
   mimeType: string;
+  /** In bytes. */
   size: number;
-  /** Its content, for an agent that takes images inline. */
-  data: Uint8Array;
+  /** An image's content, for an agent that takes images inline; absent for any other file. */
+  data?: Uint8Array;
 }
 
 /** The user's response to an agent's request: an answer to its question (null dismisses it), whether to trust, or whether to go ahead once. */

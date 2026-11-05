@@ -35,6 +35,10 @@ The agent has finished, was stopped or interrupted, hit an error, is stuck, has 
 **Queued message**:
 A message the user sent a **Working** Session, waiting in the Session's queue to be sent to the agent once the runs before it settle. The user can remove it, or send it now: interrupt the run and send it. **Stop** interrupts the run and keeps the queue. "The queue" always means a Session's queued messages, never the **Inbox**.
 
+**Attachment**:
+A file or image the user sends with a message. Loom keeps it with the **Session**'s history on the **Client** machine, and writes a copy into the **Environment** for the agent to read with that message.
+_Avoid_: Upload
+
 **Approval request**:
 The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
 _Avoid_: Permission prompt, confirmation

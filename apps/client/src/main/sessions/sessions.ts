@@ -169,22 +169,28 @@ export class Sessions {
   }
 
   /** The files in the Session's working copy, for @-mentions. */
-  async files(id: number): Promise<string[]> {
+  files(id: number): Promise<string[]> {
     const session = this.get(id);
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
-    const environment = this.environmentOf(session);
-    await environment.ready();
-    return listFiles(environment, session.workingCopy.path, MAX_LISTED_FILES);
+    return this.listFilesIn(session.projectId, session.workingCopy.path);
   }
 
-  /** The files in the Project's checkout, for @-mentions before a Session exists. */
-  async projectFiles(projectId: number): Promise<string[]> {
+  /**
+   * The files in the Project's checkout, or at `ref` there (a branch, as git
+   * names it), for @-mentions before a Session exists.
+   */
+  projectFiles(projectId: number, ref?: string): Promise<string[]> {
     const project = this.options.project(projectId);
     if (!project) throw new Error(`unknown Project ${projectId}`);
+    if (ref !== undefined && (typeof ref !== 'string' || !ref || ref.startsWith('-'))) throw new Error('A ref needs a name.');
+    return this.listFilesIn(projectId, project.checkout.path, ref);
+  }
+
+  private async listFilesIn(projectId: number, path: string, ref?: string): Promise<string[]> {
     const environment = this.environmentOf({ projectId });
     await environment.ready();
-    return listFiles(environment, project.checkout.path, MAX_LISTED_FILES);
+    return listFiles(environment, path, MAX_LISTED_FILES, ref);
   }
 
   /** Newest first. */
@@ -206,7 +212,7 @@ export class Sessions {
       if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch or worktree doesn't name or base a new one.");
     }
     const newAttachments = checkAttachments(params.attachments);
-    const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt, newAttachments.length > 0);
+    const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt, { attached: newAttachments.length > 0 });
     let path = project.checkout.path;
     let branch: string | null = null;
     if (existing && 'worktree' in existing) {
@@ -274,13 +280,16 @@ export class Sessions {
     try {
       if (newAttachments.length) attachments = await this.options.attachments.store(id, newAttachments);
     } catch (error) {
-      // A Session without its first message would be nothing to come back to.
+      // A Session without its first message would be nothing to come back to: undone, with the worktree made for it.
       this.sessions.delete(id);
       await this.options.db.deleteFrom('sessions').where('id', '=', id).execute();
       await this.options.attachments.remove(id).catch(() => {});
+      if (workingCopy === 'worktree' && !(existing && 'worktree' in existing)) {
+        await removeWorktree(this.environmentOf({ projectId }), { checkout: project.checkout.path, path, force: true }).catch(() => {});
+      }
       throw new Error(`Loom could not keep the attachments: ${(error as Error).message}`);
     }
-    const message = withoutUndefined({ text, attachments });
+    const message = messageOf({ text, attachments });
     this.transcripts.set(id, new Topic<TranscriptItem[]>([]));
     this.addItem(id, { kind: 'user', ...message });
     this.publish();
@@ -291,11 +300,13 @@ export class Sessions {
 
   async send({ id, prompt, attachments: attached }: Commands['sessions.send']['params']): Promise<void> {
     const newAttachments = checkAttachments(attached);
-    const text = promptText(prompt, newAttachments.length > 0);
+    const text = promptText(prompt, { attached: newAttachments.length > 0 });
     this.get(id);
+    // A prompt that can't go is turned down before its attachments are kept.
+    if (this.get(id).status !== 'working') this.assertCanReply(id);
     // Kept at once: a message held back by a change of model, or queued, keeps them too.
     const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
-    const message = withoutUndefined({ text, attachments });
+    const message = messageOf({ text, attachments });
     await this.loadTranscript(id);
     // A change of model or Effort made just before goes first: the marker, then this prompt on it.
     await this.switched(id);
@@ -305,8 +316,7 @@ export class Sessions {
 
   /** Sends `message` to a Waiting Session as the user's reply: it becomes Working. Its transcript must be read. */
   private reply(id: number, message: Message): void {
-    if (this.inRun(id)) throw new Error("The agent is waiting for an answer to what it asked; answer or dismiss it first.");
-    this.assertCanPrompt(id);
+    this.assertCanReply(id);
     this.addItem(id, { kind: 'user', ...message });
     this.setStatus(id, { status: 'working' });
     void this.run(id, message);
@@ -377,16 +387,17 @@ export class Sessions {
     await this.loadTranscript(id);
     const message = this.queued(id, queuedId);
     const agent = this.live.get(id);
+    /** The agent's steer, throwing unless it can take the message now. */
     const steerable = () => {
       if (!this.options.adapter.canSteer || !agent?.steer) throw new Error(`${this.options.adapter.name} can't take a message mid-run: use Send now.`);
       if (this.get(id).status !== 'working' || this.interrupting.has(id) || this.live.get(id) !== agent) throw new Error('The agent is not working on this Session: use Send now.');
       return agent.steer.bind(agent);
     };
-    steerable();
+    steerable(); // checked before writing the files, which may take a while
     const files = await this.deliver(id, message.attachments);
     // The run may have ended, or the message gone, while the files were written.
     const steer = steerable();
-    this.queued(id, queuedId);
+    this.queued(id, queuedId); // throws if it's gone
     this.dequeue(id, message.id);
     this.endStreaming(id);
     this.addItem(id, { kind: 'user', ...messageOf(message) });
@@ -514,7 +525,7 @@ export class Sessions {
     this.setStatus(id, { status: 'working' });
     // Starting again sets the Environment starting at once, so the run waits for it.
     environment.restart().catch(() => {});
-    void this.run(id, withoutUndefined({ text: prompt.text, attachments: prompt.attachments }));
+    void this.run(id, messageOf(prompt));
   }
 
   /** Sends the agent the Merge request prompt shortcut. */
@@ -682,6 +693,12 @@ export class Sessions {
   /** Whether the Session's agent is mid-run: working, or waiting on the user's answer to something it asked. */
   private inRun(id: number): boolean {
     return this.get(id).status === 'working' || this.asks.has(id);
+  }
+
+  /** Throws unless the Session can take a reply: its agent waits on no answer, and can be prompted. */
+  private assertCanReply(id: number): void {
+    if (this.inRun(id)) throw new Error("The agent is waiting for an answer to what it asked; answer or dismiss it first.");
+    this.assertCanPrompt(id);
   }
 
   /** Throws if the Session's agent has stopped for good: Loom can't resume agents yet. */
@@ -1363,15 +1380,15 @@ export class Sessions {
 }
 
 /** The prompt's text, trimmed; it may be empty only with files attached. */
-function promptText(prompt: string, attached = false): string {
+function promptText(prompt: string, { attached = false } = {}): string {
   if (typeof prompt !== 'string') throw new Error('A prompt must be text.');
   const text = prompt.trim();
   if (!text && !attached) throw new Error('A prompt needs some text.');
   return text;
 }
 
-/** A queued message as what is sent: its text and attachments. */
-function messageOf({ text, attachments }: QueuedMessage): Message {
+/** What is sent of a queued message or a user's transcript item: its text and attachments. */
+function messageOf({ text, attachments }: Message): Message {
   return withoutUndefined({ text, attachments });
 }
 

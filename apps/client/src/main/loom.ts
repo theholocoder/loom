@@ -165,8 +165,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
-    // Only checking what the user picked: not worth holding the change while the Environment starts.
     attachments: new Attachments(options.userDataDir),
+    // Only checking what the user picked: not worth holding the change while the Environment starts.
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
   sessions.set(sessionService.list());
@@ -214,7 +214,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
     'projects.models': ({ id }) => listModels(id),
-    'projects.files': ({ id }) => sessionService.projectFiles(id),
+    'projects.files': ({ id, ref }) => sessionService.projectFiles(id, ref),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
     },

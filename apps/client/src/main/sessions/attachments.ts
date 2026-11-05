@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, type Attachment, type NewAttachment } from '../../shared/api';
+import { isImage, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, type Attachment, type NewAttachment } from '../../shared/api';
 import type { PromptFile } from '../agents/adapter';
 import type { BridgeCall } from '../environments/exec';
 
@@ -36,6 +36,12 @@ const MIME_TYPES: Record<string, string> = {
   txt: 'text/plain',
   log: 'text/plain',
 };
+
+/** What delivering attachments needs of the Session's Environment: its bridge, and its temp directory. */
+export interface AttachmentEnvironment {
+  request: BridgeCall;
+  tempDir: string;
+}
 
 export class Attachments {
   /** `userDataDir` is where the attachments folder goes. */
@@ -69,13 +75,14 @@ export class Attachments {
    * freely, and says where they are. Written again each time, the temp
    * directory being anyone's to clear.
    */
-  async deliver(sessionId: number, attachments: Attachment[], environment: { request: BridgeCall; tempDir: string }): Promise<PromptFile[]> {
+  async deliver(sessionId: number, attachments: Attachment[], environment: AttachmentEnvironment): Promise<PromptFile[]> {
     const files: PromptFile[] = [];
     for (const attachment of attachments) {
       const data = await readFile(this.path(sessionId, attachment));
       const path = `${environment.tempDir}/loom-attachments/${sessionId}/${attachment.hash}/${attachment.name}`;
       await environment.request('files.write', WRITE_TIMEOUT_MS, { path, data: data.toString('base64') });
-      files.push({ path, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size, data });
+      // Only an image's content is kept for the agent; the rest it reads from its copy.
+      files.push({ path, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size, ...(isImage(attachment.mimeType) ? { data } : {}) });
     }
     return files;
   }

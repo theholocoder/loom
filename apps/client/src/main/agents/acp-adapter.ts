@@ -1,7 +1,7 @@
 // An AgentAdapter for any agent that speaks ACP v1 over stdio, one process per
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
-import type { AgentConfig, Answer, ModelChoice, ModelPick, QuestionField, QuestionOption, ToolStatus } from '../../shared/api';
+import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type ToolStatus } from '../../shared/api';
 import type { AgentAdapter, AgentEvent, AgentPrompt, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection } from './acp';
@@ -181,7 +181,7 @@ function promptBlocks({ text, files }: AgentPrompt, images: boolean): Array<Reco
     ...(text ? [{ type: 'text', text }] : []),
     ...files.map(({ path, name, mimeType, size, data }) => {
       const uri = fileUri(path);
-      if (images && mimeType.startsWith('image/')) return { type: 'image', mimeType, data: Buffer.from(data).toString('base64'), uri };
+      if (images && isImage(mimeType) && data) return { type: 'image', mimeType, data: Buffer.from(data).toString('base64'), uri };
       return { type: 'resource_link', name, uri, mimeType, size };
     }),
   ];

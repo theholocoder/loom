@@ -372,12 +372,19 @@ export interface NewAttachment {
  * message, written into the Session's Environment through its bridge.
  */
 export interface Attachment {
+  /** Its file name, as a plain name with no folder. */
   name: string;
+  /** Its media type, as the renderer gave it or guessed from its name. */
   mimeType: string;
   /** In bytes. */
   size: number;
   /** Its content's SHA-256, in hex. */
   hash: string;
+}
+
+/** Whether a media type is an image's, which goes to the agent as an image when it takes them. */
+export function isImage(mimeType: string): boolean {
+  return mimeType.startsWith('image/');
 }
 
 /** The most files `sessions.files` and `projects.files` list. */
@@ -719,8 +726,13 @@ export interface Commands {
    * Models the user turned off are left out.
    */
   'projects.models': { params: { id: number }; result: ModelChoice[] };
-  /** The files in the Project's checkout, as `sessions.files` lists a Session's, for @-mentions before a Session exists. */
-  'projects.files': { params: { id: number }; result: string[] };
+  /**
+   * The files in the Project's checkout, as `sessions.files` lists a
+   * Session's, for @-mentions before a Session exists; with `ref`, the
+   * files git has on that branch (`origin/main`, `loom/spike`) instead, for
+   * a new worktree starting from it. Rejects a ref git doesn't know.
+   */
+  'projects.files': { params: { id: number; ref?: string }; result: string[] };
   /** The Loom window got focus: read every Session's branch and worktree again. */
   'sessions.check': { params: void; result: void };
   /**

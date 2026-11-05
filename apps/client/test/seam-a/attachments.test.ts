@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine } from './harness';
+import { git, startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine } from './harness';
 import type { EnvironmentStatus, Session } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -108,7 +108,13 @@ describe('attachments', () => {
     const { machine, checkout } = machineWith([{ chunks: ['Working on it.'], hold: 'first' }]);
     const userDataDir = tempDir('loom-attachments-');
     const { main, project } = await withProject(machine, checkout, userDataDir);
-    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Refactor billing' });
+    const first = { name: 'schema.sql', mimeType: 'application/octet-stream', size: 9, hash: sha256('create;\n\n') };
+    const { id } = await main.api.invoke('sessions.create', {
+      projectId: project.id,
+      workingCopy: 'checkout',
+      prompt: 'Refactor billing',
+      attachments: [{ name: 'schema.sql', data: bytes('create;\n\n') }],
+    });
     await waitFor(main.api, 'transcript', (list) => list.some((i) => i.kind === 'agent'), { sessionId: id });
     const attachment = { name: 'design.md', mimeType: 'text/markdown', size: 7, hash: sha256('# Plan\n') };
 
@@ -122,7 +128,22 @@ describe('attachments', () => {
     await waitFor(again.api, 'environments', ready);
     const [restarted] = (await again.api.invoke('sessions.list')).filter((s) => s.id === id);
     expect(restarted!.queue).toEqual([{ id: expect.any(Number), text: 'Follow this', attachments: [attachment] }]);
+    const [sent] = await waitFor(again.api, 'transcript', (list) => list.length > 0, { sessionId: id });
+    expect(sent).toEqual({ kind: 'user', id: 0, text: 'Refactor billing', attachments: [first] });
     expect(readFileSync(join(userDataDir, 'attachments', String(id), `${attachment.hash}.md`), 'utf8')).toBe('# Plan\n');
+  });
+
+  it("keeps nothing of a reply's attachments when the Session can't take it", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-attachments-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Hi' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await main.api.invoke('sessions.archive', { id });
+
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'More', attachments: [{ name: 'late.txt', data: bytes('late') }] })).rejects.toThrow('archived');
+
+    expect(existsSync(join(userDataDir, 'attachments', String(id)))).toBe(false);
   });
 
   it('turns down what it cannot attach', async () => {
@@ -158,5 +179,20 @@ describe('@-mentions', () => {
     expect(files).toContain('.gitignore');
     expect(files.some((f) => f.startsWith('dist/'))).toBe(false);
     expect(await main.api.invoke('projects.files', { id: project.id })).toEqual(files);
+  });
+
+  it('lists the files git has on a branch, for a new worktree starting from it', async () => {
+    const { machine, checkout } = machineWith([]);
+    machine.commit(checkout, 'README.md', 'hi\n');
+    git(checkout, 'switch', '--quiet', '-c', 'spike');
+    machine.commit(checkout, 'spike.ts', 'export {};\n');
+    git(checkout, 'switch', '--quiet', '-');
+    writeFileSync(join(checkout, 'local.txt'), 'not committed\n');
+    const { main, project } = await withProject(machine, checkout);
+
+    expect(await main.api.invoke('projects.files', { id: project.id, ref: 'spike' })).toEqual(expect.arrayContaining(['README.md', 'spike.ts']));
+    expect(await main.api.invoke('projects.files', { id: project.id, ref: 'spike' })).not.toContain('local.txt');
+    expect(await main.api.invoke('projects.files', { id: project.id })).not.toContain('spike.ts');
+    await expect(main.api.invoke('projects.files', { id: project.id, ref: 'no-such-branch' })).rejects.toThrow("Couldn't list");
   });
 });

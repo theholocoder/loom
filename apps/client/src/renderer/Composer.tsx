@@ -3,7 +3,7 @@
 // files, and `/` for the palette's actions.
 import { ArrowUp, FileText, Image, ListPlus, Paperclip, Square, SquareTerminal, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import type { Attachment, NewAttachment } from '../shared/api';
+import { isImage, type Attachment, type NewAttachment } from '../shared/api';
 import type { PaletteAction } from './CommandPalette';
 import { stepIndex } from './Popover';
 import { shortcutLabel } from './shortcuts';
@@ -83,7 +83,9 @@ export function Composer({
     clearedFor.current = clearKey;
     setDraft('');
   }, [clearKey]);
-  const [files, setFiles] = useState<File[]>([]);
+  /** The files attached so far, each with a key of its own: the same file may be attached twice. */
+  const [files, setFiles] = useState<Array<{ key: number; file: File }>>([]);
+  const nextKey = useRef(0);
   const attachable = canAttach && !disabled;
   const attached = attachable ? files : [];
   const [sending, setSending] = useState(false);
@@ -91,7 +93,7 @@ export function Composer({
   const picker = useRef<HTMLInputElement>(null);
   const attach = (added: Iterable<File>) => {
     const list = [...added];
-    if (list.length) setFiles((current) => [...current, ...list]);
+    if (list.length) setFiles((current) => [...current, ...list.map((file) => ({ key: nextKey.current++, file }))]);
   };
 
   const menu = useMenu({ draft, caret, commands, loadFiles });
@@ -101,7 +103,7 @@ export function Composer({
     if (!canSend) return;
     setSending(true);
     try {
-      const attachments = await Promise.all(attached.map(readAttachment));
+      const attachments = await Promise.all(attached.map(({ file }) => readAttachment(file)));
       if (await onSend(draft, attachments)) {
         setDraft('');
         setFiles([]);
@@ -171,20 +173,18 @@ export function Composer({
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
         {attached.length > 0 && (
           <ul className="attachments" aria-label="Attachments">
-            {attached.map((file, index) => (
-              <li key={index} className="chip" title={`${file.name} · ${sizeLabel(file.size)}`}>
-                {file.type.startsWith('image/') ? <Image className="sm" /> : <FileText className="sm" />}
-                <span className="ellipsis">{file.name || 'Pasted file'}</span>
+            {attached.map(({ key, file }) => (
+              <AttachmentChip key={key} name={file.name || 'Pasted file'} mimeType={file.type} size={file.size}>
                 <button
                   className="icon-btn sm"
                   type="button"
                   aria-label={`Remove ${file.name || 'Pasted file'}`}
                   title="Remove"
-                  onClick={() => setFiles((current) => current.filter((_, at) => at !== index))}
+                  onClick={() => setFiles((current) => current.filter((f) => f.key !== key))}
                 >
                   <X className="sm" />
                 </button>
-              </li>
+              </AttachmentChip>
             ))}
           </ul>
         )}
@@ -279,8 +279,10 @@ function useMenu({ draft, caret, commands, loadFiles }: { draft: string; caret: 
 } {
   const command = commands.length ? /^\/([^\n]*)$/.exec(draft) : null;
   const mention = !command && loadFiles ? /(^|\s)@([^\s@]*)$/.exec(draft.slice(0, caret)) : null;
+  /** Where the mention's `@` is. */
+  const mentionStart = mention ? caret - mention[2]!.length - 1 : -1;
   /** What the menu is about: closing it closes it for that only. */
-  const trigger = command ? 'command' : mention ? `mention:${caret - mention[2]!.length - 1}` : undefined;
+  const trigger = command ? 'command' : mention ? `mention:${mentionStart}` : undefined;
   const [dismissed, setDismissed] = useState<string>();
   const [active, setActive] = useState(0);
   const [files, setFiles] = useState<{ list?: string[]; loading: boolean; error?: string }>({ loading: false });
@@ -312,7 +314,7 @@ function useMenu({ draft, caret, commands, loadFiles }: { draft: string; caret: 
       open = { kind: 'command', options, active: stepIndex(active, options.length) };
     } else if (mention) {
       const options = matchFiles(files.list ?? [], query);
-      open = { kind: 'mention', options, active: stepIndex(active, options.length), start: caret - mention[2]!.length - 1, loading: files.loading && !files.list, ...(files.error ? { error: files.error } : {}) };
+      open = { kind: 'mention', options, active: stepIndex(active, options.length), start: mentionStart, loading: files.loading && !files.list, ...(files.error ? { error: files.error } : {}) };
     }
   }
   return { open, setActive, dismiss: () => setDismissed(trigger) };
@@ -394,13 +396,22 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
   return (
     <ul className="attachments" aria-label="Attachments">
       {attachments.map((attachment, index) => (
-        <li key={index} className="chip" title={`${attachment.name} · ${sizeLabel(attachment.size)}`}>
-          {attachment.mimeType.startsWith('image/') ? <Image className="sm" /> : <FileText className="sm" />}
-          <span className="ellipsis">{attachment.name}</span>
+        <AttachmentChip key={index} {...attachment}>
           <span className="muted">{sizeLabel(attachment.size)}</span>
-        </li>
+        </AttachmentChip>
       ))}
     </ul>
+  );
+}
+
+/** One attached file or image, by name, with what follows it: its size, or a Remove button. */
+function AttachmentChip({ name, mimeType, size, children }: Pick<Attachment, 'name' | 'mimeType' | 'size'> & { children: ReactNode }) {
+  return (
+    <li className="chip" title={`${name} · ${sizeLabel(size)}`}>
+      {isImage(mimeType) ? <Image className="sm" /> : <FileText className="sm" />}
+      <span className="ellipsis">{name}</span>
+      {children}
+    </li>
   );
 }
 

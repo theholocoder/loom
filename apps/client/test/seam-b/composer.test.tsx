@@ -121,6 +121,21 @@ describe('attachments when starting a Session', () => {
 });
 
 describe('@-mentions', () => {
+  it("suggests, when starting a new worktree, the files of the branch it starts from", async () => {
+    const main = new FakeMain({ projects: [project] }, { 'projects.files': () => ['README.md'], 'projects.branches': () => ({ defaultBranch: 'trunk', remote: ['trunk'], existing: [], worktrees: [] }) });
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter Projects' }), { key: 'Enter' });
+    const composer = within(screen.getByRole('form', { name: 'Composer' }));
+    await waitFor(() => expect(composer.getByRole('button', { name: 'Branch from' }).textContent).toBe('origin/trunk'));
+
+    type(composer.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement, 'See @READ');
+
+    await composer.findByRole('option', { name: 'README.md' });
+    expect(main.invoked.find((i) => i.command === 'projects.files')?.params).toEqual({ id: project.id, ref: 'origin/trunk' });
+  });
+
   const files = ['README.md', 'src/billing/invoice.ts', 'src/billing/refund.ts', 'test/invoice.test.ts'];
 
   it("suggests the working copy's files as the user types after @, and puts the one picked in the prompt", async () => {

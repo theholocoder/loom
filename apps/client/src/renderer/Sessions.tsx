@@ -97,6 +97,17 @@ function workingCopyParams(
   }
 }
 
+/**
+ * Where a new Session's files for @-mentions come from: the branch a new
+ * worktree starts from or checks out, or else the checkout itself (whose
+ * files an existing worktree's are close to).
+ */
+function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: ExistingPick; base?: string }): { ref?: string } {
+  if (choice === 'worktree' && base) return { ref: `origin/${base}` };
+  if (choice === 'existing' && existing && 'branch' in existing) return { ref: branchLabel(existing.branch) };
+  return {};
+}
+
 /** Starting a Session: which Project, which working copy, and the first prompt. */
 /** `pickIssue` opens the issue picker at once, for starting from an issue. */
 /** `commands` are what the composer's `/` offers: the palette's actions. */
@@ -169,8 +180,7 @@ export function NewSession({
           placeholder={`Tell ${OPENCODE_NAME} what to do…`}
           onSend={start}
           onDraftChange={setDraft}
-          // A new worktree starts from the checkout's files.
-          loadFiles={() => api.invoke('projects.files', { id: chosen.id })}
+          loadFiles={() => api.invoke('projects.files', { id: chosen.id, ...filesRef(workingCopy, { existing, base }) })}
           commands={commands}
           canSendEmpty={!!issue}
           disabled={workingCopy === 'existing' && !existing}
