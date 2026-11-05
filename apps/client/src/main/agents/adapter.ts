@@ -2,7 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
-import type { AgentConfig, Answer, ApprovalPolicy, QuestionField, ToolStatus } from '../../shared/api';
+import type { AgentConfig, Answer, ApprovalPolicy, ModelPick, QuestionField, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -122,12 +122,6 @@ export interface AgentSession {
   steer?(text: string): void;
   /** Ends the agent's process. */
   close(): Promise<void>;
-}
-
-/** A model, `provider/model`, and an Effort level to run with; what is absent stays as it is. */
-export interface ModelPick {
-  model?: string;
-  effort?: string;
 }
 
 /** The user's response to an agent's request: an answer to its question (null dismisses it), whether to trust, or whether to go ahead once. */

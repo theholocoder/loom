@@ -77,6 +77,15 @@ export interface ModelChoice {
   efforts?: string[];
 }
 
+/** A model, `provider/model`, and an Effort level to run with; what is absent stays as it is, or is the agent's own. */
+export interface ModelPick {
+  model?: string;
+  effort?: string;
+}
+
+/** The Effort level a model runs with until another is picked, among the levels OpenCode offers for every model taking any. */
+export const DEFAULT_EFFORT = 'default';
+
 /**
  * The models and Effort levels a Session's agent offers, and what it runs
  * with now, as its config options last said.
@@ -724,6 +733,10 @@ export interface Commands {
    * Started from an `issue`, the Session is linked to it, its first prompt
    * starts with the issue's number, title, URL and body (`prompt` may then be
    * empty), and the branch suggested is `<prefix>/<issue#>-<slug of the title>`.
+   *
+   * `model` (see `projects.models`) and `effort` are what its first prompt
+   * runs with; the agent's default model, or the model's default Effort,
+   * while absent.
    */
   'sessions.create': {
     params: {
@@ -734,11 +747,7 @@ export interface Commands {
       existing?: ExistingWorkingCopy;
       issue?: Issue;
       prompt: string;
-      /** The model to run on, `provider/model` (see `projects.models`); the agent's default if absent. */
-      model?: string;
-      /** Its Effort level; the model's default if absent. */
-      effort?: string;
-    };
+    } & ModelPick;
     result: Session;
   };
   /**
@@ -767,7 +776,7 @@ export interface Commands {
    * and for an archived Session. A running agent is switched at once, and
    * rejects a model or Effort level it doesn't offer, changing nothing.
    */
-  'sessions.setModel': { params: { id: number; model?: string; effort?: string }; result: void };
+  'sessions.setModel': { params: { id: number } & ModelPick; result: void };
   /** Gives a queued message to the agent mid-run, for an agent that can be steered (`canSteer`). */
   'sessions.steer': { params: { id: number; queuedId: number }; result: void };
   /**

@@ -15,7 +15,7 @@ import { useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ThinkingBlock, ToolCard } from './WorkCards';
-import { ContextGauge, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
+import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -121,7 +121,7 @@ export function NewSession({ initialProjectId, pickIssue, onStarted }: { initial
   const models = useCheckoutModels(chosen?.id);
   const [model, setModel] = useState<string>();
   const [effort, setEffort] = useState<string>();
-  const efforts = (models.listed && 'value' in models.listed ? models.listed.value.find((m) => m.id === model)?.efforts : undefined) ?? [];
+  const efforts = effortsOf(models.listed, model);
 
   const start = async (prompt: string) => {
     if (!chosen) return false;
@@ -179,6 +179,7 @@ export function NewSession({ initialProjectId, pickIssue, onStarted }: { initial
                 }}
               />
               <ModelPickers
+                agent={OPENCODE_NAME}
                 models={models.listed}
                 model={model}
                 efforts={efforts}
@@ -334,10 +335,7 @@ export function SessionView({
   // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
   const checkoutModels = useCheckoutModels(agentConfig ? undefined : session.projectId);
   const shownModel = session.model ?? agentConfig?.model;
-  const shownEfforts =
-    agentConfig && agentConfig.model === shownModel
-      ? agentConfig.efforts
-      : ((checkoutModels.listed && 'value' in checkoutModels.listed ? checkoutModels.listed.value.find((m) => m.id === shownModel)?.efforts : undefined) ?? []);
+  const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(checkoutModels.listed, shownModel);
   const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
     api.invoke('sessions.answer', { id: session.id, itemId, answer }),
   );
@@ -538,6 +536,7 @@ export function SessionView({
         queueing={working}
         tools={
           <ModelPickers
+            agent={session.agent}
             models={agentConfig ? { value: agentConfig.models } : checkoutModels.listed}
             model={shownModel}
             efforts={shownEfforts}

@@ -1,8 +1,8 @@
 // An AgentAdapter for any agent that speaks ACP v1 over stdio, one process per
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
-import type { AgentConfig, Answer, ModelChoice, QuestionField, QuestionOption, ToolStatus } from '../../shared/api';
-import type { AgentAdapter, AgentEvent, AgentResponse, AgentSession, ApprovalAction, ModelPick, OpenOptions } from './adapter';
+import type { AgentConfig, Answer, ModelChoice, ModelPick, QuestionField, QuestionOption, ToolStatus } from '../../shared/api';
+import type { AgentAdapter, AgentEvent, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection } from './acp';
 
@@ -214,11 +214,13 @@ interface ConfigOption {
 
 const MODEL = 'model';
 const EFFORT = 'thought_level';
+/** The id of each category's option, as OpenCode names them, for an agent that leaves the category out: ACP makes it optional. */
+const OPTION_IDS: Record<string, string> = { [MODEL]: 'model', [EFFORT]: 'effort' };
 
-/** The select option of `category`, if the agent has one; else the one of that id, as ACP's categories are optional. */
+/** The select option of `category`, if the agent has one; else the one of that category's usual id. */
 function optionOf(options: ConfigOption[], category: string): (ConfigOption & { id: string }) | undefined {
   const selects = options.filter((o): o is ConfigOption & { id: string } => typeof o?.id === 'string' && o.type === 'select');
-  return selects.find((o) => o.category === category) ?? selects.find((o) => o.id === (category === EFFORT ? 'effort' : category));
+  return selects.find((o) => o.category === category) ?? selects.find((o) => o.id === OPTION_IDS[category]);
 }
 
 /** The values of a select option, with their names, flattened out of any groups. */

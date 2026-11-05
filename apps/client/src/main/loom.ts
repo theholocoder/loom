@@ -144,6 +144,14 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     restart: () => native.restart(),
     tempDir: () => tempDirOf(native.status.bridge?.os, native.status.bridge?.home),
   };
+  /** The models the agent offers in the Project's checkout, once its Environment is up. */
+  const listModels = async (projectId: number) => {
+    const checkout = projectService.list().find((p) => p.id === projectId)?.checkout;
+    if (!checkout) throw new Error(`unknown Project ${projectId}`);
+    if (checkout.environmentId !== native.status.id) throw new Error(`unknown Environment "${checkout.environmentId}"`);
+    await native.ready();
+    return native.listModels(checkout.path);
+  };
   const sessions = new Topic<Session[]>([]);
   const sessionService = await Sessions.load({
     db,
@@ -156,6 +164,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
+    models: (projectId) => listModels(projectId),
   });
   sessions.set(sessionService.list());
 
@@ -201,13 +210,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
-    'projects.models': async ({ id }) => {
-      const checkout = projectService.list().find((p) => p.id === id)?.checkout;
-      if (!checkout) throw new Error(`unknown Project ${id}`);
-      if (checkout.environmentId !== native.status.id) throw new Error(`unknown Environment "${checkout.environmentId}"`);
-      await native.ready();
-      return native.listModels(checkout.path);
-    },
+    'projects.models': ({ id }) => listModels(id),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
     },

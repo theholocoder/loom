@@ -45,8 +45,9 @@ type probeResult struct {
 
 // probeOpencode starts a short-lived, private `opencode serve --stdio` and
 // asks it for its integrations, which is how main tells whether OpenCode is
-// signed in, and, given a directory, the models it offers there. It never runs `opencode auth list` or `opencode models`, which
-// start the user's shared background service.
+// signed in, and, given a directory, the models it offers there. It never
+// runs `opencode auth list` or `opencode models`, which start the user's
+// shared background service.
 //
 // The server prints {"url": ...} on stdout, guards its API with HTTP Basic
 // auth using OPENCODE_SERVER_PASSWORD, and exits when its stdin closes.

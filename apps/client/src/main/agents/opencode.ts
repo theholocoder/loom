@@ -3,7 +3,7 @@
 // in (a private `opencode serve --stdio` lists a connected integration). It
 // never runs `opencode auth list` or `opencode models`, which start the
 // user's shared background service.
-import { OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type ModelChoice } from '../../shared/api';
+import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type ModelChoice } from '../../shared/api';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { AcpProfile } from './acp-adapter';
 import { OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
@@ -63,9 +63,6 @@ interface ApiModel {
   enabled?: unknown;
   variants?: Array<{ id?: unknown }>;
 }
-
-/** OpenCode's ACP bridge offers every model's variants as Effort levels, with this one besides. */
-const DEFAULT_EFFORT = 'default';
 
 /**
  * The models OpenCode offers in the checkout `directory`, from a private

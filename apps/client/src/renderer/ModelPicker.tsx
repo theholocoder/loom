@@ -3,13 +3,14 @@
 // names them.
 import { Brain, Cpu, Gauge } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { ContextUsage, ModelChoice, TranscriptItem } from '../shared/api';
+import { DEFAULT_EFFORT, type ContextUsage, type ModelChoice, type TranscriptItem } from '../shared/api';
 import { useApi } from './api';
 import { Select } from './Popover';
 import { SearchPicker, type Loaded } from './SearchPicker';
 
 /** The model and Effort pickers: Effort only for a model that takes Effort levels. */
 export function ModelPickers({
+  agent,
   models,
   model,
   efforts,
@@ -19,6 +20,8 @@ export function ModelPickers({
   onModel,
   onEffort,
 }: {
+  /** The agent's name, as the UI shows it. */
+  agent: string;
   /** What can be picked, once listed. */
   models: Loaded<ModelChoice[]>;
   /** The model shown, `provider/model`; the agent's default while absent. */
@@ -40,7 +43,7 @@ export function ModelPickers({
         placeholder="Default model"
         icon={<Cpu className="sm" />}
         noun="models"
-        loading="Asking OpenCode for its models…"
+        loading={`Asking ${agent} for its models…`}
         options={models && 'value' in models ? { value: models.value.map((m) => ({ key: m.id, label: m.id, detail: m.name, value: m.id })) } : models}
         selected={model === undefined ? undefined : { key: model, label: model }}
         disabled={disabled}
@@ -62,8 +65,10 @@ export function ModelPickers({
   );
 }
 
-/** The Effort level a model runs with until another is picked. */
-const DEFAULT_EFFORT = 'default';
+/** The Effort levels of `model` among the models listed; none while they aren't. */
+export function effortsOf(listed: Loaded<ModelChoice[]>, model: string | undefined): string[] {
+  return (listed && 'value' in listed ? listed.value.find((m) => m.id === model)?.efforts : undefined) ?? [];
+}
 
 /**
  * The models the agent offers in the Project's checkout, listed by main when

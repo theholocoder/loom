@@ -27,6 +27,8 @@ export interface OpencodeScript {
     writeOnExit?: string;
     /** Each process answers `session/new` only once the test calls `machine.release(holdNew)`: an agent slow to start. */
     holdNew?: string;
+    /** Each process answers `session/set_config_option` only once the test calls `machine.release(holdConfig)`. */
+    holdConfig?: string;
   };
 }
 

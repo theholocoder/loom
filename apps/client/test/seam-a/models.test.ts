@@ -13,9 +13,9 @@ const models: StandInModel[] = [
 ];
 
 /** A machine with a ready OpenCode offering `models` and playing `turns`, and a git checkout. */
-function machineWith(turns: AcpTurn[] = []): { machine: Machine; checkout: string } {
+function machineWith(turns: AcpTurn[] = [], acp: { holdConfig?: string } = {}): { machine: Machine; checkout: string } {
   const machine = tempMachine();
-  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, models, acp: { turns } });
+  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, models, acp: { turns, ...acp } });
   return { machine, checkout: machine.gitRepo('billing-api') };
 }
 
@@ -133,6 +133,15 @@ async function finishedSession(machine: Machine, checkout: string) {
   return { main, id };
 }
 
+/** Resolves once `check` holds, polling: for what only the stand-in's logs show. */
+async function until(check: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error('timed out');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 const markers = (items: TranscriptItem[]) => items.filter((i) => i.kind === 'model');
 
 describe('changing the model and Effort between runs', () => {
@@ -197,6 +206,68 @@ describe('changing the model and Effort between runs', () => {
 
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)!.model).toBeUndefined();
     expect(markers(await waitFor(main.api, 'transcript', () => true, { sessionId: id }))).toEqual([]);
+  });
+
+  it('sends a prompt given while the agent switches only once it has, on the new model, after the marker', async () => {
+    const { machine, checkout } = machineWith([], { holdConfig: 'switch' });
+    const { main, id } = await finishedSession(machine, checkout);
+
+    const switching = main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' });
+    await until(() => asked(machine).includes('model=anthropic/claude-sonnet-5-5'));
+    const sending = main.api.invoke('sessions.send', { id, prompt: 'Second' });
+    machine.release('switch');
+    await Promise.all([switching, sending]);
+
+    await waitFor(main.api, 'sessions', session(id, (s) => finished(s) && asked(machine).filter((m) => m === 'session/prompt').length === 2));
+    expect(asked(machine).slice(2)).toEqual(['session/prompt', 'model=anthropic/claude-sonnet-5-5', 'session/prompt']);
+    const items = await waitFor(main.api, 'transcript', (all) => all.length >= 3, { sessionId: id });
+    expect(items.filter((i) => i.kind === 'user' || i.kind === 'model').map((i) => i.kind)).toEqual(['user', 'model', 'user']);
+  });
+
+  it("puts the agent back on what it ran with when it takes the new model but turns down the Effort level", async () => {
+    const { machine, checkout } = machineWith();
+    const { main, id } = await finishedSession(machine, checkout);
+
+    await expect(main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5', effort: 'extreme' })).rejects.toThrow(/extreme/);
+
+    const after = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!;
+    expect(after.model).toBeUndefined();
+    expect(after.agentConfig?.model).toBe('opencode/pulse-free');
+  });
+
+  it("is refused for a Session whose agent has stopped, which can't be resumed yet", async () => {
+    const { machine, checkout } = machineWith();
+    const userDataDir = tempDir('loom-stopped-');
+    const first = await startMain({ machine, userDataDir });
+    await waitFor(first.api, 'environments', ready);
+    const project = await first.api.invoke('projects.link', { path: checkout });
+    const { id } = await first.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Hi' });
+    await waitFor(first.api, 'sessions', session(id, finished));
+    await first.close();
+    const second = await startMain({ machine, userDataDir });
+
+    await expect(second.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' })).rejects.toThrow(/stopped/);
+  });
+
+  it("checks a change against the checkout's models while no agent runs, and applies it once one does", async () => {
+    const { machine, checkout } = machineWith();
+    const { main, id } = await finishedSession(machine, checkout);
+    // The bridge dies with the agent, and comes back without it.
+    const bridge = main.bridge();
+    const exited = new Promise((resolve) => bridge.once('exit', resolve));
+    bridge.kill();
+    await exited;
+    await waitFor(main.api, 'sessions', session(id, (s) => s.waitingReason === 'error'));
+    main.clock.advance(1_000);
+    await waitFor(main.api, 'environments', ready);
+
+    await expect(main.api.invoke('sessions.setModel', { id, model: 'openai/gpt-old' })).rejects.toThrow(/openai\/gpt-old/);
+    await expect(main.api.invoke('sessions.setModel', { id, model: 'opencode/pulse-free', effort: 'max' })).rejects.toThrow(/Effort/);
+    await main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5', effort: 'max' });
+    await main.api.invoke('sessions.send', { id, prompt: 'Again' });
+
+    await waitFor(main.api, 'sessions', session(id, finished));
+    expect(asked(machine).slice(-3)).toEqual(['model=anthropic/claude-sonnet-5-5', 'effort=max', 'session/prompt']);
   });
 
   it('keeps the model and Effort picked across a restart', async () => {

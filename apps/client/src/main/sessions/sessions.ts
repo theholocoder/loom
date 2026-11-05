@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession, ApprovalAction } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -37,6 +37,8 @@ export interface SessionsOptions {
   };
   /** The approval settings, as they are now. */
   approvals: () => ApprovalPolicy;
+  /** The models the agent offers in the Project's checkout (see `projects.models`). */
+  models: (projectId: number) => Promise<ModelChoice[]>;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -95,6 +97,8 @@ export class Sessions {
   private readonly approvedCalls = new Map<number, Set<string>>();
   /** What the user said on denying Approval requests, sent to the agent as the next prompt once its run ends. */
   private readonly denyMessages = new Map<number, string>();
+  /** Model and Effort changes in flight, by Session: a prompt given meanwhile waits for them. */
+  private readonly switching = new Map<number, Promise<void>>();
   /** The id the next queued message gets: ids are given here, so a message is queued at once. */
   private nextQueuedId = 1;
   /**
@@ -252,6 +256,8 @@ export class Sessions {
     const text = promptText(prompt);
     this.get(id);
     await this.loadTranscript(id);
+    // A change of model or Effort made just before goes first: the marker, then this prompt on it.
+    await this.switched(id);
     if (this.get(id).status === 'working') return this.enqueue(id, text);
     this.reply(id, text);
   }
@@ -344,26 +350,75 @@ export class Sessions {
    * Changes the model or Effort the Session's prompts run with, from the
    * next one, between runs only, with a marker in its timeline. A running
    * agent is switched at once, so it can turn down what it doesn't offer
-   * before anything changes, and so offers the new model's Effort levels.
+   * before anything changes, and so offers the new model's Effort levels;
+   * with none running, the change is checked against the checkout's models.
+   * Changes go one at a time, and a prompt given meanwhile waits for them.
    */
-  async setModel({ id, model, effort }: { id: number; model?: string; effort?: string }): Promise<void> {
+  async setModel({ id, model, effort }: { id: number } & ModelPick): Promise<void> {
     this.get(id);
     await this.loadTranscript(id);
     checkPick({ model, effort });
+    await this.switched(id);
+    const change = this.switchModel(id, { model, effort });
+    this.switching.set(id, change);
+    try {
+      await change;
+    } finally {
+      if (this.switching.get(id) === change) this.switching.delete(id);
+    }
+  }
+
+  /** Resolves once the Session's model and Effort changes in flight are done, however they end. */
+  private async switched(id: number): Promise<void> {
+    while (this.switching.has(id)) await this.switching.get(id)!.catch(() => {});
+  }
+
+  private async switchModel(id: number, { model, effort }: ModelPick): Promise<void> {
     const session = this.get(id);
     if (session.status === 'archived') throw new Error('This Session is archived.');
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     if (this.inRun(id)) throw new Error('The model and Effort change only between runs: wait for the agent to finish, or stop it.');
-    const running = { model: session.model ?? session.agentConfig?.model, effort: session.effort ?? session.agentConfig?.effort };
+    // A change that could never apply: the agent's next prompt is refused.
+    this.assertCanPrompt(id);
+    const was = { model: session.agentConfig?.model, effort: session.agentConfig?.effort };
+    const running = { model: session.model ?? was.model, effort: session.effort ?? was.effort };
     const newModel = model !== undefined && model !== running.model;
     // A new model starts on its own default Effort, unless one is picked with it.
     const newEffort = effort !== undefined && (newModel || effort !== running.effort);
     if (!newModel && !newEffort) return;
-    const next = { model: newModel ? model : session.model, effort: newEffort ? effort : newModel ? undefined : session.effort };
-    await this.live.get(id)?.configure(next);
+    const next: ModelPick = { model: newModel ? model : session.model, effort: newEffort ? effort : newModel ? undefined : session.effort };
+    const agent = this.live.get(id);
+    if (agent) {
+      try {
+        await agent.configure(next);
+      } catch (error) {
+        // Switched to the model but not to its Effort: back to what it ran with, so it shows what the Session runs.
+        await agent.configure(was).catch(() => {});
+        throw error;
+      }
+    } else {
+      // An Effort level alone is checked against the model the Session runs on.
+      await this.checkOffered(session.projectId, { model: next.model ?? running.model, effort: next.effort });
+    }
     if (this.get(id).status === 'archived') return;
     this.update(id, { model: next.model, effort: next.effort });
     this.save(id, { model: next.model ?? null, effort: next.effort ?? null });
     this.addItem(id, withoutUndefined({ kind: 'model' as const, model: newModel ? model : undefined, effort: newEffort ? effort : undefined }));
+  }
+
+  /**
+   * Rejects a model, or a model's Effort level, the agent doesn't offer in
+   * the Project's checkout. What can't be known (the models can't be listed,
+   * or the agent's own default model) is left for the agent to turn down.
+   */
+  private async checkOffered(projectId: number, { model, effort }: ModelPick): Promise<void> {
+    if (model === undefined) return;
+    const offered = await this.options.models(projectId).catch(() => undefined);
+    if (!offered) return;
+    const found = offered.find((m) => m.id === model);
+    const name = this.options.adapter.name;
+    if (!found) throw new Error(`${name} doesn't offer ${model} in this Project.`);
+    if (effort !== undefined && !(found.efforts ?? []).includes(effort)) throw new Error(`${name} offers no Effort ${effort} for ${model}.`);
   }
 
   /** Puts a message at the end of the Session's queue. */
@@ -756,6 +811,7 @@ export class Sessions {
       }
     }
     // The model and Effort picked apply from this prompt; an agent already on them isn't asked.
+    await this.switched(id);
     const { model, effort } = this.get(id);
     try {
       await agent.configure({ model, effort });
@@ -1244,8 +1300,8 @@ function checkIssue(issue: Issue): void {
   }
 }
 
-/** Rejects a model or Effort level that isn't a name. */
-function checkPick({ model, effort }: { model?: unknown; effort?: unknown }): void {
+/** Rejects a model that isn't named `provider/model`, and an Effort level with no name. */
+function checkPick({ model, effort }: { [K in keyof ModelPick]?: unknown }): void {
   if (model !== undefined && (typeof model !== 'string' || !model.includes('/'))) throw new Error('A model is named provider/model.');
   if (effort !== undefined && (typeof effort !== 'string' || !effort)) throw new Error('An Effort level needs a name.');
 }

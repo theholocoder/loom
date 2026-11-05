@@ -15,7 +15,8 @@
 // OpenCode 2.1.4 does: `initialize`, `session/new`, which answers a `ses_…`
 // id and the `model` and `effort` config options (the script's `models`, the
 // first one current), `session/set_config_option`, which answers them as
-// changed (a new model goes back to the default Effort), and `session/prompt`, which plays the script's `turns` one per prompt
+// changed (a new model goes back to the default Effort; with `holdConfig`,
+// only once the test releases it), and `session/prompt`, which plays the script's `turns` one per prompt
 // (see OpencodeScript in harness.ts); an `elicit` chunk sends Loom an
 // `elicitation/create` request and waits for its response, a `permission`
 // chunk a `session/request_permission` one (a reject ends the turn as
@@ -129,6 +130,7 @@ function acp() {
       sessionId = `ses_standin${process.pid}`;
       send({ id, result: { sessionId, configOptions: configOptions(models, selection) } });
     } else if (method === 'session/set_config_option') {
+      if (script.acp?.holdConfig) await released(script.acp.holdConfig);
       const { configId, value } = params;
       if (configId === 'model') {
         const model = models.find((m) => `${m.providerID}/${m.id}` === value);

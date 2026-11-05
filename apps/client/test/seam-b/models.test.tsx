@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { AgentConfig, ModelChoice, Project, Session, TranscriptItem } from '../../src/shared/api';
+import type { AgentConfig, Commands, ModelChoice, Project, Session, TranscriptItem } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -111,7 +111,7 @@ describe('the model and Effort pickers before a Session exists', () => {
   });
 
   it("leaves the model to the agent when none is picked, and offers no Effort for a model that takes none", async () => {
-    const created: Array<Record<string, unknown>> = [];
+    const created: Array<Commands['sessions.create']['params']> = [];
     renderApp(
       new FakeMain(
         { projects: [project] },
