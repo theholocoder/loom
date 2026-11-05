@@ -94,7 +94,8 @@ function workingCopyParams(
 }
 
 /** Starting a Session: which Project, which working copy, and the first prompt. */
-export function NewSession({ initialProjectId, onStarted }: { initialProjectId?: number; onStarted: (session: Session) => void }) {
+/** `pickIssue` opens the issue picker at once, for starting from an issue. */
+export function NewSession({ initialProjectId, pickIssue, onStarted }: { initialProjectId?: number; pickIssue?: boolean; onStarted: (session: Session) => void }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
   const [projectId, setProjectId] = useState(initialProjectId);
@@ -179,6 +180,7 @@ export function NewSession({ initialProjectId, onStarted }: { initialProjectId?:
               />
               <IssuePicker
                 project={chosen}
+                defaultOpen={pickIssue}
                 issue={issue}
                 onChange={(picked) => {
                   setIssue(picked);
@@ -256,12 +258,34 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
   return { listed: listed && listed.projectId === projectId ? listed.result : undefined, refresh };
 }
 
+/** An action asked of the open Session from outside it: by the palette or a shortcut. */
+export type SessionCommand = 'archive' | 'openMergeRequest' | 'createMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
+
 /**
  * One Session: its header, its conversation and the composer. Showing it
  * marks it read, as does a status change while it is shown. Changing
- * `replyRequest` focuses the composer.
+ * `replyRequest` focuses the composer. A `command` is run once, showing what
+ * went wrong in the conversation like the header's own actions, then handed
+ * back through `onCommandDone`. `onRetryableChange` says whether `retry`
+ * would do anything: whether the last prompt failed.
  */
-export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff }: { session: Session; replyRequest?: number; diffOpen: boolean; onToggleDiff: () => void }) {
+export function SessionView({
+  session,
+  replyRequest = 0,
+  command,
+  onCommandDone,
+  onRetryableChange,
+  diffOpen,
+  onToggleDiff,
+}: {
+  session: Session;
+  replyRequest?: number;
+  command?: SessionCommand;
+  onCommandDone?: () => void;
+  onRetryableChange?: (retryable: boolean) => void;
+  diffOpen: boolean;
+  onToggleDiff: () => void;
+}) {
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
@@ -283,6 +307,28 @@ export function SessionView({ session, replyRequest = 0, diffOpen, onToggleDiff 
   const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
     api.invoke('sessions.answer', { id: session.id, itemId, answer }),
   );
+
+  useEffect(() => {
+    if (!command) return;
+    onCommandDone?.();
+    setError(undefined);
+    const { id } = session;
+    const runs: Record<SessionCommand, () => Promise<void>> = {
+      archive: () => archiver.archive(session),
+      openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
+      createMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
+      openInEditor: () => api.invoke('sessions.openInEditor', { id }),
+      openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
+      retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
+      markUnread: () => api.invoke('sessions.setUnread', { id, unread: true }),
+    };
+    runs[command]().catch((e: unknown) => setError((e as Error).message));
+    // Run once per command: onCommandDone clears it, so asking again runs it again.
+  }, [command]);
+  useEffect(() => {
+    onRetryableChange?.(retryable);
+  }, [retryable]);
+  useEffect(() => () => onRetryableChange?.(false), []);
 
   const end = useRef<HTMLDivElement>(null);
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.

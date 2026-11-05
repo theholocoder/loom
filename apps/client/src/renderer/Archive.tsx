@@ -1,5 +1,5 @@
-// The archive command, shared by the Session header and the Inbox rows, and
-// ready for the `e` shortcut: archives a Session, warning first (Discard / Cancel) when its
+// The archive command, shared by the Session header, the Inbox rows, the
+// palette and the `e` shortcut: archives a Session, warning first (Discard / Cancel) when its
 // worktree has uncommitted changes or unpushed commits.
 import { FolderX, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
