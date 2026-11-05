@@ -31,7 +31,7 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
   const empty = emptyDashboard(days);
   return {
     ...empty,
-    perDay: empty.perDay.map((d, i) => (i === days - 1 ? { ...d, tokens: 1_200_000, byProject: { loom: 900_000, docs: 300_000 } } : d)),
+    perDay: empty.perDay.map((d, i) => (i === days - 1 ? { ...d, tokens: 1_200_000, byProject: { 1: 900_000, 2: 300_000 } } : d)),
     tokens: 1_200_000,
     reportedCost: 3.4,
     sessionsStarted: 5,
@@ -39,8 +39,8 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
     medianRunMs: 400_000,
     medianWaitMs: 22 * 60_000,
     perProject: [
-      { project: 'loom', tokens: 900_000 },
-      { project: 'docs', tokens: 300_000 },
+      { projectId: 1, project: 'loom', tokens: 900_000 },
+      { projectId: 2, project: 'docs', tokens: 300_000 },
     ],
     perModel: [{ model: 'anthropic/claude-sonnet-5-5', tokens: 1_200_000 }],
     mix: { input: 300_000, output: 100_000, cacheRead: 700_000, cacheWrite: 50_000, reasoning: 50_000 },
@@ -50,6 +50,7 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
       {
         sessionId: 7,
         title: 'Fix the login bug',
+        projectId: 1,
         project: 'loom',
         issue: { number: 42, url: 'https://github.com/theholocoder/loom/issues/42' },
         mergeRequest: { number: 12, url: 'https://github.com/theholocoder/loom/pull/12' },
@@ -58,7 +59,7 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
         workingMs: 72 * 60_000,
         outcome: 'merged',
       },
-      { sessionId: 99, title: 'Old Session', project: 'gone', model: 'openai/gpt-5.1', tokens: 300_000, workingMs: 30_000, outcome: 'archived' },
+      { sessionId: 99, title: 'Old Session', projectId: 3, project: 'gone', model: 'openai/gpt-5.1', tokens: 300_000, workingMs: 30_000, outcome: 'archived' },
     ],
   };
 }
@@ -134,6 +135,13 @@ describe('the dashboard', () => {
 
     fireEvent.click(rows[0]!);
     await waitFor(() => expect(screen.queryByRole('main', { name: 'Dashboard' })).toBeNull());
+  });
+
+  it('rounds token counts up into the next unit', async () => {
+    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': ({ days }) => ({ ...emptyDashboard(days), tokens: 999_600 }) });
+    const view = openDashboard(main);
+
+    await waitFor(() => expect(tile(view, 'Tokens').textContent).toContain('1.0M'));
   });
 
   it('says so when nothing has been recorded yet', async () => {

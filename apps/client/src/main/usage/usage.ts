@@ -2,7 +2,7 @@
 // the dashboard measures, and computes the dashboard from them and the
 // Sessions' facts. Usage is kept indefinitely; nothing here deletes any.
 import type { Kysely, Transaction } from 'kysely';
-import { TOP_SESSIONS, USAGE_RANGES, type SessionOutcome, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
+import { TOP_SESSIONS, USAGE_RANGES, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
 import type { Schema, SessionSpansTable } from '../storage/schema';
 import type { MergeRequestState } from '../projects/merge-requests';
 
@@ -59,7 +59,7 @@ export async function recordSpan(trx: Transaction<Schema>, span: SessionSpansTab
 }
 
 /** What became of a Session, from its facts. */
-export function outcomeOf({ status, mergeRequestState }: { status: string; mergeRequestState: MergeRequestState | null }): SessionOutcome {
+export function outcomeOf({ status, mergeRequestState }: { status: SessionStatus; mergeRequestState: MergeRequestState | null }): SessionOutcome {
   if (mergeRequestState === 'merged' || mergeRequestState === 'closed') return mergeRequestState;
   if (status === 'archived' && mergeRequestState === null) return 'archived';
   return 'open';
@@ -88,10 +88,12 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
 
   const mix: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   let reportedCost = 0;
-  const perDay = new Map(dayList.map((day) => [day, { day, tokens: 0, byProject: {} as Record<string, number> }]));
-  const perProject = new Map<string, number>();
+  const perDay = new Map(dayList.map((day) => [day, { day, tokens: 0, byProject: {} as Record<number, number> }]));
+  const perProject = new Map<number, number>();
+  /** Each Project's name, as of the latest day its usage was recorded. */
+  const projectNames = new Map<number, { name: string; day: string }>();
   const perModel = new Map<string, number>();
-  const perSession = new Map<number, { tokens: number; project: string; byModel: Map<string, number> }>();
+  const perSession = new Map<number, { tokens: number; projectId: number; byModel: Map<string, number> }>();
   for (const b of buckets) {
     const tokens = b.input_tokens + b.output_tokens + b.cache_read_tokens + b.cache_write_tokens + b.reasoning_tokens;
     mix.input += b.input_tokens;
@@ -102,11 +104,13 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     reportedCost += b.cost;
     const day = perDay.get(b.day)!;
     day.tokens += tokens;
-    day.byProject[b.project_name] = (day.byProject[b.project_name] ?? 0) + tokens;
-    add(perProject, b.project_name, tokens);
+    day.byProject[b.project_id] = (day.byProject[b.project_id] ?? 0) + tokens;
+    add(perProject, b.project_id, tokens);
+    const named = projectNames.get(b.project_id);
+    if (!named || named.day < b.day) projectNames.set(b.project_id, { name: b.project_name, day: b.day });
     add(perModel, b.model, tokens);
     let s = perSession.get(b.session_id);
-    if (!s) perSession.set(b.session_id, (s = { tokens: 0, project: b.project_name, byModel: new Map() }));
+    if (!s) perSession.set(b.session_id, (s = { tokens: 0, projectId: b.project_id, byModel: new Map() }));
     s.tokens += tokens;
     add(s.byModel, b.model, tokens);
   }
@@ -133,10 +137,11 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
       return withoutUndefined({
         sessionId,
         title: row?.title ?? `Session ${sessionId}`,
-        project: usage.project,
+        projectId: usage.projectId,
+        project: projectNames.get(usage.projectId)!.name,
         issue: row ? linkOf(row.issue_number, row.issue_url) : undefined,
         mergeRequest: row ? linkOf(row.merge_request_number, row.merge_request_url) : undefined,
-        model: sorted(usage.byModel)[0]!.model,
+        model: byTokens(usage.byModel)[0]!.key,
         tokens: usage.tokens,
         workingMs: workingMs.get(sessionId) ?? 0,
         outcome: row ? outcomeOfRow(row) : 'archived',
@@ -153,8 +158,8 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     mergeRequestsMerged: sessions.filter((s) => s.merge_request_state === 'merged' && s.archived_at !== null && s.archived_at >= since && s.archived_at <= now).length,
     medianRunMs: median(runs.map((s) => s.ended_at - s.started_at)),
     medianWaitMs: median(waits.map((s) => s.ended_at - s.started_at)),
-    perProject: sorted(perProject).map(({ model: project, tokens }) => ({ project, tokens })),
-    perModel: sorted(perModel),
+    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => ({ projectId, project: projectNames.get(projectId)!.name, tokens })),
+    perModel: byTokens(perModel).map(({ key: model, tokens }) => ({ model, tokens })),
     mix,
     cacheHitRate: prompt > 0 ? mix.cacheRead / prompt : undefined,
     outcomes,
@@ -173,9 +178,9 @@ function add<K>(map: Map<K, number>, key: K, value: number): void {
   map.set(key, (map.get(key) ?? 0) + value);
 }
 
-/** Entries by tokens, most first, then by name. */
-function sorted(map: Map<string, number>): Array<{ model: string; tokens: number }> {
-  return [...map.entries()].sort(([a, x], [b, y]) => y - x || a.localeCompare(b)).map(([model, tokens]) => ({ model, tokens }));
+/** Token counts by key, most first, then by key. */
+function byTokens<K extends string | number>(map: Map<K, number>): Array<{ key: K; tokens: number }> {
+  return [...map.entries()].sort(([a, x], [b, y]) => y - x || String(a).localeCompare(String(b))).map(([key, tokens]) => ({ key, tokens }));
 }
 
 function median(values: number[]): number | undefined {

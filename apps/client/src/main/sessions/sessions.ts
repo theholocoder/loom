@@ -75,6 +75,7 @@ export const IDLE_STOP_MS = 10 * 60_000;
 /** What to do once a run the user interrupted has ended: send the queued message `sendNow`, or else stop. */
 type Interruption = { sendNow?: number };
 type StatusChange = { status: SessionStatus; waitingReason?: WaitingReason; error?: string };
+const NO_TOKENS: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
 /** The stretch of time a Session is in, for the dashboard: since when. */
 type OpenSpan = { kind: 'run' | 'wait'; since: number };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
@@ -144,8 +145,6 @@ export class Sessions {
   private readonly linkCalls = new Map<number, Set<string>>();
   /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
   private readonly reportedCosts = new Map<number, number>();
-  /** The cost the agent reported during each Session's run, until the run's usage is recorded. */
-  private readonly runCosts = new Map<number, number>();
   /** The model each Session's run goes with, as Loom set it. */
   private readonly runModels = new Map<number, string>();
   /** The run or wait each Session is in, while the Client runs (see spanOf). */
@@ -1013,7 +1012,7 @@ export class Sessions {
       return;
     }
     // Usage is filed under the model the run goes with: the one picked, or else the agent's own.
-    this.runModels.set(id, model ?? this.get(id).agentConfig?.model ?? 'default');
+    this.runModels.set(id, this.modelOf(id));
     let files: PromptFile[];
     try {
       files = await this.deliver(id, attachments);
@@ -1081,8 +1080,8 @@ export class Sessions {
 
   private onAgentEvent(id: number, event: AgentEvent): void {
     // Usage counts however the run ended: cancelled, or by Archive.
-    if (event.type === 'usage' && event.cost !== undefined) this.runCosts.set(id, event.cost);
-    if (event.type === 'turn-usage') return this.shuttingDown ? undefined : this.recordUsage(id, event.tokens);
+    if (event.type === 'usage' && event.cost !== undefined) this.recordCost(id, event.cost);
+    if (event.type === 'turn-usage') return this.recordUsage(id, event.tokens, 0);
     // The agent closing is Archive's own doing; Archive reports it if the Session stays.
     if (event.type === 'closed' && this.archiving.has(id)) return void this.live.delete(id);
     // An archived Session's agent is on its way out; nothing it says counts.
@@ -1147,32 +1146,38 @@ export class Sessions {
   }
 
   /**
-   * Adds a turn's usage to the Session's bucket for today and the model it
-   * ran with: its tokens, and what the agent's reported cost went up by.
+   * Adds what the agent's reported cost went up by, now, to the Session's
+   * usage: a cost reported cumulatively is counted as it changes, whichever
+   * turn it came with and however that turn ended.
    */
-  private recordUsage(id: number, tokens: TokenCounts): void {
+  private recordCost(id: number, reported: number): void {
+    const before = this.reportedCosts.get(id) ?? 0;
+    if (reported === before) return;
+    this.reportedCosts.set(id, reported);
+    this.save(id, { reported_cost: reported });
+    // A cost that went down was corrected: nothing to add.
+    if (reported > before) this.recordUsage(id, NO_TOKENS, reported - before);
+  }
+
+  /** Adds tokens and cost to the Session's bucket for today and the model its run went with. */
+  private recordUsage(id: number, tokens: TokenCounts, cost: number): void {
     const session = this.get(id);
-    const seen = this.runCosts.get(id);
-    this.runCosts.delete(id);
-    let cost = 0;
-    if (seen !== undefined) {
-      const before = this.reportedCosts.get(id) ?? 0;
-      // A cost that went down is a conversation the agent started afresh.
-      cost = seen >= before ? seen - before : seen;
-      this.reportedCosts.set(id, seen);
-      this.save(id, { reported_cost: seen });
-    }
-    const model = this.runModels.get(id) ?? session.model ?? session.agentConfig?.model ?? 'default';
     const turn = {
       sessionId: id,
       projectId: session.projectId,
       projectName: this.options.project(session.projectId)?.name ?? `Project ${session.projectId}`,
-      model,
+      model: this.runModels.get(id) ?? this.modelOf(id),
       endedAt: this.options.clock.now(),
       tokens,
       cost,
     };
     this.write((trx) => recordTurn(trx, turn));
+  }
+
+  /** The model the Session runs with: the one picked, or else the agent's own. */
+  private modelOf(id: number): string {
+    const session = this.get(id);
+    return session.model ?? session.agentConfig?.model ?? 'default';
   }
 
   /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */

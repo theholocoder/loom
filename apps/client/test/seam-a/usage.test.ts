@@ -54,9 +54,9 @@ describe('usage per turn', () => {
     expect(dashboard.mix).toEqual({ input: 1500, output: 300, reasoning: 50, cacheRead: 3000, cacheWrite: 400 });
     expect(dashboard.cacheHitRate).toBeCloseTo(3000 / 4900);
     expect(dashboard.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', tokens: 5250 }]);
-    expect(dashboard.perProject).toEqual([{ project: 'loom', tokens: 5250 }]);
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 5250 }]);
     expect(dashboard.perDay).toHaveLength(7);
-    expect(dashboard.perDay.at(-1)).toMatchObject({ tokens: 5250, byProject: { loom: 5250 } });
+    expect(dashboard.perDay.at(-1)).toMatchObject({ tokens: 5250, byProject: { [project.id]: 5250 } });
     expect(dashboard.perDay.slice(0, -1).every((d) => d.tokens === 0)).toBe(true);
   });
 });
@@ -94,8 +94,8 @@ describe('where a turn is filed', () => {
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
     expect(dashboard.perDay.slice(-2)).toEqual([
-      { day: '2026-11-04', tokens: 1100, byProject: { loom: 1100 } },
-      { day: '2026-11-05', tokens: 550, byProject: { loom: 550 } },
+      { day: '2026-11-04', tokens: 1100, byProject: { [project.id]: 1100 } },
+      { day: '2026-11-05', tokens: 550, byProject: { [project.id]: 550 } },
     ]);
     expect(dashboard.perModel).toEqual([
       { model: 'anthropic/claude-sonnet-5-5', tokens: 1100 },
@@ -225,6 +225,7 @@ describe('Session outcomes', () => {
     expect(dashboard.topSessions[1]).toEqual({
       sessionId: merged.id,
       title: 'Fix the login bug',
+      projectId: project.id,
       project: 'loom',
       mergeRequest: { number: 12, url: pr(12) },
       model: 'anthropic/claude-sonnet-5-5',
@@ -232,5 +233,45 @@ describe('Session outcomes', () => {
       workingMs: 0,
       outcome: 'merged',
     });
+  });
+});
+
+describe('usage per Project', () => {
+  it('keeps two Projects of the same name apart', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, models, acp: { turns: [{ chunks: ['Done.'], tokens: { inputTokens: 100, outputTokens: 0 } }] } });
+    const work = machine.gitRepo('work/loom');
+    const fork = machine.gitRepo('fork/loom');
+    for (const repo of [work, fork]) machine.commit(repo, 'README.md', '# loom\n');
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', ready);
+    const first = await main.api.invoke('projects.link', { path: work });
+    const second = await main.api.invoke('projects.link', { path: fork });
+    for (const [projectId, prompt] of [[first.id, 'One'], [second.id, 'Two'], [second.id, 'Three']] as const) {
+      const { id } = await main.api.invoke('sessions.create', { projectId, workingCopy: 'checkout', prompt });
+      await waiting(main, id);
+    }
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+
+    expect(dashboard.perProject).toEqual([
+      { projectId: second.id, project: 'loom', tokens: 200 },
+      { projectId: first.id, project: 'loom', tokens: 100 },
+    ]);
+    expect(dashboard.perDay.at(-1)!.byProject).toEqual({ [first.id]: 100, [second.id]: 200 });
+  });
+});
+
+describe('reported cost', () => {
+  it('counts what a failed turn cost, on the turn it was reported with', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Trying…'], error: 'Quota exceeded', cost: 0.3 }]);
+    const { main, project } = await start(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.waitingReason === 'error'));
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+
+    expect(dashboard.reportedCost).toBeCloseTo(0.3);
+    expect(dashboard.tokens).toBe(0);
   });
 });

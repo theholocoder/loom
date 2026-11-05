@@ -31,8 +31,8 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
   }, [api, days]);
 
   // Projects coloured by their place in the per-Project chart, the same in every chart.
-  const colorOf = (name: string) => {
-    const at = data?.perProject.findIndex((p) => p.project === name) ?? -1;
+  const colorOf = (projectId: number) => {
+    const at = data?.perProject.findIndex((p) => p.projectId === projectId) ?? -1;
     return SERIES[(at < 0 ? 0 : at) % SERIES.length]!;
   };
   const shown = data?.days === days ? data : undefined;
@@ -75,7 +75,7 @@ function Content({
   data: UsageDashboard;
   projects: Project[];
   sessions: Session[];
-  colorOf: (project: string) => string;
+  colorOf: (projectId: number) => string;
   onOpenSession: (session: Session) => void;
 }) {
   const { mix } = data;
@@ -108,9 +108,9 @@ function Content({
           <div className="card-head">
             <h3 id="dash-per-day">Tokens per day</h3>
             <div className="legend">
-              {data.perProject.map(({ project }) => (
-                <span key={project}>
-                  <span className="sw" style={{ background: colorOf(project) }} />
+              {data.perProject.map(({ projectId, project }) => (
+                <span key={projectId}>
+                  <span className="sw" style={{ background: colorOf(projectId) }} />
                   {project}
                 </span>
               ))}
@@ -122,7 +122,7 @@ function Content({
           <div className="card-head">
             <h3 id="dash-per-project">Tokens per Project</h3>
           </div>
-          <Bars label="Tokens per Project" rows={data.perProject.map((p) => ({ label: p.project, value: p.tokens, color: colorOf(p.project) }))} format={formatTokens} />
+          <Bars label="Tokens per Project" rows={data.perProject.map((p) => ({ key: String(p.projectId), label: p.project, value: p.tokens, color: colorOf(p.projectId) }))} format={formatTokens} />
         </section>
         <section className="card" aria-labelledby="dash-per-model">
           <div className="card-head">
@@ -219,13 +219,13 @@ function Tile({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: s
   );
 }
 
-function Bars({ label, rows, format }: { label: string; rows: Array<{ label: string; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
+function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: string; label: string; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
   if (!rows.length) return <div className="empty">Nothing yet.</div>;
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
     <ul className="hbars" aria-label={label}>
       {rows.map((row) => (
-        <li key={row.label} className="hbar">
+        <li key={row.key ?? row.label} className="hbar">
           <span className={row.tech ? 'ellipsis tech' : 'ellipsis'} title={row.label}>
             {row.label}
           </span>
@@ -240,7 +240,7 @@ function Bars({ label, rows, format }: { label: string; rows: Array<{ label: str
 }
 
 /** Tokens per day as bars stacked by Project, with a tooltip per day. */
-function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (project: string) => string }) {
+function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId: number) => string }) {
   const W = 820;
   const H = 230;
   const L = 46;
@@ -253,7 +253,7 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (project: 
   const y = (v: number) => T + (H - T - B) * (1 - v / max);
   const base = H - B;
   const step = Math.ceil(n / 8);
-  const order = data.perProject.map((p) => p.project);
+  const order = data.perProject;
   return (
     <div className="chart">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Tokens per day by Project">
@@ -272,13 +272,13 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (project: 
           const x = L + i * bw + (bw - barW) / 2;
           let acc = 0;
           const segments = order
-            .filter((project) => (day.byProject[project] ?? 0) > 0)
-            .map((project) => {
-              const v = day.byProject[project]!;
+            .filter(({ projectId }) => (day.byProject[projectId] ?? 0) > 0)
+            .map(({ projectId }) => {
+              const v = day.byProject[projectId]!;
               const top = y(acc + v);
               const height = y(acc) - top;
               acc += v;
-              return <rect key={project} x={x} y={top} width={barW} height={Math.max(0, height - 1)} rx={1.5} fill={colorOf(project)} />;
+              return <rect key={projectId} x={x} y={top} width={barW} height={Math.max(0, height - 1)} rx={1.5} fill={colorOf(projectId)} />;
             });
           const labelled = i % step === (n - 1) % step;
           return (
@@ -291,8 +291,8 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (project: 
               )}
               <rect className="hit" x={L + i * bw} y={T} width={bw} height={base - T}>
                 <title>{`${shortDay(day.day)}: ${formatTokens(day.tokens)} tokens${order
-                  .filter((p) => day.byProject[p])
-                  .map((p) => `\n${p}: ${formatTokens(day.byProject[p]!)}`)
+                  .filter(({ projectId }) => day.byProject[projectId])
+                  .map(({ projectId, project }) => `\n${project}: ${formatTokens(day.byProject[projectId]!)}`)
                   .join('')}`}</title>
               </rect>
             </g>
@@ -306,16 +306,17 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (project: 
 
 /** The issue and Merge request a Top Session links to, as their Forge writes them. */
 function references(top: TopSession, projects: Project[]): string {
-  const kind = projects.find((p) => p.name === top.project)?.forge.kind;
+  const kind = projects.find((p) => p.id === top.projectId)?.forge.kind;
   const refs = [top.issue && `#${top.issue.number}`, top.mergeRequest && mergeRequestRef(kind, top.mergeRequest.number)].filter(Boolean);
   return refs.length ? refs.join(' · ') : 'Session without issue';
 }
 
 /** A token count, short: 950, 12k, 1.2M, 3.4B. */
 export function formatTokens(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  // Each unit from where its rounding would reach it: 999,600 is 1.0M, not 1000k.
+  if (n >= 999.95e6) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 999.5e3) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 999.5) return `${Math.round(n / 1e3)}k`;
   return String(Math.round(n));
 }
 

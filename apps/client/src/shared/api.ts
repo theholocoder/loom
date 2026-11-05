@@ -684,7 +684,8 @@ export type SessionOutcome = 'merged' | 'closed' | 'archived' | 'open';
 export interface TopSession {
   sessionId: number;
   title: string;
-  /** Its Project's name, as it was when the usage was recorded. */
+  projectId: number;
+  /** Its Project's name, as it was when its usage was last recorded. */
   project: string;
   issue?: ForgeLink;
   mergeRequest?: ForgeLink;
@@ -704,8 +705,8 @@ export interface TopSession {
  */
 export interface UsageDashboard {
   days: UsageRange;
-  /** Every day of the range, oldest first, as `YYYY-MM-DD` in local time. */
-  perDay: Array<{ day: string; tokens: number; byProject: Record<string, number> }>;
+  /** Every day of the range, oldest first, as `YYYY-MM-DD` in local time, with its tokens by Project id. */
+  perDay: Array<{ day: string; tokens: number; byProject: Record<number, number> }>;
   tokens: number;
   /** What the agents reported, in USD: subscription and local models report $0. */
   reportedCost: number;
@@ -716,8 +717,8 @@ export interface UsageDashboard {
   medianRunMs?: number;
   /** The median wait for the user (on a question or Approval request, or finished and unanswered, while Loom ran), in ms; absent with none. */
   medianWaitMs?: number;
-  /** By tokens, most first. */
-  perProject: Array<{ project: string; tokens: number }>;
+  /** By tokens, most first; `project` is its name as its usage was last recorded. */
+  perProject: Array<{ projectId: number; project: string; tokens: number }>;
   perModel: Array<{ model: string; tokens: number }>;
   mix: TokenCounts;
   /** Cache reads out of all prompt tokens (input, cache read and cache write), 0 to 1; absent with none. */
