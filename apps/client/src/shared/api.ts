@@ -63,6 +63,50 @@ export interface AgentStatus {
   error?: string;
 }
 
+/** A model the agent can run, as its own providers offer it. */
+export interface ModelChoice {
+  /** `provider/model`, as the agent names it. */
+  id: string;
+  /** What its provider calls it. */
+  name: string;
+  /**
+   * The Effort levels it takes, as the agent reports them, `default`
+   * included; empty for a model that takes none. Absent when only the
+   * current model's are known (see AgentConfig.efforts).
+   */
+  efforts?: string[];
+}
+
+/** A model, `provider/model`, and an Effort level to run with; what is absent stays as it is, or is the agent's own. */
+export interface ModelPick {
+  model?: string;
+  effort?: string;
+}
+
+/** The Effort level a model runs with until another is picked, among the levels OpenCode offers for every model taking any. */
+export const DEFAULT_EFFORT = 'default';
+
+/**
+ * The models and Effort levels a Session's agent offers, and what it runs
+ * with now, as its config options last said.
+ */
+export interface AgentConfig {
+  /** The model it runs with, `provider/model`. */
+  model?: string;
+  models: ModelChoice[];
+  /** The Effort level it runs with; absent for a model that takes none. */
+  effort?: string;
+  /** The current model's Effort levels, `default` included; empty for a model that takes none. */
+  efforts: string[];
+}
+
+/** How full a Session's agent context is, in tokens, as the agent last reported after a run. */
+export interface ContextUsage {
+  used: number;
+  /** The model's context window. */
+  size: number;
+}
+
 export interface EnvironmentStatus {
   id: string;
   label: string;
@@ -270,6 +314,26 @@ export interface Session {
   queue?: QueuedMessage[];
   /** Set when its agent can take a queued message mid-run (Steer); otherwise Send now interrupts the run. */
   canSteer?: boolean;
+  /**
+   * Set when its agent ran and has stopped for good, as after the Client
+   * restarted: Loom can't resume agents yet, so it takes no prompt, and its
+   * model and Effort can't change.
+   */
+  agentStopped?: boolean;
+  /**
+   * The model the user picked, `provider/model`, and its Effort level: what
+   * each prompt runs with, from the next one. Absent for the agent's own
+   * choice (OpenCode's default model, or the model's default Effort).
+   */
+  model?: string;
+  effort?: string;
+  /**
+   * What the Session's agent offers to pick, and runs with, as it last
+   * reported: known once its agent has started while the Client runs.
+   */
+  agentConfig?: AgentConfig;
+  /** How full the agent's context was after its last run that reported it. */
+  context?: ContextUsage;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
@@ -547,7 +611,13 @@ export type TranscriptItem =
   /** A run that failed, with the agent's message. */
   | { kind: 'error'; id: number; message: string }
   /** The user interrupted the run: with Stop, or to send a queued message now. */
-  | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' };
+  | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' }
+  /**
+   * The user changed the model or Effort between runs, applying from the
+   * next prompt: what they picked, `model` for a new model, `effort` for a
+   * new Effort level (a new model without one goes back to its default).
+   */
+  | { kind: 'model'; id: number; model?: string; effort?: string };
 
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed
@@ -608,6 +678,13 @@ export interface Commands {
   'projects.branches': { params: { id: number }; result: Branches };
   /** Checks every Project's Forge again, and resolves once done. */
   'projects.check': { params: void; result: void };
+  /**
+   * The models the agent offers in the Project's checkout, for starting a
+   * Session: asked of a private agent probe (never `opencode models`), once
+   * per checkout until the agent is checked again (`environments.detect`).
+   * Models the user turned off are left out.
+   */
+  'projects.models': { params: { id: number }; result: ModelChoice[] };
   /** The Loom window got focus: read every Session's branch and worktree again. */
   'sessions.check': { params: void; result: void };
   /**
@@ -662,6 +739,10 @@ export interface Commands {
    * Started from an `issue`, the Session is linked to it, its first prompt
    * starts with the issue's number, title, URL and body (`prompt` may then be
    * empty), and the branch suggested is `<prefix>/<issue#>-<slug of the title>`.
+   *
+   * `model` (see `projects.models`) and `effort` are what its first prompt
+   * runs with; the agent's default model, or the model's default Effort,
+   * while absent.
    */
   'sessions.create': {
     params: {
@@ -672,7 +753,7 @@ export interface Commands {
       existing?: ExistingWorkingCopy;
       issue?: Issue;
       prompt: string;
-    };
+    } & ModelPick;
     result: Session;
   };
   /**
@@ -693,6 +774,19 @@ export interface Commands {
    * transcript shows; the rest of the queue stays.
    */
   'sessions.sendNow': { params: { id: number; queuedId: number }; result: void };
+  /**
+   * Changes the model the Session runs on, `provider/model`, or its Effort
+   * level, or both, from the next prompt, adding a marker to its timeline.
+   * A new model goes back to its default Effort unless one is given. Only
+   * between runs: rejects while the agent is Working or waits on an answer,
+   * and for a Session that can take no prompt (archived, its worktree
+   * missing, its agent stopped). A running agent is switched at once and
+   * rejects a model or Effort level it doesn't offer, changing nothing;
+   * with none running, the change is checked against `projects.models`
+   * when they can be listed. Changes go one at a time, in order, and a
+   * prompt sent meanwhile waits for them, coming after their markers.
+   */
+  'sessions.setModel': { params: { id: number } & ModelPick; result: void };
   /** Gives a queued message to the agent mid-run, for an agent that can be steered (`canSteer`). */
   'sessions.steer': { params: { id: number; queuedId: number }; result: void };
   /**

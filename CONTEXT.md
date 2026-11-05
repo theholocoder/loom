@@ -22,6 +22,10 @@ _Avoid_: Host, runtime, target
 **Agent**:
 The coding agent a **Session** runs on (OpenCode in v1), installed on the developer's machine and signed in to their own model providers. Loom drives it with the user's own setup (skills, extensions, MCP servers), but never configures its providers or holds its credentials.
 
+**Effort**:
+How much reasoning the agent's model puts into each prompt, at one of the levels the **Agent** offers for that model (`default` among them; some models have none). Picked with the model, as `provider/model`, for a **Session**: both change only between runs, from the next prompt.
+_Avoid_: Thought level, variant, reasoning effort
+
 **Working** (Session status):
 The agent is currently running; the **Session** does not need the user's attention.
 

@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
-import { OPENCODE_NAME, type BridgeInfo, type EnvironmentStatus, type ShellEnvironmentSource } from '../../shared/api';
-import { detectOpenCode } from '../agents/opencode';
+import { OPENCODE_NAME, type BridgeInfo, type EnvironmentStatus, type ModelChoice, type ShellEnvironmentSource } from '../../shared/api';
+import { detectOpenCode, listOpenCodeModels } from '../agents/opencode';
 import type { Clock, TimerHandle } from '../clock';
 import { BridgeConnection } from './bridge-connection';
 import type { Channel, ChannelParams } from './channel';
@@ -40,6 +40,8 @@ export class Environment {
   /** Restarts tried since the bridge last connected. */
   private restarts = 0;
   private waiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+  /** The models the agent offers, by checkout, until the agent is checked again. */
+  private models = new Map<string, Promise<ModelChoice[]>>();
 
   constructor(private readonly options: EnvironmentOptions) {
     this.current = { id: options.id, label: options.label, state: 'starting' };
@@ -155,6 +157,8 @@ export class Environment {
   detectAgent(): Promise<void> {
     const connection = this.connected();
     if (!connection) return Promise.resolve();
+    // Checked again, the agent may offer other models: the user signed in to a provider, or out.
+    this.models.clear();
     this.detecting ??= (async () => {
       const previous = this.current.agent ?? { name: OPENCODE_NAME, state: 'unknown' as const };
       this.update({ agent: { ...previous, checking: true } });
@@ -175,6 +179,22 @@ export class Environment {
     // A check started before the reload would report the old environment.
     await this.detecting;
     await this.detectAgent();
+  }
+
+  /**
+   * The models the agent offers in the checkout at `path`, asked once per
+   * checkout until the agent is checked again; a failed ask is asked again.
+   */
+  listModels(path: string): Promise<ModelChoice[]> {
+    let listed = this.models.get(path);
+    if (!listed) {
+      listed = listOpenCodeModels((method, timeoutMs, params) => this.request(method, timeoutMs, params), path);
+      this.models.set(path, listed);
+      listed.catch(() => {
+        if (this.models.get(path) === listed) this.models.delete(path);
+      });
+    }
+    return listed;
   }
 
   /** Sends one request to the bridge; rejects unless the Environment is connected. */

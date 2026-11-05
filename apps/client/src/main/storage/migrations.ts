@@ -82,4 +82,10 @@ export const migrations: Migration[] = [
       .execute();
     await db.schema.createIndex('queued_messages_session').on('queued_messages').column('session_id').execute();
   },
+  async (db) => {
+    await db.schema.alterTable('sessions').addColumn('model', 'text').execute();
+    await db.schema.alterTable('sessions').addColumn('effort', 'text').execute();
+    await db.schema.alterTable('sessions').addColumn('context_used', 'integer').execute();
+    await db.schema.alterTable('sessions').addColumn('context_size', 'integer').execute();
+  },
 ];

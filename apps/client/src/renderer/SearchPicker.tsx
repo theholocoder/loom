@@ -25,6 +25,7 @@ export function SearchPicker<T>({
   loading,
   options,
   selected,
+  disabled = false,
   onOpen,
   onChange,
 }: {
@@ -40,6 +41,7 @@ export function SearchPicker<T>({
   options: Loaded<PickerOption<T>[]>;
   /** The selected option's key and label; the label shows even before the options are listed. */
   selected?: { key: string; label: string };
+  disabled?: boolean;
   /** Called when the list opens, e.g. to load the options again. */
   onOpen?: () => void;
   onChange: (value: T) => void;
@@ -58,7 +60,7 @@ export function SearchPicker<T>({
 
   return (
     <>
-      <button ref={trigger} type="button" className="pick" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open} onClick={() => {
+      <button ref={trigger} type="button" className="pick" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={() => {
           if (open) return close();
           setOpen(true);
           onOpen?.();
@@ -68,7 +70,7 @@ export function SearchPicker<T>({
         <b className="tech ellipsis">{selected?.label ?? placeholder}</b>
         <ChevronDown className="chev" aria-hidden />
       </button>
-      {open && (
+      {open && !disabled && (
         <Popover anchor={trigger} role="dialog" label={label} className="search-popover" onClose={close}>
           <input aria-label={`Search ${noun}`} placeholder={`Search ${noun}…`} data-autofocus value={search} onChange={(event) => setSearch(event.target.value)} />
           {options && 'error' in options && (

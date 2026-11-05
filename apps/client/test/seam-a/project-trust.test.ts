@@ -19,6 +19,7 @@ class TrustAskingAgent implements AgentAdapter {
     const emit = (event: AgentEvent) => onEvent(event);
     return {
       id,
+      configure: async () => {},
       prompt: () => {
         emit({ type: 'run-started' });
         const requestId = `trust-${++asks}`;

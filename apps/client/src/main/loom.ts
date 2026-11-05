@@ -144,6 +144,14 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     restart: () => native.restart(),
     tempDir: () => tempDirOf(native.status.bridge?.os, native.status.bridge?.home),
   };
+  /** The models the agent offers in the Project's checkout, once its Environment is up. */
+  const listModels = async (projectId: number) => {
+    const checkout = projectService.list().find((p) => p.id === projectId)?.checkout;
+    if (!checkout) throw new Error(`unknown Project ${projectId}`);
+    if (checkout.environmentId !== native.status.id) throw new Error(`unknown Environment "${checkout.environmentId}"`);
+    await native.ready();
+    return native.listModels(checkout.path);
+  };
   const sessions = new Topic<Session[]>([]);
   const sessionService = await Sessions.load({
     db,
@@ -156,6 +164,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
+    // Only checking what the user picked: not worth holding the change while the Environment starts.
+    models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
   sessions.set(sessionService.list());
 
@@ -201,6 +211,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
+    'projects.models': ({ id }) => listModels(id),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
     },
@@ -219,6 +230,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.removeQueued': (params) => sessionService.removeQueued(params),
     'sessions.sendNow': (params) => sessionService.sendNow(params),
     'sessions.steer': (params) => sessionService.steer(params),
+    'sessions.setModel': (params) => sessionService.setModel(params),
     'sessions.archive': (params) => sessionService.archive(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),

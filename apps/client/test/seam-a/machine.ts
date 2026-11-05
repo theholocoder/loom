@@ -13,6 +13,12 @@ export interface OpencodeScript {
   version: string;
   /** What `GET /api/integration` lists. */
   integrations?: Array<{ id: string; name: string; connections: unknown[] }>;
+  /**
+   * The models the user's providers offer, in the order `GET /api/model`
+   * lists them; `opencode acp`'s `model` and `effort` config options offer
+   * them too, the first being the current one of a new session.
+   */
+  models?: StandInModel[];
   /** What `opencode acp` does. */
   acp?: {
     /** Each process plays one turn per `session/prompt`, in order; past the end, a turn that says nothing. */
@@ -21,7 +27,30 @@ export interface OpencodeScript {
     writeOnExit?: string;
     /** Each process answers `session/new` only once the test calls `machine.release(holdNew)`: an agent slow to start. */
     holdNew?: string;
+    /** Each process answers `session/set_config_option` only once the test calls `machine.release(holdConfig)`. */
+    holdConfig?: string;
   };
+}
+
+/** A model as the stand-in reports it, in OpenCode's terms. */
+export interface StandInModel {
+  providerID: string;
+  id: string;
+  name: string;
+  /** Its variants, which ACP offers as Effort levels (with `default`). */
+  variants?: string[];
+  /** Its context window, in tokens: `usage_update`'s `size`. */
+  context?: number;
+  /** False for a model the user turned off; listed all the same. */
+  enabled?: boolean;
+}
+
+/** An HTTP request the `opencode serve` stand-in answered. */
+export interface OpencodeRequest {
+  method: string;
+  path: string;
+  /** Its `x-opencode-directory` header, written like `folder()` paths. */
+  directory?: string;
 }
 
 /** One run of the `opencode acp` stand-in. */
@@ -46,6 +75,8 @@ export interface AcpTurn {
   hold?: string;
   /** The run fails with this JSON-RPC error message, as a provider error does. */
   error?: string;
+  /** The run ends with a `usage_update` of this many context tokens used, out of the current model's `context`. */
+  used?: number;
 }
 
 /**
@@ -173,6 +204,14 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
       .filter((script) => basename(script) === 'opencode.json')
       .flatMap((script) => readLines(`${script}.acp.log`).map((line) => JSON.parse(line) as AcpMessage))
       .map((m) => (process.platform === 'win32' ? { ...m, cwd: m.cwd.replaceAll('\\', '/') } : m));
+  }
+
+  /** The HTTP requests the `opencode serve` stand-ins answered, in order. */
+  opencodeRequests(): OpencodeRequest[] {
+    return this.scripts
+      .filter((script) => basename(script) === 'opencode.json')
+      .flatMap((script) => readLines(`${script}.http.log`).map((line) => JSON.parse(line) as OpencodeRequest))
+      .map((r) => (process.platform === 'win32' && r.directory ? { ...r, directory: r.directory.replaceAll('\\', '/') } : r));
   }
 
   /** Lets an `opencode acp` stand-in run holding on `name` finish. */

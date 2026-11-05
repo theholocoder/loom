@@ -15,6 +15,7 @@ import { useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ThinkingBlock, ToolCard } from './WorkCards';
+import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
 
 const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
@@ -116,13 +117,19 @@ export function NewSession({ initialProjectId, pickIssue, onStarted }: { initial
   const [pickedIssue, setIssue] = useState<Issue>();
   const issue = chosen?.forge.state === 'available' ? pickedIssue : undefined;
   const suggested = !chosen ? '' : issue ? issueBranch(chosen.branchPrefix, issue) : draft.trim() ? suggestBranch(chosen.branchPrefix, draft) : '';
+  // The model and Effort picked; until then, the agent's own.
+  const models = useCheckoutModels(chosen?.id);
+  const [model, setModel] = useState<string>();
+  const [effort, setEffort] = useState<string>();
+  const efforts = effortsOf(models.listed, model);
 
   const start = async (prompt: string) => {
     if (!chosen) return false;
     setError(undefined);
     const params = workingCopyParams(workingCopy, { existing, branch: editedBranch, base: pickedBase });
     try {
-      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, ...params, ...(issue ? { issue } : {}), prompt }));
+      const pick = { ...(model !== undefined && { model }), ...(effort !== undefined && efforts.includes(effort) && { effort }) };
+      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, ...params, ...(issue ? { issue } : {}), ...pick, prompt }));
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -166,7 +173,24 @@ export function NewSession({ initialProjectId, pickIssue, onStarted }: { initial
                   setIssue(undefined);
                   setPickedBase(undefined);
                   setExisting(undefined);
+                  // Another checkout may offer other models.
+                  setModel(undefined);
+                  setEffort(undefined);
                 }}
+              />
+              <ModelPickers
+                agent={OPENCODE_NAME}
+                models={models.listed}
+                model={model}
+                efforts={efforts}
+                effort={effort}
+                onOpen={models.refresh}
+                onModel={(picked) => {
+                  setModel(picked);
+                  // A new model starts on its own default Effort.
+                  setEffort(undefined);
+                }}
+                onEffort={setEffort}
               />
               <Select<WorkingCopyChoice>
                 variant="compact"
@@ -305,6 +329,13 @@ export function SessionView({
   // at a time, the composer giving its answers of one's own; a trust or Approval request, on its card.
   const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust' || i.kind === 'approval') && i.state === 'asked') : undefined;
   const asked = firstAsked !== undefined;
+  // Between runs only: not while the agent works, or waits on an answer.
+  const pickersDisabled = working || asked || session.status === 'archived' || !!session.worktreeMissing || !!session.agentStopped;
+  const { agentConfig } = session;
+  // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
+  const checkoutModels = useCheckoutModels(agentConfig ? undefined : session.projectId);
+  const shownModel = session.model ?? agentConfig?.model;
+  const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(checkoutModels.listed, shownModel);
   const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
     api.invoke('sessions.answer', { id: session.id, itemId, answer }),
   );
@@ -468,6 +499,8 @@ export function SessionView({
             <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
           ) : item.kind === 'interruption' ? (
             <Interruption key={item.id} item={item} />
+          ) : item.kind === 'model' ? (
+            <ModelMarker key={item.id} item={item} />
           ) : (
             <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
           ),
@@ -501,6 +534,20 @@ export function SessionView({
         focusRequest={replyRequest}
         onSend={send}
         queueing={working}
+        tools={
+          <ModelPickers
+            agent={session.agent}
+            models={agentConfig ? { value: agentConfig.models } : checkoutModels.listed}
+            model={shownModel}
+            efforts={shownEfforts}
+            effort={session.effort ?? agentConfig?.effort}
+            disabled={pickersDisabled}
+            onOpen={checkoutModels.refresh}
+            onModel={(model) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, model }))}
+            onEffort={(effort) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, effort }))}
+          />
+        }
+        gauge={session.context && <ContextGauge context={session.context} />}
         onStop={working ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
         queue={
           session.queue && session.status !== 'archived' ? (
@@ -612,6 +659,7 @@ function Composer({
   queueing = false,
   onStop,
   queue,
+  gauge,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -635,6 +683,8 @@ function Composer({
   onStop?: () => void;
   /** The Session's queue, shown above the prompt box. */
   queue?: ReactNode;
+  /** How full the agent's context is, by the send button. */
+  gauge?: ReactNode;
 }) {
   const [draft, setDraftState] = useState('');
   const setDraft = (value: string) => {
@@ -681,6 +731,7 @@ function Composer({
           </span>
           {tools}
           <span className="grow" />
+          {gauge}
           {onStop && (
             <button className="send" type="button" onClick={onStop}>
               <Square />

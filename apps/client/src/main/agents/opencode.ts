@@ -3,7 +3,7 @@
 // in (a private `opencode serve --stdio` lists a connected integration). It
 // never runs `opencode auth list` or `opencode models`, which start the
 // user's shared background service.
-import { OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus } from '../../shared/api';
+import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type ModelChoice } from '../../shared/api';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { AcpProfile } from './acp-adapter';
 import { OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
@@ -53,6 +53,32 @@ export async function detectOpenCode(call: BridgeCall): Promise<Omit<AgentStatus
   }
   const signedIn = Array.isArray(integrations) && integrations.some((i) => Array.isArray(i.connections) && i.connections.length > 0);
   return { ...status, state: signedIn ? 'ready' : 'signed-out' };
+}
+
+/** A model as OpenCode's `GET /api/model` lists it; only what Loom reads. */
+interface ApiModel {
+  id?: unknown;
+  providerID?: unknown;
+  name?: unknown;
+  enabled?: unknown;
+  variants?: Array<{ id?: unknown }>;
+}
+
+/**
+ * The models OpenCode offers in the checkout `directory`, from a private
+ * `opencode serve --stdio`: as `provider/model`, with their Effort levels as
+ * its ACP bridge offers them (their variants, then `default`), leaving out
+ * the models the user turned off.
+ */
+export async function listOpenCodeModels(call: BridgeCall, directory: string): Promise<ModelChoice[]> {
+  const { models } = await call<{ models?: ApiModel[] }>('opencode.probe', PROBE_REQUEST_TIMEOUT_MS, { directory });
+  if (!Array.isArray(models)) throw new Error('OpenCode listed no models');
+  return models.flatMap((model) => {
+    if (typeof model?.providerID !== 'string' || typeof model.id !== 'string' || model.enabled === false) return [];
+    const variants = (Array.isArray(model.variants) ? model.variants : []).flatMap((v) => (typeof v?.id === 'string' ? [v.id] : []));
+    const id = `${model.providerID}/${model.id}`;
+    return [{ id, name: typeof model.name === 'string' && model.name ? model.name : id, efforts: variants.length ? [...new Set([...variants, DEFAULT_EFFORT])] : [] }];
+  });
 }
 
 /** `opencode v2.1.4`, `v2.1.4` or `1.19.4` → [major, minor, patch]. */

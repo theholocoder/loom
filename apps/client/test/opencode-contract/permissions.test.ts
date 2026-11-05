@@ -5,40 +5,19 @@
 // LOOM_OPENCODE_CONTRACT=1; see the README's "Real OpenCode contract suite".
 // It spends a few prompts of the user's default model, in throwaway git
 // repositories under the temp directory; nothing it asks is ever approved.
-import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AcpAdapter } from '../../src/main/agents/acp-adapter';
-import type { AgentEnvironment, AgentEvent, ApprovalAction } from '../../src/main/agents/adapter';
+import type { AgentEvent, ApprovalAction } from '../../src/main/agents/adapter';
 import { OPENCODE_ACP } from '../../src/main/agents/opencode';
-import type { Channel, ChannelParams } from '../../src/main/environments/channel';
+import { local } from './local';
 import { classifyApproval } from '../../src/main/sessions/approvals';
 import { DEFAULT_APPROVALS } from '../../src/shared/api';
 
 const enabled = process.env.LOOM_OPENCODE_CONTRACT === '1';
-
-/** Runs the agent on this machine, as the bridge's channel would in the native Environment. */
-const local: AgentEnvironment = {
-  label: 'Native',
-  openChannel: async ({ command, args = [], cwd, env }: ChannelParams) => {
-    const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-4000)));
-    const channel = {
-      listen: ({ onData, onExit }: Parameters<Channel['listen']>[0]) => {
-        child.stdout.on('data', onData);
-        child.on('exit', (code) => onExit({ exitCode: code ?? -1, stderr }));
-      },
-      write: async (data: string | Buffer) => void child.stdin.write(data),
-      closeStdin: async () => void child.stdin.end(),
-      kill: async () => void child.kill(),
-    };
-    return channel as unknown as Channel;
-  },
-};
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
