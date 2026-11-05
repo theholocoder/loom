@@ -1,8 +1,8 @@
 // An AgentAdapter for any agent that speaks ACP v1 over stdio, one process per
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
-import type { Answer, QuestionField, QuestionOption, ToolStatus } from '../../shared/api';
-import type { AgentAdapter, AgentEvent, AgentResponse, AgentSession, ApprovalAction, OpenOptions } from './adapter';
+import type { AgentConfig, Answer, ModelChoice, QuestionField, QuestionOption, ToolStatus } from '../../shared/api';
+import type { AgentAdapter, AgentEvent, AgentResponse, AgentSession, ApprovalAction, ModelPick, OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection } from './acp';
 
@@ -45,6 +45,15 @@ export class AcpAdapter implements AgentAdapter {
       throw error;
     });
     let sessionId: string | undefined;
+    /** The agent's config options as it last reported them, and what Loom reads of them. */
+    let options: ConfigOption[] = [];
+    let config: AgentConfig = configOf(options);
+    const configured = (reported: unknown) => {
+      if (!Array.isArray(reported)) return;
+      options = reported as ConfigOption[];
+      config = configOf(options);
+      onEvent({ type: 'config', config });
+    };
     /**
      * Elicitations and permission requests waiting on the user, by the
      * requestId Loom gave them: answered by the user, or cancelled with the run.
@@ -73,6 +82,7 @@ export class AcpAdapter implements AgentAdapter {
         if (method !== 'session/update') return;
         const { sessionId: forSession, update } = params as { sessionId: string; update: SessionUpdate };
         if (forSession !== sessionId) return;
+        if (update.sessionUpdate === 'config_option_update') return configured((update as { configOptions?: unknown }).configOptions);
         const event = translate(update);
         if (event) onEvent(event);
       },
@@ -114,14 +124,32 @@ export class AcpAdapter implements AgentAdapter {
         clientInfo: { name: 'loom', version: this.clientVersion },
       });
       // Loom adds no tools of its own (ADR 0006): the agent's are the user's.
-      ({ sessionId } = await connection.request<{ sessionId: string }>('session/new', { cwd: workingCopy, mcpServers: [] }));
+      let reported: unknown;
+      ({ sessionId, configOptions: reported } = await connection.request<{ sessionId: string; configOptions?: unknown }>('session/new', { cwd: workingCopy, mcpServers: [] }));
+      configured(reported);
     } catch (error) {
       await channel.kill().catch(() => {});
       throw new Error(`${this.profile.name} could not start a session: ${(error as Error).message}`);
     }
     const id = sessionId;
+    const name = this.profile.name;
+    /** Sets one config option; the agent answers with all of them as they now are. */
+    const set = async (category: string, value: string, what: string) => {
+      const option = optionOf(options, category);
+      if (!option) throw new Error(`${name} offers no ${what} to pick here.`);
+      try {
+        const { configOptions } = await connection.request<{ configOptions?: unknown }>('session/set_config_option', { sessionId: id, configId: option.id, value });
+        configured(configOptions);
+      } catch (error) {
+        throw new Error(`${name} could not switch to ${what} ${value}: ${(error as Error).message}`);
+      }
+    };
     return {
       id,
+      configure: async ({ model, effort }: ModelPick) => {
+        if (model !== undefined && model !== config.model) await set(MODEL, model, 'the model');
+        if (effort !== undefined && effort !== config.effort) await set(EFFORT, effort, 'Effort');
+      },
       prompt: (text) => {
         onEvent({ type: 'run-started' });
         connection.request<{ stopReason: string }>('session/prompt', { sessionId: id, prompt: [{ type: 'text', text }] }).then(
@@ -142,6 +170,11 @@ export class AcpAdapter implements AgentAdapter {
 
 function translate(update: SessionUpdate): AgentEvent | undefined {
   switch (update.sessionUpdate) {
+    case 'usage_update': {
+      const { used, size } = update as { used?: unknown; size?: unknown };
+      if (!isCount(used) || !isCount(size) || size === 0) return undefined;
+      return { type: 'usage', used, size };
+    }
     case 'agent_message_chunk':
     case 'agent_thought_chunk': {
       const text = (update as ContentChunk).content?.type === 'text' ? (update as ContentChunk).content?.text : undefined;
@@ -167,6 +200,59 @@ function translate(update: SessionUpdate): AgentEvent | undefined {
     }
   }
   return undefined;
+}
+
+// ACP v1's session config options: Loom reads the model and Effort ones, by
+// category (ACP's `thought_level` for Effort), and leaves the rest alone.
+interface ConfigOption {
+  id?: unknown;
+  category?: unknown;
+  type?: unknown;
+  currentValue?: unknown;
+  options?: unknown;
+}
+
+const MODEL = 'model';
+const EFFORT = 'thought_level';
+
+/** The select option of `category`, if the agent has one; else the one of that id, as ACP's categories are optional. */
+function optionOf(options: ConfigOption[], category: string): (ConfigOption & { id: string }) | undefined {
+  const selects = options.filter((o): o is ConfigOption & { id: string } => typeof o?.id === 'string' && o.type === 'select');
+  return selects.find((o) => o.category === category) ?? selects.find((o) => o.id === (category === EFFORT ? 'effort' : category));
+}
+
+/** The values of a select option, with their names, flattened out of any groups. */
+function choicesOf(option: ConfigOption | undefined): Array<{ value: string; name?: string }> {
+  const flat = (list: unknown): Array<{ value: string; name?: string }> =>
+    Array.isArray(list)
+      ? list.flatMap((o: { value?: unknown; name?: unknown; options?: unknown }) =>
+          typeof o?.value === 'string' ? [{ value: o.value, ...(typeof o.name === 'string' ? { name: o.name } : {}) }] : flat(o?.options),
+        )
+      : [];
+  return flat(option?.options);
+}
+
+/** What Loom reads of the agent's config options: its models, as `provider/model`, and the current model's Effort levels. */
+function configOf(options: ConfigOption[]): AgentConfig {
+  const model = optionOf(options, MODEL);
+  const effort = optionOf(options, EFFORT);
+  const models: ModelChoice[] = choicesOf(model).map(({ value, name }) => {
+    // OpenCode names a model `provider/Name`; the provider is in its id already.
+    const provider = value.split('/', 1)[0]!;
+    const shown = name?.startsWith(`${provider}/`) ? name.slice(provider.length + 1) : name;
+    return { id: value, name: shown || value };
+  });
+  const efforts = choicesOf(effort).map((c) => c.value);
+  return {
+    ...(typeof model?.currentValue === 'string' && model.currentValue ? { model: model.currentValue } : {}),
+    models,
+    ...(typeof effort?.currentValue === 'string' && efforts.length ? { effort: effort.currentValue } : {}),
+    efforts,
+  };
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
 }
 
 // ACP v1's shapes for the updates Loom shows. Anything else in them is ignored.

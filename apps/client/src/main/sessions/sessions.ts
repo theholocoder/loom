@@ -169,6 +169,7 @@ export class Sessions {
     if (!project) throw new Error(`unknown Project ${projectId}`);
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
     if (issue) checkIssue(issue);
+    checkPick(params);
     const { existing } = params;
     if (existing !== undefined) {
       checkExisting(existing);
@@ -224,6 +225,11 @@ export class Sessions {
       issue_url: issue?.url ?? null,
       merge_request_number: null,
       merge_request_url: null,
+      model: params.model ?? null,
+      // An Effort level is the model's: without a model picked, it is the agent's default model's.
+      effort: params.effort ?? null,
+      context_used: null,
+      context_size: null,
       created_at: now,
       updated_at: now,
     };
@@ -332,6 +338,32 @@ export class Sessions {
     this.endStreaming(id);
     this.addItem(id, { kind: 'user', text: message.text });
     agent.steer(message.text);
+  }
+
+  /**
+   * Changes the model or Effort the Session's prompts run with, from the
+   * next one, between runs only, with a marker in its timeline. A running
+   * agent is switched at once, so it can turn down what it doesn't offer
+   * before anything changes, and so offers the new model's Effort levels.
+   */
+  async setModel({ id, model, effort }: { id: number; model?: string; effort?: string }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    checkPick({ model, effort });
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    if (this.inRun(id)) throw new Error('The model and Effort change only between runs: wait for the agent to finish, or stop it.');
+    const running = { model: session.model ?? session.agentConfig?.model, effort: session.effort ?? session.agentConfig?.effort };
+    const newModel = model !== undefined && model !== running.model;
+    // A new model starts on its own default Effort, unless one is picked with it.
+    const newEffort = effort !== undefined && (newModel || effort !== running.effort);
+    if (!newModel && !newEffort) return;
+    const next = { model: newModel ? model : session.model, effort: newEffort ? effort : newModel ? undefined : session.effort };
+    await this.live.get(id)?.configure(next);
+    if (this.get(id).status === 'archived') return;
+    this.update(id, { model: next.model, effort: next.effort });
+    this.save(id, { model: next.model ?? null, effort: next.effort ?? null });
+    this.addItem(id, withoutUndefined({ kind: 'model' as const, model: newModel ? model : undefined, effort: newEffort ? effort : undefined }));
   }
 
   /** Puts a message at the end of the Session's queue. */
@@ -723,6 +755,14 @@ export class Sessions {
         return;
       }
     }
+    // The model and Effort picked apply from this prompt; an agent already on them isn't asked.
+    const { model, effort } = this.get(id);
+    try {
+      await agent.configure({ model, effort });
+    } catch (error) {
+      this.fail(id, (error as Error).message);
+      return;
+    }
     // Interrupted while the agent started: the prompt never goes.
     if (this.interrupting.has(id)) return this.interrupted(id);
     agent.prompt(text);
@@ -769,6 +809,13 @@ export class Sessions {
     switch (event.type) {
       case 'run-started':
         return;
+      case 'config':
+        return this.update(id, { agentConfig: event.config });
+      case 'usage': {
+        const context = { used: event.used, size: event.size };
+        this.update(id, { context });
+        return this.save(id, { context_used: context.used, context_size: context.size });
+      }
       case 'text-delta':
         return this.appendText(id, 'agent', event.text);
       case 'thinking-delta':
@@ -1197,6 +1244,12 @@ function checkIssue(issue: Issue): void {
   }
 }
 
+/** Rejects a model or Effort level that isn't a name. */
+function checkPick({ model, effort }: { model?: unknown; effort?: unknown }): void {
+  if (model !== undefined && (typeof model !== 'string' || !model.includes('/'))) throw new Error('A model is named provider/model.');
+  if (effort !== undefined && (typeof effort !== 'string' || !effort)) throw new Error('An Effort level needs a name.');
+}
+
 /** Rejects an existing working copy that isn't a plain branch name, or a worktree's path. */
 function checkExisting(existing: ExistingWorkingCopy): void {
   if (typeof existing !== 'object' || existing === null) throw new Error('An existing working copy needs a branch or a worktree.');
@@ -1238,6 +1291,9 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     branch: row.branch ?? undefined,
     issue: linkOf(row.issue_number, row.issue_url),
     mergeRequest: linkOf(row.merge_request_number, row.merge_request_url),
+    model: row.model ?? undefined,
+    effort: row.effort ?? undefined,
+    context: row.context_used === null || row.context_size === null ? undefined : { used: row.context_used, size: row.context_size },
     status: row.status,
     waitingReason: row.waiting_reason ?? undefined,
     error: row.error ?? undefined,

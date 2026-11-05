@@ -48,6 +48,12 @@ export interface SessionsTable {
   /** The linked Merge request: both set, or both null. */
   merge_request_number: number | null;
   merge_request_url: string | null;
+  /** The model the user picked, `provider/model`, and its Effort level; null for the agent's own. */
+  model: string | null;
+  effort: string | null;
+  /** How full the agent's context was after its last run that said: both set, or both null. */
+  context_used: number | null;
+  context_size: number | null;
   /** Clock times. */
   created_at: number;
   updated_at: number;

@@ -169,7 +169,11 @@ func (s *server) handle(ctx context.Context, req request) response {
 		}
 		return reply(copyFiles(params))
 	case "opencode.probe":
-		return reply(probeOpencode(ctx, s.env.get()))
+		var params probeParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(probeOpencode(ctx, s.env.get(), params))
 	case "channel.open":
 		var params openParams
 		if err := decodeParams(req.Params, &params); err != nil {

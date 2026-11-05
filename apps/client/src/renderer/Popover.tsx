@@ -163,6 +163,7 @@ export function Select<T extends string | number>({
   icon,
   className,
   variant = 'field',
+  disabled = false,
 }: {
   label: string;
   value: T;
@@ -173,18 +174,19 @@ export function Select<T extends string | number>({
   className?: string;
   /** `field` (default): a bordered field; `compact`: borderless, for a dense toolbar. */
   variant?: 'field' | 'compact';
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const current = options.find((option) => option.value === value);
   return (
     <>
-      <button ref={trigger} type="button" className={['pick', 'select', `select-${variant}`, className].filter(Boolean).join(' ')} title={label} aria-label={label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button ref={trigger} type="button" className={['pick', 'select', `select-${variant}`, className].filter(Boolean).join(' ')} title={label} aria-label={label} aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => setOpen(!open)}>
         {icon}
         <b>{current?.label}</b>
         <ChevronDown className="chev" aria-hidden />
       </button>
-      {open && (
+      {open && !disabled && (
         <Popover anchor={trigger} role="listbox" label={label} className={className} onClose={() => setOpen(false)}>
           {options.map((option) => (
             <button

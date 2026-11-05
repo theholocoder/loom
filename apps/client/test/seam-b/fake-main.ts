@@ -33,6 +33,7 @@ export class FakeMain implements LoomApi {
       'projects.issues': () => [],
       'projects.branches': () => ({ defaultBranch: 'main', remote: ['main'], existing: [], worktrees: [] }),
       'projects.check': () => {},
+      'projects.models': () => [],
       'sessions.check': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
         const settings = { ...this.value('settings'), worktreeRoot };
@@ -74,6 +75,7 @@ export class FakeMain implements LoomApi {
       'sessions.removeQueued': () => {},
       'sessions.sendNow': () => {},
       'sessions.steer': () => {},
+      'sessions.setModel': () => {},
       'sessions.archive': () => ({ archived: true }),
       'sessions.requestMergeRequest': () => {},
       'sessions.setUnread': () => {},

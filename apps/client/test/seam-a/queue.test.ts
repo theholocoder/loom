@@ -276,6 +276,7 @@ class SteerableAgent implements AgentAdapter {
     const emit = (event: AgentEvent) => onEvent(event);
     return {
       id: 'ses_steerable',
+      configure: async () => {},
       prompt: () => {
         emit({ type: 'run-started' });
         emit({ type: 'text-delta', text: 'On it.' });

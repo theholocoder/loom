@@ -2,7 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
-import type { Answer, ApprovalPolicy, QuestionField, ToolStatus } from '../../shared/api';
+import type { AgentConfig, Answer, ApprovalPolicy, QuestionField, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -34,6 +34,10 @@ export type AgentEvent =
    * AgentSession.answer approves or denies it under `requestId`.
    */
   | { type: 'approval-asked'; requestId: string; action: ApprovalAction }
+  /** What the agent offers to pick and runs with: when it starts, and whenever that changes. */
+  | { type: 'config'; config: AgentConfig }
+  /** How full its context is, in tokens, out of the model's window: after a run. */
+  | { type: 'usage'; used: number; size: number }
   /** The run ended normally. */
   | { type: 'run-settled' }
   /** The run ended in an error, such as a provider's (no credit, exhausted quota). */
@@ -95,6 +99,13 @@ export interface AgentAdapter {
 export interface AgentSession {
   /** The agent's own id for the conversation. */
   readonly id: string;
+  /**
+   * Has the agent run with `choice` from its next run: what is given and
+   * differs from what it runs with now. Changing the model goes back to the
+   * new model's default Effort unless one is given. Rejects a model or
+   * Effort level the agent doesn't offer; a `config` event follows a change.
+   */
+  configure(choice: ModelPick): Promise<void>;
   /** Starts a run; its progress and outcome arrive as events. */
   prompt(text: string): void;
   /**
@@ -111,6 +122,12 @@ export interface AgentSession {
   steer?(text: string): void;
   /** Ends the agent's process. */
   close(): Promise<void>;
+}
+
+/** A model, `provider/model`, and an Effort level to run with; what is absent stays as it is. */
+export interface ModelPick {
+  model?: string;
+  effort?: string;
 }
 
 /** The user's response to an agent's request: an answer to its question (null dismisses it), whether to trust, or whether to go ahead once. */
