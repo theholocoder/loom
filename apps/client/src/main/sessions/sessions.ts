@@ -282,11 +282,13 @@ export class Sessions {
     } catch (error) {
       // A Session without its first message would be nothing to come back to: undone, with the worktree made for it.
       this.sessions.delete(id);
-      await this.options.db.deleteFrom('sessions').where('id', '=', id).execute();
+      await this.options.db
+        .deleteFrom('sessions')
+        .where('id', '=', id)
+        .execute()
+        .catch((e: unknown) => console.error(`could not undo Session ${id}:`, e));
       await this.options.attachments.remove(id).catch(() => {});
-      if (workingCopy === 'worktree' && !(existing && 'worktree' in existing)) {
-        await removeWorktree(this.environmentOf({ projectId }), { checkout: project.checkout.path, path, force: true }).catch(() => {});
-      }
+      if (workingCopy === 'worktree' && !(existing && 'worktree' in existing)) await this.undoWorktree(projectId, path, existing ? undefined : branch);
       throw new Error(`Loom could not keep the attachments: ${(error as Error).message}`);
     }
     const message = messageOf({ text, attachments });
@@ -298,18 +300,29 @@ export class Sessions {
     return this.sessions.get(id)!;
   }
 
+  /** Removes a worktree made for a Session that couldn't start, and the branch made with it, if any. */
+  private async undoWorktree(projectId: number, path: string, newBranch: string | null | undefined): Promise<void> {
+    const environment = this.environmentOf({ projectId });
+    const checkout = this.options.project(projectId)!.checkout.path;
+    try {
+      await removeWorktree(environment, { checkout, path, force: true });
+      if (newBranch) await exec(environment.request, 'git', ['-C', checkout, 'branch', '-D', newBranch], GIT_TIMEOUT_MS);
+    } catch (error) {
+      console.error(`could not remove the worktree at ${path}:`, error);
+    }
+  }
+
   async send({ id, prompt, attachments: attached }: Commands['sessions.send']['params']): Promise<void> {
     const newAttachments = checkAttachments(attached);
     const text = promptText(prompt, { attached: newAttachments.length > 0 });
     this.get(id);
-    // A prompt that can't go is turned down before its attachments are kept.
-    if (this.get(id).status !== 'working') this.assertCanReply(id);
-    // Kept at once: a message held back by a change of model, or queued, keeps them too.
-    const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
-    const message = messageOf({ text, attachments });
     await this.loadTranscript(id);
     // A change of model or Effort made just before goes first: the marker, then this prompt on it.
     await this.switched(id);
+    // A prompt that can't go is turned down before its attachments are kept.
+    if (this.get(id).status !== 'working') this.assertCanReply(id);
+    const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
+    const message = messageOf({ text, attachments });
     if (this.get(id).status === 'working') return this.enqueue(id, message);
     this.reply(id, message);
   }
@@ -393,7 +406,8 @@ export class Sessions {
       if (this.get(id).status !== 'working' || this.interrupting.has(id) || this.live.get(id) !== agent) throw new Error('The agent is not working on this Session: use Send now.');
       return agent.steer.bind(agent);
     };
-    steerable(); // checked before writing the files, which may take a while
+    // Checked before writing the files, which may take a while, and again after.
+    steerable();
     const files = await this.deliver(id, message.attachments);
     // The run may have ended, or the message gone, while the files were written.
     const steer = steerable();

@@ -174,11 +174,11 @@ export function Composer({
         {attached.length > 0 && (
           <ul className="attachments" aria-label="Attachments">
             {attached.map(({ key, file }) => (
-              <AttachmentChip key={key} name={file.name || 'Pasted file'} mimeType={file.type} size={file.size}>
+              <AttachmentChip key={key} name={nameOf(file)} mimeType={file.type} size={file.size}>
                 <button
                   className="icon-btn sm"
                   type="button"
-                  aria-label={`Remove ${file.name || 'Pasted file'}`}
+                  aria-label={`Remove ${nameOf(file)}`}
                   title="Remove"
                   onClick={() => setFiles((current) => current.filter((f) => f.key !== key))}
                 >
@@ -396,7 +396,7 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
   return (
     <ul className="attachments" aria-label="Attachments">
       {attachments.map((attachment, index) => (
-        <AttachmentChip key={index} {...attachment}>
+        <AttachmentChip key={`${index}:${attachment.hash}`} {...attachment}>
           <span className="muted">{sizeLabel(attachment.size)}</span>
         </AttachmentChip>
       ))}
@@ -415,9 +415,14 @@ function AttachmentChip({ name, mimeType, size, children }: Pick<Attachment, 'na
   );
 }
 
+/** A file's name, as shown and sent: a pasted one may have none. */
+function nameOf(file: File): string {
+  return file.name || 'Pasted file';
+}
+
 async function readAttachment(file: File): Promise<NewAttachment> {
   const data = new Uint8Array(await file.arrayBuffer());
-  return { name: file.name || 'pasted', ...(file.type ? { mimeType: file.type } : {}), data };
+  return { name: nameOf(file), ...(file.type ? { mimeType: file.type } : {}), data };
 }
 
 /** A file's size, as people read it: `512 B`, `14 KB`, `2.3 MB`. */

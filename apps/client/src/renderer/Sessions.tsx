@@ -99,12 +99,14 @@ function workingCopyParams(
 
 /**
  * Where a new Session's files for @-mentions come from: the branch a new
- * worktree starts from or checks out, or else the checkout itself (whose
- * files an existing worktree's are close to).
+ * worktree starts from or checks out, or an existing worktree has checked
+ * out; or else the checkout itself.
  */
 function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: ExistingPick; base?: string }): { ref?: string } {
   if (choice === 'worktree' && base) return { ref: `origin/${base}` };
   if (choice === 'existing' && existing && 'branch' in existing) return { ref: branchLabel(existing.branch) };
+  // An existing worktree's files are those of its branch, but for what it hasn't committed.
+  if (choice === 'existing' && existing && 'worktree' in existing && existing.worktree.branch) return { ref: existing.worktree.branch };
   return {};
 }
 

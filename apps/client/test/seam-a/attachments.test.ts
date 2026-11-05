@@ -146,6 +146,36 @@ describe('attachments', () => {
     expect(existsSync(join(userDataDir, 'attachments', String(id)))).toBe(false);
   });
 
+  it("undoes the Session, its worktree and its new branch, when its attachments can't be kept", async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [] } });
+    const checkout = machine.gitClone(machine.gitOrigin('billing-api'), 'billing-api');
+    const userDataDir = tempDir('loom-attachments-');
+    // The attachments folder can't be made: a file is in its way.
+    writeFileSync(join(userDataDir, 'attachments'), '');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+
+    await expect(
+      main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', branch: 'loom/import', prompt: 'Import', attachments: [{ name: 'rows.csv', data: bytes('a\n') }] }),
+    ).rejects.toThrow('could not keep the attachments');
+
+    expect(await main.api.invoke('sessions.list')).toEqual([]);
+    expect(git(checkout, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1);
+    expect(git(checkout, 'branch', '--list', 'loom/import')).toBe('');
+  });
+
+  it('gets a big image to an agent that takes images whole', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Big.'] }], { images: true });
+    const { main, project } = await withProject(machine, checkout);
+    const image = new Uint8Array(9.5 * 1024 * 1024).map((_, i) => i % 251);
+
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: [{ name: 'big.png', data: image }] });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
+    const [, block] = prompts(machine)[0]!;
+    expect(sha256(Buffer.from(block!.data as string, 'base64'))).toBe(sha256(image));
+  });
+
   it('turns down what it cannot attach', async () => {
     const { machine, checkout } = machineWith([]);
     const { main, project } = await withProject(machine, checkout);

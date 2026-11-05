@@ -3,7 +3,7 @@
 // file named by its content's hash; transcript events and queued messages
 // refer to them. They reach the agent by being written into the Session's
 // Environment through its bridge, where it reads them.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isImage, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, type Attachment, type NewAttachment } from '../../shared/api';
@@ -61,7 +61,7 @@ export class Attachments {
       const path = this.path(sessionId, kept);
       await mkdir(join(this.userDataDir, ATTACHMENTS_FOLDER, String(sessionId)), { recursive: true });
       // Written beside its place and renamed in, so a crash never leaves half a file under its hash.
-      const partial = `${path}.partial`;
+      const partial = `${path}.${randomUUID()}.partial`;
       await writeFile(partial, data);
       await rename(partial, path);
       stored.push(kept);
