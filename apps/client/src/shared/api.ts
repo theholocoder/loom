@@ -353,7 +353,47 @@ export interface Session {
 export interface QueuedMessage {
   id: number;
   text: string;
+  /** What is attached to it, stored already; absent when nothing is. */
+  attachments?: Attachment[];
 }
+
+/** A file or image the user attaches to a message, as the renderer read it. */
+export interface NewAttachment {
+  /** Its file name, which the agent sees too. */
+  name: string;
+  /** Its media type, if the renderer knows it; otherwise guessed from the name. */
+  mimeType?: string;
+  data: Uint8Array;
+}
+
+/**
+ * A file or image attached to a message: stored in the attachments folder in
+ * `userData`, per Session by content hash, and given to the agent with its
+ * message, written into the Session's Environment through its bridge.
+ */
+export interface Attachment {
+  /** Its file name, as a plain name with no folder. */
+  name: string;
+  /** Its media type, as the renderer gave it or guessed from its name. */
+  mimeType: string;
+  /** In bytes. */
+  size: number;
+  /** Its content's SHA-256, in hex. */
+  hash: string;
+}
+
+/** Whether a media type is an image's, which goes to the agent as an image when it takes them. */
+export function isImage(mimeType: string): boolean {
+  return mimeType.startsWith('image/');
+}
+
+/** The most files `sessions.files` and `projects.files` list. */
+export const MAX_LISTED_FILES = 20_000;
+
+/** The most one message can have attached. */
+export const MAX_ATTACHMENTS = 10;
+/** The largest file that can be attached, in bytes. */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /** A diff's size: files changed, lines added and removed. Untracked files count as files of added lines. */
 export interface DiffStat {
@@ -560,7 +600,8 @@ export type ApprovalDecision = 'once' | 'session' | 'deny';
 
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
-  | { kind: 'user'; id: number; text: string }
+  /** What the user sent, with what they attached to it, if anything. */
+  | { kind: 'user'; id: number; text: string; attachments?: Attachment[] }
   /** `streaming` while the agent is still adding to it. */
   | { kind: 'agent'; id: number; text: string; streaming: boolean }
   /** The agent's thinking, apart from its reply; `streaming` as for `agent`. */
@@ -685,6 +726,13 @@ export interface Commands {
    * Models the user turned off are left out.
    */
   'projects.models': { params: { id: number }; result: ModelChoice[] };
+  /**
+   * The files in the Project's checkout, as `sessions.files` lists a
+   * Session's, for @-mentions before a Session exists; with `ref`, the
+   * files git has on that branch (`origin/main`, `loom/spike`) instead, for
+   * a new worktree starting from it. Rejects a ref git doesn't know.
+   */
+  'projects.files': { params: { id: number; ref?: string }; result: string[] };
   /** The Loom window got focus: read every Session's branch and worktree again. */
   'sessions.check': { params: void; result: void };
   /**
@@ -743,6 +791,8 @@ export interface Commands {
    * `model` (see `projects.models`) and `effort` are what its first prompt
    * runs with; the agent's default model, or the model's default Effort,
    * while absent.
+   *
+   * `attachments` go with the first prompt (see `sessions.send`).
    */
   'sessions.create': {
     params: {
@@ -753,6 +803,7 @@ export interface Commands {
       existing?: ExistingWorkingCopy;
       issue?: Issue;
       prompt: string;
+      attachments?: NewAttachment[];
     } & ModelPick;
     result: Session;
   };
@@ -760,8 +811,19 @@ export interface Commands {
    * Sends a prompt to a Waiting Session, which becomes Working. While the
    * Session is Working, the prompt joins its queue instead, sent once the runs
    * before it settle. Rejects while the agent waits on an answer.
+   *
+   * `attachments` are stored at once and go to the agent with the prompt;
+   * the prompt may then be empty. Rejects more than MAX_ATTACHMENTS, one
+   * over MAX_ATTACHMENT_BYTES, and one with no name.
    */
-  'sessions.send': { params: { id: number; prompt: string }; result: void };
+  'sessions.send': { params: { id: number; prompt: string; attachments?: NewAttachment[] }; result: void };
+  /**
+   * The files in the Session's working copy, for @-mentions: tracked and
+   * untracked ones git doesn't ignore, as paths relative to it with `/`, by
+   * path, at most MAX_LISTED_FILES. Rejects for an archived Session, or one
+   * whose worktree is missing.
+   */
+  'sessions.files': { params: { id: number }; result: string[] };
   /**
    * Interrupts the Session's run without sending its queue, which it keeps:
    * the Session goes Waiting (stopped). Rejects when no run is going.

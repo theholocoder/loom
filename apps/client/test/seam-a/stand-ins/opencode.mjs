@@ -12,7 +12,7 @@
 // x-opencode-directory header.
 //
 // `opencode acp` speaks ACP v1 (newline-delimited JSON-RPC) on its stdio, as
-// OpenCode 2.1.4 does: `initialize`, `session/new`, which answers a `ses_…`
+// OpenCode 2.1.4 does: `initialize` (taking images in prompts with `images`), `session/new`, which answers a `ses_…`
 // id and the `model` and `effort` config options (the script's `models`, the
 // first one current), `session/set_config_option`, which answers them as
 // changed (a new model goes back to the default Effort; with `holdConfig`,
@@ -124,7 +124,7 @@ function acp() {
       return;
     }
     if (method === 'initialize') {
-      send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
+      send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true, ...(script.acp?.images ? { promptCapabilities: { image: true } } : {}) }, authMethods: [] } });
     } else if (method === 'session/new') {
       if (script.acp?.holdNew) await released(script.acp.holdNew);
       sessionId = `ses_standin${process.pid}`;

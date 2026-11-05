@@ -34,6 +34,8 @@ export class FakeMain implements LoomApi {
       'projects.branches': () => ({ defaultBranch: 'main', remote: ['main'], existing: [], worktrees: [] }),
       'projects.check': () => {},
       'projects.models': () => [],
+      'projects.files': () => [],
+      'sessions.files': () => [],
       'sessions.check': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
         const settings = { ...this.value('settings'), worktreeRoot };

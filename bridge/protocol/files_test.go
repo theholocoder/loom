@@ -116,3 +116,42 @@ func TestFilesCopyOfAMissingFileIsAnError(t *testing.T) {
 		t.Fatalf("reply error = %v, want copy_failed", errObj)
 	}
 }
+
+func TestFilesWriteWritesAFileCreatingItsFolders(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "attachments", "7", "notes.txt")
+	p := startBridge(t)
+
+	// JSON carries bytes as base64: "aGVsbG8K" is "hello\n".
+	p.call(1, "files.write", map[string]any{"path": path, "data": "aGVsbG8K"})
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello\n" {
+		t.Fatalf("files.write wrote %q, want %q", got, "hello\n")
+	}
+}
+
+func TestFilesWriteReplacesAFileAlreadyThere(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	write(t, path, "old content", 0o644)
+	p := startBridge(t)
+
+	p.call(1, "files.write", map[string]any{"path": path, "data": "bmV3"})
+
+	if got, _ := os.ReadFile(path); string(got) != "new" {
+		t.Fatalf("files.write left %q, want %q", got, "new")
+	}
+}
+
+func TestFilesWriteNeedsAPath(t *testing.T) {
+	p := startBridge(t)
+
+	p.send(map[string]any{"id": 1, "method": "files.write", "params": map[string]any{"data": "eA=="}})
+
+	if code := p.response(1)["error"].(map[string]any)["code"]; code != "bad_params" {
+		t.Fatalf("files.write without a path: error %v, want bad_params", code)
+	}
+}

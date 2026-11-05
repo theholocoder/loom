@@ -101,3 +101,41 @@ func copyPath(from, to string) error {
 	}
 	return dst.Close()
 }
+
+type fileWriteParams struct {
+	Path string `json:"path"`
+	// JSON carries it as base64.
+	Data []byte `json:"data"`
+}
+
+// writeFile writes a file whole, creating the folders it needs (private to
+// the user), and replacing what was there. It is written beside its place
+// and renamed in, so a reader never sees half of it.
+func writeFile(params fileWriteParams) (*struct{}, *Error) {
+	if params.Path == "" {
+		return nil, &Error{Code: "bad_params", Message: "files.write needs a path"}
+	}
+	dir := filepath.Dir(params.Path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, &Error{Code: "write_failed", Message: err.Error()}
+	}
+	tmp, err := os.CreateTemp(dir, ".loom-write-*")
+	if err != nil {
+		return nil, &Error{Code: "write_failed", Message: err.Error()}
+	}
+	_, err = tmp.Write(params.Data)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), params.Path)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		return nil, &Error{Code: "write_failed", Message: err.Error()}
+	}
+	return &struct{}{}, nil
+}

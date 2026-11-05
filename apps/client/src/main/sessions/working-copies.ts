@@ -330,3 +330,21 @@ async function gitOrThrow(environment: GitRunner, args: string[], what: string, 
 function message(result: ExecResult): string {
   return (result.stderr || result.stdout).trim() || `git exited with code ${result.exitCode}`;
 }
+
+/** What the bridge keeps of a command's stdout (`maxOutput` in bridge/protocol/exec.go), past which the listing is cut short. */
+const BRIDGE_MAX_OUTPUT = 1 << 20;
+
+/**
+ * The files in the working copy at `path`, for @-mentions: tracked ones and
+ * untracked ones git doesn't ignore, relative to it with `/`, by path, at
+ * most `limit`. With `ref`, the files git has at that commit instead.
+ */
+export async function listFiles(environment: GitRunner, path: string, limit: number, ref?: string): Promise<string[]> {
+  const args = ref === undefined ? ['ls-files', '-z', '--cached', '--others', '--exclude-standard'] : ['ls-tree', '-r', '-z', '--name-only', '--end-of-options', ref];
+  const result = await gitOrThrow(environment, ['-C', path, ...args], "Couldn't list the working copy's files");
+  const listed = result.stdout.split('\0');
+  // Cut short by the bridge, the last path may be part of one; and the list ends with an empty one anyway.
+  listed.pop();
+  if (Buffer.byteLength(result.stdout) >= BRIDGE_MAX_OUTPUT) listed.pop();
+  return [...new Set(listed.filter(Boolean))].sort().slice(0, limit);
+}

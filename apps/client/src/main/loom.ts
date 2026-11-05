@@ -9,6 +9,7 @@ import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
 import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
+import { Attachments } from './sessions/attachments';
 import { openIn, type Opener } from './sessions/open-in';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Settings } from './settings';
@@ -164,6 +165,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
+    attachments: new Attachments(options.userDataDir),
     // Only checking what the user picked: not worth holding the change while the Environment starts.
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
@@ -212,6 +214,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
     'projects.models': ({ id }) => listModels(id),
+    'projects.files': ({ id, ref }) => sessionService.projectFiles(id, ref),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
     },
@@ -226,6 +229,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.diffBases': ({ id }) => sessionService.diffBases(id),
     'sessions.setDiffBase': ({ id, base }) => sessionService.setDiffBase(id, base),
     'sessions.send': (params) => sessionService.send(params),
+    'sessions.files': ({ id }) => sessionService.files(id),
     'sessions.stop': (params) => sessionService.stop(params),
     'sessions.removeQueued': (params) => sessionService.removeQueued(params),
     'sessions.sendNow': (params) => sessionService.sendNow(params),

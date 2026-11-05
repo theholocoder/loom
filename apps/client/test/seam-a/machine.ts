@@ -29,6 +29,8 @@ export interface OpencodeScript {
     holdNew?: string;
     /** Each process answers `session/set_config_option` only once the test calls `machine.release(holdConfig)`. */
     holdConfig?: string;
+    /** Each process says in `initialize` that it takes images in prompts (`promptCapabilities.image`). */
+    images?: boolean;
   };
 }
 

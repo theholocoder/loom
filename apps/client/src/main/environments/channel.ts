@@ -33,6 +33,8 @@ export interface ChannelTransport {
 }
 
 const CHANNEL_REQUEST_TIMEOUT_MS = 30_000;
+/** The most of a write one `channel.write` carries: base64 makes it a third bigger, under the bridge's 16 MiB frame. */
+const MAX_WRITE_BYTES = 4 << 20;
 
 /**
  * Bytes received but not yet acknowledged before main acknowledges them. It
@@ -66,10 +68,19 @@ export class Channel {
     }
   }
 
-  /** Writes to the process's stdin, after any write already in flight. */
+  /**
+   * Writes to the process's stdin, after any write already in flight. A big
+   * write, such as a prompt with images in it, goes in pieces, each well
+   * within the bridge's frame limit once base64-encoded.
+   */
   write(data: string | Buffer): Promise<void> {
-    const encoded = Buffer.from(data).toString('base64');
-    const write = this.writing.then(() => this.transport.request<void>('channel.write', CHANNEL_REQUEST_TIMEOUT_MS, { channel: this.id, data: encoded }));
+    const bytes = Buffer.from(data);
+    const write = this.writing.then(async () => {
+      for (let at = 0; at < bytes.length || at === 0; at += MAX_WRITE_BYTES) {
+        const encoded = bytes.subarray(at, at + MAX_WRITE_BYTES).toString('base64');
+        await this.transport.request<void>('channel.write', CHANNEL_REQUEST_TIMEOUT_MS, { channel: this.id, data: encoded });
+      }
+    });
     this.writing = write.catch(() => {});
     return write;
   }

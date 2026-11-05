@@ -74,6 +74,8 @@ export interface QueuedMessagesTable {
   id: number;
   session_id: number;
   text: string;
+  /** What is attached to it (Attachment[], JSON-encoded); null when nothing is. */
+  attachments: string | null;
   /** Clock time it was queued. */
   created_at: number;
 }
