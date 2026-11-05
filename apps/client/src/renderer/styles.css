@@ -103,7 +103,6 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .msg.agent .body, .msg.user .body { flex: 1; }
 .msg.user .bubble { max-width: 85%; background: var(--user); border: 1px solid var(--user-line); padding: 8px 14px; border-radius: 16px 16px 4px 16px; }
 .msg.agent .bubble { background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; border-radius: 4px 16px 16px 16px; }
-.bubble p { margin: 6px 0; } .bubble ul { margin: 6px 0; padding-left: 20px; }
 .msg .name { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
 .tools { margin-left: 42px; }
 .tool { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 6px 0; overflow: hidden; }
@@ -246,7 +245,7 @@ input.prefix { background: var(--panel2); border: 1px solid var(--line); border-
 button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-align: left; }
 .st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }
 .st-waiting-approval, .st-waiting-feedback { color: var(--wait); }
-.bubble { white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble { overflow-wrap: anywhere; }
 .tool.failed { border-color: var(--err); } .tool.failed .name { color: var(--err); }
 .composer-wrap button.send:disabled { opacity: .5; cursor: default; filter: none; }
 /* Inbox rows open their Session from a button, beside the hover actions. */
@@ -275,3 +274,38 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .queue li .grow { color: var(--text); min-width: 0; }
 .queue li button:not(.icon-btn) { border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
 .interruption { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 4px 0; font-size: 12.5px; color: var(--muted); }
+
+/* Markdown in chat messages; highlighting takes the theme's own colours */
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md table, .md .code-block, .md .quote-block { margin: 6px 0; }
+.md ul, .md ol { padding-left: 22px; }
+.md li > p { margin: 2px 0; }
+.md .contains-task-list { list-style: none; padding-left: 4px; }
+.md .task-list-item > input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: -1px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 12px 0 6px; line-height: 1.3; font-weight: 650; }
+.md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.08em; } .md h4, .md h5, .md h6 { font-size: 1em; }
+.md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md :not(pre) > code { font-size: .9em; }
+.md table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
+.md th { background: var(--panel2); font-weight: 600; }
+.md .code-block { border: 1px solid var(--line); border-radius: 6px; background: var(--code); overflow: hidden; }
+.md .code-block figcaption { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
+/* the figure is the block's frame: its pre and code take none of the global code styles */
+.md .code-block pre { margin: 0; padding: 8px 10px; border: 0; border-radius: 0; background: none; overflow-x: auto; white-space: pre; overflow-wrap: normal; color: var(--text); }
+.md .code-block pre code { background: none; border: 0; padding: 0; border-radius: 0; }
+.md .quote-block { position: relative; }
+.md blockquote { margin: 0; padding: 2px 64px 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.md .quote-block > .copy-btn { position: absolute; top: 0; right: 0; }
+.copy-btn { padding: 1px 6px; font-size: 11.5px; background: transparent; border-color: transparent; color: var(--muted); }
+.copy-btn:hover { background: var(--hover); color: var(--text); }
+.copy-btn.failed { color: var(--err); }
+.hljs-comment, .hljs-quote { color: var(--muted); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-doctag, .hljs-meta .hljs-keyword { color: var(--accent); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute, .hljs-template-tag, .hljs-template-variable { color: var(--ok); }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet, .hljs-variable.constant_ { color: var(--wait); }
+.hljs-title, .hljs-section, .hljs-function .hljs-title, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--work); }
+.hljs-type, .hljs-class .hljs-title, .hljs-params, .hljs-attr, .hljs-property { color: var(--text); }
+.hljs-deletion, .hljs-meta { color: var(--err); }
+.hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
