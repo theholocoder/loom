@@ -268,6 +268,11 @@ export class Sessions {
   /** The files in the Session's working copy, for @-mentions. */
   files(id: number): Promise<string[]> {
     const session = this.get(id);
+    if (this.reopenable(id)) {
+      // Its worktree is gone until it is reopened: its branch has the same files.
+      if (session.workingCopy.kind !== 'worktree') return this.listFilesIn(session.projectId, session.workingCopy.path);
+      return session.branch ? this.projectFiles(session.projectId, session.branch) : Promise.resolve([]);
+    }
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     return this.listFilesIn(session.projectId, session.workingCopy.path);
@@ -299,7 +304,7 @@ export class Sessions {
     const { projectId, workingCopy, issue } = params;
     const project = this.options.project(projectId);
     if (!project) throw new Error(`unknown Project ${projectId}`);
-    if (this.removing.has(projectId)) throw new Error(`The Project "${project.name}" is being removed.`);
+    if (this.removing.has(projectId)) throw beingRemoved(project);
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
     if (issue) checkIssue(issue);
     checkPick(params);
@@ -427,15 +432,40 @@ export class Sessions {
     const text = promptText(prompt, { attached: newAttachments.length > 0, comments });
     this.get(id);
     await this.loadTranscript(id);
-    // A message to an archived Session reopens it.
-    if (this.get(id).status === 'archived') await this.reopen(id);
+    if (this.get(id).status !== 'archived') return this.prompt(id, text, newAttachments);
+    // A message to an archived Session reopens it; one sent meanwhile goes once it has.
+    const running = this.reopening.get(id);
+    if (running) {
+      await running.catch(() => {});
+      return this.send({ id, prompt, attachments: attached, comments });
+    }
+    const reopening = (async () => {
+      await this.prepareReopen(id);
+      await this.prompt(id, text, newAttachments, { reopening: true });
+    })();
+    this.reopening.set(id, reopening);
+    try {
+      await reopening;
+    } finally {
+      if (this.reopening.get(id) === reopening) this.reopening.delete(id);
+    }
+  }
+
+  /** Sends a prompt to the Session, or queues it; `reopening`, to an archived Session made ready by `prepareReopen`. */
+  private async prompt(id: number, text: string, newAttachments: ReturnType<typeof checkAttachments>, { reopening = false } = {}): Promise<void> {
     // A change of model or Effort made just before goes first: the marker, then this prompt on it.
     await this.switched(id);
     // A prompt that can't go is turned down before its attachments are kept.
-    if (this.get(id).status !== 'working' && !this.isStuck(id)) this.assertCanReply(id);
+    if (reopening) this.assertCanReopen(id);
+    else if (this.get(id).status !== 'working' && !this.isStuck(id)) this.assertCanReply(id);
     const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
     const message = messageOf({ text, attachments });
     this.resetAutoPrompts(id);
+    if (reopening) {
+      // Asked again with the reply: the Project may have started being removed meanwhile.
+      this.assertCanReopen(id);
+      return this.reply(id, message, { reopening });
+    }
     if (this.get(id).status === 'working') return void this.enqueue(id, message);
     // A stuck run gives way to the message, as with Send now; one sent meanwhile waits its turn behind it.
     if (this.isStuck(id)) {
@@ -446,49 +476,64 @@ export class Sessions {
     this.reply(id, message);
   }
 
-  /**
-   * Takes an archived Session out of the Archive, Waiting, to be replied to:
-   * a worktree Session gets a worktree again, on the branch archiving kept.
-   * Turned down, leaving it archived, when its Project was removed or its
-   * branch is gone.
-   */
-  private reopen(id: number): Promise<void> {
-    const running = this.reopening.get(id);
-    if (running) return running;
-    const reopening = this.reopenSession(id).finally(() => this.reopening.delete(id));
-    this.reopening.set(id, reopening);
-    return reopening;
+  /** Whether the archived Session can be reopened by a message: its Project is still there. */
+  private reopenable(id: number): boolean {
+    const session = this.get(id);
+    return session.status === 'archived' && this.options.project(session.projectId) !== undefined;
   }
 
-  private async reopenSession(id: number): Promise<void> {
-    if (this.archiving.has(id)) throw new Error('This Session is being archived.');
+  /** Throws unless the archived Session can be reopened now. */
+  private assertCanReopen(id: number): void {
     const session = this.get(id);
     const project = this.options.project(session.projectId);
     if (!project) throw new Error("This Session's Project was removed, so it can't be reopened.");
-    if (this.removing.has(project.id)) throw new Error(`The Project "${project.name}" is being removed.`);
-    if (session.workingCopy.kind === 'worktree' && !(await pathExists(this.environmentOf(session), session.workingCopy.path))) {
-      const name = session.branch;
-      if (!name) throw new Error("This Session's worktree was on no branch, so it can't be reopened.");
-      const { path } = await this.oneAtATime(project.id, () =>
-        createWorktree(this.environmentOf(session), {
-          checkout: project.checkout.path,
-          projectName: project.name,
-          branchPrefix: project.branchPrefix,
-          root: this.options.worktreeRoot(),
-          branch: { existing: { name, remote: false } },
-        }),
-      );
-      if (path !== session.workingCopy.path) {
-        this.update(id, { workingCopy: { kind: 'worktree', path } });
-        this.save(id, { working_copy_path: path });
-      }
-    }
-    if (this.get(id).status === 'archived') this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
+    if (this.removing.has(project.id)) throw beingRemoved(project);
+    if (this.archiving.has(id)) throw new Error('This Session is being archived.');
+    if (session.status !== 'archived') throw new Error('This Session is no longer archived.');
   }
 
-  /** Sends `message` to a Waiting Session as the user's reply: it becomes Working. Its transcript must be read. */
-  private reply(id: number, message: Message): void {
-    this.assertCanReply(id);
+  /**
+   * Readies an archived Session to be reopened, leaving it archived: a
+   * worktree Session gets its worktree again, where it was, on the branch
+   * archiving kept; its Merge request is looked up again, as it may have
+   * ended meanwhile (Babysit then leaves it be). Turned down when its Project
+   * was removed, its branch is gone, or something else is where its worktree was.
+   */
+  private async prepareReopen(id: number): Promise<void> {
+    this.assertCanReopen(id);
+    const session = this.get(id);
+    const project = this.options.project(session.projectId)!;
+    if (session.workingCopy.kind === 'worktree') {
+      const environment = this.environmentOf(session);
+      const { path } = session.workingCopy;
+      const name = session.branch;
+      if (await pathExists(environment, path)) {
+        // Left over from an archive that didn't finish, it is used as it is, if it is the Session's.
+        const head = await exec(environment.request, 'git', ['-C', path, 'rev-parse', '--abbrev-ref', 'HEAD'], GIT_TIMEOUT_MS).catch(() => undefined);
+        if (!name || head?.exitCode !== 0 || head.stdout.trim() !== name) throw new Error(`${path} isn't this Session's worktree on "${name ?? 'its branch'}"; move it away to reopen the Session.`);
+      } else {
+        if (!name) throw new Error("This Session's worktree was on no branch, so it can't be reopened.");
+        await this.oneAtATime(project.id, () =>
+          createWorktree(environment, {
+            checkout: project.checkout.path,
+            projectName: project.name,
+            branchPrefix: project.branchPrefix,
+            root: this.options.worktreeRoot(),
+            branch: { existing: { name, remote: false } },
+            at: path,
+          }),
+        );
+      }
+    }
+    if (session.mergeRequestState === 'open') await this.lookUpMergeRequestState(id);
+  }
+
+  /**
+   * Sends `message` to a Waiting Session as the user's reply, or, `reopening`,
+   * to an archived one: it becomes Working. Its transcript must be read.
+   */
+  private reply(id: number, message: Message, { reopening = false } = {}): void {
+    if (!reopening) this.assertCanReply(id);
     this.addItem(id, { kind: 'user', ...message });
     this.setStatus(id, { status: 'working' });
     void this.run(id, message);
@@ -615,8 +660,8 @@ export class Sessions {
 
   private async switchModel(id: number, { model, effort }: ModelPick): Promise<void> {
     if (this.inRun(id)) throw new Error('The model and Effort change only between runs: wait for the agent to finish, or stop it.');
-    // A change that could never apply is refused, as the prompt it would apply to is.
-    this.assertCanPrompt(id);
+    // A change that could never apply is refused, as the prompt it would apply to is; an archived Session's applies once it is reopened.
+    if (!this.reopenable(id)) this.assertCanPrompt(id);
     const session = this.get(id);
     const was = { model: session.agentConfig?.model, effort: session.agentConfig?.effort };
     const running = { model: session.model ?? was.model, effort: session.effort ?? was.effort };
@@ -639,7 +684,7 @@ export class Sessions {
       // An Effort level alone is checked against the model the Session runs on.
       await this.checkOffered(session.projectId, { model: next.model ?? running.model, effort: next.effort });
     }
-    if (this.get(id).status === 'archived') return;
+    if (this.get(id).status === 'archived' && !this.reopenable(id)) return;
     this.update(id, { model: next.model, effort: next.effort });
     this.save(id, { model: next.model ?? null, effort: next.effort ?? null });
     this.addItem(id, withoutUndefined({ kind: 'model' as const, model: newModel ? model : undefined, effort: newEffort ? effort : undefined }));
@@ -953,6 +998,8 @@ export class Sessions {
     if (this.removing.has(projectId)) throw new Error('This Project is already being removed.');
     this.removing.add(projectId);
     try {
+      // A reopen under way either gets its Session Working first, to be archived again here, or is turned down.
+      await Promise.allSettled(this.list().flatMap((s) => (s.projectId === projectId && this.reopening.has(s.id) ? [this.reopening.get(s.id)!] : [])));
       const result = await this.archiveProject(projectId, discard);
       // A Session that was starting as the removal began has started by now.
       const late = result.removed && this.list().some((s) => s.projectId === projectId && s.status !== 'archived');
@@ -1932,6 +1979,8 @@ export class Sessions {
       this.write((trx) => trx.updateTable('sessions').set((eb) => ({ stuck_count: eb('stuck_count', '+', 1) })).where('id', '=', id).execute());
     }
     if (status === 'archived' && was.status !== 'archived') this.save(id, { archived_at: updatedAt });
+    // Reopened: it is archived no longer.
+    if (status !== 'archived' && was.status === 'archived') this.save(id, { archived_at: null });
     this.update(id, { status, waitingReason, error, unread, updatedAt });
     this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt });
     this.watchIdle(id);
@@ -2211,4 +2260,9 @@ function withoutUndefined<T extends object>(value: T): T {
 
 function filesOf(summary: DiffSummary): DiffFile[] {
   return summary.available ? summary.files : [];
+}
+
+/** Why nothing new may happen on a Project being removed. */
+function beingRemoved(project: Pick<Project, 'name'>): Error {
+  return new Error(`The Project "${project.name}" is being removed.`);
 }

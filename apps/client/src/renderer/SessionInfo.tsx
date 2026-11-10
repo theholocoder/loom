@@ -5,7 +5,7 @@ import { Archive, Bot, BotOff, Check, CircleCheck, CircleDot, CircleMinus, Circl
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type EnvironmentStatus, type MergeRequestState, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
-import { RemovedTag } from './Archive';
+import { RemovedTag, useRemovedProject } from './Archive';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
 import { Popover } from './Popover';
 
@@ -48,7 +48,7 @@ export function SessionInfo({
 }) {
   const api = useApi();
   const environment = useTopic('environments')?.find((e) => e.id === project?.checkout.environmentId);
-  const removedProject = useTopic('removedProjects')?.find((p) => p.id === session.projectId);
+  const removedProject = useRemovedProject(session.projectId);
   const archived = session.status === 'archived';
   // A missing worktree has no folder to open.
   const openable = !archived && !session.worktreeMissing;

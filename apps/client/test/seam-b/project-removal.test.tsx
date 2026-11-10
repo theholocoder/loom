@@ -196,6 +196,19 @@ describe('a removed Project', () => {
     await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.send')?.params).toMatchObject({ prompt: 'One more thing' }));
   });
 
+  it('lets the message that reopens an archived Session pick a model and mention files', async () => {
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }, { 'sessions.files': () => ['src/login.ts'] }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: /Old work/ }));
+
+    expect((screen.getByRole('button', { name: 'Model' }) as HTMLButtonElement).disabled).toBe(false);
+    const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'Look at @log', selectionStart: 12 } });
+    await screen.findByRole('listbox', { name: 'Files' });
+    expect(main.invoked.map((i) => i.command)).toContain('sessions.files');
+  });
+
   it('is tagged removed in the Usage breakdowns', async () => {
     const dashboard = {
       ...emptyDashboard(7),

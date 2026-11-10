@@ -252,7 +252,6 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.link': (params) => projectService.link(params),
     'projects.restorable': (params) => projectService.restorable(params),
     'projects.remove': async ({ id, discard }) => {
-      if (!projectService.list().some((p) => p.id === id)) throw new Error(`unknown Project ${id}`);
       return sessionService.removeProject(id, discard ?? false, () => projectService.remove(id));
     },
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),

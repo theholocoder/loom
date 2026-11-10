@@ -1,4 +1,4 @@
-import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, Trash2, TriangleAlert } from 'lucide-react';
+import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderMinus, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -199,7 +199,7 @@ function RemoveProject({ project }: { project: Project }) {
   return (
     <>
       <button className="icon-btn sm" type="button" title={`Remove ${project.name}`} aria-label={`Remove ${project.name}`} onClick={() => setStep({})}>
-        <Trash2 />
+        <FolderMinus />
       </button>
       {step && (
         <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && close()}>

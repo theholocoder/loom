@@ -1,15 +1,20 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { git, processEnded, startMain, tempMachine, waitFor, type Machine, type OpencodeScript } from './harness';
+import { git, processEnded, startMain, tempDir, tempMachine, waitFor, type Machine, type OpencodeScript } from './harness';
 import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
 const signedIn = [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }];
 
+const models = [
+  { providerID: 'anthropic', id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', context: 200_000 },
+  { providerID: 'anthropic', id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', context: 200_000 },
+];
+
 function machineWith(acp: OpencodeScript['acp']): { machine: Machine; checkout: string } {
   const machine = tempMachine();
-  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp });
+  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, models, acp });
   const origin = machine.gitOrigin('billing-api');
   return { machine, checkout: machine.gitClone(origin, 'billing-api') };
 }
@@ -90,5 +95,71 @@ describe('a new message to an archived Session', () => {
 
     await expect(main.api.invoke('sessions.send', { id, prompt: 'One more thing' })).rejects.toThrow("This Session's Project was removed, so it can't be reopened.");
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived' });
+  });
+
+  /** An archived worktree Session, its worktree gone, its branch kept. */
+  async function archivedWorktreeSession(acp: OpencodeScript['acp'] = { turns: [{ chunks: ['Done.'] }], resumedTurns: [{ chunks: ['Back at it.'] }] }) {
+    const { machine, checkout } = machineWith(acp);
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    await main.api.invoke('sessions.archive', { id: created.id });
+    return { machine, checkout, main, project, id: created.id, path: created.workingCopy.path };
+  }
+
+  it('makes its worktree again where it was, even with the worktree root changed since', async () => {
+    const { main, id, path } = await archivedWorktreeSession();
+    await main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: tempDir('loom-other-root-') });
+
+    await main.api.invoke('sessions.send', { id, prompt: 'One more thing' });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    expect(existsSync(path)).toBe(true);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)!.workingCopy.path).toBe(path);
+  });
+
+  it("is turned down when a folder that isn't its worktree is where its worktree was", async () => {
+    const { main, id, path } = await archivedWorktreeSession();
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'unrelated.txt'), 'mine\n');
+
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'One more thing' })).rejects.toThrow(`${path} isn't this Session's worktree`);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived' });
+    expect(readFileSync(join(path, 'unrelated.txt'), 'utf8')).toBe('mine\n');
+  });
+
+  it('goes straight from Archived to Working, never Waiting in between', async () => {
+    const { main, id } = await archivedWorktreeSession();
+    const seen: string[] = [];
+    const stop = main.api.subscribe('sessions', (list) => {
+      const status = list.find((s) => s.id === id)?.status;
+      if (status && seen.at(-1) !== status) seen.push(status);
+    });
+
+    await main.api.invoke('sessions.send', { id, prompt: 'One more thing' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    stop();
+
+    expect(seen).toEqual(['archived', 'working', 'waiting']);
+  });
+
+  it('takes a model pick and lists files for @-mentions before it is reopened', async () => {
+    const { main, id } = await archivedWorktreeSession();
+
+    await main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-haiku-5-5' });
+
+    expect(await main.api.invoke('sessions.files', { id })).toContain('README.md');
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived', model: 'anthropic/claude-haiku-5-5' });
+  });
+
+  it('is archived again, its worktree gone, when its Project is removed while it reopens', async () => {
+    const { main, project, id, path } = await archivedWorktreeSession();
+
+    const results = await Promise.allSettled([main.api.invoke('sessions.send', { id, prompt: 'One more thing' }), main.api.invoke('projects.remove', { id: project.id })]);
+
+    expect(results[1]).toEqual({ status: 'fulfilled', value: { removed: true } });
+    expect(await main.api.invoke('projects.list')).toEqual([]);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived' });
+    expect(existsSync(path)).toBe(false);
   });
 });
