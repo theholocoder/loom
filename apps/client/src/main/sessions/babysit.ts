@@ -2,7 +2,7 @@
 // brings what is new on it back to its Session. Nothing a poll sees reaches
 // the Session straight away: feedback waits out a quiet window, so a burst is
 // one wake-up, and everything waits for the agent to be done with its run.
-import type { BabysitCi, BabysitStatus, FeedbackInfo, FeedbackItem, MergeRequestState, Project, Session } from '../../shared/api';
+import type { BabysitCheck, BabysitCi, BabysitStatus, FeedbackInfo, FeedbackItem, MergeRequestState, Project, Session } from '../../shared/api';
 import type { Clock, TimerHandle } from '../clock';
 import type { BridgeCall } from '../environments/exec';
 import { readMergeRequestActivity, type MergeRequestActivity } from '../projects/merge-request-activity';
@@ -52,6 +52,7 @@ interface BabysitRecord {
   quietUntil?: number;
   info: FeedbackInfo[];
   ci?: BabysitCi;
+  checks?: BabysitCheck[];
   lastPollAt?: number;
   stale: boolean;
 }
@@ -63,6 +64,8 @@ export class Babysit {
   /** The polls under way, by Session and Merge request: a new link doesn't wait for the old one's. */
   private readonly polling = new Set<string>();
   private readonly flushing = new Set<number>();
+  /** The Sessions the user has stopped watching: what was seen is kept, so turning back on catches up. */
+  private readonly off = new Set<number>();
   private writes: Promise<unknown> = Promise.resolve();
   private stopped = false;
 
@@ -79,6 +82,10 @@ export class Babysit {
       const known = saved.get(session.id);
       const record = known?.url === link.url ? known : newRecord(link);
       babysit.records.set(session.id, record);
+      if (session.babysitOff) {
+        babysit.off.add(session.id);
+        continue;
+      }
       options.sessions.setBabysit(session.id, statusOf(record));
       if (record.pending.length) babysit.armQuietEnd(session.id, record);
     }
@@ -96,6 +103,7 @@ export class Babysit {
       if (record && record.url !== link?.url) this.drop(session.id);
       if (!link) continue;
       if (this.records.has(session.id)) {
+        this.followSwitch(session);
         void this.flush(session.id);
       } else if (session.mergeRequestState === 'open') {
         const fresh = newRecord(link);
@@ -105,6 +113,22 @@ export class Babysit {
         void this.poll(session.id);
       }
     }
+  }
+
+  /** Stops or starts watching as the Session's switch has just been set, if it has. */
+  private followSwitch({ id, babysitOff }: Session): void {
+    const record = this.records.get(id)!;
+    if (!!babysitOff === this.off.has(id)) return;
+    if (babysitOff) {
+      this.off.add(id);
+      this.clearTimers(id);
+      this.options.sessions.setBabysit(id, undefined);
+      return;
+    }
+    this.off.delete(id);
+    this.options.sessions.setBabysit(id, statusOf(record));
+    if (record.pending.length) this.armQuietEnd(id, record);
+    void this.poll(id);
   }
 
   /** Polls every watched Merge request now: at startup, and when the window gains focus. */
@@ -125,7 +149,7 @@ export class Babysit {
   private async poll(id: number): Promise<void> {
     const record = this.records.get(id);
     const session = this.options.sessions.list().find((s) => s.id === id);
-    if (!record || !session || session.mergeRequestState !== 'open') return;
+    if (!record || !session || session.mergeRequestState !== 'open' || this.off.has(id)) return;
     const pollKey = `${id}:${record.url}`;
     if (this.polling.has(pollKey)) return;
     this.polling.add(pollKey);
@@ -137,7 +161,7 @@ export class Babysit {
     } finally {
       this.polling.delete(pollKey);
     }
-    if (this.stopped || this.records.get(id) !== record) return;
+    if (this.stopped || this.records.get(id) !== record || this.off.has(id)) return;
     if (activity) this.takeIn(id, record, activity);
     else record.stale = true;
     this.options.sessions.setBabysit(id, statusOf(record));
@@ -192,6 +216,7 @@ export class Babysit {
     record.seen = [...activity.feedback, ...activity.approvals].map(({ key }) => key);
     record.baselined = true;
     record.ci = ci.status;
+    record.checks = ci.checks;
     record.lastPollAt = now;
     record.stale = false;
     if (activity.state !== 'open') {
@@ -204,7 +229,7 @@ export class Babysit {
   /** Gives the Session what is due. What it can't take yet is tried again as the Session changes. */
   private async flush(id: number): Promise<void> {
     const record = this.records.get(id);
-    if (!record || this.stopped || this.flushing.has(id)) return;
+    if (!record || this.stopped || this.flushing.has(id) || this.off.has(id)) return;
     const quiet = record.pending.length > 0 && record.quietUntil !== undefined && record.quietUntil <= this.options.clock.now();
     if (!quiet && !record.info.length) return;
     const info = [...record.info];
@@ -262,6 +287,7 @@ export class Babysit {
 
   private drop(id: number): void {
     this.records.delete(id);
+    this.off.delete(id);
     this.clearTimers(id);
     this.options.sessions.setBabysit(id, undefined);
     this.write(() => this.options.db.deleteFrom('babysit').where('session_id', '=', id).execute());
@@ -288,6 +314,6 @@ function newRecord({ number, url }: { number: number; url: string }): BabysitRec
   return { number, url, baselined: false, seen: [], conflictsReported: false, pending: [], info: [], stale: false };
 }
 
-function statusOf({ ci, lastPollAt, stale }: BabysitRecord): BabysitStatus {
-  return { stale, ...(ci ? { ci } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
+function statusOf({ ci, checks, lastPollAt, stale }: BabysitRecord): BabysitStatus {
+  return { stale, ...(ci ? { ci } : {}), ...(checks ? { checks } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
 }

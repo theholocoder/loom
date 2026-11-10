@@ -1,7 +1,7 @@
 // What is going on on a Merge request, read through the Forge's CLI and the
 // user's login (ADR 0002), in terms Babysit needs: who said what, its CI, and
 // whether it conflicts. The user's own comments are already left out.
-import { FORGE_CLI, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState } from '../../shared/api';
+import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 
 const ACTIVITY_TIMEOUT_MS = 30_000;
@@ -30,6 +30,8 @@ export interface MergeRequestActivity {
     key?: string;
     /** What failed, once it has finished. */
     failing: FeedbackCheck[];
+    /** Every check, however far along. */
+    checks: BabysitCheck[];
   };
   /** Absent while the Forge hasn't worked it out. */
   conflicts?: boolean;
@@ -132,18 +134,24 @@ const GITHUB_PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
  * fails again is reported again.
  */
 function gitHubCi(oid: string, rollup: { state: string; contexts: { nodes: GitHubContext[] } } | undefined): MergeRequestActivity['ci'] {
-  if (!rollup) return { failing: [] };
-  if (rollup.state === 'PENDING' || rollup.state === 'EXPECTED') return { status: 'pending', failing: [] };
+  if (!rollup) return { failing: [], checks: [] };
   const results = rollup.contexts.nodes.map((c) =>
     c.__typename === 'CheckRun'
       ? { run: `${c.name}#${c.databaseId}`, name: c.name, url: c.detailsUrl, result: c.status === 'COMPLETED' ? (c.conclusion ?? '') : undefined }
       : { run: `${c.context}@${c.createdAt}`, name: c.context, url: c.targetUrl, result: c.state === 'PENDING' || c.state === 'EXPECTED' ? undefined : c.state },
   );
-  if (!results.length) return { failing: [] };
-  if (results.some((r) => r.result === undefined)) return { status: 'pending', failing: [] };
+  const checks = results.map((r) => listedCheck(r.name, gitHubCheckState(r.result), r.url));
+  if (rollup.state === 'PENDING' || rollup.state === 'EXPECTED') return { status: 'pending', failing: [], checks };
+  if (!results.length) return { failing: [], checks };
+  if (results.some((r) => r.result === undefined)) return { status: 'pending', failing: [], checks };
   const failing = results.filter((r) => GITHUB_FAILED.has(r.result!));
-  if (failing.length) return { status: 'failed', key: `failed:${oid}:${failing.map((r) => r.run).sort().join(',')}`, failing: failing.map(checkOf) };
-  return results.every((r) => GITHUB_PASSED.has(r.result!)) ? { status: 'passed', key: `passed:${oid}`, failing: [] } : { failing: [] };
+  if (failing.length) return { status: 'failed', key: `failed:${oid}:${failing.map((r) => r.run).sort().join(',')}`, failing: failing.map(checkOf), checks };
+  return results.every((r) => GITHUB_PASSED.has(r.result!)) ? { status: 'passed', key: `passed:${oid}`, failing: [], checks } : { failing: [], checks };
+}
+
+function gitHubCheckState(result: string | undefined): BabysitCheckState {
+  if (result === undefined) return 'pending';
+  return GITHUB_FAILED.has(result) ? 'failed' : GITHUB_PASSED.has(result) ? 'passed' : 'not-run';
 }
 
 interface GitLabMergeRequest {
@@ -193,14 +201,24 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
 const GITLAB_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'scheduled']);
 
 async function gitLabCi(run: (args: string[]) => Promise<unknown>, project: string, pipeline: GitLabMergeRequest['head_pipeline']): Promise<MergeRequestActivity['ci']> {
-  if (!pipeline) return { failing: [] };
-  if (GITLAB_PENDING.has(pipeline.status)) return { status: 'pending', failing: [] };
-  if (pipeline.status === 'success') return { status: 'passed', key: `passed:${pipeline.id}`, failing: [] };
-  if (pipeline.status !== 'failed') return { failing: [] };
+  if (!pipeline) return { failing: [], checks: [] };
   const all = (await run(['api', `${project}/pipelines/${pipeline.id}/jobs?per_page=100`])) as { id: number; name: string; status: string; web_url: string }[];
+  const checks = all.map((job) => listedCheck(job.name, gitLabCheckState(job.status), job.web_url));
+  if (GITLAB_PENDING.has(pipeline.status)) return { status: 'pending', failing: [], checks };
+  if (pipeline.status === 'success') return { status: 'passed', key: `passed:${pipeline.id}`, failing: [], checks };
+  if (pipeline.status !== 'failed') return { failing: [], checks };
   const jobs = all.filter((job) => job.status === 'failed');
   // A retried job keeps its pipeline but not its id: failing again is news.
-  return { status: 'failed', key: `failed:${pipeline.id}:${jobs.map((job) => job.id).sort((a, b) => a - b).join(',')}`, failing: jobs.map((job) => ({ name: job.name, url: job.web_url })) };
+  return { status: 'failed', key: `failed:${pipeline.id}:${jobs.map((job) => job.id).sort((a, b) => a - b).join(',')}`, failing: jobs.map((job) => ({ name: job.name, url: job.web_url })), checks };
+}
+
+function gitLabCheckState(status: string): BabysitCheckState {
+  if (GITLAB_PENDING.has(status)) return 'pending';
+  return status === 'failed' ? 'failed' : status === 'success' || status === 'skipped' ? 'passed' : 'not-run';
+}
+
+function listedCheck(name: string, state: BabysitCheckState, url: string | null): BabysitCheck {
+  return { name, state, ...(url ? { url } : {}) };
 }
 
 function checkOf({ name, url }: { name: string; url: string | null }): FeedbackCheck {

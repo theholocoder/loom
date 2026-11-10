@@ -23,6 +23,7 @@ export class Settings {
       current.diffCollapsedPatterns = stored.diffCollapsedPatterns as string[];
     }
     if (isStuckAfterMinutes(stored.stuckAfterMinutes)) current.stuckAfterMinutes = stored.stuckAfterMinutes;
+    if (typeof stored.autoPromptDefault === 'boolean') current.autoPromptDefault = stored.autoPromptDefault;
     // Categories stored are kept; one Loom no longer has is dropped, and a new one gets its default.
     if (typeof stored.approvals === 'object' && stored.approvals !== null) {
       const approvals = { ...DEFAULT_APPROVALS };
@@ -71,6 +72,11 @@ export class Settings {
   async setStuckAfterMinutes(minutes: number): Promise<SettingsValues> {
     if (!isStuckAfterMinutes(minutes)) throw new Error('A Session is stuck after a whole number of minutes, at least 1.');
     return this.set('stuckAfterMinutes', minutes);
+  }
+
+  async setAutoPromptDefault(on: boolean): Promise<SettingsValues> {
+    if (typeof on !== 'boolean') throw new Error('Whether auto-prompt is on must be true or false.');
+    return this.set('autoPromptDefault', on);
   }
 
   /** Sets whether the agent asks before actions of `category`; rejects an unknown category or setting. */

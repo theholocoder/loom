@@ -330,7 +330,8 @@ describe('the Session info view', () => {
     const git = group('Git');
     expect(value(git, 'Branch')).toBe('loom/fix-login');
     fireEvent.click(within(fact(git, 'Issue')).getByRole('button', { name: '#31' }));
-    expect(value(git, 'Merge request')).toBe('#40open');
+    expect(value(git, 'Merge request')).toBe('#40');
+    expect(within(git).getByRole('button', { name: 'Merge request open' })).toBeTruthy();
     fireEvent.click(within(git).getByRole('button', { name: 'Open Merge request #40' }));
     expect(main.invoked.filter((c) => c.command === 'links.open').map((c) => c.params)).toEqual([
       { url: 'https://github.com/acme/billing-api/issues/31' },
@@ -413,7 +414,7 @@ describe('the Session info view', () => {
         ]),
       );
       expect(value(group('Git'), 'Branch')).toBe('loom/other');
-      expect(value(group('Git'), 'Merge request')).toBe('#41open');
+      expect(value(group('Git'), 'Merge request')).toBe('#41');
       expect(value(group('Usage'), 'Context')).toBe('100k / 200k (50%)');
       expect(value(group('Usage'), 'Tokens')).toBe('130k');
       expect(value(group('Usage'), 'Reported cost')).toBe('$1.50');
@@ -439,7 +440,8 @@ describe('the Session info view', () => {
 
   it("shows an archived Session's facts read-only: no editor, terminal, Archive, nor Merge request actions", () => {
     renderInfo({ ...full, status: 'archived', mergeRequestState: 'merged' });
-    expect(value(group('Git'), 'Merge request')).toBe('#40merged');
+    expect(value(group('Git'), 'Merge request')).toBe('#40');
+    expect(within(group('Git')).getByRole('button', { name: 'Merge request merged' })).toBeTruthy();
     for (const name of ['Open in editor', 'Open in terminal', 'Archive', 'Update Merge request', 'Link Merge request']) expect(within(view()).queryByRole('button', { name })).toBeNull();
     expect(within(view()).getByRole('button', { name: 'Open Merge request #40' })).toBeTruthy();
   });

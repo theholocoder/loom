@@ -86,7 +86,7 @@ describe("the Session's Merge request", () => {
     open(main);
     const git = gitGroup();
     expect(within(git).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
-    expect(mergeRequestFact(git).querySelector('.value')!.textContent).toBe('!12open');
+    expect(mergeRequestFact(git).querySelector('.value')!.textContent).toBe('!12');
 
     fireEvent.click(within(git).getByRole('button', { name: 'Open Merge request !12' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));

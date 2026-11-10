@@ -1,6 +1,6 @@
-import { CircleCheckBig, CircleX, CodeXml, FolderTree, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, Timer, TriangleAlert } from 'lucide-react';
+import { CircleCheckBig, CircleX, CodeXml, FolderTree, GitPullRequestArrow, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, Timer, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { APPROVAL_CATEGORIES, OPENCODE_MIN_VERSION, type AgentStatus, type ApprovalCategory, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
+import { APPROVAL_CATEGORIES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, type AgentStatus, type ApprovalCategory, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { Select } from './Popover';
@@ -62,6 +62,13 @@ export function Settings() {
           <h3>Stuck Sessions</h3>
         </div>
         <StuckAfter />
+      </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <GitPullRequestArrow className="sm" />
+          <h3>Merge request feedback</h3>
+        </div>
+        <AutoPromptDefault />
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
@@ -164,6 +171,27 @@ function StuckAfter() {
     >
       A Working Session whose agent says nothing for this long goes Waiting as stuck. Waiting on your answer or approval never counts.
     </TextSetting>
+  );
+}
+
+/** Whether new Sessions send their Merge request's feedback straight to the agent. */
+function AutoPromptDefault() {
+  const api = useApi();
+  const on = useTopic('settings')?.autoPromptDefault ?? false;
+  const [error, setError] = useState<string>();
+  const change = (next: boolean) => {
+    setError(undefined);
+    api.invoke('settings.setAutoPromptDefault', { on: next }).catch((e: unknown) => setError((e as Error).message));
+  };
+  return (
+    <div style={{ padding: '10px 14px' }}>
+      <label className="row">
+        <input type="checkbox" checked={on} onChange={(event) => change(event.target.checked)} />
+        <span>Auto-prompt new Sessions</span>
+      </label>
+      <div className="muted">New feedback on a Session's Merge request goes straight to its agent, up to {MAX_AUTO_PROMPTS} attempts in a row without a message from you. Each Session can change this in its Session info.</div>
+      <ErrorAlert error={error} />
+    </div>
   );
 }
 

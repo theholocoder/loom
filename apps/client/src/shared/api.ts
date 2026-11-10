@@ -204,10 +204,22 @@ export type MergeRequestState = 'open' | 'merged' | 'closed';
 /** A Merge request's CI as a whole: `pending` until all of it has finished. */
 export type BabysitCi = 'pending' | 'passed' | 'failed';
 
+/** Where one CI check is: `not-run` for one cancelled, or waiting to be started by hand. */
+export type BabysitCheckState = BabysitCi | 'not-run';
+
+export interface BabysitCheck {
+  name: string;
+  state: BabysitCheckState;
+  /** Where its details are. */
+  url?: string;
+}
+
 /** What Babysit last saw of a Session's Merge request. */
 export interface BabysitStatus {
   /** Absent with no CI, or none that says either way (cancelled, say). */
   ci?: BabysitCi;
+  /** Each of its checks as last seen; absent before the first poll that worked. */
+  checks?: BabysitCheck[];
   /** Clock time of the last poll that worked. */
   lastPollAt?: number;
   /** Set while the last poll failed: what's shown may be out of date. */
@@ -347,6 +359,10 @@ export interface Session {
   mergeRequestState?: MergeRequestState;
   /** What Babysit last saw of its open Merge request; absent with no Merge request to babysit. */
   babysit?: BabysitStatus;
+  /** Set when the user has stopped Babysit watching its Merge request; a new link starts it again. */
+  babysitOff?: boolean;
+  /** Set when its Merge request's feedback goes straight to the agent; seeded from the global default. */
+  autoPrompt?: boolean;
   status: SessionStatus;
   /**
    * Set when a worktree Session's worktree is gone, deleted outside Loom: it
@@ -540,6 +556,8 @@ export interface Settings extends Appearance {
    * before the Session goes Waiting as stuck. A whole number, at least 1.
    */
   stuckAfterMinutes: number;
+  /** Whether a new Session starts with auto-prompt on: its Merge request's feedback goes straight to the agent. */
+  autoPromptDefault: boolean;
   /** The open Session's right sidebar, as the user left it: the same for every Session. */
   sidebar: SidebarSettings;
 }
@@ -623,6 +641,9 @@ export const DEFAULT_DIFF_COLLAPSED_PATTERNS = [
   '*.lock',
 ];
 
+/** How many auto-prompts may go in a row with no message from the user, so a broken fix loop can't spin forever. */
+export const MAX_AUTO_PROMPTS = 3;
+
 export const DEFAULT_SETTINGS: Settings = {
   worktreeRoot: '~/loom/worktrees',
   editorCommand: 'code',
@@ -630,6 +651,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diffCollapsedPatterns: DEFAULT_DIFF_COLLAPSED_PATTERNS,
   approvals: DEFAULT_APPROVALS,
   stuckAfterMinutes: 15,
+  autoPromptDefault: false,
   sidebar: DEFAULT_SIDEBAR,
   ...DEFAULT_APPEARANCE,
 };
@@ -767,8 +789,12 @@ export type TranscriptItem =
   | { kind: 'merge-request'; id: number; number: number; url: string }
   /** The agent's Link merge request tool named a Merge request Loom couldn't link, as `mergeRequest` gave it, and why. */
   | { kind: 'merge-request-refused'; id: number; mergeRequest: string; reason: string }
-  /** Babysit found feedback on the Merge request; `state` is `sent` once Send to agent has passed it on. */
-  | { kind: 'feedback'; id: number; number: number; url: string; items: FeedbackItem[]; ci?: BabysitCi; state: 'new' | 'sent' }
+  /**
+   * Babysit found feedback on the Merge request; `state` is `sent` once Send
+   * to agent or auto-prompt has passed it on. `paused` when auto-prompt would
+   * have, but has gone as many times in a row as it may without the user.
+   */
+  | { kind: 'feedback'; id: number; number: number; url: string; items: FeedbackItem[]; ci?: BabysitCi; state: 'new' | 'sent'; paused?: boolean }
   /** Babysit saw progress on the Merge request that needs nothing done. */
   | ({ kind: 'feedback-info'; id: number } & FeedbackInfo);
 
@@ -939,6 +965,8 @@ export interface Commands {
    * number of at least 1.
    */
   'settings.setStuckAfterMinutes': { params: { minutes: number }; result: Settings };
+  /** Sets whether Sessions started from now on have auto-prompt on. */
+  'settings.setAutoPromptDefault': { params: { on: boolean }; result: Settings };
   /** Sets which files the Changes view shows collapsed; blank patterns are dropped. */
   'settings.setDiffCollapsedPatterns': { params: { patterns: string[] }; result: Settings };
   /**
@@ -1080,6 +1108,10 @@ export interface Commands {
    * the Session is Working. Rejects when the card has been sent already.
    */
   'sessions.sendFeedback': { params: { id: number; itemId: number }; result: void };
+  /** Starts or stops Babysit watching the Session's Merge request; started again, it reports what came meanwhile. Rejects an archived Session. */
+  'sessions.setBabysitting': { params: { id: number; on: boolean }; result: void };
+  /** Turns auto-prompt on or off for the Session; rejects an archived Session or one whose worktree is gone. */
+  'sessions.setAutoPrompt': { params: { id: number; on: boolean }; result: void };
   /**
    * Runs the editor command on the Session's working copy, or on `file`, a
    * path relative to it, in the Session's Environment. Resolves once the

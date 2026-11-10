@@ -149,7 +149,7 @@ export interface ScriptedActivity {
   /** Absent while the Forge hasn't worked it out. */
   conflicts?: boolean;
   /** GitLab's head pipeline. */
-  pipeline?: { id: number; status: string; failedJobs?: { id: number; name: string; url: string }[] };
+  pipeline?: { id: number; status: string; failedJobs?: { id: number; name: string; url: string }[]; jobs?: { id: number; name: string; status: string; url: string }[] };
   /** Who approved it on GitLab. */
   approvedBy?: string[];
 }
