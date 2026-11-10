@@ -436,7 +436,7 @@ export function SessionView({
     if (freeAnswer) return freeAnswer.placeholder;
     if (firstAsked?.kind === 'approval') return 'Approve or deny the request above to go on.';
     if (asked) return 'Answer the question above to go on.';
-    if (session.status === 'archived') return 'This Session is archived.';
+    if (session.status === 'archived' && !project) return removedProject ? "This Session's Project was removed." : 'This Session is archived.';
     if (session.worktreeMissing) return "This Session's worktree is missing; it can only be archived.";
     return `Reply to ${session.agent}…`;
   };
@@ -606,7 +606,8 @@ export function SessionView({
         <Composer
           agent={session.agent}
           placeholder={composerPlaceholder()}
-          disabled={(session.status !== 'waiting' && !working) || (asked && !freeAnswer) || !!session.worktreeMissing}
+          // An archived Session takes a message, which reopens it, while its Project is there.
+          disabled={(session.status === 'archived' && !project) || (asked && !freeAnswer) || !!session.worktreeMissing}
           dock={panel}
           clearKey={stepKey}
           focusRequest={replyRequest}

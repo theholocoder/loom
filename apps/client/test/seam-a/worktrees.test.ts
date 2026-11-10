@@ -445,7 +445,6 @@ describe('archiving a worktree Session', () => {
     expect(remoteRefs(origin)).toBe(before);
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived' });
     await processEnded(machine.acpMessages()[0]!.pid);
-    await expect(main.api.invoke('sessions.send', { id, prompt: 'More' })).rejects.toThrow('This Session is archived.');
   });
 
   it('holds back on uncommitted changes, touching nothing, until told to discard them', async () => {

@@ -173,6 +173,29 @@ describe('a removed Project', () => {
     expect(within(header).getByText('Project removed')).toBeTruthy();
   });
 
+  it("turns its archived Sessions' composer off entirely", () => {
+    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom' }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: /Old work/ }));
+
+    const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(composer.disabled).toBe(true);
+    expect(composer.getAttribute('placeholder')).toBe("This Session's Project was removed.");
+  });
+
+  it('reopens an archived Session of a Project still there with a new message', async () => {
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: /Old work/ }));
+    const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'One more thing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.send')?.params).toMatchObject({ prompt: 'One more thing' }));
+  });
+
   it('is tagged removed in the Usage breakdowns', async () => {
     const dashboard = {
       ...emptyDashboard(7),

@@ -218,6 +218,7 @@ export function Composer({
           aria-activedescendant={menu.open?.options.length ? optionId(menu.open.active) : undefined}
           rows={2}
           placeholder={placeholder}
+          disabled={disabled}
           value={draft}
           onChange={(event) => setDraft(event.target.value, event.target.selectionStart ?? event.target.value.length)}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
