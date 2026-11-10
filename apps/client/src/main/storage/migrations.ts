@@ -133,4 +133,11 @@ export const migrations: Migration[] = [
     await db.updateTable('sessions').set((eb) => ({ archived_at: eb.ref('updated_at') })).where('status', '=', 'archived').execute();
     await db.updateTable('sessions').set({ merge_request_state: 'open' }).where('merge_request_number', 'is not', null).execute();
   },
+  async (db) => {
+    await db.schema
+      .createTable('babysit')
+      .addColumn('session_id', 'integer', (c) => c.primaryKey().references('sessions.id').onDelete('cascade'))
+      .addColumn('state', 'text', (c) => c.notNull())
+      .execute();
+  },
 ];

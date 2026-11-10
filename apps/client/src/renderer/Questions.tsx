@@ -14,14 +14,14 @@ const QUESTION_STATES: Record<QuestionState, string | undefined> = { asked: unde
 const TRUST_STATES: Record<TrustState, string | undefined> = { asked: undefined, trusted: 'Trusted', untrusted: 'Not trusted', expired: 'No longer asked' };
 
 /** The frame both cards share: highlighted while the agent waits on the user. */
-export function AskCard({ label, icon, name, asked, state, children }: { label: string; icon: ReactNode; name: string; asked: boolean; state?: string; children: ReactNode }) {
+export function AskCard({ label, icon, name, asked, hint = 'The agent is asking you', state, children }: { label: string; icon: ReactNode; name: string; asked: boolean; hint?: string; state?: string; children: ReactNode }) {
   return (
     <div className="tools">
       <div className={`tool ask${asked ? ' question' : ''}`} role="group" aria-label={label}>
         <div className="tool-head">
           {icon}
           <span className="name">{name}</span>
-          <span className="grow muted">{asked ? 'The agent is asking you' : ''}</span>
+          <span className="grow muted">{asked ? hint : ''}</span>
           {state && <span className="chip">{state}</span>}
         </div>
         <div className="tool-body">{children}</div>

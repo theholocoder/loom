@@ -10,6 +10,7 @@ import type { Clock } from './clock';
 import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
 import { Attachments } from './sessions/attachments';
+import { Babysit } from './sessions/babysit';
 import { openIn, type Opener } from './sessions/open-in';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Settings } from './settings';
@@ -100,6 +101,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const environments = new Topic<EnvironmentStatus[]>([]);
   let wasConnected = false;
   let lastState: EnvironmentStatus['state'] = 'starting';
+  let babysit: Babysit | undefined;
   const native = new Environment({
     id: 'native',
     label: 'Native',
@@ -113,7 +115,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       // onChange only fires once start() runs, after projectService exists.
       const isConnected = status.state === 'connected';
       if (isConnected && !wasConnected) {
-        void projectService.checkForges(status.id);
+        // Babysit asks the Forge, so its first polls wait for that check.
+        void projectService.checkForges(status.id).catch(() => {}).then(() => babysit?.pollAll());
         // Branches may have changed while Loom wasn't looking.
         void sessionService.lookUpBranches(status.id);
       }
@@ -163,7 +166,10 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     project: (id) => projectService.list().find((p) => p.id === id),
     environment: (id) => (id === native.status.id ? nativeForSessions : undefined),
     worktreeRoot: () => settingsService.value.worktreeRoot,
-    onChange: (list) => sessions.set(list),
+    onChange: (list) => {
+      sessions.set(list);
+      babysit?.sessionsChanged(list);
+    },
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
@@ -173,6 +179,15 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
   sessions.set(sessionService.list());
+
+  babysit = await Babysit.load({
+    db,
+    clock: options.clock,
+    sessions: sessionService,
+    project: (id) => projectService.list().find((p) => p.id === id),
+    call: (id) => (id === native.status.id ? (...args) => native.request(...args) : undefined),
+  });
+  const babysitter = babysit;
 
   void native.start();
 
@@ -220,6 +235,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.files': ({ id, ref }) => sessionService.projectFiles(id, ref),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));
+      babysitter.pollAll();
     },
     'settings.setWorktreeRoot': ({ worktreeRoot }) => settingsService.setWorktreeRoot(worktreeRoot),
     'settings.setEditorCommand': ({ editorCommand }) => settingsService.setEditorCommand(editorCommand),
@@ -243,6 +259,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.archive': (params) => sessionService.archive(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
+    'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
@@ -281,6 +298,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   return {
     api,
     close: async () => {
+      await babysitter.stop();
       await sessionService.shutdown();
       await native.stop();
       await db.destroy();

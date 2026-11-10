@@ -5,6 +5,7 @@ import { Archive, Check, CircleDot, CodeXml, Copy, ExternalLink, FileDiff, GitPu
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type DiffStat, type EnvironmentStatus, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { CI_LABELS } from './FeedbackCards';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
 import { Popover } from './Popover';
 
@@ -259,6 +260,13 @@ function MergeRequestFact({
             <ExternalLink className="sm" />
           </button>
           {session.mergeRequestState && <span className={`chip mr-${session.mergeRequestState}`}>{session.mergeRequestState}</span>}
+          {session.babysit?.ci && <span className={`chip ci-${session.babysit.ci}`}>{CI_LABELS[session.babysit.ci]}</span>}
+          {session.babysit?.stale && (
+            <span className="chip stale" title="Loom couldn't reach the Forge on its last check: this may be out of date.">
+              Stale
+            </span>
+          )}
+          {session.babysit?.lastPollAt !== undefined && <span className="muted">{`Checked ${new Date(session.babysit.lastPollAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span>}
         </>
       ) : (
         <span className="muted">None</span>
