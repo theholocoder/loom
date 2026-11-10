@@ -3,8 +3,10 @@
 // scrolled to.
 import { ChevronDown, ChevronRight, Folder, GitBranch, RefreshCw, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DiffFile, DiffSummary, FileDiff, Session } from '../shared/api';
+import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type FileDiff, type Session } from '../shared/api';
+import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { FileDiffView } from './FileDiffView';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 
 /** Files with more changed lines than this start collapsed. */
@@ -24,7 +26,7 @@ type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { sta
 
 function SessionDiff({ session }: { session: Session }) {
   const api = useApi();
-  const patterns = useTopic('settings')?.diffCollapsedPatterns;
+  const settings = useTopic('settings');
   const [uncommittedOnly, setUncommittedOnly] = useState(false);
   const [refreshes, setRefreshes] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
@@ -79,7 +81,8 @@ function SessionDiff({ session }: { session: Session }) {
             files={loaded.summary.files}
             readOnly={readOnly}
             uncommittedOnly={uncommittedOnly}
-            patterns={patterns ?? []}
+            patterns={settings?.diffCollapsedPatterns ?? []}
+            theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
             version={`${refreshes}:${turnEnded}`}
           />
         )}
@@ -136,7 +139,7 @@ function DiffBase({ session, summary, onChanged }: { session: Session; summary: 
   );
 }
 
-function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boolean; uncommittedOnly: boolean; patterns: string[]; version: string }) {
+function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boolean; uncommittedOnly: boolean; patterns: string[]; theme: Theme; version: string }) {
   const { files, patterns } = props;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
@@ -174,8 +177,13 @@ function buildTree(files: DiffFile[]): TreeNode[] {
 }
 
 function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFile) => void }) {
-  const tree = useMemo(() => buildTree(files), [files]);
+  const [query, setQuery] = useState('');
+  const needle = query.trim().toLowerCase();
+  const searching = needle !== '';
+  const tree = useMemo(() => buildTree(files.filter((file) => file.path.toLowerCase().includes(needle))), [files, needle]);
   const [closed, setClosed] = useState<Set<string>>(new Set());
+  // A search shows every match, so no folder is closed during one.
+  const isClosed = (path: string) => !searching && closed.has(path);
   const render = (nodes: TreeNode[], depth: number): React.ReactNode =>
     nodes.map((node) =>
       node.file ? (
@@ -192,7 +200,8 @@ function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFil
             type="button"
             className="diff-tree-row folder"
             style={{ paddingLeft: 8 + depth * 14 }}
-            aria-expanded={!closed.has(node.path)}
+            aria-expanded={!isClosed(node.path)}
+            disabled={searching}
             onClick={() =>
               setClosed((c) => {
                 const next = new Set(c);
@@ -201,18 +210,29 @@ function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFil
               })
             }
           >
-            {closed.has(node.path) ? <ChevronRight /> : <ChevronDown />}
+            {isClosed(node.path) ? <ChevronRight /> : <ChevronDown />}
             <Folder />
             <span className="name">{node.name}</span>
           </button>
-          {closed.has(node.path) ? null : <ul>{render(node.children, depth + 1)}</ul>}
+          {isClosed(node.path) ? null : <ul>{render(node.children, depth + 1)}</ul>}
         </li>
       ),
     );
   return (
-    <nav className="diff-tree" aria-label="Changed files">
-      <ul>{render(tree, 0)}</ul>
-    </nav>
+    <>
+      <input
+        className="diff-search"
+        type="search"
+        aria-label="Filter changed files"
+        placeholder="Filter files…"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
+      />
+      <nav className="diff-tree" aria-label="Changed files">
+        {tree.length > 0 ? <ul>{render(tree, 0)}</ul> : <div className="diff-note">No changed file matches “{query.trim()}”.</div>}
+      </nav>
+    </>
   );
 }
 
@@ -239,6 +259,7 @@ function FileSection({
   uncommittedOnly,
   expanded,
   onToggle,
+  theme,
   version,
 }: {
   session: Session;
@@ -247,6 +268,7 @@ function FileSection({
   uncommittedOnly: boolean;
   expanded: boolean;
   onToggle: () => void;
+  theme: Theme;
   version: string;
 }) {
   const api = useApi();
@@ -297,19 +319,20 @@ function FileSection({
         </div>
       ) : text.state === 'done' ? (
         <>
-          {parseUnified(text.text).map((line, index) => (
-            <div key={index} className={`diff-line ${line.kind}`}>
-              {line.text || ' '}
-            </div>
-          ))}
+          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} /> : null}
           {text.truncated ? <div className="diff-note">This diff is too large to show in full.</div> : null}
-          {!text.truncated && !text.text.includes('\n@@') && !text.text.startsWith('@@') ? <div className="diff-note">No changes to its content.</div> : null}
+          {!text.truncated && !hasHunks(text.text) ? <div className="diff-note">No changes to its content.</div> : null}
         </>
       ) : (
         <div className="diff-note">Loading…</div>
       )}
     </section>
   );
+}
+
+/** Whether a patch changes any lines: one that only renames a file or changes its mode doesn't. */
+function hasHunks(patch: string): boolean {
+  return patch.startsWith('@@') || patch.includes('\n@@');
 }
 
 function fileId(path: string): string {
@@ -330,20 +353,6 @@ function globToRegExp(pattern: string): RegExp {
     .map((part) => (part === '**' ? '.*' : part === '*' ? '[^/]*' : part === '?' ? '[^/]' : part.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
     .join('');
   return new RegExp(`^${source}$`);
-}
-
-/** The lines of a unified diff from its first hunk on, as added, removed, context or hunk header. */
-export function parseUnified(text: string): { kind: 'add' | 'del' | 'ctx' | 'hunk'; text: string }[] {
-  const lines = text.split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  const start = lines.findIndex((line) => line.startsWith('@@'));
-  if (start < 0) return [];
-  return lines.slice(start).map((line) => {
-    if (line.startsWith('@@')) return { kind: 'hunk', text: line };
-    if (line.startsWith('+')) return { kind: 'add', text: line };
-    if (line.startsWith('-')) return { kind: 'del', text: line };
-    return { kind: 'ctx', text: line };
-  });
 }
 
 /** How many times the Session has left `working`: a counter that moves once per turn end. */

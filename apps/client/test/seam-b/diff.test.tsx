@@ -1,9 +1,19 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type Project, type Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
+
+// The library draws in a shadow DOM and highlights asynchronously; these tests
+// stop at the data Loom hands it.
+vi.mock('@pierre/diffs/react', () => ({
+  PatchDiff: ({ patch, options }: { patch: string; options: unknown }) => (
+    <pre data-testid="patch-diff" data-options={JSON.stringify(options)}>
+      {patch}
+    </pre>
+  ),
+}));
 
 afterEach(cleanup);
 
@@ -95,13 +105,14 @@ describe('the Changes view', () => {
     const section = (path: string) => within(panel()).getByRole('region', { name: path });
     const toggle = (path: string) => within(section(path)).getByRole('button', { name: new RegExp(`^${path.replaceAll('.', '\\.')}`) });
     expect(toggle('src/auth/login.ts').getAttribute('aria-expanded')).toBe('true');
-    await waitFor(() => expect(within(section('src/auth/login.ts')).getByText('+new line').className).toContain('add'));
-    expect(within(section('src/auth/login.ts')).getByText('-old line').className).toContain('del');
+    const diff = await within(section('src/auth/login.ts')).findByTestId('patch-diff');
+    expect(diff.textContent).toBe(text('src/auth/login.ts'));
+    expect(JSON.parse(diff.dataset.options!)).toMatchObject({ diffStyle: 'unified', lineDiffType: 'word', disableFileHeader: true, disableLineNumbers: false });
     for (const collapsed of ['docs/logo.png', 'pnpm-lock.yaml']) expect(toggle(collapsed).getAttribute('aria-expanded')).toBe('false');
     expect(diffCalls(main, 'sessions.diffFile').map((c) => (c.params as { path: string }).path).sort()).toEqual(['src/auth/login.ts', 'src/auth/session.ts']);
 
     fireEvent.click(toggle('pnpm-lock.yaml'));
-    await waitFor(() => expect(within(section('pnpm-lock.yaml')).getByText('+new line')).toBeTruthy());
+    expect((await within(section('pnpm-lock.yaml')).findByTestId('patch-diff')).textContent).toBe(text('pnpm-lock.yaml'));
 
     fireEvent.click(within(section('src/auth/login.ts')).getByRole('button', { name: 'Open src/auth/login.ts in the editor' }));
     expect(main.invoked).toContainEqual({ command: 'sessions.openInEditor', params: { id: 7, file: 'src/auth/login.ts' } });
@@ -164,6 +175,164 @@ describe('the Changes view', () => {
     renderOpen(main);
     showChanges();
     expect((await within(panel()).findByRole('alert')).textContent).toMatch(/no local origin\/main/);
+  });
+});
+
+describe('a file\'s diff', () => {
+  const oneFile = (file: DiffFile, diff: { text: string; truncated: boolean }, settings = DEFAULT_SETTINGS) =>
+    renderOpen(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings },
+        {
+          'sessions.diff': () => ({ ...summary, files: [file] }),
+          'sessions.diffFile': () => diff,
+        },
+      ),
+    );
+  const loginTs = files[0]!;
+  const section = () => within(panel()).findByRole('region', { name: loginTs.path });
+
+  it('says when a diff is cut short, under what there is of it', async () => {
+    oneFile(loginTs, { text: text(loginTs.path), truncated: true });
+    showChanges();
+    const file = within(await section());
+    expect((await file.findByTestId('patch-diff')).textContent).toBe(text(loginTs.path));
+    expect(file.getByText('This diff is too large to show in full.')).toBeTruthy();
+  });
+
+  it('hands the library nothing when there is no text at all', async () => {
+    oneFile(loginTs, { text: '', truncated: true });
+    showChanges();
+    const file = within(await section());
+    await file.findByText('This diff is too large to show in full.');
+    expect(file.queryByTestId('patch-diff')).toBeNull();
+  });
+
+  it('says so when only the file\'s name or mode changed', async () => {
+    oneFile(loginTs, { text: 'diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n', truncated: false });
+    showChanges();
+    const file = within(await section());
+    await file.findByText('No changes to its content.');
+    expect(file.queryByTestId('patch-diff')).toBeNull();
+  });
+
+  it('shows a binary file as one, without asking for its text', async () => {
+    const main = oneFile({ ...loginTs, binary: true }, { text: '', truncated: false });
+    showChanges();
+    const file = within(await section());
+    fireEvent.click(file.getByRole('button', { name: new RegExp(`^${loginTs.path}`) }));
+    expect(await file.findByText('Binary file')).toBeTruthy();
+    expect(file.queryByTestId('patch-diff')).toBeNull();
+    expect(diffCalls(main, 'sessions.diffFile')).toHaveLength(0);
+  });
+
+  it.each([
+    ['midnight', 'github-dark', 'dark'],
+    ['paper', 'rose-pine-dawn', 'light'],
+    ['nord', 'nord', 'dark'],
+    ['mocha', 'catppuccin-mocha', 'dark'],
+    ['daylight', 'github-light', 'light'],
+  ] as const)('highlights the %s theme with %s, %s', async (theme, shiki, themeType) => {
+    oneFile(loginTs, { text: text(loginTs.path), truncated: false }, { ...DEFAULT_SETTINGS, theme });
+    showChanges();
+    const file = within(await section());
+    await waitFor(() => expect(JSON.parse(file.getByTestId('patch-diff').dataset.options!)).toMatchObject({ theme: shiki, themeType }));
+  });
+
+  it('restyles an open diff when the theme changes, without loading it again', async () => {
+    const main = oneFile(loginTs, { text: text(loginTs.path), truncated: false });
+    showChanges();
+    const file = within(await section());
+    await file.findByTestId('patch-diff');
+    expect(diffCalls(main, 'sessions.diffFile')).toHaveLength(1);
+
+    await act(() => main.invoke('settings.setAppearance', { theme: 'daylight' }));
+
+    await waitFor(() => expect(JSON.parse(file.getByTestId('patch-diff').dataset.options!)).toMatchObject({ theme: 'github-light', themeType: 'light' }));
+    expect(diffCalls(main, 'sessions.diffFile')).toHaveLength(1);
+  });
+});
+
+describe('searching the changed files', () => {
+  const tree = () => within(panel()).getByRole('navigation', { name: 'Changed files' });
+  const search = () => within(panel()).getByRole('searchbox', { name: 'Filter changed files' });
+  const type = (value: string) => fireEvent.change(search(), { target: { value } });
+  const listed = () => within(tree()).getAllByRole('button').map((row) => row.textContent);
+  const open = async () => {
+    renderOpen(fakeMain());
+    showChanges();
+    await within(panel()).findByRole('navigation', { name: 'Changed files' });
+  };
+
+  it('narrows the tree as you type to the paths holding the text, whatever its case, keeping their folders', async () => {
+    await open();
+    type('AUTH/LOG');
+    expect(listed()).toEqual(['src', 'auth', expect.stringContaining('login.ts')]);
+    type('.yaml');
+    expect(listed()).toEqual([expect.stringContaining('pnpm-lock.yaml')]);
+  });
+
+  it('matches on the whole path, so a folder name finds the files in it', async () => {
+    await open();
+    type('docs/');
+    expect(listed()).toEqual(['docs', expect.stringContaining('logo.png')]);
+  });
+
+  it('keeps every file section below the tree', async () => {
+    await open();
+    type('login');
+    for (const file of files) expect(within(panel()).getByRole('region', { name: file.path })).toBeTruthy();
+  });
+
+  it('shows a match inside a folder that was closed', async () => {
+    await open();
+    fireEvent.click(within(tree()).getByRole('button', { name: 'docs' }));
+    expect(within(tree()).queryByRole('button', { name: /logo\.png/ })).toBeNull();
+    type('logo');
+    expect(within(tree()).getByRole('button', { name: /logo\.png/ })).toBeTruthy();
+    type('');
+    expect(within(tree()).queryByRole('button', { name: /logo\.png/ })).toBeNull();
+  });
+
+  it('says so when nothing matches', async () => {
+    await open();
+    type('nothing-here');
+    expect(within(tree()).queryAllByRole('button')).toHaveLength(0);
+    expect(within(panel()).getByText('No changed file matches “nothing-here”.')).toBeTruthy();
+  });
+
+  it('brings back the whole tree when the field is cleared', async () => {
+    await open();
+    const whole = listed();
+    type('login');
+    type('');
+    expect(listed()).toEqual(whole);
+    expect(within(panel()).queryByText(/No changed file matches/)).toBeNull();
+  });
+
+  it('ignores spaces around the text, so spaces alone search for nothing', async () => {
+    await open();
+    const whole = listed();
+    type('   ');
+    expect(listed()).toEqual(whole);
+    expect(within(tree()).getByRole('button', { name: 'src' }).hasAttribute('disabled')).toBe(false);
+    type(' login ');
+    expect(listed()).toEqual(['src', 'auth', expect.stringContaining('login.ts')]);
+  });
+
+  it("doesn't run a letter's shortcut while typing in the field", async () => {
+    await open();
+    fireEvent.keyDown(search(), { key: 'd' });
+    expect(panel()).toBeTruthy();
+  });
+
+  it('clears the field on Escape', async () => {
+    await open();
+    const whole = listed();
+    type('login');
+    fireEvent.keyDown(search(), { key: 'Escape' });
+    expect((search() as HTMLInputElement).value).toBe('');
+    expect(listed()).toEqual(whole);
   });
 });
 
