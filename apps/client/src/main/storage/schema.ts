@@ -38,6 +38,10 @@ export interface SessionsTable {
   status: SessionStatus;
   waiting_reason: WaitingReason | null;
   error: string | null;
+  /** 1 when its Merge request's feedback goes straight to the agent, else 0. */
+  auto_prompt: number;
+  /** How many auto-prompts have gone since the user's last message. */
+  auto_prompts_in_a_row: number;
   /** 1 while the Session has news the user hasn't opened, else 0. */
   unread: number;
   /** The branch its working copy had checked out when last looked at. */

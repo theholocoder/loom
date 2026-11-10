@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type BabysitStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -40,6 +40,8 @@ export interface SessionsOptions {
     /** Takes effect for `get` at once; resolves once saved. */
     set(projectId: number, trusted: boolean): Promise<void>;
   };
+  /** Whether a Session started now has auto-prompt on. */
+  autoPromptDefault: () => boolean;
   /** The approval settings, as they are now. */
   approvals: () => ApprovalPolicy;
   /** How long a Working Session's agent may say nothing before the Session is stuck, as the setting is now. */
@@ -158,6 +160,8 @@ export class Sessions {
   private readonly linkCalls = new Map<number, Set<string>>();
   /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
   private readonly reportedCosts = new Map<number, number>();
+  /** The auto-prompts each Session has been sent since the user's last message; none if absent. */
+  private readonly autoPromptsInARow = new Map<number, number>();
   /** The model each Session's run goes with, as Loom set it. */
   private readonly runModels = new Map<number, string>();
   /** The run or wait each Session is in, while the Client runs (see spanOf). */
@@ -178,6 +182,7 @@ export class Sessions {
       sessions.sessions.set(row.id, sessions.withCapabilities(fromRow(row)));
       if (row.merge_request_branch !== null) sessions.mergeRequestLinks.set(row.id, { branch: row.merge_request_branch, byHand: row.merge_request_by_hand === 1 });
       if (row.reported_cost !== null) sessions.reportedCosts.set(row.id, row.reported_cost);
+      if (row.auto_prompts_in_a_row > 0) sessions.autoPromptsInARow.set(row.id, row.auto_prompts_in_a_row);
     }
     await sessions.loadUsage();
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
@@ -360,6 +365,8 @@ export class Sessions {
       archived_at: null,
       stuck_count: 0,
       merge_request_state: null,
+      auto_prompt: this.options.autoPromptDefault() ? 1 : 0,
+      auto_prompts_in_a_row: 0,
     };
     let id: number;
     try {
@@ -417,6 +424,7 @@ export class Sessions {
     if (this.get(id).status !== 'working' && !this.isStuck(id)) this.assertCanReply(id);
     const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
     const message = messageOf({ text, attachments });
+    this.resetAutoPrompts(id);
     if (this.get(id).status === 'working') return void this.enqueue(id, message);
     // A stuck run gives way to the message, as with Send now; one sent meanwhile waits its turn behind it.
     if (this.isStuck(id)) {
@@ -752,7 +760,10 @@ export class Sessions {
     const agent = this.live.get(id);
     if (decision === 'deny') {
       const said = message?.trim();
-      if (said) this.denyMessages.set(id, [this.denyMessages.get(id), said].filter(Boolean).join('\n\n'));
+      if (said) {
+        this.denyMessages.set(id, [this.denyMessages.get(id), said].filter(Boolean).join('\n\n'));
+        this.resetAutoPrompts(id);
+      }
       this.settleAsk(id, itemId, { ...item, state: 'denied', ...(said ? { message: said } : {}) });
       agent?.answer(requestId, { kind: 'approval', approved: false });
       return;
@@ -964,18 +975,37 @@ export class Sessions {
 
   /**
    * Adds what Babysit has for the Session to its transcript: quiet info cards,
-   * and a feedback card that makes it Waiting (feedback). A Session waiting on
-   * an error or an interrupted run stays so, for its Retry or Continue, with
-   * the card to see. False, with nothing added, while the agent is mid-run.
+   * and feedback. With auto-prompt on, the feedback goes to the agent as one
+   * message, queued behind a run going, unless the Session can't be given it
+   * unattended (see canAutoPrompt). Otherwise a feedback card makes the
+   * Session Waiting (feedback). A Session waiting on an error or an
+   * interrupted run stays so, for its Retry or Continue, with the card to
+   * see. False, with nothing added, if it must wait: the agent is mid-run, or
+   * asking the user.
    */
   async deliverFeedback(id: number, { info, feedback }: FeedbackDelivery): Promise<boolean> {
     await this.loadTranscript(id);
-    if (this.shuttingDown || this.inRun(id)) return false;
+    // A change of model or Effort made just before goes first, as for any prompt.
+    await this.switched(id);
+    if (this.shuttingDown) return false;
     const session = this.get(id);
     if (session.status === 'archived') return true;
+    const paused = !!session.autoPrompt && this.autoPromptsSoFar(id) >= MAX_AUTO_PROMPTS;
+    const autoPrompt = !!feedback && !paused && canAutoPrompt(session);
+    if (this.inRun(id) && !(autoPrompt && session.status === 'working')) return false;
+    // A card landing mid-reply: what the agent says next starts below it.
+    this.endStreaming(id);
     for (const entry of info) this.addItem(id, { kind: 'feedback-info', ...entry });
     if (!feedback) return true;
-    this.addItem(id, { kind: 'feedback', ...feedback, state: 'new' });
+    if (autoPrompt) {
+      this.addItem(id, { kind: 'feedback', ...feedback, state: 'sent' });
+      this.setAutoPrompts(id, this.autoPromptsSoFar(id) + 1);
+      const message = { text: feedbackPrompt(feedback, this.forgeCli(id)) };
+      if (session.status === 'working') this.enqueue(id, message);
+      else this.reply(id, message);
+      return true;
+    }
+    this.addItem(id, { kind: 'feedback', ...feedback, state: 'new', ...(paused ? { paused } : {}) });
     if (session.waitingReason === 'error' || session.waitingReason === 'interrupted') {
       this.update(id, { unread: true });
       this.save(id, { unread: 1 });
@@ -993,11 +1023,39 @@ export class Sessions {
     // Marked first: a second click must not send it twice.
     this.replaceItem(id, { ...card, state: 'sent' });
     try {
-      await this.send({ id, prompt: feedbackPrompt(card) });
+      await this.send({ id, prompt: feedbackPrompt(card, this.forgeCli(id)) });
     } catch (error) {
       this.replaceItem(id, card);
       throw error;
     }
+  }
+
+  /** Turns auto-prompt on or off for the Session, from the next feedback on. */
+  setAutoPrompt({ id, on }: Commands['sessions.setAutoPrompt']['params']): void {
+    if (typeof on !== 'boolean') throw new Error('Whether auto-prompt is on must be true or false.');
+    this.assertCanPrompt(id);
+    this.update(id, { autoPrompt: on || undefined });
+    this.save(id, { auto_prompt: on ? 1 : 0 });
+  }
+
+  private autoPromptsSoFar(id: number): number {
+    return this.autoPromptsInARow.get(id) ?? 0;
+  }
+
+  private setAutoPrompts(id: number, count: number): void {
+    this.autoPromptsInARow.set(id, count);
+    this.save(id, { auto_prompts_in_a_row: count });
+  }
+
+  /** A message from the user: auto-prompt may go again. */
+  private resetAutoPrompts(id: number): void {
+    if (this.autoPromptsSoFar(id) > 0) this.setAutoPrompts(id, 0);
+  }
+
+  /** The CLI to the Session's Forge, if its Project has one. */
+  private forgeCli(id: number): string | undefined {
+    const kind = this.options.project(this.get(id).projectId)?.forge.kind;
+    return kind && FORGE_CLI[kind];
   }
 
   /**
@@ -1933,6 +1991,11 @@ function mergeRequestPrompt(cli: string): string {
   return `Open a Merge request for this branch with ${cli}, or update it if one is already open: push the branch, then write its title and description from our conversation.`;
 }
 
+/** Whether the Session's agent may be sent feedback unattended: not after the user stopped it, nor over a Retry or Continue the user has to give. */
+function canAutoPrompt({ autoPrompt, worktreeMissing, waitingReason }: Session): boolean {
+  return !!autoPrompt && !worktreeMissing && waitingReason !== 'stopped' && waitingReason !== 'error' && waitingReason !== 'interrupted';
+}
+
 /** A Session's title: the first line of its first prompt, shortened. */
 function titleOf(prompt: string): string {
   const line = prompt.split('\n', 1)[0]!.trim();
@@ -1960,6 +2023,7 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     unread: row.unread !== 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    autoPrompt: row.auto_prompt !== 0 || undefined,
   });
 }
 

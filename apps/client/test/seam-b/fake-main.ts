@@ -78,6 +78,11 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setAutoPromptDefault': ({ on }) => {
+        const settings = { ...this.value('settings'), autoPromptDefault: on };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setDiffCollapsedPatterns': ({ patterns }) => {
         const settings = { ...this.value('settings'), diffCollapsedPatterns: patterns };
         this.publish('settings', settings);
@@ -115,6 +120,7 @@ export class FakeMain implements LoomApi {
       'sessions.requestMergeRequest': () => {},
       'sessions.linkMergeRequest': () => {},
       'sessions.sendFeedback': () => {},
+      'sessions.setAutoPrompt': () => {},
       'sessions.setUnread': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},

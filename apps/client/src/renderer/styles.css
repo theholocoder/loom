@@ -371,6 +371,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .fact .value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fact .path { word-break: break-all; }
 .fact-actions { display: flex; gap: 0; flex: none; }
+.fact-toggle { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; font-size: 12px; white-space: nowrap; color: var(--muted); cursor: pointer; }
+.fact-toggle input { margin: 0; }
 .info .diff-stat { font-weight: 600; }
 .chip.ci-passed { color: var(--ok); } .chip.ci-pending, .chip.stale { color: var(--wait); } .chip.ci-failed { color: var(--err); }
 .feedback-items { margin: 0 0 8px; padding: 0 0 0 16px; }

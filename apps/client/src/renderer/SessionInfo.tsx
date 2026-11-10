@@ -56,6 +56,10 @@ export function SessionInfo({
     api.invoke(command, { id: session.id }).catch((e: unknown) => onError((e as Error).message));
   };
   const open = (url: string) => void api.invoke('links.open', { url }).catch((e: unknown) => onError((e as Error).message));
+  const setAutoPrompt = (on: boolean) => {
+    onError(undefined);
+    api.invoke('sessions.setAutoPrompt', { id: session.id, on }).catch((e: unknown) => onError((e as Error).message));
+  };
   const model = session.model ?? session.agentConfig?.model;
   const effort = session.effort ?? session.agentConfig?.effort;
   const queued = session.queue?.length ?? 0;
@@ -96,7 +100,7 @@ export function SessionInfo({
             <span className="muted">None</span>
           )}
         </Fact>
-        <MergeRequestFact session={session} project={project} linking={linking} onLinkingChange={onLinkingChange} onOpen={open} onAsk={() => run('sessions.requestMergeRequest')} />
+        <MergeRequestFact session={session} project={project} linking={linking} onLinkingChange={onLinkingChange} onOpen={open} onAsk={() => run('sessions.requestMergeRequest')} onAutoPrompt={setAutoPrompt} />
         <Fact label="Changes">
           {session.diffStat ? (
             <button type="button" className="link diff-stat" aria-label={`Show changes: ${diffStatLabel(session.diffStat)}`} onClick={onShowChanges}>
@@ -213,9 +217,9 @@ function CopyAction({ text, label }: { text: string; label: string }) {
 
 /**
  * The Merge request's number and state, opening it; asking the agent to open
- * or update it (a prompt shortcut), and Link Merge request. Asking and
- * linking need a Session that can take a prompt, on a Project whose Forge is
- * on.
+ * or update it (a prompt shortcut), Link Merge request, and the auto-prompt
+ * toggle. These need a Session that can take a prompt, on a Project whose
+ * Forge is on.
  */
 function MergeRequestFact({
   session,
@@ -224,6 +228,7 @@ function MergeRequestFact({
   onLinkingChange,
   onOpen,
   onAsk,
+  onAutoPrompt,
 }: {
   session: Session;
   project: Project | undefined;
@@ -231,6 +236,7 @@ function MergeRequestFact({
   onLinkingChange: (linking: boolean) => void;
   onOpen: (url: string) => void;
   onAsk: () => void;
+  onAutoPrompt: (on: boolean) => void;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const canAct = session.status !== 'archived' && !session.worktreeMissing && project?.forge.state === 'available';
@@ -242,6 +248,10 @@ function MergeRequestFact({
       actions={
         canAct && (
           <>
+            <label className="fact-toggle" title="Send this Merge request's feedback straight to the agent, instead of waiting for you">
+              <input type="checkbox" checked={!!session.autoPrompt} onChange={(event) => onAutoPrompt(event.target.checked)} />
+              Auto-prompt
+            </label>
             {mergeRequest ? (
               <IconAction label="Update Merge request" icon={<GitPullRequestArrow />} onClick={onAsk} />
             ) : (

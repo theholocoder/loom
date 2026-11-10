@@ -328,7 +328,7 @@ describe('Send to agent', () => {
         '   - unit (https://ci/3)',
         '4. The Merge request has conflicts with its target branch.',
         '',
-        'Fix what needs fixing, push the branch, and reply on the Merge request to what needs a reply.',
+        "Read the details you need with `gh` (a whole thread, a failing check's log), fix what needs fixing, push the branch, then reply to or resolve each item on the Merge request.",
       ].join('\n'),
     );
     expect((await cardsOf(main, id))[0]!.state).toBe('sent');
@@ -375,5 +375,203 @@ describe('Babysit on GitLab', () => {
     const invocations = machine.forgeCliInvocations('glab');
     const at = invocations.findIndex((args) => args[0] === 'api' && args[1] === 'user');
     expect(machine.forgeCliCwds('glab')[at]).toBe(checkout);
+  });
+});
+
+describe('auto-prompt', () => {
+  const comment = (n: number) => ({ id: n, author: 'bob', body: `Note ${n}`, url: `${URLS.gh}#c${n}` });
+
+  it('is off by default, and a new Session takes the global default as it stands', async () => {
+    const { main, id, projectId } = await babysat('gh');
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).autoPrompt).toBeUndefined();
+
+    expect((await main.api.invoke('settings.setAutoPromptDefault', { on: true })).autoPromptDefault).toBe(true);
+    const seeded = await main.api.invoke('sessions.create', { projectId, workingCopy: 'worktree', prompt: 'Another' });
+    expect(seeded.autoPrompt).toBe(true);
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).autoPrompt).toBeUndefined();
+  });
+
+  it('sends feedback straight to a Waiting agent, as one message, and shows the card as sent', async () => {
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { chunks: ['Fixed.'] }] });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+
+    forge({ comments: [comment(1)], checks: [{ id: 3, name: 'unit', conclusion: 'FAILURE', url: 'https://ci/3' }] });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Fixed.'), { sessionId: id });
+
+    expect(prompts(machine).at(-1)).toBe(
+      [
+        `There is new feedback on this Session's Merge request (${URLS.gh}):`,
+        '',
+        `1. Comment by bob: "Note 1" (${URLS.gh}#c1)`,
+        '2. CI failed:',
+        '   - unit (https://ci/3)',
+        '',
+        "Read the details you need with `gh` (a whole thread, a failing check's log), fix what needs fixing, push the branch, then reply to or resolve each item on the Merge request.",
+      ].join('\n'),
+    );
+    expect((await cardsOf(main, id)).map((c) => c.state)).toEqual(['sent']);
+  });
+
+  const said = (main: MainHarness, id: number, text: string) => waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === text), { sessionId: id });
+  const settled = (main: MainHarness, id: number) => waitFor(main.api, 'sessions', (list) => sessionOf(list, id).status === 'waiting');
+  /** `n` comments on the Merge request, the last new, given the time to reach the Session. */
+  async function newComment(main: MainHarness, id: number, forge: (activity: Activity) => void, n: number) {
+    forge({ comments: Array.from({ length: n }, (_, at) => comment(at + 1)) });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+  }
+
+  it('joins the queue of a Working Session, behind what the agent is doing', async () => {
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { chunks: ['Working.'], hold: 'second' }, { chunks: ['Fixed.'] }] });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await said(main, id, 'Working.');
+
+    await newComment(main, id, forge, 1);
+    const queued = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).queue?.length === 1);
+    expect(sessionOf(queued, id).status).toBe('working');
+    expect(sessionOf(queued, id).queue![0]!.text).toContain('Comment by bob: "Note 1"');
+    expect(prompts(machine).at(-1)).toBe('Carry on');
+    const midRun = await waitFor(main.api, 'transcript', () => true, { sessionId: id });
+    expect(midRun.find((i) => i.kind === 'agent' && i.text === 'Working.')).toMatchObject({ streaming: false });
+
+    machine.release('second');
+    await said(main, id, 'Fixed.');
+    expect(prompts(machine).at(-1)).toContain('Comment by bob: "Note 1"');
+    expect((await cardsOf(main, id)).map((c) => c.state)).toEqual(['sent']);
+  });
+
+  const write = { toolCallId: 'call_w', name: 'write', title: '/etc/loom.conf', kind: 'edit', locations: [{ path: '/etc/loom.conf' }], rawInput: { path: '/etc/loom.conf', content: 'hi' } };
+  const question = { message: 'Which one?', requestedSchema: { type: 'object', properties: { pick: { type: 'string', title: 'Pick' } } } };
+
+  it.each([
+    ['question', { elicit: question }, (main: MainHarness, id: number, items: TranscriptItem[]) => main.api.invoke('sessions.answer', { id, itemId: items.find((i) => i.kind === 'question')!.id, answer: { pick: 'this' } })],
+    ['approval', { permission: write }, (main: MainHarness, id: number, items: TranscriptItem[]) => main.api.invoke('sessions.approve', { id, itemId: items.find((i) => i.kind === 'approval')!.id, decision: 'once' })],
+  ] as const)('is held while the Session waits on a %s, and goes once it is unblocked', async (reason, chunk, unblock) => {
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { chunks: [chunk as never, 'Thanks.'] }, { chunks: ['Fixed.'] }] });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === reason);
+
+    await newComment(main, id, forge, 1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sessionOf(await main.api.invoke('sessions.list'), id)).toMatchObject({ status: 'waiting', waitingReason: reason });
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).queue).toBeUndefined();
+    expect(await cardsOf(main, id)).toEqual([]);
+
+    await unblock(main, id, await waitFor(main.api, 'transcript', () => true, { sessionId: id }));
+    await said(main, id, 'Fixed.');
+    expect(prompts(machine).at(-1)).toContain('Comment by bob: "Note 1"');
+    expect((await cardsOf(main, id)).map((c) => c.state)).toEqual(['sent']);
+  });
+
+  it('leaves a Session waiting on an error for its Retry, with a card to send by hand', async () => {
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { error: 'Boom' }] });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === 'error');
+
+    await newComment(main, id, forge, 1);
+    expect((await nextCard(main, id)).state).toBe('new');
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).waitingReason).toBe('error');
+    expect(prompts(machine).at(-1)).toBe('Carry on');
+  });
+
+  it('does not wake a Session the user stopped, leaving a card to send by hand', async () => {
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { chunks: ['Working.', { hold: 'never' }] }] });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await said(main, id, 'Working.');
+    await main.api.invoke('sessions.stop', { id });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === 'stopped');
+
+    await newComment(main, id, forge, 1);
+    expect((await nextCard(main, id)).state).toBe('new');
+    expect(prompts(machine).at(-1)).toBe('Carry on');
+  });
+
+  it('counts what the user says on denying an Approval request as a message', async () => {
+    const turns = [{ chunks: ['Done.'] }, { chunks: ['Fix 1.'] }, { chunks: ['Fix 2.'] }, { chunks: [{ permission: write }, 'Fix 3.'] }, { chunks: ['Fine.'] }, { chunks: ['Fix 4.'] }];
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+    for (const n of [1, 2]) {
+      await newComment(main, id, forge, n);
+      await said(main, id, `Fix ${n}.`);
+      await settled(main, id);
+    }
+    await newComment(main, id, forge, 3);
+    const asked = await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'approval'), { sessionId: id });
+    await main.api.invoke('sessions.approve', { id, itemId: asked.find((i) => i.kind === 'approval')!.id, decision: 'deny', message: 'Not there, use the repo' });
+    await said(main, id, 'Fine.');
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === 'finished');
+
+    await newComment(main, id, forge, 4);
+    await said(main, id, 'Fix 4.');
+    expect(prompts(machine).at(-1)).toContain('Note 4');
+  });
+
+  it('pauses after 3 in a row, holding the 4th for the run to end, until the user says something', async () => {
+    const turns = [{ chunks: ['Done.'] }, { chunks: ['Fix 1.'] }, { chunks: ['Fix 2.'] }, { chunks: ['Fix 3.'], hold: 'third' }, { chunks: ['Fine.'] }, { chunks: ['Fix 5.'] }];
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+
+    for (const n of [1, 2]) {
+      await newComment(main, id, forge, n);
+      await said(main, id, `Fix ${n}.`);
+      await settled(main, id);
+    }
+    await newComment(main, id, forge, 3);
+    await said(main, id, 'Fix 3.');
+
+    await newComment(main, id, forge, 4);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sessionOf(await main.api.invoke('sessions.list'), id)).toMatchObject({ status: 'working' });
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).queue).toBeUndefined();
+    expect(await cardsOf(main, id)).toHaveLength(3);
+
+    const before = prompts(machine).length;
+    machine.release('third');
+    const paused = await nextCard(main, id, 4);
+    expect(paused).toMatchObject({ state: 'new', paused: true });
+    expect(sessionOf(await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === 'feedback'), id).status).toBe('waiting');
+    expect(prompts(machine)).toHaveLength(before);
+
+    await main.api.invoke('sessions.send', { id, prompt: 'Keep going' });
+    await said(main, id, 'Fine.');
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === 'finished');
+    await newComment(main, id, forge, 5);
+    await said(main, id, 'Fix 5.');
+    expect(prompts(machine).at(-1)).toContain('Note 5');
+    expect((await cardsOf(main, id)).at(-1)).toMatchObject({ state: 'sent' });
+  });
+
+  it('keeps the toggle, the count and the default across a restart', async () => {
+    const turns = [{ chunks: ['Done.'] }, { chunks: ['Fix 1.'] }, { chunks: ['Fix 2.'] }, { chunks: ['Fix 3.'] }];
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns, userDataDir: tempDir('loom-auto-prompt-') });
+    await main.api.invoke('sessions.setAutoPrompt', { id, on: true });
+    await main.api.invoke('settings.setAutoPromptDefault', { on: true });
+    for (const n of [1, 2, 3]) {
+      await newComment(main, id, forge, n);
+      await said(main, id, `Fix ${n}.`);
+      await settled(main, id);
+    }
+    await main.close();
+
+    const again = await startMain({ machine, userDataDir: main.userDataDir, now: main.clock.now() });
+    await waitFor(again.api, 'environments', ready);
+    await waitFor(again.api, 'sessions', (list) => sessionOf(list, id).babysit?.lastPollAt === again.clock.now());
+    expect(sessionOf(await again.api.invoke('sessions.list'), id).autoPrompt).toBe(true);
+    expect((await waitFor(again.api, 'settings', () => true)).autoPromptDefault).toBe(true);
+
+    await newComment(again, id, forge, 4);
+    expect(await nextCard(again, id, 4)).toMatchObject({ state: 'new', paused: true });
+  });
+
+  it('refuses a change on an archived Session', async () => {
+    const { main, id } = await babysat('gh');
+    await main.api.invoke('sessions.archive', { id });
+    await expect(main.api.invoke('sessions.setAutoPrompt', { id, on: true })).rejects.toThrow('archived');
   });
 });

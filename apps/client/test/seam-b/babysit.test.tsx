@@ -76,6 +76,16 @@ describe('the feedback card', () => {
     expect(within(card).queryByRole('button', { name: 'Send to agent' })).toBeNull();
   });
 
+  it('says when auto-prompt has paused, and can still be sent by hand', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [session({ autoPrompt: true })] });
+    main.publish('transcript', [{ ...feedback, paused: true }], { sessionId: 1 });
+    const card = within(open(main)).getByRole('group', { name: 'Feedback on Merge request #12' });
+
+    expect(card.textContent).toContain('paused after 3 attempts');
+    fireEvent.click(within(card).getByRole('button', { name: 'Send to agent' }));
+    await waitFor(() => expect(calls(main, 'sessions.sendFeedback')).toEqual([{ id: 1, itemId: 0 }]));
+  });
+
   it('has nothing to send once the Session is archived, but still opens on the Forge', () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     main.publish('transcript', [feedback], { sessionId: 1 });
@@ -119,5 +129,48 @@ describe('Session info', () => {
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'passed', lastPollAt: 1, stale: true } })] }));
 
     expect(row().textContent).toContain('Stale');
+  });
+
+  const toggle = () => within(row()).queryByRole('checkbox', { name: 'Auto-prompt' }) as HTMLInputElement | null;
+
+  it('turns auto-prompt on and off for the Session, showing what it is', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [session()] });
+    open(main);
+    expect(toggle()!.checked).toBe(false);
+
+    fireEvent.click(toggle()!);
+    await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }]));
+
+    act(() => main.publish('sessions', [session({ autoPrompt: true })]));
+    expect(toggle()!.checked).toBe(true);
+    fireEvent.click(toggle()!);
+    await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }, { id: 1, on: false }]));
+  });
+
+  it('has no auto-prompt toggle on an archived Session', () => {
+    const main = new FakeMain({ projects: [project], sessions: [session()] });
+    open(main);
+    expect(toggle()).not.toBeNull();
+
+    act(() => main.publish('sessions', [session({ status: 'archived', waitingReason: undefined })]));
+    expect(toggle()).toBeNull();
+  });
+});
+
+describe('the auto-prompt default in Settings', () => {
+  it('is off to begin with, and saves a change', async () => {
+    const main = new FakeMain({ projects: [project] });
+    render(
+      <ApiProvider api={main}>
+        <App />
+      </ApiProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const box = screen.getByRole('checkbox', { name: 'Auto-prompt new Sessions' }) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+
+    fireEvent.click(box);
+    await waitFor(() => expect(calls(main, 'settings.setAutoPromptDefault')).toEqual([{ on: true }]));
+    await waitFor(() => expect(box.checked).toBe(true));
   });
 });

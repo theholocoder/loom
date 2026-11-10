@@ -1,7 +1,7 @@
 // What Babysit found on the Session's Merge request, in its transcript: a card
 // of feedback the agent may need to act on, and quiet notes of progress.
 import { CircleCheckBig, MessageSquareWarning } from 'lucide-react';
-import { codePlace, mergeRequestRef, type BabysitCi, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
+import { codePlace, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
 import { AskCard, ErrorAlert, useAction } from './Questions';
 
 export const CI_LABELS: Record<BabysitCi, string> = { pending: 'CI pending', passed: 'CI passed', failed: 'CI failed' };
@@ -33,6 +33,7 @@ export function FeedbackCard({
         ))}
       </ul>
       {item.ci && <p className="muted ask-hint">{CI_LABELS[item.ci]}</p>}
+      {item.paused && !sent && <p className="muted ask-hint">Auto-prompt paused after {MAX_AUTO_PROMPTS} attempts with no message from you. Sending this, or any message, starts it again.</p>}
       <ErrorAlert error={error} />
       <div className="opts">
         {!sent && !readOnly && (
