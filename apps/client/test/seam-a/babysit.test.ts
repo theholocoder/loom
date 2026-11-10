@@ -336,6 +336,14 @@ describe('Send to agent', () => {
   });
 });
 
+describe('the arguments of a poll', () => {
+  // A CLI installed as a .cmd shim runs through cmd.exe, which stops at a newline and splits at an &.
+  it.each(['gh', 'glab'] as const)('are ones cmd.exe passes on whole, for %s', async (cli) => {
+    const { machine } = await babysat(cli, { pipeline: { id: 77, status: 'failed', failedJobs: [{ id: 501, name: 'rspec', url: 'https://ci/job' }] } });
+    expect(machine.forgeCliInvocations(cli).flat().filter((arg) => /[\n&]/.test(arg))).toEqual([]);
+  });
+});
+
 describe('Babysit on GitLab', () => {
   it('reads notes, approvals, the pipeline and conflicts through glab, in the checkout', async () => {
     const pipeline = { id: 77, status: 'running' };

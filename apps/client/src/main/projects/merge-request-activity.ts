@@ -41,6 +41,9 @@ export async function readMergeRequestActivity(call: BridgeCall, forge: ForgeSta
   return forge.kind === 'github' ? readGitHub(call, forge.host, forge.repository, number) : readGitLab(call, forge.repository, workingCopy, number);
 }
 
+// A CLI installed as a .cmd shim runs through cmd.exe, which stops at a newline
+// and splits at an &: no argument here may have either.
+
 // One query, so a poll is one process. `last`: the newest, should there be more.
 const GITHUB_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   viewer { login }
@@ -57,7 +60,7 @@ const GITHUB_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
       } } } } } }
     }
   }
-}`;
+}`.replace(/\s*\n\s*/g, ' ');
 
 interface GitHubAuthored {
   author: { login: string } | null;
@@ -163,7 +166,8 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
   const [request, user, notes, approvals] = (await Promise.all([
     run(['mr', 'view', String(number), '--output', 'json']),
     run(['api', 'user']),
-    run(['api', `${project}/merge_requests/${number}/notes?per_page=100&sort=desc&order_by=created_at`]),
+    // Newest first, as GitLab returns them by default.
+    run(['api', `${project}/merge_requests/${number}/notes?per_page=100`]),
     run(['api', `${project}/merge_requests/${number}/approvals`]),
   ])) as [GitLabMergeRequest, { username: string }, GitLabNote[], { approved_by: { user: { username: string } }[] }];
   const own = user.username.toLowerCase();
@@ -193,7 +197,8 @@ async function gitLabCi(run: (args: string[]) => Promise<unknown>, project: stri
   if (GITLAB_PENDING.has(pipeline.status)) return { status: 'pending', failing: [] };
   if (pipeline.status === 'success') return { status: 'passed', key: `passed:${pipeline.id}`, failing: [] };
   if (pipeline.status !== 'failed') return { failing: [] };
-  const jobs = (await run(['api', `${project}/pipelines/${pipeline.id}/jobs?scope[]=failed&per_page=100`])) as { id: number; name: string; web_url: string }[];
+  const all = (await run(['api', `${project}/pipelines/${pipeline.id}/jobs?per_page=100`])) as { id: number; name: string; status: string; web_url: string }[];
+  const jobs = all.filter((job) => job.status === 'failed');
   // A retried job keeps its pipeline but not its id: failing again is news.
   return { status: 'failed', key: `failed:${pipeline.id}:${jobs.map((job) => job.id).sort((a, b) => a - b).join(',')}`, failing: jobs.map((job) => ({ name: job.name, url: job.web_url })) };
 }

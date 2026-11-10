@@ -2,7 +2,7 @@
 // stand-in login shell, stand-in tools and real git repositories. Shared by
 // seam A and the Electron smoke tests, so it imports no test runner.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -342,13 +342,18 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
 
   private installStandIn(name: string, standIn: string, script: unknown, binDir: string): void {
     const scriptPath = join(binDir, `${name}.json`);
-    writeFileSync(scriptPath, JSON.stringify(script));
+    // Main may be running the stand-in right now (Babysit polls in the background):
+    // it reads a whole script, the old or the new, and its launcher is left alone.
+    writeFileSync(`${scriptPath}.tmp`, JSON.stringify(script));
+    renameSync(`${scriptPath}.tmp`, scriptPath);
     // Installed again, it is the same script: its logs must be read once.
     if (!this.scripts.includes(scriptPath)) this.scripts.push(scriptPath);
     if (process.platform === 'win32') {
-      writeFileSync(join(binDir, `${name}.cmd`), `@"${process.execPath}" "${standIn}" "${scriptPath}" %*\r\n`);
+      const launcher = join(binDir, `${name}.cmd`);
+      if (!existsSync(launcher)) writeFileSync(launcher, `@"${process.execPath}" "${standIn}" "${scriptPath}" %*\r\n`);
     } else {
-      writeFileSync(join(binDir, name), `#!/bin/sh\nexec '${process.execPath}' '${standIn}' '${scriptPath}' "$@"\n`, { mode: 0o755 });
+      const launcher = join(binDir, name);
+      if (!existsSync(launcher)) writeFileSync(launcher, `#!/bin/sh\nexec '${process.execPath}' '${standIn}' '${scriptPath}' "$@"\n`, { mode: 0o755 });
     }
   }
 
