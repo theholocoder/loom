@@ -93,6 +93,11 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setDiffView': (diffView) => {
+        const settings = { ...this.value('settings'), diffView };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setSidebar': (sidebar) => {
         const current = this.value('settings');
         const next = { ...current.sidebar, ...sidebar };

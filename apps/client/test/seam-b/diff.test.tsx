@@ -64,9 +64,9 @@ function renderOpen(main: FakeMain, s: Session = session) {
 const showChanges = () => fireEvent.keyDown(document.body, { key: 'd' });
 const hideChanges = showChanges;
 
-function fakeMain(result: DiffSummary = summary, s: Session = session) {
+function fakeMain(result: DiffSummary = summary, s: Session = session, settings = DEFAULT_SETTINGS) {
   return new FakeMain(
-    { projects: [project], sessions: [s], settings: DEFAULT_SETTINGS },
+    { projects: [project], sessions: [s], settings },
     {
       'sessions.diff': ({ uncommittedOnly }) => (uncommittedOnly && result.available ? { ...result, files: result.files.filter((f) => f.status !== 'committed') } : result),
       'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
@@ -287,6 +287,70 @@ describe("how the diffs are laid out", () => {
     fireEvent.click(within(panel()).getByRole('button', { name: 'Wrap long lines' }));
     fireEvent.click(within(panel()).getByRole('button', { name: 'Side by side' }));
     for (const options of allOptions()) expect(options).toMatchObject({ overflow: 'wrap', diffStyle: 'split' });
+  });
+});
+
+describe('remembering how the diffs are laid out', () => {
+  const pressed = (name: string) => within(panel()).getByRole('button', { name }).getAttribute('aria-pressed');
+  const click = (name: string) => fireEvent.click(within(panel()).getByRole('button', { name }));
+  const openPanel = async () => {
+    showChanges();
+    await within(panel()).findAllByTestId('patch-diff');
+  };
+
+  it('opens as the settings say', async () => {
+    renderOpen(fakeMain(summary, session, { ...DEFAULT_SETTINGS, diffView: { fileList: true, wrap: true, sideBySide: true } }));
+    await openPanel();
+    expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy();
+    expect(pressed('File list')).toBe('true');
+    for (const diff of within(panel()).getAllByTestId('patch-diff')) expect(JSON.parse(diff.dataset.options!)).toMatchObject({ overflow: 'wrap', diffStyle: 'split' });
+  });
+
+  it('saves each click, whole', async () => {
+    const main = renderOpen(fakeMain());
+    await openPanel();
+    click('Wrap long lines');
+    click('File list');
+    const saved = main.invoked.filter((c) => c.command === 'settings.setDiffView').map((c) => c.params);
+    expect(saved).toEqual([
+      { fileList: false, wrap: true, sideBySide: false },
+      { fileList: true, wrap: true, sideBySide: false },
+    ]);
+  });
+
+  it('is as the user left it after closing and reopening the panel', async () => {
+    renderOpen(fakeMain());
+    await openPanel();
+    click('File list');
+    click('Wrap long lines');
+    click('Side by side');
+    hideChanges();
+    expect(screen.queryByRole('tabpanel', { name: 'Changes' })).toBeNull();
+
+    await openPanel();
+    for (const name of ['File list', 'Wrap long lines', 'Side by side']) expect(pressed(name)).toBe('true');
+    expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy();
+  });
+
+  it('goes back when the choice cannot be saved', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderOpen(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        {
+          'sessions.diff': () => summary,
+          'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
+          'settings.setDiffView': () => {
+            throw new Error('disk full');
+          },
+        },
+      ),
+    );
+    await openPanel();
+    click('Wrap long lines');
+    await waitFor(() => expect(pressed('Wrap long lines')).toBe('false'));
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });
 

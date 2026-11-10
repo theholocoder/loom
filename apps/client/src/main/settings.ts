@@ -1,5 +1,5 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
-import { clampSidebarWidth, DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isSidebarView, type ApprovalCategory, type ApprovalSetting, type Settings as SettingsValues, type SidebarSettings } from '../shared/api';
+import { clampSidebarWidth, DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isSidebarView, type ApprovalCategory, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues, type SidebarSettings } from '../shared/api';
 import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
@@ -37,6 +37,15 @@ export class Settings {
         open: typeof open === 'boolean' ? open : current.sidebar.open,
         view: isSidebarView(view) ? view : current.sidebar.view,
         width: typeof width === 'number' && Number.isFinite(width) ? clampSidebarWidth(width) : current.sidebar.width,
+      };
+    }
+    // Likewise each part of the Changes view's layout.
+    if (typeof stored.diffView === 'object' && stored.diffView !== null) {
+      const { fileList, wrap, sideBySide } = stored.diffView as Record<string, unknown>;
+      current.diffView = {
+        fileList: typeof fileList === 'boolean' ? fileList : current.diffView.fileList,
+        wrap: typeof wrap === 'boolean' ? wrap : current.diffView.wrap,
+        sideBySide: typeof sideBySide === 'boolean' ? sideBySide : current.diffView.sideBySide,
       };
     }
     // A value Loom no longer offers falls back to the default.
@@ -109,6 +118,13 @@ export class Settings {
       view: view ?? this.current.sidebar.view,
       width: width === undefined ? this.current.sidebar.width : clampSidebarWidth(width),
     });
+  }
+
+  /** Sets the Changes view's layout, all of it, so that quick changes can't undo each other. */
+  async setDiffView(diffView: DiffViewSettings): Promise<SettingsValues> {
+    const { fileList, wrap, sideBySide } = diffView;
+    if (typeof fileList !== 'boolean' || typeof wrap !== 'boolean' || typeof sideBySide !== 'boolean') throw new Error("Each part of the Changes view's layout must be true or false.");
+    return this.set('diffView', { fileList, wrap, sideBySide });
   }
 
   private async set<K extends keyof SettingsValues>(key: K, value: SettingsValues[K]): Promise<SettingsValues> {

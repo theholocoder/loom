@@ -4,6 +4,7 @@
 // variables on `.file-diff` in styles.css.
 import { PatchDiff } from '@pierre/diffs/react';
 import { useMemo } from 'react';
+import type { DiffViewSettings } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
 
 /** The Shiki theme that colours code in each Loom theme. */
@@ -15,14 +16,8 @@ const SHIKI_THEMES: Record<Theme, string> = {
   daylight: 'github-light',
 };
 
-/** How the user has chosen to lay out the diffs. */
-export interface DiffLayout {
-  wrap: boolean;
-  sideBySide: boolean;
-}
-
 /** Draws a patch for one file. It must have a hunk: the library throws on text that holds no file diff. */
-export function FileDiffView({ patch, theme, layout: { wrap, sideBySide } }: { patch: string; theme: Theme; layout: DiffLayout }) {
+export function FileDiffView({ patch, theme, view: { wrap, sideBySide } }: { patch: string; theme: Theme; view: Pick<DiffViewSettings, 'wrap' | 'sideBySide'> }) {
   const options = useMemo(
     () =>
       ({

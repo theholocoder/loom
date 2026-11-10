@@ -3,10 +3,10 @@
 // scrolled to.
 import { ArrowRightToLine, ChevronDown, ChevronRight, Columns2, Folder, GitBranch, PanelLeft, RefreshCw, Rows2, SquarePen, WrapText, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type FileDiff, type Session } from '../shared/api';
+import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
-import { FileDiffView, type DiffLayout } from './FileDiffView';
+import { FileDiffView } from './FileDiffView';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 
 /** Files with more changed lines than this start collapsed. */
@@ -27,6 +27,7 @@ type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { sta
 function SessionDiff({ session }: { session: Session }) {
   const api = useApi();
   const settings = useTopic('settings');
+  const [view, changeView] = useDiffView(settings?.diffView);
   const [uncommittedOnly, setUncommittedOnly] = useState(false);
   const [refreshes, setRefreshes] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
@@ -82,6 +83,8 @@ function SessionDiff({ session }: { session: Session }) {
             uncommittedOnly={uncommittedOnly}
             patterns={settings?.diffCollapsedPatterns ?? []}
             theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
+            view={view}
+            onViewChange={changeView}
             version={`${refreshes}:${turnEnded}`}
           />
         )}
@@ -138,8 +141,18 @@ function DiffBase({ session, summary, onChanged }: { session: Session; summary: 
   );
 }
 
-function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boolean; uncommittedOnly: boolean; patterns: string[]; theme: Theme; version: string }) {
-  const { files, patterns } = props;
+function DiffFiles(props: {
+  session: Session;
+  files: DiffFile[];
+  readOnly: boolean;
+  uncommittedOnly: boolean;
+  patterns: string[];
+  theme: Theme;
+  view: DiffViewSettings;
+  onViewChange: (change: Partial<DiffViewSettings>) => void;
+  version: string;
+}) {
+  const { files, patterns, view, onViewChange } = props;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
   const toggle = (file: DiffFile, open = !isExpanded(file)) => setExpanded((e) => ({ ...e, [file.path]: open }));
@@ -147,9 +160,6 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
     toggle(file, true);
     document.getElementById(fileId(file.path))?.scrollIntoView?.({ block: 'start' });
   };
-  const [listOpen, setListOpen] = useState(false);
-  const [wrap, setWrap] = useState(false);
-  const [sideBySide, setSideBySide] = useState(false);
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
   const matching = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(needle)), [files, needle]);
@@ -166,19 +176,19 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
         />
-        <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={listOpen} onClick={() => setListOpen((open) => !open)}>
+        <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={view.fileList} onClick={() => onViewChange({ fileList: !view.fileList })}>
           <PanelLeft />
         </button>
-        <StateToggle label="Wrap long lines" pressed={wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => setWrap((w) => !w)} />
-        <StateToggle label="Side by side" pressed={sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => setSideBySide((s) => !s)} />
+        <StateToggle label="Wrap long lines" pressed={view.wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => onViewChange({ wrap: !view.wrap })} />
+        <StateToggle label="Side by side" pressed={view.sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => onViewChange({ sideBySide: !view.sideBySide })} />
       </div>
       <div className="diff-files-body">
-        <FileTree files={matching} searching={needle !== ''} hidden={!listOpen || matching.length === 0} onPick={show} />
+        <FileTree files={matching} searching={needle !== ''} hidden={!view.fileList || matching.length === 0} onPick={show} />
         <div className="diff-sections">
           {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
           {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
           {files.map((file) => (
-            <FileSection key={file.path} {...props} layout={{ wrap, sideBySide }} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
+            <FileSection key={file.path} {...props} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
           ))}
         </div>
       </div>
@@ -285,7 +295,7 @@ function FileSection({
   uncommittedOnly,
   expanded,
   onToggle,
-  layout,
+  view,
   theme,
   version,
 }: {
@@ -296,7 +306,7 @@ function FileSection({
   uncommittedOnly: boolean;
   expanded: boolean;
   onToggle: () => void;
-  layout: DiffLayout;
+  view: DiffViewSettings;
   theme: Theme;
   version: string;
 }) {
@@ -348,7 +358,7 @@ function FileSection({
         </div>
       ) : text.state === 'done' ? (
         <>
-          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} layout={layout} /> : null}
+          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} view={view} /> : null}
           {text.truncated ? <div className="diff-note">This diff is too large to show in full.</div> : null}
           {!text.truncated && !hasHunks(text.text) ? <div className="diff-note">No changes to its content.</div> : null}
         </>
@@ -382,6 +392,33 @@ function globToRegExp(pattern: string): RegExp {
     .map((part) => (part === '**' ? '.*' : part === '*' ? '[^/]*' : part === '?' ? '[^/]' : part.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
     .join('');
   return new RegExp(`^${source}$`);
+}
+
+/**
+ * The Changes view's layout: the settings', or what the user changed it to
+ * until settings hold the same. A change settings refuse is undone, unless a
+ * later one has replaced it.
+ */
+function useDiffView(stored: DiffViewSettings | undefined): [DiffViewSettings, (change: Partial<DiffViewSettings>) => void] {
+  const api = useApi();
+  const [local, setLocal] = useState<DiffViewSettings>();
+  useEffect(() => {
+    if (stored) setLocal((pending) => (pending && sameDiffView(pending, stored) ? undefined : pending));
+  }, [stored]);
+  const current = local ?? stored ?? DEFAULT_DIFF_VIEW;
+  const change = (part: Partial<DiffViewSettings>) => {
+    const next = { ...current, ...part };
+    setLocal(next);
+    api.invoke('settings.setDiffView', next).catch((error: unknown) => {
+      console.error("could not keep the Changes view's layout:", error);
+      setLocal((pending) => (pending && sameDiffView(pending, next) ? undefined : pending));
+    });
+  };
+  return [current, change];
+}
+
+function sameDiffView(a: DiffViewSettings, b: DiffViewSettings): boolean {
+  return a.fileList === b.fileList && a.wrap === b.wrap && a.sideBySide === b.sideBySide;
 }
 
 /** How many times the Session has left `working`: a counter that moves once per turn end. */
