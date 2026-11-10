@@ -93,7 +93,7 @@ describe('the Changes view', () => {
   it('shows a file tree and per-file sections, large, binary and lockfiles collapsed, loading a diff on expand', async () => {
     const main = renderOpen(fakeMain());
     showChanges();
-    await waitFor(() => expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy());
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'File list' }));
     const tree = within(panel()).getByRole('navigation', { name: 'Changed files' });
     expect(within(tree).getByRole('button', { name: 'src' }).getAttribute('aria-expanded')).toBe('true');
     expect(within(tree).getByRole('button', { name: /login\.ts.*committed/ })).toBeTruthy();
@@ -253,15 +253,35 @@ describe('a file\'s diff', () => {
   });
 });
 
+describe('the file list', () => {
+  it('starts hidden, leaving the search and the diffs, and the toggle shows and hides it', async () => {
+    renderOpen(fakeMain());
+    showChanges();
+    const toggle = await within(panel()).findByRole('button', { name: 'File list' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+    expect(within(panel()).getByRole('searchbox', { name: 'Filter changed files' })).toBeTruthy();
+    expect(within(panel()).getByRole('region', { name: 'src/auth/login.ts' })).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+  });
+});
+
 describe('searching the changed files', () => {
   const tree = () => within(panel()).getByRole('navigation', { name: 'Changed files' });
   const search = () => within(panel()).getByRole('searchbox', { name: 'Filter changed files' });
   const type = (value: string) => fireEvent.change(search(), { target: { value } });
   const listed = () => within(tree()).getAllByRole('button').map((row) => row.textContent);
+  const section = (path: string) => within(panel()).queryByRole('region', { name: path });
   const open = async () => {
     renderOpen(fakeMain());
     showChanges();
-    await within(panel()).findByRole('navigation', { name: 'Changed files' });
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'File list' }));
   };
 
   it('narrows the tree as you type to the paths holding the text, whatever its case, keeping their folders', async () => {
@@ -278,10 +298,41 @@ describe('searching the changed files', () => {
     expect(listed()).toEqual(['docs', expect.stringContaining('logo.png')]);
   });
 
-  it('keeps every file section below the tree', async () => {
+  it('narrows the diffs below to the same files', async () => {
     await open();
     type('login');
-    for (const file of files) expect(within(panel()).getByRole('region', { name: file.path })).toBeTruthy();
+    expect(section('src/auth/login.ts')).toBeTruthy();
+    for (const other of ['src/auth/session.ts', 'docs/logo.png', 'pnpm-lock.yaml']) expect(section(other)).toBeNull();
+  });
+
+  it('narrows the diffs with the file list hidden too', async () => {
+    await open();
+    fireEvent.click(within(panel()).getByRole('button', { name: 'File list' }));
+    type('login');
+    expect(section('src/auth/login.ts')).toBeTruthy();
+    expect(section('src/auth/session.ts')).toBeNull();
+  });
+
+  it('brings back a filtered-out diff without loading it again', async () => {
+    const main = fakeMain();
+    renderOpen(main);
+    showChanges();
+    const shown = await within(panel()).findByRole('region', { name: 'src/auth/session.ts' });
+    await within(shown).findByTestId('patch-diff');
+    const loads = diffCalls(main, 'sessions.diffFile').length;
+    type('login');
+    type('');
+    expect(within(section('src/auth/session.ts')!).getByTestId('patch-diff')).toBeTruthy();
+    expect(diffCalls(main, 'sessions.diffFile')).toHaveLength(loads);
+  });
+
+  it('keeps the filter and the file list when switching to uncommitted changes only', async () => {
+    await open();
+    type('session');
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Uncommitted only' }));
+    await waitFor(() => expect(within(panel()).getByRole('button', { name: 'Uncommitted only' }).getAttribute('aria-pressed')).toBe('true'));
+    expect((search() as HTMLInputElement).value).toBe('session');
+    expect(within(tree()).getByRole('button', { name: /session\.ts/ })).toBeTruthy();
   });
 
   it('shows a match inside a folder that was closed', async () => {
@@ -297,7 +348,8 @@ describe('searching the changed files', () => {
   it('says so when nothing matches', async () => {
     await open();
     type('nothing-here');
-    expect(within(tree()).queryAllByRole('button')).toHaveLength(0);
+    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+    for (const file of files) expect(section(file.path)).toBeNull();
     expect(within(panel()).getByText('No changed file matches “nothing-here”.')).toBeTruthy();
   });
 

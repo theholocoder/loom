@@ -1,7 +1,7 @@
 // The sidebar's Changes view: what the open Session's branch changed, as a
 // file tree and unified per-file diffs loaded as they are expanded or
 // scrolled to.
-import { ChevronDown, ChevronRight, Folder, GitBranch, RefreshCw, SquarePen } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, GitBranch, PanelLeft, RefreshCw, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type FileDiff, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
@@ -60,7 +60,7 @@ function SessionDiff({ session }: { session: Session }) {
           <RefreshCw />
         </button>
       </div>
-      <div className="scroll">
+      <div className={summary?.available && summary.files.length > 0 ? 'scroll diff-panes' : 'scroll'}>
         {summary?.available && !summary.readOnly && !uncommittedOnly && summary.baseSource && <DiffBase session={session} summary={summary} onChanged={() => setRefreshes((r) => r + 1)} />}
         {loaded.state === 'loading' ? (
           <div className="diff-loading" role="status">
@@ -76,7 +76,6 @@ function SessionDiff({ session }: { session: Session }) {
           <div className="empty">No changes against {loaded.summary.base}.</div>
         ) : (
           <DiffFiles
-            key={`${uncommittedOnly}`}
             session={session}
             files={loaded.summary.files}
             readOnly={readOnly}
@@ -148,13 +147,38 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
     toggle(file, true);
     document.getElementById(fileId(file.path))?.scrollIntoView?.({ block: 'start' });
   };
+  const [listOpen, setListOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const needle = query.trim().toLowerCase();
+  const matching = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(needle)), [files, needle]);
+  const shown = useMemo(() => new Set(matching), [matching]);
   return (
-    <>
-      <FileTree files={files} onPick={show} />
-      {files.map((file) => (
-        <FileSection key={file.path} {...props} file={file} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
-      ))}
-    </>
+    <div className="diff-files">
+      <div className="diff-files-bar">
+        <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={listOpen} onClick={() => setListOpen((open) => !open)}>
+          <PanelLeft />
+        </button>
+        <input
+          className="diff-search"
+          type="search"
+          aria-label="Filter changed files"
+          placeholder="Filter files…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
+        />
+      </div>
+      <div className="diff-files-body">
+        <FileTree files={matching} searching={needle !== ''} hidden={!listOpen || matching.length === 0} onPick={show} />
+        <div className="diff-sections">
+          {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
+          {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
+          {files.map((file) => (
+            <FileSection key={file.path} {...props} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -176,11 +200,8 @@ function buildTree(files: DiffFile[]): TreeNode[] {
   return root.children;
 }
 
-function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFile) => void }) {
-  const [query, setQuery] = useState('');
-  const needle = query.trim().toLowerCase();
-  const searching = needle !== '';
-  const tree = useMemo(() => buildTree(files.filter((file) => file.path.toLowerCase().includes(needle))), [files, needle]);
+function FileTree({ files, searching, hidden, onPick }: { files: DiffFile[]; searching: boolean; hidden: boolean; onPick: (file: DiffFile) => void }) {
+  const tree = useMemo(() => buildTree(files), [files]);
   const [closed, setClosed] = useState<Set<string>>(new Set());
   // A search shows every match, so no folder is closed during one.
   const isClosed = (path: string) => !searching && closed.has(path);
@@ -219,20 +240,9 @@ function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFil
       ),
     );
   return (
-    <>
-      <input
-        className="diff-search"
-        type="search"
-        aria-label="Filter changed files"
-        placeholder="Filter files…"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
-      />
-      <nav className="diff-tree" aria-label="Changed files">
-        {tree.length > 0 ? <ul>{render(tree, 0)}</ul> : <div className="diff-note">No changed file matches “{query.trim()}”.</div>}
-      </nav>
-    </>
+    <nav className="diff-tree" aria-label="Changed files" hidden={hidden}>
+      <ul>{render(tree, 0)}</ul>
+    </nav>
   );
 }
 
@@ -255,6 +265,7 @@ type FileText = { state: 'idle' } | { state: 'loading' } | { state: 'error'; mes
 function FileSection({
   session,
   file,
+  hidden,
   readOnly,
   uncommittedOnly,
   expanded,
@@ -264,6 +275,7 @@ function FileSection({
 }: {
   session: Session;
   file: DiffFile;
+  hidden: boolean;
   readOnly: boolean;
   uncommittedOnly: boolean;
   expanded: boolean;
@@ -297,7 +309,7 @@ function FileSection({
 
   const openInEditor = () => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error));
   return (
-    <section className="diff-file" id={fileId(file.path)} ref={ref} aria-label={file.path}>
+    <section className="diff-file" id={fileId(file.path)} ref={ref} aria-label={file.path} hidden={hidden}>
       <h4>
         <button type="button" className="diff-file-toggle" aria-expanded={expanded} onClick={onToggle}>
           {expanded ? <ChevronDown /> : <ChevronRight />}

@@ -198,8 +198,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .diff-toggle[aria-pressed='true'] { color: var(--text); }
 .diff-toggle[aria-pressed='true'] .knob { background: color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
 .diff-toggle[aria-pressed='true'] .knob::after { left: 11px; background: var(--accent); }
-.diff-search { display: block; width: 100%; box-sizing: border-box; margin-top: 10px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: 12px var(--font); }
-.diff-tree { margin: 6px 0 10px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 0; }
+.diff-search { flex: 1; min-width: 0; box-sizing: border-box; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: 12px var(--font); }
+.diff-tree { flex: 0 0 min(280px, 45%); box-sizing: border-box; align-self: flex-start; max-height: calc(100% - 10px); overflow: auto; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 0; }
 .diff-tree ul { list-style: none; margin: 0; padding: 0; }
 .diff-tree-row { width: 100%; display: flex; align-items: center; gap: 6px; padding: 2px 8px; border: 0; background: transparent; color: var(--text); font: 12px var(--mono); cursor: pointer; text-align: left; }
 .diff-tree-row:hover { background: var(--panel2); }
@@ -210,6 +210,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .diff-status { font: 500 10.5px var(--ui, inherit); padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 .diff-status.modified { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .diff-status.untracked { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+/* Just a dot in the narrow file list: the word stays for screen readers, and in each file's header. */
+.diff-tree .diff-status { flex: none; font-size: 0; padding: 0; width: 7px; height: 7px; border: 0; background: currentColor; }
 .diff-counts { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
 .diff-note { padding: 8px 10px; font-size: 12px; color: var(--muted); }
 .diff-loading { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; }
@@ -366,6 +368,14 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .sidebar-edge { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
 .sidebar-edge:hover, .sidebar-edge:focus-visible { background: color-mix(in srgb, var(--accent) 40%, transparent); outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
+.sidebar-view .diff-panes { display: flex; flex-direction: column; overflow: hidden; }
+.diff-files { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.diff-files-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0; }
+.diff-files-bar .icon-btn { flex: none; }
+.diff-files-bar .icon-btn[aria-pressed='true'] { color: var(--accent); }
+.diff-files-body { flex: 1; min-height: 0; display: flex; gap: 10px; }
+.diff-sections { flex: 1; min-width: 0; overflow: auto; }
+.diff-sections .diff-file { margin: 0 0 10px; }
 .changes-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
 /* Session info: four groups of facts, each with its actions at the end. */
 .info { flex: 1; overflow: auto; padding: 4px 14px 16px; }
