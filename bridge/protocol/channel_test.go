@@ -27,6 +27,8 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	case "cat":
 		_, _ = io.Copy(os.Stdout, os.Stdin)
+	case "opencode":
+		serveFakeOpencode(os.Getenv(fakeOpencodeVar))
 	case "where":
 		cwd, _ := os.Getwd()
 		fmt.Printf("%s|%s", cwd, os.Getenv("LOOM_GREETING"))
