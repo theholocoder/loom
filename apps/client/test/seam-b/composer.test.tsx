@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { Project, Session } from '../../src/shared/api';
+import type { AgentCommand, Project, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -169,31 +169,109 @@ describe('@-mentions', () => {
   });
 });
 
-describe('/ commands', () => {
-  it("lists the palette's actions after /, and runs the one picked instead of sending", async () => {
-    const main = new FakeMain({ projects: [project], sessions: [finished] });
+describe('/ skills and commands', () => {
+  const checkoutCommands: AgentCommand[] = [
+    { kind: 'command', name: 'init', description: 'guided AGENTS.md setup' },
+    { kind: 'skill', name: 'tdd', description: 'Test-driven development.' },
+    { kind: 'skill', name: 'grill-me', description: 'A relentless interview.' },
+  ];
+  /** A Session whose agent announced its commands: these replace the checkout's commands, its skills stay. */
+  const running: Session = {
+    ...finished,
+    agentCommands: [
+      { kind: 'command', name: 'review', description: 'review changes' },
+      { kind: 'command', name: 'compact', description: 'Compact the session' },
+    ],
+  };
+  const options = (composer: ReturnType<typeof within>) => within(composer.getByRole('listbox', { name: 'Skills and commands' })).getAllByRole('option').map((o) => o.getAttribute('aria-label'));
+
+  it("lists the Session agent's commands and the Project's skills after /, not the palette's actions", async () => {
+    const main = new FakeMain({ projects: [project], sessions: [running] }, { 'projects.commands': () => checkoutCommands });
     const { composer, prompt } = openSession(main);
 
-    type(prompt, '/edit');
+    type(prompt, '/');
 
-    const commands = within(composer.getByRole('listbox', { name: 'Commands' }));
-    expect(commands.getAllByRole('option').map((o) => o.getAttribute('aria-label'))).toEqual(['Open in editor']);
-    fireEvent.keyDown(prompt, { key: 'Enter' });
-
-    await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.openInEditor')?.params).toEqual({ id: finished.id }));
-    expect(prompt.value).toBe('');
-    expect(main.invoked.some((i) => i.command === 'sessions.send')).toBe(false);
+    await waitFor(() => expect(options(composer)).toEqual(['/review', '/compact', '/tdd', '/grill-me']));
+    expect(main.invoked.find((i) => i.command === 'projects.commands')?.params).toEqual({ id: project.id });
+    expect(composer.getByRole('option', { name: '/tdd' }).textContent).toContain('Test-driven development.');
   });
 
-  it('sends a prompt that only starts with / when no action matches it', async () => {
-    const main = new FakeMain({ projects: [project], sessions: [finished] });
+  it('lists the ones matching what follows /, by name first, then by description', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => checkoutCommands });
     const { composer, prompt } = openSession(main);
 
+    type(prompt, '/in');
+
+    await waitFor(() => expect(options(composer)).toEqual(['/init', '/grill-me']));
+  });
+
+  it('puts the one picked in the prompt, for the user to add to and send as typed', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => checkoutCommands });
+    const { composer, prompt } = openSession(main);
+
+    type(prompt, '/td');
+    await composer.findByRole('option', { name: '/tdd' });
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+
+    expect(prompt.value).toBe('/tdd ');
+    expect(composer.queryByRole('listbox', { name: 'Skills and commands' })).toBeNull();
+    expect(main.invoked.some((i) => i.command === 'sessions.send')).toBe(false);
+
+    type(prompt, '/tdd the refund flow');
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+    await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.send')?.params).toEqual({ id: finished.id, prompt: '/tdd the refund flow' }));
+  });
+
+  it('lists a name typed in full first, and once, a skill also being a command', async () => {
+    const listed: AgentCommand[] = [
+      { kind: 'command', name: 'review-pr' },
+      { kind: 'command', name: 'review' },
+      { kind: 'skill', name: 'review' },
+    ];
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => listed });
+    const { composer, prompt } = openSession(main);
+
+    type(prompt, '/review');
+
+    await waitFor(() => expect(options(composer)).toEqual(['/review', '/review-pr']));
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+    await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.send')?.params).toEqual({ id: finished.id, prompt: '/review' }));
+  });
+
+  it('sends a / name typed in full on Enter', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => checkoutCommands });
+    const { composer, prompt } = openSession(main);
+
+    type(prompt, '/init');
+    await composer.findByRole('option', { name: '/init' });
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+
+    await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.send')?.params).toEqual({ id: finished.id, prompt: '/init' }));
+  });
+
+  it('sends a prompt that only starts with /', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => checkoutCommands });
+    const { composer, prompt } = openSession(main);
+
+    type(prompt, '/usr');
+    await waitFor(() => expect(within(composer.getByRole('listbox', { name: 'Skills and commands' })).getByText('Nothing matches.')).toBeTruthy());
     type(prompt, '/usr/bin is missing');
-    expect(within(composer.getByRole('listbox', { name: 'Commands' })).getByText('No command matches.')).toBeTruthy();
+    expect(composer.queryByRole('listbox', { name: 'Skills and commands' })).toBeNull();
     fireEvent.keyDown(prompt, { key: 'Enter' });
 
     await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.send')?.params).toEqual({ id: finished.id, prompt: '/usr/bin is missing' }));
   });
-});
 
+  it("lists the Project's commands and skills when starting a Session", async () => {
+    const main = new FakeMain({ projects: [project] }, { 'projects.commands': () => checkoutCommands });
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter Projects' }), { key: 'Enter' });
+    const composer = within(screen.getByRole('form', { name: 'Composer' }));
+
+    type(composer.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement, '/');
+
+    await waitFor(() => expect(options(composer)).toEqual(['/init', '/tdd', '/grill-me']));
+  });
+});

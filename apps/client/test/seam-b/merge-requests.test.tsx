@@ -158,20 +158,3 @@ describe("the Session's Merge request", () => {
     expect(screen.getByRole('dialog', { name: 'Link Merge request' })).toBeTruthy();
   });
 });
-
-describe('the Merge request action from /', () => {
-  it('is among the commands / offers, and picking it asks the agent for the Merge request instead of sending the text', async () => {
-    const main = new FakeMain({ projects: [gitlab], sessions: [session()] });
-    open(main);
-    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
-
-    fireEvent.change(prompt, { target: { value: '/create merge' } });
-    const commands = within(screen.getByRole('listbox', { name: 'Commands' }));
-    expect(commands.getAllByRole('option').map((o) => o.getAttribute('aria-label'))).toEqual(['Create Merge request for this Session']);
-    fireEvent.keyDown(prompt, { key: 'Enter' });
-
-    await waitFor(() => expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]));
-    expect(calls(main, 'sessions.send')).toEqual([]);
-    expect(prompt.value).toBe('');
-  });
-});

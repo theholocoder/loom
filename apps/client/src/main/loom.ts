@@ -150,14 +150,16 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     tempDir: () => tempDirOf(native.status.bridge?.os, native.status.bridge?.home),
     bridgeExecutable: () => native.status.bridge?.executable || undefined,
   };
-  /** The models the agent offers in the Project's checkout, once its Environment is up. */
-  const listModels = async (projectId: number) => {
+  /** The Project's checkout, once its Environment is up. */
+  const readyCheckout = async (projectId: number) => {
     const checkout = projectService.list().find((p) => p.id === projectId)?.checkout;
     if (!checkout) throw new Error(`unknown Project ${projectId}`);
     if (checkout.environmentId !== native.status.id) throw new Error(`unknown Environment "${checkout.environmentId}"`);
     await native.ready();
-    return native.listModels(checkout.path);
+    return checkout.path;
   };
+  /** The models the agent offers in the Project's checkout, once its Environment is up. */
+  const listModels = async (projectId: number) => native.listModels(await readyCheckout(projectId));
   const sessions = new Topic<Session[]>([]);
   const sessionService = await Sessions.load({
     db,
@@ -233,6 +235,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
     'projects.models': ({ id }) => listModels(id),
+    'projects.commands': async ({ id }) => native.listCommands(await readyCheckout(id)),
     'projects.files': ({ id, ref }) => sessionService.projectFiles(id, ref),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));

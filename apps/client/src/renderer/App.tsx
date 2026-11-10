@@ -220,7 +220,7 @@ function Workspace() {
       ) : view === 'projects' ? (
         <Projects linker={linker} />
       ) : view === 'new-session' ? (
-        <NewSession key={newSession.generation} initialProjectId={newSession.projectId} pickIssue={newSession.fromIssue} onStarted={select} commands={actions} />
+        <NewSession key={newSession.generation} initialProjectId={newSession.projectId} pickIssue={newSession.fromIssue} onStarted={select} />
       ) : selected ? (
         <SessionView
           key={selected.id}
@@ -230,7 +230,6 @@ function Workspace() {
           onCommandDone={() => setCommand(undefined)}
           onRetryableChange={setRetryable}
           sidebar={sidebar}
-          commands={actions}
         />
       ) : (
         <main className="main" aria-label="Session">

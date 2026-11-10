@@ -1,12 +1,15 @@
 // The prompt box under a Session's conversation, and the New Session one:
 // files and images attached to the message, comments on the diff going with
-// it, @-mentions of the working copy's files, and `/` for the palette's actions.
-import { ArrowUp, FileText, Image, ListPlus, MessageSquareCode, Paperclip, Square, SquareTerminal, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { diffCommentRange, isImage, type Attachment, type DiffComment, type NewAttachment } from '../shared/api';
-import type { PaletteAction } from './CommandPalette';
+// it, @-mentions of the working copy's files, and `/` for the agent's skills
+// and commands.
+import { ArrowUp, FileText, Image, ListPlus, MessageSquareCode, Paperclip, Sparkles, Square, SquareSlash, SquareTerminal, X } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { diffCommentRange, isImage, type AgentCommand, type Attachment, type DiffComment, type NewAttachment } from '../shared/api';
+import { useApi } from './api';
 import { stepIndex } from './Popover';
-import { shortcutLabel } from './shortcuts';
+
+/** No skills or commands, the same each time. */
+const NONE: AgentCommand[] = [];
 
 /** The most files an @-mention suggests at once. */
 const MAX_SUGGESTED = 50;
@@ -64,8 +67,8 @@ export function Composer({
   gauge?: ReactNode;
   /** Lists the working copy's files, for @-mentions; asked again each time one starts. */
   loadFiles?: () => Promise<string[]>;
-  /** What `/` offers: the palette's actions. */
-  commands?: PaletteAction[];
+  /** What `/` offers: the agent's skills and commands (see useAgentCommands). */
+  commands?: AgentCommand[];
   /** The diff comments that go with what is sent, shown as chips; whoever gives them clears them once sent. */
   comments?: DiffComment[];
   onRemoveComment?: (index: number) => void;
@@ -117,15 +120,14 @@ export function Composer({
       setSending(false);
     }
   };
-  /** Runs the menu's highlighted option: a command, or the file it mentions. */
+  /** Puts the menu's highlighted option in the prompt: a skill or command, or the file it mentions. */
   const pick = (index: number) => {
     const open = menu.open;
     if (!open) return;
     if (open.kind === 'command') {
       const command = open.options[index];
       if (!command) return;
-      setDraft('');
-      command.run(prompt.current);
+      setDraft(`/${command.name} `);
       return;
     }
     const file = open.options[index];
@@ -144,7 +146,9 @@ export function Composer({
         menu.setActive(stepIndex(open.active + (event.key === 'ArrowDown' ? 1 : -1), open.options.length));
         return;
       }
-      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+      // Enter on a skill or command typed in full sends it as it is.
+      const typed = open.kind === 'command' && draft === `/${open.options[open.active]?.name}`;
+      if ((event.key === 'Enter' && !event.shiftKey && !typed) || event.key === 'Tab') {
         event.preventDefault();
         pick(open.active);
         return;
@@ -276,7 +280,7 @@ export function Composer({
         </span>
         {commands.length > 0 && (
           <span>
-            <kbd>/</kbd> commands
+            <kbd>/</kbd> skills and commands
           </span>
         )}
       </div>
@@ -284,23 +288,23 @@ export function Composer({
   );
 }
 
-/** What the menu over the prompt offers, while open: the actions `/` finds, or the files an @-mention finds. */
+/** What the menu over the prompt offers, while open: the skills and commands `/` finds, or the files an @-mention finds. */
 type OpenMenu =
-  | { kind: 'command'; options: PaletteAction[]; active: number }
+  | { kind: 'command'; options: AgentCommand[]; active: number }
   | { kind: 'mention'; options: string[]; active: number; start: number; loading: boolean; error?: string };
 
 /**
- * The menu over the prompt: `/` at the start of a one-line prompt lists the
- * actions matching what follows it; `@` after a space, or at the start, lists
+ * The menu over the prompt: `/` at the start of the prompt lists the skills
+ * and commands matching what follows it, up to a space; `@` after a space, or at the start, lists
  * the files matching what follows it up to the caret. Escape closes it until
  * what it was opened for changes.
  */
-function useMenu({ draft, caret, commands, loadFiles }: { draft: string; caret: number; commands: PaletteAction[]; loadFiles?: () => Promise<string[]> }): {
+function useMenu({ draft, caret, commands, loadFiles }: { draft: string; caret: number; commands: AgentCommand[]; loadFiles?: () => Promise<string[]> }): {
   open: OpenMenu | undefined;
   setActive: (index: number) => void;
   dismiss: () => void;
 } {
-  const command = commands.length ? /^\/([^\n]*)$/.exec(draft) : null;
+  const command = commands.length ? /^\/(\S*)$/.exec(draft) : null;
   const mention = !command && loadFiles ? /(^|\s)@([^\s@]*)$/.exec(draft.slice(0, caret)) : null;
   /** Where the mention's `@` is. */
   const mentionStart = mention ? caret - mention[2]!.length - 1 : -1;
@@ -332,8 +336,7 @@ function useMenu({ draft, caret, commands, loadFiles }: { draft: string; caret: 
   let open: OpenMenu | undefined;
   if (trigger !== undefined && dismissed !== trigger) {
     if (command) {
-      const words = query.split(/\s+/).filter(Boolean);
-      const options = commands.filter((action) => words.every((word) => action.label.toLowerCase().includes(word)));
+      const options = matchCommands(commands, query);
       open = { kind: 'command', options, active: stepIndex(active, options.length) };
     } else if (mention) {
       const options = matchFiles(files.list ?? [], query);
@@ -341,6 +344,56 @@ function useMenu({ draft, caret, commands, loadFiles }: { draft: string; caret: 
     }
   }
   return { open, setActive, dismiss: () => setDismissed(trigger) };
+}
+
+/**
+ * The skills and commands matching `query`, best first: the one named it,
+ * those whose name starts with it, then whose name has it, then whose
+ * description does; in the order given otherwise.
+ */
+function matchCommands(commands: AgentCommand[], query: string): AgentCommand[] {
+  if (!query) return commands;
+  const rank = ({ name, description }: AgentCommand) => {
+    const lower = name.toLowerCase();
+    if (lower === query) return 0;
+    if (lower.startsWith(query)) return 1;
+    if (lower.includes(query)) return 2;
+    return description?.toLowerCase().includes(query) ? 3 : 4;
+  };
+  return commands
+    .map((command) => ({ command, rank: rank(command) }))
+    .filter((c) => c.rank < 4)
+    .sort((a, b) => a.rank - b.rank)
+    .map((c) => c.command);
+}
+
+/**
+ * The skills and commands `/` offers: the agent's in the Project's checkout,
+ * listed by main (once per checkout), with `announced`, the commands a
+ * Session's agent announced, in place of the checkout's commands when given;
+ * each name once, a command before a skill of the same name, as the agent
+ * runs it. None while they aren't listed, or when they can't be.
+ */
+export function useAgentCommands(projectId: number | undefined, announced?: AgentCommand[]): AgentCommand[] {
+  const api = useApi();
+  const [listed, setListed] = useState<{ projectId: number; commands: AgentCommand[] }>();
+  useEffect(() => {
+    if (projectId === undefined) return;
+    let current = true;
+    api.invoke('projects.commands', { id: projectId }).then(
+      (commands) => current && setListed({ projectId, commands }),
+      () => current && setListed({ projectId, commands: [] }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [api, projectId]);
+  const checkout = listed && listed.projectId === projectId ? listed.commands : NONE;
+  return useMemo(() => {
+    const all = announced ? [...announced, ...checkout.filter((c) => c.kind === 'skill')] : checkout;
+    const names = new Set<string>();
+    return all.filter(({ name }) => !names.has(name) && !!names.add(name));
+  }, [announced, checkout]);
 }
 
 /**
@@ -384,18 +437,18 @@ function MenuList({ id, open, optionId, onHover, onPick }: { id: string; open: O
       {children}
     </div>
   );
-  const empty = open.kind === 'mention' ? (open.error ?? (open.loading ? 'Listing files…' : 'No file matches.')) : 'No command matches.';
+  const empty = open.kind === 'mention' ? (open.error ?? (open.loading ? 'Listing files…' : 'No file matches.')) : 'Nothing matches.';
   return (
-    <div id={id} className="composer-menu" role="listbox" aria-label={open.kind === 'command' ? 'Commands' : 'Files'}>
+    <div id={id} className="composer-menu" role="listbox" aria-label={open.kind === 'command' ? 'Skills and commands' : 'Files'}>
       {open.kind === 'command'
-        ? open.options.map((action, index) =>
+        ? open.options.map((command, index) =>
             option(
               index,
-              action.label,
+              `/${command.name}`,
               <>
-                <action.icon className="sm" />
-                <span className="grow ellipsis">{action.label}</span>
-                {action.shortcut && <kbd>{shortcutLabel(action.shortcut)}</kbd>}
+                {command.kind === 'skill' ? <Sparkles className="sm" aria-label="Skill" /> : <SquareSlash className="sm" aria-label="Command" />}
+                <span className="tech">/{command.name}</span>
+                {command.description && <span className="muted grow ellipsis">{command.description}</span>}
               </>,
             ),
           )

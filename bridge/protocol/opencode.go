@@ -30,6 +30,10 @@ const probeGrace = 5 * time.Second
 // MaxFrameSize.
 const maxModelsOutput = 8 << 20
 
+// maxSkillsOutput bounds what `GET /api/skill` may answer: it carries each
+// skill's whole SKILL.md, which the probe leaves out of what it reports.
+const maxSkillsOutput = 32 << 20
+
 type probeParams struct {
 	// Directory, when given, is a checkout to list the models of.
 	Directory string `json:"directory,omitempty"`
@@ -41,13 +45,28 @@ type probeResult struct {
 	// Models is OpenCode's `GET /api/model` list for the checkout params.Directory,
 	// as it reported it; absent without a directory.
 	Models json.RawMessage `json:"models,omitempty"`
+	// Commands is OpenCode's `GET /api/command` list for params.Directory, as
+	// it reported it; absent without a directory, or when OpenCode can't list
+	// them.
+	Commands json.RawMessage `json:"commands,omitempty"`
+	// Skills is OpenCode's `GET /api/skill` list for params.Directory, each
+	// with only its id, name and description; absent when there are none, or as
+	// Commands is.
+	Skills []probeSkill `json:"skills,omitempty"`
+}
+
+// probeSkill is what the probe reports of a skill: not its path or content.
+type probeSkill struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // probeOpencode starts a short-lived, private `opencode serve --stdio` and
 // asks it for its integrations, which is how main tells whether OpenCode is
-// signed in, and, given a directory, the models it offers there. It never
-// runs `opencode auth list` or `opencode models`, which start the user's
-// shared background service.
+// signed in, and, given a directory, the models, commands and skills it
+// offers there. It never runs `opencode auth list` or `opencode models`,
+// which start the user's shared background service.
 //
 // The server prints {"url": ...} on stdout, guards its API with HTTP Basic
 // auth using OPENCODE_SERVER_PASSWORD, and exits when its stdin closes.
@@ -132,6 +151,17 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 			return nil, failure
 		}
 		result.Models = models
+		// After the models, which wait for OpenCode to load the checkout: until
+		// then it lists no skills. Without them the models are still worth having.
+		if commands, failure := probeGet(ctx, base, password, "/api/command", params.Directory, maxOutput); failure == nil {
+			result.Commands = commands
+		}
+		if skills, failure := probeGet(ctx, base, password, "/api/skill", params.Directory, maxSkillsOutput); failure == nil {
+			var listed []probeSkill
+			if json.Unmarshal(skills, &listed) == nil {
+				result.Skills = listed
+			}
+		}
 	}
 	return result, nil
 }
