@@ -560,7 +560,22 @@ export interface Settings extends Appearance {
   autoPromptDefault: boolean;
   /** The open Session's right sidebar, as the user left it: the same for every Session. */
   sidebar: SidebarSettings;
+  /** How the Changes view is laid out, as the user left it: the same for every Session. */
+  diffView: DiffViewSettings;
 }
+
+/** The Changes view's layout, kept in settings. */
+export interface DiffViewSettings {
+  /** Whether the list of changed files shows beside the diffs. */
+  fileList: boolean;
+  /** Whether long lines wrap, rather than scroll sideways. */
+  wrap: boolean;
+  /** Whether diffs show side by side, rather than unified. */
+  sideBySide: boolean;
+}
+
+/** The Changes view until the user changes it: unified, long lines scrolling, no file list. */
+export const DEFAULT_DIFF_VIEW: DiffViewSettings = { fileList: false, wrap: false, sideBySide: false };
 
 /** The right sidebar's views: Session info, or the Changes (the diff). */
 export const SIDEBAR_VIEWS = ['info', 'changes'] as const;
@@ -653,6 +668,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stuckAfterMinutes: 15,
   autoPromptDefault: false,
   sidebar: DEFAULT_SIDEBAR,
+  diffView: DEFAULT_DIFF_VIEW,
   ...DEFAULT_APPEARANCE,
 };
 
@@ -980,6 +996,8 @@ export interface Commands {
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
   /** Sets what is given of the right sidebar's state; a width is kept within its minimum and maximum. Rejects a view Loom has not. */
   'settings.setSidebar': { params: Partial<SidebarSettings>; result: Settings };
+  /** Sets the Changes view's layout, all of it. Rejects anything but true or false. */
+  'settings.setDiffView': { params: DiffViewSettings; result: Settings };
   'sessions.list': { params: void; result: Session[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with

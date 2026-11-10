@@ -246,6 +246,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
     'settings.setSidebar': (sidebar) => settingsService.setSidebar(sidebar),
+    'settings.setDiffView': (diffView) => settingsService.setDiffView(diffView),
     'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),

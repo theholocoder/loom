@@ -1,10 +1,12 @@
 // The sidebar's Changes view: what the open Session's branch changed, as a
 // file tree and unified per-file diffs loaded as they are expanded or
 // scrolled to.
-import { ChevronDown, ChevronRight, Folder, GitBranch, RefreshCw, SquarePen } from 'lucide-react';
+import { ArrowRightToLine, ChevronDown, ChevronRight, Columns2, Folder, GitBranch, PanelLeft, RefreshCw, Rows2, SquarePen, WrapText, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DiffFile, DiffSummary, FileDiff, Session } from '../shared/api';
+import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
+import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { FileDiffView } from './FileDiffView';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 
 /** Files with more changed lines than this start collapsed. */
@@ -24,7 +26,8 @@ type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { sta
 
 function SessionDiff({ session }: { session: Session }) {
   const api = useApi();
-  const patterns = useTopic('settings')?.diffCollapsedPatterns;
+  const settings = useTopic('settings');
+  const [view, changeView] = useDiffView(settings?.diffView);
   const [uncommittedOnly, setUncommittedOnly] = useState(false);
   const [refreshes, setRefreshes] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
@@ -58,7 +61,7 @@ function SessionDiff({ session }: { session: Session }) {
           <RefreshCw />
         </button>
       </div>
-      <div className="scroll">
+      <div className={summary?.available && summary.files.length > 0 ? 'scroll diff-panes' : 'scroll'}>
         {summary?.available && !summary.readOnly && !uncommittedOnly && summary.baseSource && <DiffBase session={session} summary={summary} onChanged={() => setRefreshes((r) => r + 1)} />}
         {loaded.state === 'loading' ? (
           <div className="diff-loading" role="status">
@@ -74,12 +77,14 @@ function SessionDiff({ session }: { session: Session }) {
           <div className="empty">No changes against {loaded.summary.base}.</div>
         ) : (
           <DiffFiles
-            key={`${uncommittedOnly}`}
             session={session}
             files={loaded.summary.files}
             readOnly={readOnly}
             uncommittedOnly={uncommittedOnly}
-            patterns={patterns ?? []}
+            patterns={settings?.diffCollapsedPatterns ?? []}
+            theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
+            view={view}
+            onViewChange={changeView}
             version={`${refreshes}:${turnEnded}`}
           />
         )}
@@ -136,8 +141,18 @@ function DiffBase({ session, summary, onChanged }: { session: Session; summary: 
   );
 }
 
-function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boolean; uncommittedOnly: boolean; patterns: string[]; version: string }) {
-  const { files, patterns } = props;
+function DiffFiles(props: {
+  session: Session;
+  files: DiffFile[];
+  readOnly: boolean;
+  uncommittedOnly: boolean;
+  patterns: string[];
+  theme: Theme;
+  view: DiffViewSettings;
+  onViewChange: (change: Partial<DiffViewSettings>) => void;
+  version: string;
+}) {
+  const { files, patterns, view, onViewChange } = props;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
   const toggle = (file: DiffFile, open = !isExpanded(file)) => setExpanded((e) => ({ ...e, [file.path]: open }));
@@ -145,13 +160,50 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
     toggle(file, true);
     document.getElementById(fileId(file.path))?.scrollIntoView?.({ block: 'start' });
   };
+  const [query, setQuery] = useState('');
+  const needle = query.trim().toLowerCase();
+  const matching = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(needle)), [files, needle]);
+  const shown = useMemo(() => new Set(matching), [matching]);
   return (
-    <>
-      <FileTree files={files} onPick={show} />
-      {files.map((file) => (
-        <FileSection key={file.path} {...props} file={file} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
-      ))}
-    </>
+    <div className="diff-files">
+      <div className="diff-files-bar">
+        <input
+          className="diff-search"
+          type="search"
+          aria-label="Filter changed files"
+          placeholder="Filter files…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
+        />
+        <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={view.fileList} onClick={() => onViewChange({ fileList: !view.fileList })}>
+          <PanelLeft />
+        </button>
+        <StateToggle label="Wrap long lines" pressed={view.wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => onViewChange({ wrap: !view.wrap })} />
+        <StateToggle label="Side by side" pressed={view.sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => onViewChange({ sideBySide: !view.sideBySide })} />
+      </div>
+      <div className="diff-files-body">
+        <FileTree files={matching} searching={needle !== ''} hidden={!view.fileList || matching.length === 0} onPick={show} />
+        <div className="diff-sections">
+          {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
+          {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
+          {files.map((file) => (
+            <FileSection key={file.path} {...props} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** An on/off icon button: it shows the current state's icon and, on hover, the icon of the state a click gives. */
+function StateToggle({ label, pressed, onIcon: On, offIcon: Off, onToggle }: { label: string; pressed: boolean; onIcon: LucideIcon; offIcon: LucideIcon; onToggle: () => void }) {
+  const [Current, Next] = pressed ? [On, Off] : [Off, On];
+  return (
+    <button className="icon-btn sm state-toggle" type="button" title={label} aria-label={label} aria-pressed={pressed} onClick={onToggle}>
+      <Current className="at-rest" />
+      <Next className="on-hover" />
+    </button>
   );
 }
 
@@ -173,9 +225,11 @@ function buildTree(files: DiffFile[]): TreeNode[] {
   return root.children;
 }
 
-function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFile) => void }) {
+function FileTree({ files, searching, hidden, onPick }: { files: DiffFile[]; searching: boolean; hidden: boolean; onPick: (file: DiffFile) => void }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [closed, setClosed] = useState<Set<string>>(new Set());
+  // A search shows every match, so no folder is closed during one.
+  const isClosed = (path: string) => !searching && closed.has(path);
   const render = (nodes: TreeNode[], depth: number): React.ReactNode =>
     nodes.map((node) =>
       node.file ? (
@@ -192,7 +246,8 @@ function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFil
             type="button"
             className="diff-tree-row folder"
             style={{ paddingLeft: 8 + depth * 14 }}
-            aria-expanded={!closed.has(node.path)}
+            aria-expanded={!isClosed(node.path)}
+            disabled={searching}
             onClick={() =>
               setClosed((c) => {
                 const next = new Set(c);
@@ -201,16 +256,16 @@ function FileTree({ files, onPick }: { files: DiffFile[]; onPick: (file: DiffFil
               })
             }
           >
-            {closed.has(node.path) ? <ChevronRight /> : <ChevronDown />}
+            {isClosed(node.path) ? <ChevronRight /> : <ChevronDown />}
             <Folder />
             <span className="name">{node.name}</span>
           </button>
-          {closed.has(node.path) ? null : <ul>{render(node.children, depth + 1)}</ul>}
+          {isClosed(node.path) ? null : <ul>{render(node.children, depth + 1)}</ul>}
         </li>
       ),
     );
   return (
-    <nav className="diff-tree" aria-label="Changed files">
+    <nav className="diff-tree" aria-label="Changed files" hidden={hidden}>
       <ul>{render(tree, 0)}</ul>
     </nav>
   );
@@ -235,18 +290,24 @@ type FileText = { state: 'idle' } | { state: 'loading' } | { state: 'error'; mes
 function FileSection({
   session,
   file,
+  hidden,
   readOnly,
   uncommittedOnly,
   expanded,
   onToggle,
+  view,
+  theme,
   version,
 }: {
   session: Session;
   file: DiffFile;
+  hidden: boolean;
   readOnly: boolean;
   uncommittedOnly: boolean;
   expanded: boolean;
   onToggle: () => void;
+  view: DiffViewSettings;
+  theme: Theme;
   version: string;
 }) {
   const api = useApi();
@@ -275,7 +336,7 @@ function FileSection({
 
   const openInEditor = () => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error));
   return (
-    <section className="diff-file" id={fileId(file.path)} ref={ref} aria-label={file.path}>
+    <section className="diff-file" id={fileId(file.path)} ref={ref} aria-label={file.path} hidden={hidden}>
       <h4>
         <button type="button" className="diff-file-toggle" aria-expanded={expanded} onClick={onToggle}>
           {expanded ? <ChevronDown /> : <ChevronRight />}
@@ -297,19 +358,20 @@ function FileSection({
         </div>
       ) : text.state === 'done' ? (
         <>
-          {parseUnified(text.text).map((line, index) => (
-            <div key={index} className={`diff-line ${line.kind}`}>
-              {line.text || ' '}
-            </div>
-          ))}
+          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} view={view} /> : null}
           {text.truncated ? <div className="diff-note">This diff is too large to show in full.</div> : null}
-          {!text.truncated && !text.text.includes('\n@@') && !text.text.startsWith('@@') ? <div className="diff-note">No changes to its content.</div> : null}
+          {!text.truncated && !hasHunks(text.text) ? <div className="diff-note">No changes to its content.</div> : null}
         </>
       ) : (
         <div className="diff-note">Loading…</div>
       )}
     </section>
   );
+}
+
+/** Whether a patch changes any lines: one that only renames a file or changes its mode doesn't. */
+function hasHunks(patch: string): boolean {
+  return patch.startsWith('@@') || patch.includes('\n@@');
 }
 
 function fileId(path: string): string {
@@ -332,18 +394,31 @@ function globToRegExp(pattern: string): RegExp {
   return new RegExp(`^${source}$`);
 }
 
-/** The lines of a unified diff from its first hunk on, as added, removed, context or hunk header. */
-export function parseUnified(text: string): { kind: 'add' | 'del' | 'ctx' | 'hunk'; text: string }[] {
-  const lines = text.split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  const start = lines.findIndex((line) => line.startsWith('@@'));
-  if (start < 0) return [];
-  return lines.slice(start).map((line) => {
-    if (line.startsWith('@@')) return { kind: 'hunk', text: line };
-    if (line.startsWith('+')) return { kind: 'add', text: line };
-    if (line.startsWith('-')) return { kind: 'del', text: line };
-    return { kind: 'ctx', text: line };
-  });
+/**
+ * The Changes view's layout: the settings', or what the user changed it to
+ * until settings hold the same. A change settings refuse is undone, unless a
+ * later one has replaced it.
+ */
+function useDiffView(stored: DiffViewSettings | undefined): [DiffViewSettings, (change: Partial<DiffViewSettings>) => void] {
+  const api = useApi();
+  const [local, setLocal] = useState<DiffViewSettings>();
+  useEffect(() => {
+    if (stored) setLocal((pending) => (pending && sameDiffView(pending, stored) ? undefined : pending));
+  }, [stored]);
+  const current = local ?? stored ?? DEFAULT_DIFF_VIEW;
+  const change = (part: Partial<DiffViewSettings>) => {
+    const next = { ...current, ...part };
+    setLocal(next);
+    api.invoke('settings.setDiffView', next).catch((error: unknown) => {
+      console.error("could not keep the Changes view's layout:", error);
+      setLocal((pending) => (pending && sameDiffView(pending, next) ? undefined : pending));
+    });
+  };
+  return [current, change];
+}
+
+function sameDiffView(a: DiffViewSettings, b: DiffViewSettings): boolean {
+  return a.fileList === b.fileList && a.wrap === b.wrap && a.sideBySide === b.sideBySide;
 }
 
 /** How many times the Session has left `working`: a counter that moves once per turn end. */
