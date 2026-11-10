@@ -15,6 +15,10 @@
 // --source-branch <branch>` list the script's open `mergeRequests` on that
 // branch, and `pr view <n>` / `mr view <n>` print one of them in any state,
 // failing like the real CLI when there is none.
+// And Babysit's polls of a Merge request's activity (see `activity` in
+// machine.ts): `api graphql` for gh, `api user`, `api …/notes`, `api
+// …/approvals` and `api …/jobs` for glab. They all fail, as an unreachable
+// Forge would, while the script's `offline` is set.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
@@ -50,6 +54,26 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
       ? issues.map((i) => ({ id: 9000 + i.number, iid: i.number, title: i.title, description: i.body, state: 'opened', web_url: i.url }))
       : issues.map((i) => ({ number: i.number, title: i.title, body: i.body, url: i.url }));
   process.stdout.write(JSON.stringify(json));
+} else if (args[0] === 'api' && script.offline) {
+  process.stderr.write('error connecting to the Forge\n');
+  process.exit(1);
+} else if (args[0] === 'api' && args[1] === 'graphql') {
+  const number = args.find((a) => a.startsWith('number=')).slice('number='.length);
+  const found = (script.mergeRequests ?? []).find((m) => String(m.number) === number);
+  process.stdout.write(JSON.stringify({ data: { viewer: { login: script.viewer ?? 'octocat' }, repository: { pullRequest: asPullRequest(found) } } }));
+} else if (args[0] === 'api' && args[1] === 'user') {
+  process.stdout.write(JSON.stringify({ username: script.viewer ?? 'octocat' }));
+} else if (args[0] === 'api' && /\/merge_requests\/\d+\/notes(\?|$)/.test(args[1])) {
+  const found = mergeRequestIn(args[1]);
+  process.stdout.write(JSON.stringify((found.comments ?? []).map(asNote)));
+} else if (args[0] === 'api' && /\/merge_requests\/\d+\/approvals$/.test(args[1])) {
+  const found = mergeRequestIn(args[1]);
+  process.stdout.write(JSON.stringify({ approved_by: (found.approvedBy ?? []).map((username) => ({ user: { username } })) }));
+} else if (args[0] === 'api' && /\/pipelines\/\d+\/jobs(\?|$)/.test(args[1])) {
+  const id = /\/pipelines\/(\d+)\/jobs/.exec(args[1])[1];
+  const found = (script.mergeRequests ?? []).find((m) => String(m.pipeline?.id) === id);
+  const failed = (found?.pipeline.failedJobs ?? []).map((job) => ({ id: job.id, name: job.name, status: 'failed', web_url: job.url }));
+  process.stdout.write(JSON.stringify([{ id: 1, name: 'lint', status: 'success', web_url: 'https://ci/lint' }, ...failed]));
 } else if ((args[0] === 'pr' || args[0] === 'mr') && args[1] === 'list') {
   const flag = args[0] === 'pr' ? '--head' : '--source-branch';
   const branch = args[args.indexOf(flag) + 1];
@@ -68,8 +92,58 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
 }
 
 /** A scripted Merge request as `gh` or `glab` prints it in JSON. */
-function asCli({ number, url, branch, state = 'open' }) {
+function asCli({ number, url, branch, state = 'open', conflicts, pipeline }) {
   return basename(scriptPath, '.json') === 'glab'
-    ? { id: 5000 + number, iid: number, web_url: url, source_branch: branch, state: state === 'open' ? 'opened' : state }
+    ? { id: 5000 + number, iid: number, web_url: url, source_branch: branch, state: state === 'open' ? 'opened' : state, has_conflicts: conflicts ?? false, head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null }
     : { number, url, headRefName: branch, state: state.toUpperCase() };
+}
+
+/** The Merge request a `glab api …/merge_requests/<n>/…` path names. */
+function mergeRequestIn(path) {
+  const number = /\/merge_requests\/(\d+)\//.exec(path)[1];
+  return (script.mergeRequests ?? []).find((m) => String(m.number) === number);
+}
+
+/** A scripted comment as GitLab's notes API returns it. */
+function asNote({ id, author, body, path, line, system = false }) {
+  return { id, body, system, author: { username: author }, ...(path ? { type: 'DiffNote', position: { new_path: path, new_line: line } } : { type: null }) };
+}
+
+/** The state GitHub sums a commit's checks up as. */
+function rollupOf(checks) {
+  if (checks.some((c) => (c.context ? c.state === 'PENDING' : (c.status ?? 'COMPLETED') !== 'COMPLETED'))) return 'PENDING';
+  return checks.some((c) => (c.context ? c.state !== 'SUCCESS' : c.conclusion === 'FAILURE')) ? 'FAILURE' : 'SUCCESS';
+}
+
+/** A scripted Merge request as Loom's GraphQL query gets it from GitHub. */
+function asPullRequest({ number, url, state = 'open', reviews = [], comments = [], checks = [], conflicts, oid = 'commit-1', rollupState }) {
+  return {
+    number,
+    url,
+    state: state.toUpperCase(),
+    mergeable: conflicts === undefined ? 'UNKNOWN' : conflicts ? 'CONFLICTING' : 'MERGEABLE',
+    reviews: {
+      nodes: reviews.map((r) => ({
+        databaseId: r.id,
+        state: r.state,
+        body: r.body ?? '',
+        url: r.url,
+        author: r.author ? { login: r.author } : null,
+        comments: { nodes: (r.comments ?? []).map((c) => ({ path: c.path, line: c.line ?? null, originalLine: c.originalLine ?? null, body: c.body, url: c.url })) },
+      })),
+    },
+    comments: { nodes: comments.map((c) => ({ databaseId: c.id, body: c.body, url: c.url, author: c.author ? { login: c.author } : null })) },
+    commits: {
+      nodes: [
+        {
+          commit: {
+            oid,
+            statusCheckRollup: checks.length
+              ? { state: rollupState ?? rollupOf(checks), contexts: { nodes: checks.map((c) => (c.context ? { __typename: 'StatusContext', context: c.context, state: c.state, targetUrl: c.url ?? null, createdAt: c.createdAt ?? '2026-11-01T00:00:00Z' } : { __typename: 'CheckRun', databaseId: c.id, name: c.name, status: c.status ?? 'COMPLETED', conclusion: c.conclusion ?? null, detailsUrl: c.url ?? null })) } }
+              : null,
+          },
+        },
+      ],
+    },
+  };
 }

@@ -15,6 +15,7 @@ import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
+import { FeedbackCard, FeedbackInfoCard } from './FeedbackCards';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
 import { AttachmentList, Composer } from './Composer';
@@ -447,6 +448,7 @@ export function SessionView({
       setError((e as Error).message);
     }
   };
+  const openLink = (url: string) => void api.invoke('links.open', { url }).catch((e: unknown) => setError((e as Error).message));
   const retry = () => runCommand(() => api.invoke('sessions.retry', { id: session.id }));
   // Loom quit or crashed during the run, which the agent can go on with.
   const continuable = session.status === 'waiting' && session.waitingReason === 'interrupted' && !session.worktreeMissing;
@@ -540,7 +542,18 @@ export function SessionView({
                 </span>
               </div>
             ) : item.kind === 'merge-request' ? (
-              <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => void api.invoke('links.open', { url: item.url }).catch((e: unknown) => setError((e as Error).message))} />
+              <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
+            ) : item.kind === 'feedback' ? (
+              <FeedbackCard
+                key={item.id}
+                item={item}
+                forge={project?.forge.kind}
+                readOnly={session.status === 'archived' || !!session.worktreeMissing}
+                onOpen={openLink}
+                onSend={() => api.invoke('sessions.sendFeedback', { id: session.id, itemId: item.id })}
+              />
+            ) : item.kind === 'feedback-info' ? (
+              <FeedbackInfoCard key={item.id} item={item} onOpen={() => openLink(item.url)} />
             ) : (
               <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
             ),

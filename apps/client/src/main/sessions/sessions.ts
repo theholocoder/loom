@@ -2,12 +2,14 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_LISTED_FILES, type Answer, type BabysitStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
+import type { FeedbackDelivery } from './babysit';
+import { feedbackPrompt } from './feedback-prompt';
 import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
@@ -947,6 +949,55 @@ export class Sessions {
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
     void this.lookUpMergeRequestState(id);
     for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
+  }
+
+  /** Says what Babysit last saw of the Session's Merge request. */
+  setBabysit(id: number, status: BabysitStatus | undefined): void {
+    this.update(id, { babysit: status });
+  }
+
+  /** Records the Merge request's state, as Babysit found it. */
+  setMergeRequestState(id: number, state: MergeRequestState): void {
+    this.save(id, { merge_request_state: state });
+    this.update(id, { mergeRequestState: state });
+  }
+
+  /**
+   * Adds what Babysit has for the Session to its transcript: quiet info cards,
+   * and a feedback card that makes it Waiting (feedback). A Session waiting on
+   * an error or an interrupted run stays so, for its Retry or Continue, with
+   * the card to see. False, with nothing added, while the agent is mid-run.
+   */
+  async deliverFeedback(id: number, { info, feedback }: FeedbackDelivery): Promise<boolean> {
+    await this.loadTranscript(id);
+    if (this.shuttingDown || this.inRun(id)) return false;
+    const session = this.get(id);
+    if (session.status === 'archived') return true;
+    for (const entry of info) this.addItem(id, { kind: 'feedback-info', ...entry });
+    if (!feedback) return true;
+    this.addItem(id, { kind: 'feedback', ...feedback, state: 'new' });
+    if (session.waitingReason === 'error' || session.waitingReason === 'interrupted') {
+      this.update(id, { unread: true });
+      this.save(id, { unread: 1 });
+    } else {
+      this.setStatus(id, { status: 'waiting', waitingReason: 'feedback' });
+    }
+    return true;
+  }
+
+  /** Sends the agent the feedback on a card, and marks it sent. */
+  async sendFeedback({ id, itemId }: { id: number; itemId: number }): Promise<void> {
+    const card = (await this.loadTranscript(id)).value.find((item) => item.id === itemId);
+    if (card?.kind !== 'feedback') throw new Error('There is no such feedback.');
+    if (card.state === 'sent') throw new Error('This feedback has already been sent to the agent.');
+    // Marked first: a second click must not send it twice.
+    this.replaceItem(id, { ...card, state: 'sent' });
+    try {
+      await this.send({ id, prompt: feedbackPrompt(card) });
+    } catch (error) {
+      this.replaceItem(id, card);
+      throw error;
+    }
   }
 
   /**
@@ -1913,7 +1964,7 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
 }
 
 /** What a run leaves going until it ends: a tool call still running, or a question, trust or Approval request still asked. */
-function leftGoing(item: TranscriptItem): boolean {
+function leftGoing(item: TranscriptItem): item is Extract<TranscriptItem, { kind: 'tool' | 'question' | 'trust' | 'approval' }> {
   return (item.kind === 'tool' && item.status === 'running') || ((item.kind === 'question' || item.kind === 'trust' || item.kind === 'approval') && item.state === 'asked');
 }
 

@@ -372,6 +372,13 @@ body.resizing { cursor: col-resize; user-select: none; }
 .fact .path { word-break: break-all; }
 .fact-actions { display: flex; gap: 0; flex: none; }
 .info .diff-stat { font-weight: 600; }
+.chip.ci-passed { color: var(--ok); } .chip.ci-pending, .chip.stale { color: var(--wait); } .chip.ci-failed { color: var(--err); }
+.feedback-items { margin: 0 0 8px; padding: 0 0 0 16px; }
+.feedback-items .feedback-items { margin: 4px 0 0; }
+.feedback-items li { margin-bottom: 4px; }
+.feedback-link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.feedback-link:hover { text-decoration: underline; }
+.feedback-excerpt { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .chip.mr-open { color: var(--ok); } .chip.mr-merged { color: var(--accent); } .chip.mr-closed { color: var(--err); }
 .context { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .context .bar { display: block; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }

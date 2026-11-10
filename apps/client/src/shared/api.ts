@@ -201,6 +201,51 @@ export type WorkingCopyKind = 'worktree' | 'checkout';
 /** Where a Merge request is on its Forge. */
 export type MergeRequestState = 'open' | 'merged' | 'closed';
 
+/** A Merge request's CI as a whole: `pending` until all of it has finished. */
+export type BabysitCi = 'pending' | 'passed' | 'failed';
+
+/** What Babysit last saw of a Session's Merge request. */
+export interface BabysitStatus {
+  /** Absent with no CI, or none that says either way (cancelled, say). */
+  ci?: BabysitCi;
+  /** Clock time of the last poll that worked. */
+  lastPollAt?: number;
+  /** Set while the last poll failed: what's shown may be out of date. */
+  stale: boolean;
+}
+
+/** A comment on a place in the code. */
+export interface FeedbackComment {
+  path: string;
+  line?: number;
+  excerpt: string;
+  url: string;
+}
+
+export interface FeedbackCheck {
+  name: string;
+  /** Where its log is. */
+  url?: string;
+}
+
+/** `src/a.ts:10`: the place in the code a comment is about. */
+export function codePlace({ path, line }: { path?: string; line?: number }): string {
+  return `${path ?? ''}${line ? `:${line}` : ''}`;
+}
+
+/** One thing a Session's Merge request got that the agent may need to act on. */
+export type FeedbackItem =
+  /** A whole review, however many comments it has. */
+  | { kind: 'review'; author: string; verdict: 'changes-requested' | 'commented'; excerpt: string; url: string; comments: FeedbackComment[] }
+  /** A comment; `path` when it is on the code. */
+  | { kind: 'comment'; author: string; path?: string; line?: number; excerpt: string; url: string }
+  /** The CI finished, and these failed. */
+  | { kind: 'ci-failed'; checks: FeedbackCheck[] }
+  | { kind: 'conflicts' };
+
+/** Progress worth seeing that needs nothing done. */
+export type FeedbackInfo = { event: 'approved'; author: string; url: string } | { event: 'ci-passed'; url: string };
+
 /** An issue or Merge request on the Project's Forge. */
 export interface ForgeLink {
   /** Its number on the Forge (see mergeRequestRef). */
@@ -298,8 +343,10 @@ export interface Session {
   issue?: ForgeLink;
   /** Its current branch's Merge request, once linked. */
   mergeRequest?: ForgeLink;
-  /** Where its Merge request is, as Loom last knew: `open` while linked, looked up again on Archive. */
+  /** Where its Merge request is, as Loom last knew: `open` while linked, until Babysit sees otherwise or Archive looks again. */
   mergeRequestState?: MergeRequestState;
+  /** What Babysit last saw of its open Merge request; absent with no Merge request to babysit. */
+  babysit?: BabysitStatus;
   status: SessionStatus;
   /**
    * Set when a worktree Session's worktree is gone, deleted outside Loom: it
@@ -719,7 +766,11 @@ export type TranscriptItem =
   /** A Merge request was linked to the Session: found on its branch, linked by the user or by the agent's tool. */
   | { kind: 'merge-request'; id: number; number: number; url: string }
   /** The agent's Link merge request tool named a Merge request Loom couldn't link, as `mergeRequest` gave it, and why. */
-  | { kind: 'merge-request-refused'; id: number; mergeRequest: string; reason: string };
+  | { kind: 'merge-request-refused'; id: number; mergeRequest: string; reason: string }
+  /** Babysit found feedback on the Merge request; `state` is `sent` once Send to agent has passed it on. */
+  | { kind: 'feedback'; id: number; number: number; url: string; items: FeedbackItem[]; ci?: BabysitCi; state: 'new' | 'sent' }
+  /** Babysit saw progress on the Merge request that needs nothing done. */
+  | ({ kind: 'feedback-info'; id: number } & FeedbackInfo);
 
 /** The ranges the usage dashboard covers, in days ending today. */
 export const USAGE_RANGES = [7, 30, 90] as const;
@@ -1024,6 +1075,11 @@ export interface Commands {
    * on that branch.
    */
   'sessions.linkMergeRequest': { params: { id: number; mergeRequest: string }; result: void };
+  /**
+   * Sends the agent the feedback on card `itemId`, as one message, queued if
+   * the Session is Working. Rejects when the card has been sent already.
+   */
+  'sessions.sendFeedback': { params: { id: number; itemId: number }; result: void };
   /**
    * Runs the editor command on the Session's working copy, or on `file`, a
    * path relative to it, in the Session's Environment. Resolves once the

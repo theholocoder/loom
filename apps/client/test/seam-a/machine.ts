@@ -2,7 +2,7 @@
 // stand-in login shell, stand-in tools and real git repositories. Shared by
 // seam A and the Electron smoke tests, so it imports no test runner.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,7 +127,31 @@ export interface ForgeCliScript {
   /** The open issues `issue list` lists. */
   issues?: { number: number; title: string; body: string; url: string }[];
   /** The Merge requests `pr`/`mr list` and `view` know of; `state` defaults to open. */
-  mergeRequests?: { number: number; url: string; branch: string; state?: 'open' | 'merged' | 'closed' }[];
+  mergeRequests?: ({ number: number; url: string; branch: string; state?: 'open' | 'merged' | 'closed' } & ScriptedActivity)[];
+  /** The account signed in, whose comments are the user's own (default: `octocat`). */
+  viewer?: string;
+  /** Set when Babysit's polls should fail, as with an unreachable Forge. */
+  offline?: boolean;
+}
+
+/** What Babysit's polls see of a Merge request, in terms common to both stand-ins. */
+export interface ScriptedActivity {
+  /** GitHub's issue comments, or GitLab's notes (`system` ones and `path`/`line` diff notes too). */
+  comments?: { id: number; author: string | null; body: string; url?: string; path?: string; line?: number; system?: boolean }[];
+  /** GitHub's reviews with their inline comments. */
+  reviews?: { id: number; author: string | null; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'; body?: string; url: string; comments?: { path: string; line?: number; originalLine?: number; body: string; url: string }[] }[];
+  /** GitHub's check runs (`id`) and commit statuses (`context`) on the head commit. */
+  checks?: ({ id: number; name: string; status?: string; conclusion?: string; url?: string; context?: undefined } | { context: string; state: string; url?: string; createdAt?: string })[];
+  /** What GitHub sums the checks up as, when it isn't what they say (a suite with no runs yet). */
+  rollupState?: string;
+  /** The head commit, which a new push changes. */
+  oid?: string;
+  /** Absent while the Forge hasn't worked it out. */
+  conflicts?: boolean;
+  /** GitLab's head pipeline. */
+  pipeline?: { id: number; status: string; failedJobs?: { id: number; name: string; url: string }[] };
+  /** Who approved it on GitLab. */
+  approvedBy?: string[];
 }
 
 export type ForgeCli = 'gh' | 'glab';
@@ -318,13 +342,18 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
 
   private installStandIn(name: string, standIn: string, script: unknown, binDir: string): void {
     const scriptPath = join(binDir, `${name}.json`);
-    writeFileSync(scriptPath, JSON.stringify(script));
+    // Main may be running the stand-in right now (Babysit polls in the background):
+    // it reads a whole script, the old or the new, and its launcher is left alone.
+    writeFileSync(`${scriptPath}.tmp`, JSON.stringify(script));
+    renameSync(`${scriptPath}.tmp`, scriptPath);
     // Installed again, it is the same script: its logs must be read once.
     if (!this.scripts.includes(scriptPath)) this.scripts.push(scriptPath);
     if (process.platform === 'win32') {
-      writeFileSync(join(binDir, `${name}.cmd`), `@"${process.execPath}" "${standIn}" "${scriptPath}" %*\r\n`);
+      const launcher = join(binDir, `${name}.cmd`);
+      if (!existsSync(launcher)) writeFileSync(launcher, `@"${process.execPath}" "${standIn}" "${scriptPath}" %*\r\n`);
     } else {
-      writeFileSync(join(binDir, name), `#!/bin/sh\nexec '${process.execPath}' '${standIn}' '${scriptPath}' "$@"\n`, { mode: 0o755 });
+      const launcher = join(binDir, name);
+      if (!existsSync(launcher)) writeFileSync(launcher, `#!/bin/sh\nexec '${process.execPath}' '${standIn}' '${scriptPath}' "$@"\n`, { mode: 0o755 });
     }
   }
 

@@ -125,6 +125,13 @@ export interface QueuedMessagesTable {
   created_at: number;
 }
 
+/** What Babysit remembers of the Merge request a Session has linked. */
+export interface BabysitTable {
+  session_id: number;
+  /** The Merge request's URL, its seen items, what is waiting to be told and its last poll, JSON-encoded. */
+  state: string;
+}
+
 export interface Schema {
   settings: SettingsTable;
   projects: ProjectsTable;
@@ -134,4 +141,5 @@ export interface Schema {
   queued_messages: QueuedMessagesTable;
   usage_buckets: UsageBucketsTable;
   session_spans: SessionSpansTable;
+  babysit: BabysitTable;
 }
