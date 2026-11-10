@@ -278,7 +278,7 @@ function MergeRequestFact({
             {ref}
             <ExternalLink className="sm" />
           </button>
-          {watchable && <IconAction label={watching ? `Watching ${ref}, click to stop` : `Not watching ${ref}, click to watch`} icon={watching ? <Eye /> : <EyeOff />} onClick={() => onWatch(!watching)} />}
+          {watchable && <WatchToggle name={ref} watching={watching} onSwitch={onWatch} />}
           {session.mergeRequestState && <span className={`chip mr-${session.mergeRequestState}`}>{session.mergeRequestState}</span>}
           {session.babysit?.ci && <span className={`chip ci-${session.babysit.ci}`}>{CI_LABELS[session.babysit.ci]}</span>}
           {session.babysit?.stale && (
@@ -292,6 +292,29 @@ function MergeRequestFact({
         <span className="muted">None</span>
       )}
     </Fact>
+  );
+}
+
+/** The eye: whether the Merge request is watched, and the switch. Hovered, it shows what a click will do; once clicked, what it did. */
+function WatchToggle({ name, watching, onSwitch }: { name: string; watching: boolean; onSwitch: (on: boolean) => void }) {
+  const [previewing, setPreviewing] = useState(false);
+  const label = watching ? `Watching ${name}, click to stop` : `Not watching ${name}, click to watch`;
+  const open = previewing ? !watching : watching;
+  return (
+    <button
+      className="icon-btn sm"
+      type="button"
+      title={label}
+      aria-label={label}
+      onMouseEnter={() => setPreviewing(true)}
+      onMouseLeave={() => setPreviewing(false)}
+      onClick={() => {
+        setPreviewing(false);
+        onSwitch(!watching);
+      }}
+    >
+      {open ? <Eye /> : <EyeOff />}
+    </button>
   );
 }
 

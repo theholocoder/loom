@@ -144,6 +144,29 @@ describe('Session info', () => {
     await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }, { id: 1, on: true }]));
   });
 
+  const icon = (button: HTMLElement) => (button.querySelector('svg')!.classList.contains('lucide-eye-off') ? 'struck' : 'open');
+
+  it('previews what a click will do while the eye is hovered, until it is clicked', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [session()] });
+    open(main);
+    const button = eye(/^Watching #12/)!;
+    expect(icon(button)).toBe('open');
+
+    fireEvent.mouseEnter(button);
+    expect(icon(button)).toBe('struck');
+    fireEvent.mouseLeave(button);
+    expect(icon(button)).toBe('open');
+
+    fireEvent.mouseEnter(button);
+    fireEvent.click(button);
+    act(() => main.publish('sessions', [session({ babysitOff: true })]));
+    expect(icon(eye(/^Not watching #12/)!)).toBe('struck');
+
+    fireEvent.mouseLeave(eye(/^Not watching #12/)!);
+    fireEvent.mouseEnter(eye(/^Not watching #12/)!);
+    expect(icon(eye(/^Not watching #12/)!)).toBe('open');
+  });
+
   it('has no eye for what is not being or cannot be watched', () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
