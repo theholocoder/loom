@@ -445,6 +445,27 @@ export interface NewAttachment {
 }
 
 /**
+ * The user's note on a line or range of a Session's diff, sent with a prompt
+ * as a block: `path:start-end`, the quoted lines and the note. It is kept
+ * nowhere but in the text of the message it goes with.
+ */
+export interface DiffComment {
+  /** The file's path in the working copy, as the diff names it. */
+  path: string;
+  /** The first and last lines commented, as the diff numbers them: a removed line by its old number, any other by its new one. */
+  start: number;
+  end: number;
+  /** The lines, as the diff shows them: each starts with ` `, `-` or `+`. */
+  lines: string[];
+  note: string;
+}
+
+/** How a diff comment's range is written: `path:start-end`, or `path:start` for one line. */
+export function diffCommentRange({ path, start, end }: Pick<DiffComment, 'path' | 'start' | 'end'>): string {
+  return start === end ? `${path}:${start}` : `${path}:${start}-${end}`;
+}
+
+/**
  * A file or image attached to a message: stored in the attachments folder in
  * `userData`, per Session by content hash, and given to the agent with its
  * message, written into the Session's Environment through its bridge.
@@ -1059,8 +1080,12 @@ export interface Commands {
    * `attachments` are stored at once and go to the agent with the prompt;
    * the prompt may then be empty. Rejects more than MAX_ATTACHMENTS, one
    * over MAX_ATTACHMENT_BYTES, and one with no name.
+   *
+   * `comments` follow the prompt's text as blocks, each the comment's
+   * `path:start-end`, its quoted lines and its note; the prompt may then be
+   * empty. Rejects a comment with no note.
    */
-  'sessions.send': { params: { id: number; prompt: string; attachments?: NewAttachment[] }; result: void };
+  'sessions.send': { params: { id: number; prompt: string; attachments?: NewAttachment[]; comments?: DiffComment[] }; result: void };
   /**
    * The files in the Session's working copy, for @-mentions: tracked and
    * untracked ones git doesn't ignore, as paths relative to it with `/`, by

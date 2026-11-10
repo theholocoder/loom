@@ -1,11 +1,12 @@
 // The sidebar's Changes view: what the open Session's branch changed, as a
 // file tree and unified per-file diffs loaded as they are expanded or
-// scrolled to.
+// scrolled to, each line or range of which can be commented on.
 import { ArrowRightToLine, ChevronDown, ChevronRight, Columns2, Folder, GitBranch, PanelLeft, RefreshCw, Rows2, SquarePen, WrapText, type LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, diffCommentRange, type DiffComment, type DiffFile, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { quoteRange, type LineRange, type Quote } from './diff-comments';
 import { FileDiffView } from './FileDiffView';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 
@@ -18,13 +19,13 @@ const STATUS_LABEL: Record<DiffFile['status'], string> = { committed: 'committed
  * The Session's changes, worked out when the view is shown: on first show,
  * on each show after, at each turn end while shown, and on Refresh.
  */
-export function ChangesView({ session }: { session: Session }) {
-  return <SessionDiff key={session.id} session={session} />;
+export function ChangesView({ session, onComment }: { session: Session; onComment?: (comment: DiffComment) => void }) {
+  return <SessionDiff key={session.id} session={session} onComment={onComment} />;
 }
 
 type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; summary: DiffSummary };
 
-function SessionDiff({ session }: { session: Session }) {
+function SessionDiff({ session, onComment }: { session: Session; onComment?: (comment: DiffComment) => void }) {
   const api = useApi();
   const settings = useTopic('settings');
   const [view, changeView] = useDiffView(settings?.diffView);
@@ -80,6 +81,7 @@ function SessionDiff({ session }: { session: Session }) {
             session={session}
             files={loaded.summary.files}
             readOnly={readOnly}
+            onComment={readOnly ? undefined : onComment}
             uncommittedOnly={uncommittedOnly}
             patterns={settings?.diffCollapsedPatterns ?? []}
             theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
@@ -145,6 +147,7 @@ function DiffFiles(props: {
   session: Session;
   files: DiffFile[];
   readOnly: boolean;
+  onComment: ((comment: DiffComment) => void) | undefined;
   uncommittedOnly: boolean;
   patterns: string[];
   theme: Theme;
@@ -292,6 +295,7 @@ function FileSection({
   file,
   hidden,
   readOnly,
+  onComment,
   uncommittedOnly,
   expanded,
   onToggle,
@@ -303,6 +307,8 @@ function FileSection({
   file: DiffFile;
   hidden: boolean;
   readOnly: boolean;
+  /** Absent when the diff can't be commented on. */
+  onComment: ((comment: DiffComment) => void) | undefined;
   uncommittedOnly: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -323,7 +329,8 @@ function FileSection({
   useEffect(() => {
     if (!expanded || !visible || file.binary || file.uncounted) return;
     let current = true;
-    setText({ state: 'loading' });
+    // A diff shown stays until the new one comes: a comment being written on it isn't lost meanwhile.
+    setText((t) => (t.state === 'done' ? t : { state: 'loading' }));
     api.invoke('sessions.diffFile', { id: session.id, path: file.path, uncommittedOnly }).then(
       (diff) => current && setText({ state: 'done', ...diff }),
       (error: unknown) => current && setText({ state: 'error', message: (error as Error).message }),
@@ -333,6 +340,47 @@ function FileSection({
     };
     // `file` is compared by what identifies its diff.
   }, [api, session.id, file.path, file.oldPath, file.status, file.added, file.removed, uncommittedOnly, expanded, visible, version]);
+
+  /** The comment being written on this file: what its range quotes, and its range as picked. */
+  const [draft, setDraft] = useState<{ quote: Quote; range: LineRange }>();
+  const patch = text.state === 'done' ? text.text : undefined;
+  // A diff loaded again keeps the comment being written while it still holds the same lines there.
+  useEffect(() => {
+    setDraft((was) => {
+      if (!was || patch === undefined) return undefined;
+      const quote = quoteRange(file.path, patch, was.range);
+      return quote && quote.lines.join('\n') === was.quote.lines.join('\n') ? { quote, range: was.range } : undefined;
+    });
+  }, [patch]);
+  const commenting =
+    onComment && patch !== undefined
+      ? {
+          onPlus: (range: LineRange) => {
+            const quote = quoteRange(file.path, patch, range);
+            if (quote) setDraft({ quote, range });
+          },
+          ...(draft
+            ? {
+                draft: {
+                  range: draft.range,
+                  at: draft.quote.last,
+                  form: (
+                    <CommentForm
+                      key={diffCommentRange(draft.quote)}
+                      quote={draft.quote}
+                      onAdd={(note) => {
+                        const { last: _, ...quoted } = draft.quote;
+                        onComment({ ...quoted, note });
+                        setDraft(undefined);
+                      }}
+                      onCancel={() => setDraft(undefined)}
+                    />
+                  ),
+                },
+              }
+            : {}),
+        }
+      : undefined;
 
   const openInEditor = () => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error));
   return (
@@ -358,7 +406,7 @@ function FileSection({
         </div>
       ) : text.state === 'done' ? (
         <>
-          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} view={view} /> : null}
+          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} view={view} commenting={commenting} /> : null}
           {text.truncated ? <div className="diff-note">This diff is too large to show in full.</div> : null}
           {!text.truncated && !hasHunks(text.text) ? <div className="diff-note">No changes to its content.</div> : null}
         </>
@@ -366,6 +414,36 @@ function FileSection({
         <div className="diff-note">Loading…</div>
       )}
     </section>
+  );
+}
+
+/** The note on a line or range of a diff, under its last line: added as a chip in the composer. */
+function CommentForm({ quote, onAdd, onCancel }: { quote: Quote; onAdd: (note: string) => void; onCancel: () => void }) {
+  const [note, setNote] = useState('');
+  const range = diffCommentRange(quote);
+  const add = () => note.trim() && onAdd(note.trim());
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      add();
+    }
+  };
+  return (
+    <div className="diff-comment" role="group" aria-label={`Comment on ${range}`}>
+      <textarea aria-label={`Comment on ${range}`} rows={3} placeholder="Note for the agent…" autoFocus value={note} onChange={(event) => setNote(event.target.value)} onKeyDown={onKeyDown} />
+      <div className="row">
+        <span className="tech muted ellipsis grow">{range}</span>
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="primary" type="button" disabled={!note.trim()} onClick={add}>
+          Add comment
+        </button>
+      </div>
+    </div>
   );
 }
 

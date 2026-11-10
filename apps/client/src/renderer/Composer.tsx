@@ -1,9 +1,9 @@
 // The prompt box under a Session's conversation, and the New Session one:
-// files and images attached to the message, @-mentions of the working copy's
-// files, and `/` for the palette's actions.
-import { ArrowUp, FileText, Image, ListPlus, Paperclip, Square, SquareTerminal, X } from 'lucide-react';
+// files and images attached to the message, comments on the diff going with
+// it, @-mentions of the working copy's files, and `/` for the palette's actions.
+import { ArrowUp, FileText, Image, ListPlus, MessageSquareCode, Paperclip, Square, SquareTerminal, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { isImage, type Attachment, type NewAttachment } from '../shared/api';
+import { diffCommentRange, isImage, type Attachment, type DiffComment, type NewAttachment } from '../shared/api';
 import type { PaletteAction } from './CommandPalette';
 import { stepIndex } from './Popover';
 import { shortcutLabel } from './shortcuts';
@@ -33,6 +33,8 @@ export function Composer({
   gauge,
   loadFiles,
   commands = [],
+  comments = [],
+  onRemoveComment,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -64,6 +66,9 @@ export function Composer({
   loadFiles?: () => Promise<string[]>;
   /** What `/` offers: the palette's actions. */
   commands?: PaletteAction[];
+  /** The diff comments that go with what is sent, shown as chips; whoever gives them clears them once sent. */
+  comments?: DiffComment[];
+  onRemoveComment?: (index: number) => void;
 }) {
   const id = useId();
   const [draft, setDraftState] = useState('');
@@ -89,7 +94,7 @@ export function Composer({
   const attachable = canAttach && !disabled;
   const attached = attachable ? files : [];
   const [sending, setSending] = useState(false);
-  const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '' || attached.length > 0);
+  const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '' || attached.length > 0 || comments.length > 0);
   const picker = useRef<HTMLInputElement>(null);
   const attach = (added: Iterable<File>) => {
     const list = [...added];
@@ -171,6 +176,24 @@ export function Composer({
       <div className={`composer${dock ? ' docked' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
         {dock}
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
+        {comments.length > 0 && (
+          <ul className="attachments" aria-label="Diff comments">
+            {comments.map((comment, index) => {
+              const range = diffCommentRange(comment);
+              return (
+                <li key={`${index}:${range}`} className="chip" title={`${range}\n${comment.note}`}>
+                  <MessageSquareCode className="sm" />
+                  <span className="tech ellipsis">{range}</span>
+                  {onRemoveComment && (
+                    <button className="icon-btn sm" type="button" aria-label={`Remove comment on ${range}`} title="Remove" onClick={() => onRemoveComment(index)}>
+                      <X className="sm" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
         {attached.length > 0 && (
           <ul className="attachments" aria-label="Attachments">
             {attached.map(({ key, file }) => (
