@@ -2,7 +2,7 @@
 // brings what is new on it back to its Session. Nothing a poll sees reaches
 // the Session straight away: feedback waits out a quiet window, so a burst is
 // one wake-up, and everything waits for the agent to be done with its run.
-import type { BabysitCi, BabysitStatus, FeedbackInfo, FeedbackItem, MergeRequestState, Project, Session } from '../../shared/api';
+import type { BabysitCheck, BabysitCi, BabysitStatus, FeedbackInfo, FeedbackItem, MergeRequestState, Project, Session } from '../../shared/api';
 import type { Clock, TimerHandle } from '../clock';
 import type { BridgeCall } from '../environments/exec';
 import { readMergeRequestActivity, type MergeRequestActivity } from '../projects/merge-request-activity';
@@ -52,6 +52,7 @@ interface BabysitRecord {
   quietUntil?: number;
   info: FeedbackInfo[];
   ci?: BabysitCi;
+  checks?: BabysitCheck[];
   lastPollAt?: number;
   stale: boolean;
 }
@@ -215,6 +216,7 @@ export class Babysit {
     record.seen = [...activity.feedback, ...activity.approvals].map(({ key }) => key);
     record.baselined = true;
     record.ci = ci.status;
+    record.checks = ci.checks;
     record.lastPollAt = now;
     record.stale = false;
     if (activity.state !== 'open') {
@@ -312,6 +314,6 @@ function newRecord({ number, url }: { number: number; url: string }): BabysitRec
   return { number, url, baselined: false, seen: [], conflictsReported: false, pending: [], info: [], stale: false };
 }
 
-function statusOf({ ci, lastPollAt, stale }: BabysitRecord): BabysitStatus {
-  return { stale, ...(ci ? { ci } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
+function statusOf({ ci, checks, lastPollAt, stale }: BabysitRecord): BabysitStatus {
+  return { stale, ...(ci ? { ci } : {}), ...(checks ? { checks } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
 }

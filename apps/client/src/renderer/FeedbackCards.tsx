@@ -4,7 +4,7 @@ import { CircleCheckBig, MessageSquareWarning } from 'lucide-react';
 import { codePlace, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
 import { AskCard, ErrorAlert, useAction } from './Questions';
 
-export const CI_LABELS: Record<BabysitCi, string> = { pending: 'CI pending', passed: 'CI passed', failed: 'CI failed' };
+const CI_LABELS: Record<BabysitCi, string> = { pending: 'CI pending', passed: 'CI passed', failed: 'CI failed' };
 
 /** The feedback, its CI status, Send to agent while it can be sent, and Open on Forge. */
 export function FeedbackCard({

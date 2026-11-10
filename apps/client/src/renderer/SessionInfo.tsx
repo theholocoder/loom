@@ -1,11 +1,10 @@
 // The sidebar's Session info view: the open Session's details, which may
 // change while it runs, each with the actions that go with it, in four fixed
 // groups: Where, Git, Agent and Usage. An archived Session's are read-only.
-import { Archive, Check, CircleDot, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitPullRequestArrow, GitPullRequestCreate, Link, SquareTerminal, TriangleAlert } from 'lucide-react';
+import { Archive, Check, CircleCheck, CircleDot, CircleMinus, CircleX, Clock, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed, GitPullRequestCreate, Link, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
-import { mergeRequestRef, type DiffStat, type EnvironmentStatus, type Project, type Session } from '../shared/api';
+import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type EnvironmentStatus, type MergeRequestState, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
-import { CI_LABELS } from './FeedbackCards';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
 import { Popover } from './Popover';
 
@@ -185,11 +184,11 @@ function Fact({ label, actions, children }: { label: string; actions?: ReactNode
 }
 
 /** An icon button for a fact; `expanded` makes it open a dialog, `buttonRef` anchors that dialog. */
-function IconAction({ label, icon, onClick, buttonRef, expanded }: { label: string; icon: ReactNode; onClick: () => void; buttonRef?: RefObject<HTMLButtonElement | null>; expanded?: boolean }) {
+function IconAction({ label, icon, onClick, buttonRef, expanded, className }: { label: string; icon: ReactNode; onClick: () => void; buttonRef?: RefObject<HTMLButtonElement | null>; expanded?: boolean; className?: string }) {
   return (
     <button
       ref={buttonRef}
-      className="icon-btn sm"
+      className={['icon-btn sm', className].filter(Boolean).join(' ')}
       type="button"
       title={label}
       aria-label={label}
@@ -279,8 +278,7 @@ function MergeRequestFact({
             <ExternalLink className="sm" />
           </button>
           {watchable && <WatchToggle name={ref} watching={watching} onSwitch={onWatch} />}
-          {session.mergeRequestState && <span className={`chip mr-${session.mergeRequestState}`}>{session.mergeRequestState}</span>}
-          {session.babysit?.ci && <span className={`chip ci-${session.babysit.ci}`}>{CI_LABELS[session.babysit.ci]}</span>}
+          {session.mergeRequestState && <MergeRequestStatus state={session.mergeRequestState} session={session} onOpen={onOpen} />}
           {session.babysit?.stale && (
             <span className="chip stale" title="Loom couldn't reach the Forge on its last check: this may be out of date.">
               Stale
@@ -315,6 +313,73 @@ function WatchToggle({ name, watching, onSwitch }: { name: string; watching: boo
     >
       {open ? <Eye /> : <EyeOff />}
     </button>
+  );
+}
+
+const CHECK_STATES: Record<BabysitCheckState, { label: string; icon: ReactNode }> = {
+  passed: { label: 'Passed', icon: <CircleCheck className="sm tone-passed" /> },
+  failed: { label: 'Failed', icon: <CircleX className="sm tone-failed" /> },
+  pending: { label: 'Pending', icon: <Clock className="sm tone-pending" /> },
+  'not-run': { label: 'Not run', icon: <CircleMinus className="sm muted" /> },
+};
+
+/** What sums up a Merge request in one icon: merged or closed, or else how its CI is going. */
+function statusLook(state: MergeRequestState, ci: BabysitCi | undefined): { label: string; icon: ReactNode; tone?: string } {
+  if (state === 'merged') return { label: 'Merge request merged', icon: <GitMerge />, tone: 'tone-merged' };
+  if (state === 'closed') return { label: 'Merge request closed', icon: <GitPullRequestClosed />, tone: 'tone-failed' };
+  if (ci === 'passed') return { label: 'Merge request open, CI passed', icon: <CircleCheck />, tone: 'tone-passed' };
+  if (ci === 'failed') return { label: 'Merge request open, CI failed', icon: <CircleX />, tone: 'tone-failed' };
+  if (ci === 'pending') return { label: 'Merge request open, CI pending', icon: <Clock />, tone: 'tone-pending' };
+  return { label: 'Merge request open', icon: <GitPullRequest /> };
+}
+
+const CI_HEADINGS: Record<BabysitCi, string> = { passed: 'All checks have passed', failed: 'Some checks failed', pending: 'Checks are running' };
+
+/** "1 failed, 5 passed": the checks by state, the ones needing attention first. */
+function checksSummary(checks: BabysitCheck[]): string {
+  const order: BabysitCheckState[] = ['failed', 'passed', 'pending', 'not-run'];
+  return order.flatMap((state) => {
+    const count = checks.filter((check) => check.state === state).length;
+    return count ? [`${count} ${CHECK_STATES[state].label.toLowerCase()}`] : [];
+  }).join(', ');
+}
+
+/** The Merge request's state and CI as one icon, which opens the list of its checks. */
+function MergeRequestStatus({ state, session, onOpen }: { state: MergeRequestState; session: Session; onOpen: (url: string) => void }) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [listing, setListing] = useState(false);
+  const { ci, checks = [] } = session.babysit ?? {};
+  const { label, icon, tone } = statusLook(state, ci);
+  const heading = state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : ci ? CI_HEADINGS[ci] : 'No CI checks';
+  const empty = session.babysitOff ? "Loom isn't watching this Merge request, so it can't say how its CI is going." : "Loom hasn't seen any checks on this Merge request.";
+  return (
+    <>
+      <IconAction label={label} icon={icon} className={tone} buttonRef={trigger} expanded={listing} onClick={() => setListing(!listing)} />
+      {listing && (
+        <Popover anchor={trigger} role="dialog" label="CI checks" className="ci-checks" onClose={() => setListing(false)}>
+          <h4 tabIndex={-1} data-autofocus>
+            {heading}
+          </h4>
+          <p className="muted">{checks.length ? checksSummary(checks) : empty}</p>
+          {checks.length > 0 && (
+            <ul>
+              {checks.map((check, at) => (
+                <li key={at}>
+                  {CHECK_STATES[check.state].icon}
+                  <span className="name tech">{check.name}</span>
+                  <span className="muted">{CHECK_STATES[check.state].label}</span>
+                  {check.url && (
+                    <button type="button" className="link" onClick={() => onOpen(check.url!)}>
+                      Details
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Popover>
+      )}
+    </>
   );
 }
 

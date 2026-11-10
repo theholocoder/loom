@@ -676,3 +676,57 @@ describe('watching a Merge request', () => {
     await expect(main.api.invoke('sessions.setBabysitting', { id, on: false })).rejects.toThrow('archived');
   });
 });
+
+describe('the CI checks of a Merge request', () => {
+  it('lists every check GitHub has, however far along, with its link', async () => {
+    const { main, id } = await babysat('gh', {
+      checks: [
+        { id: 1, name: 'unit', conclusion: 'FAILURE', url: 'https://ci/1' },
+        { id: 2, name: 'lint', conclusion: 'SUCCESS', url: 'https://ci/2' },
+        { id: 3, name: 'docs', conclusion: 'SKIPPED' },
+        { id: 4, name: 'e2e', status: 'IN_PROGRESS', url: 'https://ci/4' },
+        { id: 5, name: 'old', conclusion: 'CANCELLED' },
+        { context: 'codecov', state: 'SUCCESS', url: 'https://ci/6' },
+      ],
+    });
+
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit).toMatchObject({
+      ci: 'pending',
+      checks: [
+        { name: 'unit', state: 'failed', url: 'https://ci/1' },
+        { name: 'lint', state: 'passed', url: 'https://ci/2' },
+        { name: 'docs', state: 'passed' },
+        { name: 'e2e', state: 'pending', url: 'https://ci/4' },
+        { name: 'old', state: 'not-run' },
+        { name: 'codecov', state: 'passed', url: 'https://ci/6' },
+      ],
+    });
+  });
+
+  it('lists every job of the pipeline on GitLab, finished or not', async () => {
+    const jobs = [
+      { id: 1, name: 'lint', status: 'success', url: 'https://ci/1' },
+      { id: 2, name: 'rspec', status: 'running', url: 'https://ci/2' },
+      { id: 3, name: 'deploy', status: 'manual', url: 'https://ci/3' },
+    ];
+    const { main, id } = await babysat('glab', { pipeline: { id: 77, status: 'running', jobs } });
+
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit).toMatchObject({
+      ci: 'pending',
+      checks: [
+        { name: 'lint', state: 'passed', url: 'https://ci/1' },
+        { name: 'rspec', state: 'pending', url: 'https://ci/2' },
+        { name: 'deploy', state: 'not-run', url: 'https://ci/3' },
+      ],
+    });
+  });
+
+  it('follows the checks from poll to poll', async () => {
+    const { main, id, forge } = await babysat('gh', { checks: [{ id: 1, name: 'unit', status: 'QUEUED' }] });
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.checks).toEqual([{ name: 'unit', state: 'pending' }]);
+
+    forge({ checks: [{ id: 1, name: 'unit', conclusion: 'SUCCESS' }] });
+    await pollAfter(main, id, MINUTE);
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.checks).toEqual([{ name: 'unit', state: 'passed' }]);
+  });
+});

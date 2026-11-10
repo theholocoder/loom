@@ -204,10 +204,22 @@ export type MergeRequestState = 'open' | 'merged' | 'closed';
 /** A Merge request's CI as a whole: `pending` until all of it has finished. */
 export type BabysitCi = 'pending' | 'passed' | 'failed';
 
+/** Where one CI check is: `not-run` for one cancelled, or waiting to be started by hand. */
+export type BabysitCheckState = BabysitCi | 'not-run';
+
+export interface BabysitCheck {
+  name: string;
+  state: BabysitCheckState;
+  /** Where its details are. */
+  url?: string;
+}
+
 /** What Babysit last saw of a Session's Merge request. */
 export interface BabysitStatus {
   /** Absent with no CI, or none that says either way (cancelled, say). */
   ci?: BabysitCi;
+  /** Each of its checks as last seen; absent before the first poll that worked. */
+  checks?: BabysitCheck[];
   /** Clock time of the last poll that worked. */
   lastPollAt?: number;
   /** Set while the last poll failed: what's shown may be out of date. */

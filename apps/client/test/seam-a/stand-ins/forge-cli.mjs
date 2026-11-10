@@ -73,7 +73,8 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
   const id = /\/pipelines\/(\d+)\/jobs/.exec(args[1])[1];
   const found = (script.mergeRequests ?? []).find((m) => String(m.pipeline?.id) === id);
   const failed = (found?.pipeline.failedJobs ?? []).map((job) => ({ id: job.id, name: job.name, status: 'failed', web_url: job.url }));
-  process.stdout.write(JSON.stringify([{ id: 1, name: 'lint', status: 'success', web_url: 'https://ci/lint' }, ...failed]));
+  const jobs = found?.pipeline.jobs?.map((job) => ({ id: job.id, name: job.name, status: job.status, web_url: job.url }));
+  process.stdout.write(JSON.stringify(jobs ?? [{ id: 1, name: 'lint', status: 'success', web_url: 'https://ci/lint' }, ...failed]));
 } else if ((args[0] === 'pr' || args[0] === 'mr') && args[1] === 'list') {
   const flag = args[0] === 'pr' ? '--head' : '--source-branch';
   const branch = args[args.indexOf(flag) + 1];

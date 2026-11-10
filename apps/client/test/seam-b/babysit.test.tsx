@@ -120,7 +120,7 @@ describe('Session info', () => {
     const at = new Date(2026, 10, 10, 14, 32).getTime();
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'pending', lastPollAt: at, stale: false } })] }));
 
-    expect(row().textContent).toContain('CI pending');
+    expect(within(row()).getByRole('button', { name: 'Merge request open, CI pending' })).toBeTruthy();
     expect(row().textContent).toContain(`Checked ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     expect(row().textContent).not.toContain('Stale');
   });
@@ -129,6 +129,63 @@ describe('Session info', () => {
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'passed', lastPollAt: 1, stale: true } })] }));
 
     expect(row().textContent).toContain('Stale');
+  });
+
+  const checks: NonNullable<NonNullable<Session['babysit']>['checks']> = [
+    { name: 'unit', state: 'failed', url: 'https://ci/1' },
+    { name: 'lint', state: 'passed', url: 'https://ci/2' },
+    { name: 'e2e', state: 'pending' },
+    { name: 'old', state: 'not-run' },
+  ];
+  const status = (name: string) => within(row()).getByRole('button', { name }) as HTMLElement;
+  const iconOf = (button: HTMLElement) => [...button.querySelector('svg')!.classList].find((c) => c.startsWith('lucide-'));
+
+  it.each([
+    ['open', 'passed', 'Merge request open, CI passed', 'lucide-circle-check'],
+    ['open', 'failed', 'Merge request open, CI failed', 'lucide-circle-x'],
+    ['merged', 'passed', 'Merge request merged', 'lucide-git-merge'],
+  ] as const)('sums up a Merge request %s with CI %s in one icon', (mergeRequestState, ci, name, icon) => {
+    open(new FakeMain({ projects: [project], sessions: [session({ mergeRequestState, babysit: { ci, stale: false } })] }));
+
+    expect(iconOf(status(name))).toBe(icon);
+    expect(row().textContent).not.toContain('CI ');
+    expect(row().textContent).not.toContain(mergeRequestState);
+  });
+
+  it('lists the checks in a dropdown, each opening its details', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'failed', checks, stale: false } })] });
+    open(main);
+    expect(screen.queryByRole('dialog', { name: 'CI checks' })).toBeNull();
+
+    fireEvent.click(status('Merge request open, CI failed'));
+    const list = screen.getByRole('dialog', { name: 'CI checks' });
+    expect(list.textContent).toContain('Some checks failed');
+    expect(list.textContent).toContain('1 failed, 1 passed, 1 pending, 1 not run');
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['unitFailedDetails', 'lintPassedDetails', 'e2ePending', 'oldNot run']);
+
+    fireEvent.click(within(within(list).getAllByRole('listitem')[1]!).getByRole('button', { name: 'Details' }));
+    await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url: 'https://ci/2' }]));
+
+    fireEvent.click(status('Merge request open, CI failed'));
+    expect(screen.queryByRole('dialog', { name: 'CI checks' })).toBeNull();
+  });
+
+  it.each([
+    [{ ci: 'passed', checks: [{ name: 'lint', state: 'passed' }], stale: false }, 'Merge request open, CI passed', 'All checks have passed'],
+    [{ ci: 'pending', checks: [{ name: 'lint', state: 'pending' }], stale: false }, 'Merge request open, CI pending', 'Checks are running'],
+    [{ checks: [], stale: false }, 'Merge request open', 'No CI checks'],
+  ] as const)('heads the dropdown for what CI is doing', (babysit, name, heading) => {
+    open(new FakeMain({ projects: [project], sessions: [session({ babysit: babysit as never })] }));
+    fireEvent.click(status(name));
+
+    expect(screen.getByRole('dialog', { name: 'CI checks' }).textContent).toContain(heading);
+  });
+
+  it('says why there are no checks when the Merge request is not watched', () => {
+    open(new FakeMain({ projects: [project], sessions: [session({ babysitOff: true })] }));
+    fireEvent.click(status('Merge request open'));
+
+    expect(screen.getByRole('dialog', { name: 'CI checks' }).textContent).toContain("isn't watching");
   });
 
   const eye = (name: RegExp) => within(row()).queryByRole('button', { name });
