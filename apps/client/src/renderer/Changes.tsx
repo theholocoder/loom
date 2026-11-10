@@ -157,9 +157,6 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
   return (
     <div className="diff-files">
       <div className="diff-files-bar">
-        <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={listOpen} onClick={() => setListOpen((open) => !open)}>
-          <PanelLeft />
-        </button>
         <input
           className="diff-search"
           type="search"
@@ -169,6 +166,9 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
         />
+        <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={listOpen} onClick={() => setListOpen((open) => !open)}>
+          <PanelLeft />
+        </button>
         <StateToggle label="Wrap long lines" pressed={wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => setWrap((w) => !w)} />
         <StateToggle label="Side by side" pressed={sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => setSideBySide((s) => !s)} />
       </div>
