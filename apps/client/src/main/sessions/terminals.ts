@@ -1,9 +1,9 @@
-// The terminals in Loom's dock: each a shell on a bridge channel with a
+// The Terminals in the Dock: each a shell on a bridge channel with a
 // pseudo-terminal, in its Session's Environment and working copy. They run
 // until their shell exits, they are closed, their Session is archived or
 // Loom quits; nothing of them outlives Loom.
 import type { Channel, ChannelParams } from '../environments/channel';
-import { TERMINAL_REPLAY_BYTES, type Session, type TerminalInfo, type TerminalOutput } from '../../shared/api';
+import { TERMINAL_REPLAY_BYTES, type Session, type TerminalInfo, type TerminalOutput, type TerminalSize } from '../../shared/api';
 
 /** What a terminal needs from its Session's Environment. */
 export interface TerminalEnvironment {
@@ -15,12 +15,13 @@ export interface TerminalEnvironment {
 }
 
 export interface TerminalsOptions {
+  /** The Session with this id, if there is one. */
   session(id: number): Session | undefined;
   /** The Session's Environment, if Loom has it. */
   environment(session: Session): TerminalEnvironment | undefined;
 }
 
-interface Running {
+interface RunningTerminal {
   info: TerminalInfo;
   channel: Channel;
   /** The end of what it printed, at most TERMINAL_REPLAY_BYTES, for a new listener. */
@@ -33,28 +34,29 @@ interface Running {
 
 export class Terminals {
   private nextId = 1;
-  private running = new Map<number, Running>();
+  private running = new Map<number, RunningTerminal>();
   /** How many terminals each Session has opened, for their titles. */
   private opened = new Map<number, number>();
   private listListeners = new Map<number, Set<(list: TerminalInfo[]) => void>>();
 
   constructor(private readonly options: TerminalsOptions) {}
 
-  async open({ sessionId, cols, rows }: { sessionId: number; cols: number; rows: number }): Promise<TerminalInfo> {
+  /** Opens a terminal for the Session, in its working copy; see `terminals.open`. */
+  async open({ sessionId, ...size }: { sessionId: number } & TerminalSize): Promise<TerminalInfo> {
     const session = this.options.session(sessionId);
     if (!session) throw new Error(`unknown Session ${sessionId}`);
     if (session.status === 'archived') throw new Error('The Session is archived, so it has no terminal.');
     if (session.worktreeMissing) throw new Error("The Session's worktree is missing, so a terminal can't open in it.");
-    if (!(cols >= 1 && rows >= 1)) throw new Error('A terminal needs at least one column and one row.');
+    const pty = cells(size);
     const environment = this.options.environment(session);
     if (!environment) throw new Error(`unknown Environment for Session ${sessionId}`);
     await environment.ready();
     if (environment.os() === 'windows') throw new Error(`Terminals need a Unix or WSL Environment; ${environment.label} is native Windows.`);
-    const channel = await environment.openChannel({ command: '', cwd: session.workingCopy.path, pty: { cols: Math.floor(cols), rows: Math.floor(rows) } });
+    const channel = await environment.openChannel({ command: '', cwd: session.workingCopy.path, pty });
 
     const number = (this.opened.get(sessionId) ?? 0) + 1;
     this.opened.set(sessionId, number);
-    const terminal: Running = {
+    const terminal: RunningTerminal = {
       info: { id: this.nextId++, sessionId, title: `Terminal ${number}` },
       channel,
       replay: [],
@@ -77,16 +79,16 @@ export class Terminals {
     return terminal.info;
   }
 
+  /** Types `data` into the terminal. */
   write(id: number, data: string): Promise<void> {
     return this.get(id).channel.write(data);
   }
 
-  resize(id: number, cols: number, rows: number): Promise<void> {
-    if (!(cols >= 1 && rows >= 1)) throw new Error('A terminal needs at least one column and one row.');
-    return this.get(id).channel.resize({ cols: Math.floor(cols), rows: Math.floor(rows) });
+  resize(id: number, size: TerminalSize): Promise<void> {
+    return this.get(id).channel.resize(cells(size));
   }
 
-  /** A listener has shown `bytes` more of the output; what it replayed counts for nothing. */
+  /** A listener has shown `bytes` more of the output given to it as it came. */
   ack(id: number, bytes: number): void {
     const terminal = this.running.get(id);
     if (!terminal) return;
@@ -95,6 +97,7 @@ export class Terminals {
     terminal.channel.acknowledge(acknowledged);
   }
 
+  /** Closes the terminal, killing its shell and all it started. */
   async close(id: number): Promise<void> {
     const terminal = this.running.get(id);
     if (!terminal) return;
@@ -117,6 +120,7 @@ export class Terminals {
     await Promise.all([...this.running.keys()].map((id) => this.close(id)));
   }
 
+  /** Gives `listener` the Session's terminals, then the list again on each change. */
   subscribeList(sessionId: number, listener: (list: TerminalInfo[]) => void): () => void {
     let listeners = this.listListeners.get(sessionId);
     if (!listeners) this.listListeners.set(sessionId, (listeners = new Set()));
@@ -136,7 +140,7 @@ export class Terminals {
       return () => {};
     }
     terminal.listeners.add(listener);
-    listener({ data: Buffer.concat(terminal.replay) });
+    listener({ data: Buffer.concat(terminal.replay), replay: true });
     return () => {
       terminal.listeners.delete(listener);
       // With nobody left to show it, the shell must not be held back.
@@ -144,7 +148,7 @@ export class Terminals {
     };
   }
 
-  private received(terminal: Running, data: Buffer): void {
+  private received(terminal: RunningTerminal, data: Buffer): void {
     terminal.replay.push(data);
     terminal.replayBytes += data.length;
     while (terminal.replayBytes - terminal.replay[0]!.length >= TERMINAL_REPLAY_BYTES) {
@@ -158,7 +162,7 @@ export class Terminals {
     for (const listener of [...terminal.listeners]) listener({ data });
   }
 
-  private get(id: number): Running {
+  private get(id: number): RunningTerminal {
     const terminal = this.running.get(id);
     if (!terminal) throw new Error(`no open terminal ${id}`);
     return terminal;
@@ -174,4 +178,10 @@ export class Terminals {
     const list = this.list(sessionId);
     for (const listener of [...listeners]) listener(list);
   }
+}
+
+/** `size` in whole cells; rejects one with no column or no row. */
+function cells({ cols, rows }: TerminalSize): TerminalSize {
+  if (!(cols >= 1 && rows >= 1)) throw new Error('A terminal needs at least one column and one row.');
+  return { cols: Math.floor(cols), rows: Math.floor(rows) };
 }

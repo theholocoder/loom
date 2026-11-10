@@ -1,26 +1,26 @@
 // The screens of the open terminals, kept for as long as their terminals
 // run: the dock shows one at a time, and a Session not shown keeps its
 // terminals going, still taking in what they print.
-import type { LoomApi, TerminalInfo } from '../shared/api';
+import type { LoomApi, TerminalInfo, TerminalSize } from '../shared/api';
 import { createTerminalScreen, type TerminalScreen } from './terminal-screen';
 
-interface Kept {
+interface KeptScreen {
   screen: TerminalScreen;
   sessionId: number;
   /** The size main last heard of. */
-  size?: { cols: number; rows: number };
+  size?: TerminalSize;
   stop: () => void;
 }
 
 /** Each main's terminals' screens, by terminal id. */
-const kept = new WeakMap<LoomApi, Map<number, Kept>>();
+const keptScreens = new WeakMap<LoomApi, Map<number, KeptScreen>>();
 /** Each main's subscriptions to a Session's terminals, while it has screens. */
-const watching = new WeakMap<LoomApi, Map<number, () => void>>();
+const watchedSessions = new WeakMap<LoomApi, Map<number, () => void>>();
 
 /** The screen of `terminal`, made the first time it is asked for. */
 export function terminalScreen(api: LoomApi, terminal: TerminalInfo): TerminalScreen {
-  let screens = kept.get(api);
-  if (!screens) kept.set(api, (screens = new Map()));
+  let screens = keptScreens.get(api);
+  if (!screens) keptScreens.set(api, (screens = new Map()));
   const existing = screens.get(terminal.id);
   if (existing) return existing.screen;
 
@@ -31,11 +31,13 @@ export function terminalScreen(api: LoomApi, terminal: TerminalInfo): TerminalSc
   screen.onInput((data) => void api.invoke('terminals.write', { id, data }).catch(() => {}));
   const stop = api.subscribe(
     'terminalOutput',
-    ({ data }) => {
+    ({ data, replay }) => {
       if (!data.length) return;
       const bytes = data.length;
-      // Main holds the shell back until the screen keeps up.
-      screen.write(data, () => void api.invoke('terminals.ack', { id, bytes }).catch(() => {}));
+      // Main holds the shell back until the screen keeps up; what it replays was never held.
+      screen.write(data, () => {
+        if (!replay) void api.invoke('terminals.ack', { id, bytes }).catch(() => {});
+      });
     },
     { id },
   );
@@ -46,7 +48,7 @@ export function terminalScreen(api: LoomApi, terminal: TerminalInfo): TerminalSc
 
 /** Fits the terminal's screen to where it is shown, telling main its new size. */
 export function fitTerminal(api: LoomApi, id: number): void {
-  const entry = kept.get(api)?.get(id);
+  const entry = keptScreens.get(api)?.get(id);
   const size = entry?.screen.fit();
   if (!entry || !size || (entry.size?.cols === size.cols && entry.size.rows === size.rows)) return;
   entry.size = size;
@@ -55,14 +57,14 @@ export function fitTerminal(api: LoomApi, id: number): void {
 
 /** Drops the screens of a Session's terminals once they are gone from its list. */
 function watch(api: LoomApi, sessionId: number): void {
-  let sessions = watching.get(api);
-  if (!sessions) watching.set(api, (sessions = new Map()));
+  let sessions = watchedSessions.get(api);
+  if (!sessions) watchedSessions.set(api, (sessions = new Map()));
   if (sessions.has(sessionId)) return;
   const watched = sessions;
   const stop = api.subscribe(
     'terminals',
     (list) => {
-      const screens = kept.get(api)!;
+      const screens = keptScreens.get(api)!;
       for (const [id, entry] of [...screens]) {
         if (entry.sessionId !== sessionId || list.some((t) => t.id === id)) continue;
         entry.stop();

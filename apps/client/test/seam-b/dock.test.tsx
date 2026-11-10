@@ -150,12 +150,13 @@ describe('the dock', () => {
     toggleTerminal();
     await waitFor(() => expect(screens).toHaveLength(1));
 
-    act(() => main.publish('terminalOutput', { data: new TextEncoder().encode('$ héllo') }, { id: 1 }));
+    act(() => main.publish('terminalOutput', { data: new TextEncoder().encode('$ '), replay: true }, { id: 1 }));
+    act(() => main.publish('terminalOutput', { data: new TextEncoder().encode('héllo') }, { id: 1 }));
     screens[0]!.type('ls\r');
 
     expect(screens[0]!.shown).toBe('$ héllo');
-    // 'é' is two bytes.
-    expect(calls(main, 'terminals.ack')).toEqual([{ id: 1, bytes: 8 }]);
+    // What main replays was never held back; 'é' is two bytes.
+    expect(calls(main, 'terminals.ack')).toEqual([{ id: 1, bytes: 6 }]);
     expect(calls(main, 'terminals.write')).toEqual([{ id: 1, data: 'ls\r' }]);
   });
 

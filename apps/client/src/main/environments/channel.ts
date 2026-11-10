@@ -1,6 +1,7 @@
 // A long-lived process in an Environment whose stdin and stdout main drives
 // through the bridge, multiplexed with every other channel's on the bridge's
 // stdio: an agent's ACP stdio. See bridge/protocol/channel.go.
+import type { TerminalSize } from '../../shared/api';
 
 /** What starts a channel's process. */
 export interface ChannelParams {
@@ -17,12 +18,6 @@ export interface ChannelParams {
    * defaults to the user's login shell.
    */
   pty?: TerminalSize;
-}
-
-/** A terminal's size in character cells. */
-export interface TerminalSize {
-  cols: number;
-  rows: number;
 }
 
 export interface ChannelExit {

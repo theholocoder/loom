@@ -2,6 +2,7 @@
 // DOM when it can't, themed from Loom's CSS tokens. This is the only module
 // that knows xterm; seam B tests stand in for it, since jsdom has no layout.
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal, type ITheme } from '@xterm/xterm';
@@ -31,9 +32,13 @@ export interface ScreenOptions {
 export function createTerminalScreen(options: ScreenOptions): TerminalScreen {
   const element = document.createElement('div');
   element.className = 'terminal-screen';
-  const terminal = new Terminal({ ...style(), cursorBlink: true, scrollback: 5000 });
+  // The Unicode 11 widths need the proposed API.
+  const terminal = new Terminal({ ...style(), cursorBlink: true, scrollback: 5000, allowProposedApi: true });
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
+  // Emoji and other wide characters take the two cells shells and TUIs expect.
+  terminal.loadAddon(new Unicode11Addon());
+  terminal.unicode.activeVersion = '11';
   terminal.loadAddon(new WebLinksAddon((_event, url) => options.openLink(url)));
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown') return true;

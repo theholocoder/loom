@@ -968,7 +968,7 @@ export type DatabaseStatus =
     };
 
 /**
- * A terminal in Loom's dock: a shell in its Session's Environment, started in
+ * A Terminal in the Dock: a shell in its Session's Environment, started in
  * the Session's working copy, running until it exits, it is closed, its
  * Session is archived or Loom quits. Nothing of it outlives Loom.
  */
@@ -979,9 +979,17 @@ export interface TerminalInfo {
   title: string;
 }
 
+/** A terminal's size in character cells. */
+export interface TerminalSize {
+  cols: number;
+  rows: number;
+}
+
 /** A piece of what a terminal printed: UTF-8 bytes, which may split a character. */
 export interface TerminalOutput {
   data: Uint8Array;
+  /** Set on what was printed before the listener came, which is not to be acknowledged. */
+  replay?: boolean;
 }
 
 /** Commands the renderer can invoke, with their parameters and results. */
@@ -1292,11 +1300,11 @@ export interface Commands {
    * full environment. Rejects for an archived Session, one whose worktree is
    * missing, and in a native Windows Environment (WSL is fine).
    */
-  'terminals.open': { params: { sessionId: number; cols: number; rows: number }; result: TerminalInfo };
+  'terminals.open': { params: { sessionId: number } & TerminalSize; result: TerminalInfo };
   /** Types `data` into the terminal. */
   'terminals.write': { params: { id: number; data: string }; result: void };
   /** Sets the terminal's size in character cells. */
-  'terminals.resize': { params: { id: number; cols: number; rows: number }; result: void };
+  'terminals.resize': { params: { id: number } & TerminalSize; result: void };
   /**
    * Says `bytes` of the terminal's output have been shown. Until they are,
    * the shell is held back once it gets far enough ahead, so a flood of
@@ -1331,8 +1339,8 @@ export interface Topics {
   terminals: TerminalInfo[];
   /**
    * What one terminal prints: first the end of what it printed so far
-   * (TERMINAL_REPLAY_BYTES at most, possibly nothing), then each new piece.
-   * Each piece is to be acknowledged with `terminals.ack` once shown.
+   * (TERMINAL_REPLAY_BYTES at most, possibly nothing, marked `replay`), then
+   * each new piece, to be acknowledged with `terminals.ack` once shown.
    */
   terminalOutput: TerminalOutput;
   database: DatabaseStatus;

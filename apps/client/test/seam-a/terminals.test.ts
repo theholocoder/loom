@@ -34,9 +34,9 @@ function outputUntil(api: LoomApi, id: number, want: string): Promise<string> {
     let done = false;
     const unsubscribe = api.subscribe(
       'terminalOutput',
-      ({ data }) => {
+      ({ data, replay }) => {
         text += decoder.decode(data, { stream: true });
-        if (data.length) void api.invoke('terminals.ack', { id, bytes: data.length }).catch(() => {});
+        if (data.length && !replay) void api.invoke('terminals.ack', { id, bytes: data.length }).catch(() => {});
         if (done || !text.includes(want)) return;
         done = true;
         clearTimeout(timer);
@@ -80,8 +80,15 @@ describe.skipIf(process.platform === 'win32')('terminals in the dock', () => {
     await main.api.invoke('terminals.write', { id: terminal.id, data: 'echo "early $((6*7))"\r' });
     await outputUntil(main.api, terminal.id, 'early 42');
 
-    // A second listener, as after a renderer reload, gets it all again.
+    // A second listener, as after a renderer reload, gets it all again, marked as a replay.
     await outputUntil(main.api, terminal.id, 'early 42');
+    const replayed = await new Promise<boolean | undefined>((resolve) => {
+      const stop = main.api.subscribe('terminalOutput', ({ replay }) => {
+        queueMicrotask(() => stop());
+        resolve(replay);
+      }, { id: terminal.id });
+    });
+    expect(replayed).toBe(true);
   });
 
   it('holds a flooding shell back until its output is acknowledged', async () => {

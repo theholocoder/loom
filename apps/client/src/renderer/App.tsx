@@ -163,7 +163,7 @@ function Workspace() {
       if (event.target instanceof Element && event.target.closest('.terminal-screen')) {
         if (!matchesShortcut(SHORTCUTS.toggleTerminal.shortcut, event)) return;
         event.preventDefault();
-        actions.find((a) => a.label === SHORTCUTS.toggleTerminal.label)?.run(focusedElement());
+        actions.find((a) => a.shortcut === SHORTCUTS.toggleTerminal.shortcut)?.run(focusedElement());
         return;
       }
       // Not over a dialog, nor a menu or picker, which have keys of their own.

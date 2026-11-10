@@ -164,9 +164,10 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   /** The commands and skills the agent offers in the Project's checkout, once its Environment is up. */
   const listCommands = async (projectId: number) => native.listCommands(await readyCheckout(projectId));
   const sessions = new Topic<Session[]>([]);
-  /** Which Environment a Session's Project is in, if Loom has it. */
-  const sessionEnvironment = (session: Session) =>
-    projectService.list().find((p) => p.id === session.projectId)?.checkout.environmentId === native.status.id ? native : undefined;
+  /** The id of the Environment the Project's checkout is in. */
+  const environmentIdOf = (projectId: number) => projectService.list().find((p) => p.id === projectId)?.checkout.environmentId;
+  /** The Environment a Session runs in, if Loom has it. */
+  const sessionEnvironment = (session: Session) => (environmentIdOf(session.projectId) === native.status.id ? native : undefined);
   const terminals = new Terminals({
     session: (id) => sessionService.list().find((s) => s.id === id),
     environment: (session) => {
@@ -212,7 +213,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const openInSession = (id: number, opener: Opener, file?: string) => {
     const session = sessionService.list().find((s) => s.id === id);
     if (!session) throw new Error(`unknown Session ${id}`);
-    const environmentId = projectService.list().find((p) => p.id === session.projectId)?.checkout.environmentId;
+    const environmentId = environmentIdOf(session.projectId);
     if (environmentId !== native.status.id) throw new Error(`unknown Environment "${environmentId}"`);
     const { editorCommand, terminalCommand } = settingsService.value;
     return openIn(nativeForSessions, {
@@ -289,7 +290,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
     'terminals.open': (params) => terminals.open(params),
     'terminals.write': ({ id, data }) => terminals.write(id, data),
-    'terminals.resize': ({ id, cols, rows }) => terminals.resize(id, cols, rows),
+    'terminals.resize': ({ id, cols, rows }) => terminals.resize(id, { cols, rows }),
     'terminals.ack': ({ id, bytes }) => terminals.ack(id, bytes),
     'terminals.close': ({ id }) => terminals.close(id),
     'sessions.diff': ({ id, uncommittedOnly }) => sessionService.diff(id, uncommittedOnly),
