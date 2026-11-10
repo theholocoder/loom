@@ -143,5 +143,6 @@ export const migrations: Migration[] = [
   async (db) => {
     await db.schema.alterTable('sessions').addColumn('auto_prompt', 'integer', (c) => c.notNull().defaultTo(0)).execute();
     await db.schema.alterTable('sessions').addColumn('auto_prompts_in_a_row', 'integer', (c) => c.notNull().defaultTo(0)).execute();
+    await db.schema.alterTable('sessions').addColumn('babysit_off', 'integer', (c) => c.notNull().defaultTo(0)).execute();
   },
 ];

@@ -38,6 +38,8 @@ export interface SessionsTable {
   status: SessionStatus;
   waiting_reason: WaitingReason | null;
   error: string | null;
+  /** 1 when the user has stopped Babysit watching its Merge request, else 0. */
+  babysit_off: number;
   /** 1 when its Merge request's feedback goes straight to the agent, else 0. */
   auto_prompt: number;
   /** How many auto-prompts have gone since the user's last message. */

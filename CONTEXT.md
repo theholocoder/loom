@@ -58,7 +58,7 @@ A request to merge a **Session**'s branch, whatever the **Forge** calls it (MR o
 _Avoid_: PR (except when talking about GitHub specifically)
 
 **Babysit**:
-Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on (at most 3 times in a row without a message from the user, then it pauses and the Session goes **Waiting**); a merged or closed Merge request archives the Session.
+Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on (at most 3 times in a row without a message from the user, then it pauses and the Session goes **Waiting**); a merged or closed Merge request archives the Session. The user can stop and restart the watch per **Session**; a newly linked Merge request is always watched.
 _Avoid_: Watch, monitor
 
 ## Relationships

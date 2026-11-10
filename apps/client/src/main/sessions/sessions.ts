@@ -367,6 +367,7 @@ export class Sessions {
       merge_request_state: null,
       auto_prompt: this.options.autoPromptDefault() ? 1 : 0,
       auto_prompts_in_a_row: 0,
+      babysit_off: 0,
     };
     let id: number;
     try {
@@ -1030,6 +1031,14 @@ export class Sessions {
     }
   }
 
+  /** Starts or stops Babysit watching the Session's Merge request. */
+  setBabysitting({ id, on }: Commands['sessions.setBabysitting']['params']): void {
+    if (typeof on !== 'boolean') throw new Error('Whether the Merge request is watched must be true or false.');
+    if (this.get(id).status === 'archived') throw new Error('This Session is archived.');
+    this.update(id, { babysitOff: on ? undefined : true });
+    this.save(id, { babysit_off: on ? 0 : 1 });
+  }
+
   /** Turns auto-prompt on or off for the Session, from the next feedback on. */
   setAutoPrompt({ id, on }: Commands['sessions.setAutoPrompt']['params']): void {
     if (typeof on !== 'boolean') throw new Error('Whether auto-prompt is on must be true or false.');
@@ -1534,9 +1543,11 @@ export class Sessions {
       merge_request_by_hand: link && linkage!.byHand ? 1 : 0,
       // Only an open one is ever linked; Archive looks again.
       merge_request_state: link ? 'open' : null,
+      // A new Merge request is watched, whatever became of the last one's.
+      ...(same ? {} : { babysit_off: 0 }),
     });
     if (same) return;
-    this.update(id, { mergeRequest: link, mergeRequestState: link ? 'open' : undefined });
+    this.update(id, { mergeRequest: link, mergeRequestState: link ? 'open' : undefined, babysitOff: undefined });
     if (link) {
       this.endStreaming(id);
       this.addItem(id, { kind: 'merge-request', ...link });
@@ -2024,6 +2035,7 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     autoPrompt: row.auto_prompt !== 0 || undefined,
+    babysitOff: row.babysit_off !== 0 || undefined,
   });
 }
 

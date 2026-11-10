@@ -1,7 +1,7 @@
 // The sidebar's Session info view: the open Session's details, which may
 // change while it runs, each with the actions that go with it, in four fixed
 // groups: Where, Git, Agent and Usage. An archived Session's are read-only.
-import { Archive, Check, CircleDot, CodeXml, Copy, ExternalLink, FileDiff, GitPullRequestArrow, GitPullRequestCreate, Link, SquareTerminal, TriangleAlert } from 'lucide-react';
+import { Archive, Check, CircleDot, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitPullRequestArrow, GitPullRequestCreate, Link, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type DiffStat, type EnvironmentStatus, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -56,6 +56,10 @@ export function SessionInfo({
     api.invoke(command, { id: session.id }).catch((e: unknown) => onError((e as Error).message));
   };
   const open = (url: string) => void api.invoke('links.open', { url }).catch((e: unknown) => onError((e as Error).message));
+  const setWatching = (on: boolean) => {
+    onError(undefined);
+    api.invoke('sessions.setBabysitting', { id: session.id, on }).catch((e: unknown) => onError((e as Error).message));
+  };
   const setAutoPrompt = (on: boolean) => {
     onError(undefined);
     api.invoke('sessions.setAutoPrompt', { id: session.id, on }).catch((e: unknown) => onError((e as Error).message));
@@ -100,7 +104,7 @@ export function SessionInfo({
             <span className="muted">None</span>
           )}
         </Fact>
-        <MergeRequestFact session={session} project={project} linking={linking} onLinkingChange={onLinkingChange} onOpen={open} onAsk={() => run('sessions.requestMergeRequest')} onAutoPrompt={setAutoPrompt} />
+        <MergeRequestFact session={session} project={project} linking={linking} onLinkingChange={onLinkingChange} onOpen={open} onAsk={() => run('sessions.requestMergeRequest')} onAutoPrompt={setAutoPrompt} onWatch={setWatching} />
         <Fact label="Changes">
           {session.diffStat ? (
             <button type="button" className="link diff-stat" aria-label={`Show changes: ${diffStatLabel(session.diffStat)}`} onClick={onShowChanges}>
@@ -229,6 +233,7 @@ function MergeRequestFact({
   onOpen,
   onAsk,
   onAutoPrompt,
+  onWatch,
 }: {
   session: Session;
   project: Project | undefined;
@@ -237,11 +242,15 @@ function MergeRequestFact({
   onOpen: (url: string) => void;
   onAsk: () => void;
   onAutoPrompt: (on: boolean) => void;
+  onWatch: (on: boolean) => void;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const canAct = session.status !== 'archived' && !session.worktreeMissing && project?.forge.state === 'available';
   const { mergeRequest } = session;
   const ref = mergeRequest && mergeRequestRef(project?.forge.kind, mergeRequest.number);
+  // Only an open one can be watched: the eye says so, and switches it.
+  const watchable = session.status !== 'archived' && project?.forge.state === 'available' && session.mergeRequestState === 'open';
+  const watching = !session.babysitOff;
   return (
     <Fact
       label="Merge request"
@@ -249,7 +258,7 @@ function MergeRequestFact({
         canAct && (
           <>
             <label className="fact-toggle" title="Send this Merge request's feedback straight to the agent, instead of waiting for you">
-              <input type="checkbox" checked={!!session.autoPrompt} onChange={(event) => onAutoPrompt(event.target.checked)} />
+              <input type="checkbox" checked={!!session.autoPrompt} disabled={!watching} onChange={(event) => onAutoPrompt(event.target.checked)} />
               Auto-prompt
             </label>
             {mergeRequest ? (
@@ -269,6 +278,7 @@ function MergeRequestFact({
             {ref}
             <ExternalLink className="sm" />
           </button>
+          {watchable && <IconAction label={watching ? `Watching ${ref}, click to stop` : `Not watching ${ref}, click to watch`} icon={watching ? <Eye /> : <EyeOff />} onClick={() => onWatch(!watching)} />}
           {session.mergeRequestState && <span className={`chip mr-${session.mergeRequestState}`}>{session.mergeRequestState}</span>}
           {session.babysit?.ci && <span className={`chip ci-${session.babysit.ci}`}>{CI_LABELS[session.babysit.ci]}</span>}
           {session.babysit?.stale && (

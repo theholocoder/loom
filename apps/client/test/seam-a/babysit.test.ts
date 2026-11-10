@@ -575,3 +575,104 @@ describe('auto-prompt', () => {
     await expect(main.api.invoke('sessions.setAutoPrompt', { id, on: true })).rejects.toThrow('archived');
   });
 });
+
+describe('watching a Merge request', () => {
+  const comment = (n: number) => ({ id: n, author: 'bob', body: `Note ${n}`, url: `${URLS.gh}#c${n}` });
+  const toolCall = (name: string, rawInput: unknown) => [
+    { update: { sessionUpdate: 'tool_call', toolCallId: 'call_link', title: name, kind: 'other', status: 'pending', rawInput } },
+    { update: { sessionUpdate: 'tool_call_update', toolCallId: 'call_link', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'Linked.' } }] } },
+  ];
+  const quietly = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+  it('stops when switched off: no polls, no feedback, nothing shown of the last one', async () => {
+    const { machine, main, id, forge } = await babysat('gh');
+    await main.api.invoke('sessions.setBabysitting', { id, on: false });
+    const off = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit === undefined);
+    expect(sessionOf(off, id).babysitOff).toBe(true);
+
+    forge({ comments: [comment(1)] });
+    const before = graphql(machine).length;
+    await main.elapse(10 * MINUTE);
+    await main.api.invoke('sessions.check');
+    await quietly();
+    expect(graphql(machine)).toHaveLength(before);
+    expect(await cardsOf(main, id)).toEqual([]);
+  });
+
+  it('polls at once when switched back on, and reports what came meanwhile', async () => {
+    const { main, id, forge } = await babysat('gh');
+    await main.api.invoke('sessions.setBabysitting', { id, on: false });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit === undefined);
+    forge({ comments: [comment(1)] });
+    await main.elapse(MINUTE);
+
+    await main.api.invoke('sessions.setBabysitting', { id, on: true });
+    const at = main.clock.now();
+    const on = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.lastPollAt === at);
+    expect(sessionOf(on, id).babysitOff).toBeUndefined();
+    await main.elapse(QUIET_WINDOW);
+    expect((await nextCard(main, id)).items).toEqual([{ kind: 'comment', author: 'bob', excerpt: 'Note 1', url: `${URLS.gh}#c1` }]);
+  });
+
+  it('stays off across a restart', async () => {
+    const { machine, main, id } = await babysat('gh', {}, { userDataDir: tempDir('loom-watch-') });
+    await main.api.invoke('sessions.setBabysitting', { id, on: false });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit === undefined);
+    await main.close();
+
+    const before = graphql(machine).length;
+    const again = await startMain({ machine, userDataDir: main.userDataDir, now: main.clock.now() });
+    await waitFor(again.api, 'environments', ready);
+    await quietly();
+    expect(sessionOf(await again.api.invoke('sessions.list'), id).babysitOff).toBe(true);
+    expect(sessionOf(await again.api.invoke('sessions.list'), id).babysit).toBeUndefined();
+    expect(graphql(machine)).toHaveLength(before);
+  });
+
+  it('starts by itself when the agent links a Merge request with the tool', async () => {
+    const machine = tempMachine();
+    const turns = [{ chunks: toolCall('loom_link_merge_request', { number: 12 }) as AcpTurn['chunks'] }];
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns } });
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'], mergeRequests: [{ number: 12, url: URLS.gh, branch: 'somewhere-else' }] });
+    const checkout = machine.gitRepo('loom', { origin: GITHUB });
+    git(checkout, 'checkout', '--quiet', '-b', 'main');
+    machine.commit(checkout, 'README.md', '# loom\n');
+    git(checkout, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+    git(checkout, 'checkout', '--quiet', '-b', BRANCH);
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', ready);
+    const project = await main.api.invoke('projects.link', { path: checkout });
+    await waitFor(main.api, 'projects', (list) => list.some((p) => p.id === project.id && p.forge.state === 'available'));
+
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Link it' });
+
+    const linked = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.lastPollAt !== undefined);
+    expect(sessionOf(linked, id)).toMatchObject({ mergeRequest: { number: 12, url: URLS.gh }, mergeRequestState: 'open' });
+    expect(sessionOf(linked, id).babysitOff).toBeUndefined();
+  });
+
+  it('starts again on a different Merge request, but a look at the same one leaves it off', async () => {
+    const { machine, main, id } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { chunks: ['Again.'] }] });
+    const other = 'https://github.com/theholocoder/loom/pull/13';
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'], mergeRequests: [{ number: 12, url: URLS.gh, branch: BRANCH }, { number: 13, url: other, branch: 'somewhere-else' }] });
+    await main.api.invoke('sessions.setBabysitting', { id, on: false });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit === undefined);
+
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Again.'), { sessionId: id });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).status === 'waiting');
+    await quietly();
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysitOff).toBe(true);
+
+    await main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: '13' });
+    const on = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.lastPollAt !== undefined);
+    expect(sessionOf(on, id)).toMatchObject({ mergeRequest: { number: 13, url: other } });
+    expect(sessionOf(on, id).babysitOff).toBeUndefined();
+  });
+
+  it('refuses a change on an archived Session', async () => {
+    const { main, id } = await babysat('gh');
+    await main.api.invoke('sessions.archive', { id });
+    await expect(main.api.invoke('sessions.setBabysitting', { id, on: false })).rejects.toThrow('archived');
+  });
+});

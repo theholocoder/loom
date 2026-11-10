@@ -263,6 +263,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
     'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
     'sessions.setAutoPrompt': (params) => sessionService.setAutoPrompt(params),
+    'sessions.setBabysitting': (params) => sessionService.setBabysitting(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),

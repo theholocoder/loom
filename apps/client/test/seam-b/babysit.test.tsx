@@ -131,6 +131,39 @@ describe('Session info', () => {
     expect(row().textContent).toContain('Stale');
   });
 
+  const eye = (name: RegExp) => within(row()).queryByRole('button', { name });
+
+  it('shows the watch as an eye by the number, and clicking it switches the watch', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [session()] });
+    open(main);
+    fireEvent.click(eye(/^Watching #12/)!);
+    await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }]));
+
+    act(() => main.publish('sessions', [session({ babysitOff: true })]));
+    fireEvent.click(eye(/^Not watching #12/)!);
+    await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }, { id: 1, on: true }]));
+  });
+
+  it('has no eye for what is not being or cannot be watched', () => {
+    const main = new FakeMain({ projects: [project], sessions: [session()] });
+    open(main);
+    expect(eye(/atching #12/)).not.toBeNull();
+
+    act(() => main.publish('sessions', [session({ mergeRequestState: 'merged' })]));
+    expect(eye(/atching #12/)).toBeNull();
+    act(() => main.publish('sessions', [session({ status: 'archived', waitingReason: undefined })]));
+    expect(eye(/atching #12/)).toBeNull();
+  });
+
+  it('greys out auto-prompt while the Merge request is not watched', () => {
+    const main = new FakeMain({ projects: [project], sessions: [session()] });
+    open(main);
+    expect((within(row()).getByRole('checkbox', { name: 'Auto-prompt' }) as HTMLInputElement).disabled).toBe(false);
+
+    act(() => main.publish('sessions', [session({ babysitOff: true })]));
+    expect((within(row()).getByRole('checkbox', { name: 'Auto-prompt' }) as HTMLInputElement).disabled).toBe(true);
+  });
+
   const toggle = () => within(row()).queryByRole('checkbox', { name: 'Auto-prompt' }) as HTMLInputElement | null;
 
   it('turns auto-prompt on and off for the Session, showing what it is', async () => {

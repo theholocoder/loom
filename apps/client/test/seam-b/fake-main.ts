@@ -121,6 +121,7 @@ export class FakeMain implements LoomApi {
       'sessions.linkMergeRequest': () => {},
       'sessions.sendFeedback': () => {},
       'sessions.setAutoPrompt': () => {},
+      'sessions.setBabysitting': () => {},
       'sessions.setUnread': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},

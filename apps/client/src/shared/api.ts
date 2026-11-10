@@ -347,6 +347,8 @@ export interface Session {
   mergeRequestState?: MergeRequestState;
   /** What Babysit last saw of its open Merge request; absent with no Merge request to babysit. */
   babysit?: BabysitStatus;
+  /** Set when the user has stopped Babysit watching its Merge request; a new link starts it again. */
+  babysitOff?: boolean;
   /** Set when its Merge request's feedback goes straight to the agent; seeded from the global default. */
   autoPrompt?: boolean;
   status: SessionStatus;
@@ -1094,6 +1096,8 @@ export interface Commands {
    * the Session is Working. Rejects when the card has been sent already.
    */
   'sessions.sendFeedback': { params: { id: number; itemId: number }; result: void };
+  /** Starts or stops Babysit watching the Session's Merge request; started again, it reports what came meanwhile. Rejects an archived Session. */
+  'sessions.setBabysitting': { params: { id: number; on: boolean }; result: void };
   /** Turns auto-prompt on or off for the Session; rejects an archived Session or one whose worktree is gone. */
   'sessions.setAutoPrompt': { params: { id: number; on: boolean }; result: void };
   /**
