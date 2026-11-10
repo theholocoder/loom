@@ -2,7 +2,7 @@
 // docs/prototypes/ui-layout.html.
 import { Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type DiffComment, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -416,11 +416,14 @@ export function SessionView({
     if (session.unread) api.invoke('sessions.setUnread', { id: session.id, unread: false }).catch(() => {});
   }, [session.id, session.updatedAt]);
 
+  /** The comments on the diff to go with the next message, as chips in the composer. */
+  const [comments, setComments] = useState<DiffComment[]>([]);
   const send = async (prompt: string, attachments: NewAttachment[]) => {
     setError(undefined);
     try {
       if (freeAnswer) return await freeAnswer.send(prompt);
-      await api.invoke('sessions.send', { id: session.id, prompt, ...(attachments.length ? { attachments } : {}) });
+      await api.invoke('sessions.send', { id: session.id, prompt, ...(attachments.length ? { attachments } : {}), ...(comments.length ? { comments } : {}) });
+      setComments([]);
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -589,6 +592,9 @@ export function SessionView({
           canAttach={!freeAnswer}
           loadFiles={session.status === 'archived' || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
           commands={commands}
+          // Not with an answer to a question: they wait for the next message.
+          comments={freeAnswer ? undefined : comments}
+          onRemoveComment={(index) => setComments((list) => list.filter((_, i) => i !== index))}
           queueing={working}
           tools={
             <ModelPickers
@@ -622,7 +628,7 @@ export function SessionView({
       {sidebar.open && (
         <Sidebar control={sidebar}>
           {sidebar.view === 'changes' ? (
-            <ChangesView session={session} />
+            <ChangesView session={session} onComment={(comment) => setComments((list) => [...list, comment])} />
           ) : (
             <SessionInfo
               session={session}

@@ -214,6 +214,11 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .diff-tree .diff-status { flex: none; font-size: 0; padding: 0; width: 7px; height: 7px; border: 0; background: currentColor; }
 .diff-counts { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
 .diff-note { padding: 8px 10px; font-size: 12px; color: var(--muted); }
+/* The note on a line or range, drawn by the diff library under its last line. */
+.diff-comment { margin: 6px 10px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); font: 13px var(--font); display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+.diff-comment textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; outline: none; }
+.diff-comment textarea:focus { border-color: var(--accent); }
+.diff-comment .row { gap: 6px; font-size: 12px; }
 .diff-loading { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; }
 
 /* dashboard (also the layout of other full pages, like Settings) */

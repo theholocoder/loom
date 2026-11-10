@@ -1,18 +1,36 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { SelectedLineRange } from '@pierre/diffs';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type Project, type Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
+type DiffProps = {
+  patch: string;
+  options: { onGutterUtilityClick?: (range: SelectedLineRange) => void } & Record<string, unknown>;
+  lineAnnotations?: Array<{ side: string; lineNumber: number }>;
+  selectedLines?: SelectedLineRange | null;
+  renderAnnotation?: (annotation: { side: string; lineNumber: number }) => ReactNode;
+};
+/** What each patch was last drawn with, by its text. */
+const drawn = vi.hoisted(() => new Map<string, DiffProps>());
+
 // The library draws in a shadow DOM and highlights asynchronously; these tests
-// stop at the data Loom hands it.
+// stop at the data Loom hands it, and at what it calls back with.
 vi.mock('@pierre/diffs/react', () => ({
-  PatchDiff: ({ patch, options }: { patch: string; options: unknown }) => (
-    <pre data-testid="patch-diff" data-options={JSON.stringify(options)}>
-      {patch}
-    </pre>
-  ),
+  PatchDiff: (props: DiffProps) => {
+    drawn.set(props.patch, props);
+    return (
+      <div>
+        <pre data-testid="patch-diff" data-options={JSON.stringify(props.options)} data-selected={JSON.stringify(props.selectedLines ?? null)}>
+          {props.patch}
+        </pre>
+        {props.lineAnnotations?.map((a) => <div key={`${a.side}:${a.lineNumber}`}>{props.renderAnnotation?.(a)}</div>)}
+      </div>
+    );
+  },
 }));
 
 afterEach(cleanup);
@@ -533,5 +551,159 @@ describe("the diff's base", () => {
     await within(live).findByRole('button', { name: 'Compared with' });
     fireEvent.click(within(live).getByRole('button', { name: 'Uncommitted only' }));
     await waitFor(() => expect(within(live).queryByRole('button', { name: 'Compared with' })).toBeNull());
+  });
+});
+
+describe('commenting on the diff', () => {
+  const loginTs = 'src/auth/login.ts';
+  const composer = () => within(screen.getByRole('form', { name: 'Composer' }));
+  const chips = () => composer().queryByRole('list', { name: 'Diff comments' });
+  /** Opens the Changes view with login.ts's diff drawn, and hands back what the library calls on its "+". */
+  const open = async (main = fakeMain()) => {
+    renderOpen(main);
+    showChanges();
+    await within(await within(panel()).findByRole('region', { name: loginTs })).findByTestId('patch-diff');
+    return main;
+  };
+  /** As the library does once the user presses its "+" by a line, or drags it over a range. */
+  const pressPlus = (range: SelectedLineRange, path = loginTs) => act(() => drawn.get(text(path))!.options.onGutterUtilityClick!(range));
+  const comment = async (range: SelectedLineRange, note: string, path = loginTs) => {
+    pressPlus(range, path);
+    fireEvent.change(await within(panel()).findByRole('textbox', { name: /^Comment on / }), { target: { value: note } });
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Add comment' }));
+  };
+
+  it('offers the "+" by each line, and line selection, on a live Session', async () => {
+    await open();
+    const options = JSON.parse(within(panel()).getAllByTestId('patch-diff')[0]!.dataset.options!);
+    expect(options).toMatchObject({ enableGutterUtility: true, enableLineSelection: true });
+  });
+
+  it('asks for a note under the range, keeps it selected meanwhile, and adds a chip to the composer', async () => {
+    await open();
+    pressPlus({ start: 1, side: 'additions', end: 2, endSide: 'additions' });
+    const note = await within(panel()).findByRole('textbox', { name: `Comment on ${loginTs}:1-2` });
+    expect(JSON.parse(within(within(panel()).getByRole('region', { name: loginTs })).getByTestId('patch-diff').dataset.selected!)).toEqual({ start: 1, side: 'additions', end: 2, endSide: 'additions' });
+    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([{ side: 'additions', lineNumber: 2 }]);
+    // No note, nothing to add.
+    expect(within(panel()).getByRole('button', { name: 'Add comment' }).hasAttribute('disabled')).toBe(true);
+
+    fireEvent.change(note, { target: { value: 'Keep the old name.' } });
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Add comment' }));
+
+    expect(within(panel()).queryByRole('textbox', { name: /^Comment on/ })).toBeNull();
+    expect(drawn.get(text(loginTs))!.lineAnnotations ?? []).toEqual([]);
+    const chip = within(chips()!).getByRole('listitem');
+    expect(chip.textContent).toContain(`${loginTs}:1-2`);
+    expect(chip.getAttribute('title')).toContain('Keep the old name.');
+  });
+
+  it('drops the note on Cancel, adding nothing', async () => {
+    await open();
+    pressPlus({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' });
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'Cancel' }));
+    expect(within(panel()).queryByRole('textbox', { name: /^Comment on/ })).toBeNull();
+    expect(chips()).toBeNull();
+  });
+
+  it('accumulates chips across files until sent, each removable, and sends each with its quoted lines', async () => {
+    const main = await open();
+    await comment({ start: 1, side: 'additions', end: 2, endSide: 'additions' }, 'Keep the old name.');
+    await within(within(panel()).getByRole('region', { name: 'src/auth/session.ts' })).findByTestId('patch-diff');
+    await comment({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' }, 'Why drop this?', 'src/auth/session.ts');
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    expect(within(chips()!).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`${loginTs}:1-2`, 'src/auth/session.ts:2', `${loginTs}:1`]);
+
+    fireEvent.click(composer().getByRole('button', { name: `Remove comment on ${loginTs}:1` }));
+    expect(within(chips()!).getAllByRole('listitem')).toHaveLength(2);
+
+    fireEvent.change(composer().getByRole('textbox', { name: 'Prompt' }), { target: { value: 'A few things:' } });
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(chips()).toBeNull());
+    expect(main.invoked.filter((c) => c.command === 'sessions.send').map((c) => c.params)).toEqual([
+      {
+        id: 7,
+        prompt: 'A few things:',
+        comments: [
+          { path: loginTs, start: 1, end: 2, lines: [' context', '-old line', '+new line'], note: 'Keep the old name.' },
+          { path: 'src/auth/session.ts', start: 2, end: 2, lines: ['-old line'], note: 'Why drop this?' },
+        ],
+      },
+    ]);
+  });
+
+  it('quotes a range drawn from the bottom up, or across the old and new sides, in the order the diff has them', async () => {
+    const main = await open();
+    await comment({ start: 2, side: 'additions', end: 1, endSide: 'additions' }, 'Up.');
+    await comment({ start: 2, side: 'deletions', end: 2, endSide: 'additions' }, 'Across.');
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(chips()).toBeNull());
+    const [sent] = main.invoked.filter((c) => c.command === 'sessions.send');
+    expect((sent!.params as { comments: unknown }).comments).toEqual([
+      { path: loginTs, start: 1, end: 2, lines: [' context', '-old line', '+new line'], note: 'Up.' },
+      { path: loginTs, start: 2, end: 2, lines: ['-old line', '+new line'], note: 'Across.' },
+    ]);
+  });
+
+  it("numbers a range on the new side when it holds any new line, on the old side only when it's all removed lines", async () => {
+    // Old and new numbers have drifted apart: line 50 of the old file is where line 45 of the new one is.
+    const patch = `diff --git a/${loginTs} b/${loginTs}\n--- a/${loginTs}\n+++ b/${loginTs}\n@@ -50,3 +45,3 @@\n-gone\n-also gone\n+here\n context\n`;
+    await open(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        { 'sessions.diff': () => ({ ...summary, files: [files[0]!] }), 'sessions.diffFile': () => ({ text: patch, truncated: false }) },
+      ),
+    );
+    const plus = (range: SelectedLineRange) => act(() => drawn.get(patch)!.options.onGutterUtilityClick!(range));
+    const add = async (range: SelectedLineRange, label: string) => {
+      plus(range);
+      fireEvent.change(await within(panel()).findByRole('textbox', { name: `Comment on ${label}` }), { target: { value: label } });
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Add comment' }));
+    };
+    await add({ start: 50, side: 'deletions', end: 46, endSide: 'additions' }, `${loginTs}:45-46`);
+    await add({ start: 50, side: 'deletions', end: 51, endSide: 'deletions' }, `${loginTs}:50-51`);
+    expect(within(chips()!).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`${loginTs}:45-46`, `${loginTs}:50-51`]);
+  });
+
+  it('keeps a note being written when a turn end reloads the diff with the same lines', async () => {
+    const main = await open();
+    pressPlus({ start: 2, side: 'additions', end: 2, endSide: 'additions' });
+    fireEvent.change(await within(panel()).findByRole('textbox', { name: `Comment on ${loginTs}:2` }), { target: { value: 'Half' } });
+    const loads = diffCalls(main, 'sessions.diffFile').length;
+    act(() => main.publish('sessions', [{ ...session, status: 'working' }]));
+    act(() => main.publish('sessions', [{ ...session, status: 'waiting', updatedAt: 5 }]));
+    await waitFor(() => expect(diffCalls(main, 'sessions.diffFile').length).toBeGreaterThan(loads));
+    expect((within(panel()).getByRole('textbox', { name: `Comment on ${loginTs}:2` }) as HTMLTextAreaElement).value).toBe('Half');
+  });
+
+  it('keeps the chips when the send fails', async () => {
+    await open(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        {
+          'sessions.diff': () => summary,
+          'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
+          'sessions.send': () => {
+            throw new Error('Answer the question first.');
+          },
+        },
+      ),
+    );
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+    await screen.findByText('Answer the question first.');
+    expect(within(chips()!).getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('is not offered on an archived Session', async () => {
+    const archived = { ...session, status: 'archived' as const };
+    renderOpen(fakeMain({ ...summary, readOnly: true, files: [files[0]!] }, archived), archived);
+    showChanges();
+    const diff = await within(await within(panel()).findByRole('region', { name: loginTs })).findByTestId('patch-diff');
+    const options = JSON.parse(diff.dataset.options!);
+    expect(options.enableGutterUtility).toBeFalsy();
+    expect(options.enableLineSelection).toBeFalsy();
+    expect(drawn.get(text(loginTs))!.options.onGutterUtilityClick).toBeUndefined();
   });
 });
