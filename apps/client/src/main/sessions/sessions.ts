@@ -1323,6 +1323,8 @@ export class Sessions {
         return;
       case 'config':
         return this.update(id, { agentConfig: event.config });
+      case 'commands':
+        return this.update(id, { agentCommands: event.commands });
       case 'usage': {
         const context = { used: event.used, size: event.size };
         this.update(id, { context });

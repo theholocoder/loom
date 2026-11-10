@@ -19,6 +19,20 @@ export interface OpencodeScript {
    * them too, the first being the current one of a new session.
    */
   models?: StandInModel[];
+  /**
+   * The commands `GET /api/command` lists; `opencode acp` announces them in
+   * an `available_commands_update` after `session/new`, with its own
+   * `compact`, as OpenCode does.
+   */
+  commands?: Array<{ name: string; description?: string }>;
+  /**
+   * The skills `GET /api/skill` lists, each with its `path` (by default under
+   * `/home/dev/.agents/skills`) and a `content`, as OpenCode's do. Like OpenCode, it lists none before the process has
+   * loaded the checkout: before `GET /api/model`.
+   */
+  skills?: Array<{ id: string; name: string; description?: string; path?: string }>;
+  /** `GET /api/command` and `GET /api/skill` answer 404, as an OpenCode without them would. */
+  noCatalog?: boolean;
   /** What `opencode acp` does. */
   acp?: {
     /** Each process plays one turn per `session/prompt`, in order; past the end, a turn that says nothing. */

@@ -89,6 +89,29 @@ export interface ModelPick {
 export const DEFAULT_EFFORT = 'default';
 
 /**
+ * Something the agent runs from the composer's `/`: one of its commands
+ * (its own, or the user's), or one of its skills (the Project's, the user's,
+ * or its own). Sent as `/name args`, which the agent runs as the command or
+ * loads the skill for.
+ */
+export interface AgentCommand {
+  /** Whether it is a command or a skill. */
+  kind: 'command' | 'skill';
+  /** What follows the `/`. */
+  name: string;
+  /** What it does, as the agent says. */
+  description?: string;
+  /** Where a skill comes from, when known. */
+  source?: SkillSource;
+}
+
+/**
+ * Where a skill comes from: the Project's own (its SKILL.md is in the
+ * checkout), the user's (elsewhere on their machine), or the agent's own.
+ */
+export type SkillSource = 'project' | 'personal' | 'built-in';
+
+/**
  * The models and Effort levels a Session's agent offers, and what it runs
  * with now, as its config options last said.
  */
@@ -399,6 +422,12 @@ export interface Session {
    * reported: known once its agent has started while the Client runs.
    */
   agentConfig?: AgentConfig;
+  /**
+   * The commands the Session's agent offers, as it last announced them:
+   * known once its agent has started while the Client runs. Its skills are
+   * the Project's (`projects.commands`).
+   */
+  agentCommands?: AgentCommand[];
   /** How full the agent's context was after its last run that reported it. */
   context?: ContextUsage;
   /** What the Session has used so far, from its usage buckets and its runs; updated as turns end and runs start and stop. */
@@ -987,6 +1016,13 @@ export interface Commands {
    * Models the user turned off are left out.
    */
   'projects.models': { params: { id: number }; result: ModelChoice[] };
+  /**
+   * The commands and skills the agent offers in the Project's checkout, for
+   * the composer's `/`: commands first, then skills, as the agent lists them.
+   * Asked of the same agent probe as `projects.models`, and kept as long.
+   * Empty when the agent can't list them.
+   */
+  'projects.commands': { params: { id: number }; result: AgentCommand[] };
   /**
    * The files in the Project's checkout, as `sessions.files` lists a
    * Session's, for @-mentions before a Session exists; with `ref`, the

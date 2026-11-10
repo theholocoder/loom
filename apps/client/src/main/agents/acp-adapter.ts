@@ -5,6 +5,7 @@ import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPic
 import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection, AcpError } from './acp';
+import { agentCommandsOf } from './commands';
 
 /** How to start one ACP agent. */
 export interface AcpProfile {
@@ -54,6 +55,8 @@ export class AcpAdapter implements AgentAdapter {
       throw error;
     });
     let sessionId: string | undefined;
+    /** Commands announced before the session's id was known, for whichever session they were. */
+    let earlyCommands: { forSession: string; update: SessionUpdate } | undefined;
     /** While `session/load` replays the conversation's history, which Loom has already. */
     let replaying = false;
     /** Once opening has failed: the process is killed, and its end is no news for the Session. */
@@ -90,14 +93,24 @@ export class AcpAdapter implements AgentAdapter {
         onEvent(event(requestId));
       });
     };
+    /** Reports what Loom shows of a session update, if anything. */
+    const report = (update: SessionUpdate) => {
+      const event = translate(update);
+      if (event) onEvent(event);
+    };
     const connection = new AcpConnection(channel, {
       onNotification: (method, params) => {
         if (method !== 'session/update') return;
         const { sessionId: forSession, update } = params as { sessionId: string; update: SessionUpdate };
+        // The agent may announce its commands before its answer to `session/new` is read, and does while it replays history.
+        if (update?.sessionUpdate === 'available_commands_update') {
+          if (sessionId === undefined) return void (earlyCommands = { forSession, update });
+          if (forSession === sessionId) report(update);
+          return;
+        }
         if (forSession !== sessionId || replaying) return;
         if (update.sessionUpdate === 'config_option_update') return configured((update as { configOptions?: unknown }).configOptions);
-        const event = translate(update);
-        if (event) onEvent(event);
+        report(update);
       },
       onRequest: (method, params) => {
         if (method === 'session/request_permission') {
@@ -171,6 +184,8 @@ export class AcpAdapter implements AgentAdapter {
         reported = taken?.configOptions;
       }
       configured(reported);
+      if (earlyCommands?.forSession === sessionId) report(earlyCommands.update);
+      earlyCommands = undefined;
     } catch (error) {
       abandoned = true;
       await channel.kill().catch(() => {});
@@ -249,6 +264,11 @@ function fileUri(path: string): string {
 
 function translate(update: SessionUpdate): AgentEvent | undefined {
   switch (update.sessionUpdate) {
+    case 'available_commands_update': {
+      const listed = (update as { availableCommands?: unknown }).availableCommands;
+      if (!Array.isArray(listed)) return undefined;
+      return { type: 'commands', commands: agentCommandsOf('command', listed) };
+    }
     case 'usage_update': {
       const { used, size, cost } = update as { used?: unknown; size?: unknown; cost?: { amount?: unknown; currency?: unknown } };
       if (!isCount(used) || !isCount(size) || size === 0) return undefined;

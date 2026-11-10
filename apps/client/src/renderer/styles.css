@@ -350,10 +350,16 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .attachments .chip { max-width: 260px; gap: 5px; }
 .attachments .icon-btn.sm { padding: 0; width: 16px; height: 16px; }
 /* What `/` and `@` offer, over the prompt. */
-.composer-menu { margin: 6px 6px 0; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
-.composer-menu [role="option"] { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.composer-menu { margin: 6px 6px 0; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--line); padding: 2px 0 6px; }
+/* Rows keep their height: they don't shrink to fit the list. */
+.composer-menu [role="option"] { flex-shrink: 0; display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; line-height: 1.4; white-space: nowrap; overflow: hidden; }
+.composer-menu [role="option"] > svg { flex-shrink: 0; color: var(--muted); }
+.composer-menu [role="option"][aria-selected="true"] > svg { color: var(--accent); }
+.composer-menu .cmd-name { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.composer-menu .cmd-name .muted { font-weight: 400; margin-right: 1px; }
+.composer-menu .cmd-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12.5px; }
+.composer-menu .chip { flex-shrink: 0; padding: 2px 8px; border: 1px solid var(--line); background: var(--panel); }
 .composer-menu [role="option"][aria-selected="true"] { background: var(--sel); }
-.composer-menu [role="option"] kbd { margin-left: auto; }
 .composer-menu-empty { padding: 6px 10px; font-size: 13px; }
 /* Merge request: the timeline card's Open, the Link popover. */
 .merge-request .link, .info .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }

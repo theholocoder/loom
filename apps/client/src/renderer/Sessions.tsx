@@ -17,9 +17,9 @@ import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { ThinkingBlock, ToolCard } from './WorkCards';
-import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
+import { useAgentCommands, useCheckoutModels } from './checkout';
+import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
 import { AttachmentList, Composer } from './Composer';
-import type { PaletteAction } from './CommandPalette';
 
 /** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
 const WAITING: Record<Exclude<WaitingReason, 'unsaved-work'>, { label: string; icon: LucideIcon }> = {
@@ -118,18 +118,7 @@ function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: Ex
 
 /** Starting a Session: which Project, which working copy, and the first prompt. */
 /** `pickIssue` opens the issue picker at once, for starting from an issue. */
-/** `commands` are what the composer's `/` offers: the palette's actions. */
-export function NewSession({
-  initialProjectId,
-  pickIssue,
-  onStarted,
-  commands,
-}: {
-  initialProjectId?: number;
-  pickIssue?: boolean;
-  onStarted: (session: Session) => void;
-  commands?: PaletteAction[];
-}) {
+export function NewSession({ initialProjectId, pickIssue, onStarted }: { initialProjectId?: number; pickIssue?: boolean; onStarted: (session: Session) => void }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
   const [projectId, setProjectId] = useState(initialProjectId);
@@ -154,6 +143,7 @@ export function NewSession({
   const [model, setModel] = useState<string>();
   const [effort, setEffort] = useState<string>();
   const efforts = effortsOf(models.listed, model);
+  const commands = useAgentCommands(chosen?.id);
 
   const start = async (prompt: string, attachments: NewAttachment[]) => {
     if (!chosen) return false;
@@ -336,7 +326,6 @@ export function SessionView({
   onCommandDone,
   onRetryableChange,
   sidebar,
-  commands,
 }: {
   session: Session;
   replyRequest?: number;
@@ -344,10 +333,9 @@ export function SessionView({
   onCommandDone?: () => void;
   onRetryableChange?: (retryable: boolean) => void;
   sidebar: SidebarControl;
-  /** What the composer's `/` offers: the palette's actions. */
-  commands?: PaletteAction[];
 }) {
   const api = useApi();
+  const commands = useAgentCommands(session.projectId, session.agentCommands);
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
   const [error, setError] = useState<string>();

@@ -5,8 +5,9 @@
 //
 // It fakes what Loom's detection uses: `opencode --version`, and
 // `opencode serve --stdio`, which prints {"url": ...} on stdout, serves
-// `GET /api/integration` and `GET /api/model` (the script's `models`, in
-// OpenCode's shape) behind Basic auth with OPENCODE_SERVER_PASSWORD, and
+// `GET /api/integration`, `GET /api/model` (the script's `models`, in
+// OpenCode's shape), `GET /api/command` and `GET /api/skill` (none until
+// `/api/model` was asked, as OpenCode loads them with the checkout) behind Basic auth with OPENCODE_SERVER_PASSWORD, and
 // exits when its stdin closes. Each request is appended to
 // <script.json>.http.log as {method, path, directory}, `directory` being its
 // x-opencode-directory header.
@@ -55,6 +56,8 @@ if (args[0] === '--version') {
 }
 
 function serve() {
+  /** Whether the checkout is loaded, as OpenCode's first `/api/model` does: skills are listed from then on. */
+  let loaded = false;
   const expected = 'Basic ' + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD}`).toString('base64');
   const server = createServer((req, res) => {
     if (req.headers.authorization !== expected) {
@@ -69,7 +72,14 @@ function serve() {
       res.end(JSON.stringify({ data: script.integrations ?? [], location }));
       return;
     }
+    if (req.method === 'GET' && (req.url === '/api/command' || req.url === '/api/skill') && !script.noCatalog) {
+      const data = req.url === '/api/command' ? (script.commands ?? []) : loaded ? (script.skills ?? []).map((skill) => ({ path: `/home/dev/.agents/skills/${skill.id}/SKILL.md`, ...skill, content: `# ${skill.name}\n` })) : [];
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data, location }));
+      return;
+    }
     if (req.method === 'GET' && req.url === '/api/model') {
+      loaded = true;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ data: (script.models ?? []).map(apiModel), location }));
       return;
@@ -121,6 +131,11 @@ function acp() {
       responses.set(id, resolve);
       send({ id, method, params });
     });
+  /** OpenCode's ACP bridge announces its commands once a session is up, with its own `compact`. */
+  const announceCommands = () => {
+    const availableCommands = [...(script.commands ?? []).map(({ name, description }) => ({ name, description: description ?? '' })), { name: 'compact', description: 'Compact the session' }];
+    send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'available_commands_update', availableCommands } } });
+  };
   const lines = createInterface({ input: process.stdin });
   lines.on('line', async (line) => {
     if (!line.trim()) return;
@@ -139,6 +154,7 @@ function acp() {
       if (script.acp?.holdNew) await released(script.acp.holdNew);
       sessionId = `ses_standin${process.pid}`;
       send({ id, result: { sessionId, configOptions: configOptions(models, selection) } });
+      announceCommands();
     } else if (method === 'session/resume' || method === 'session/load') {
       if ((script.acp?.refuse ?? []).includes(method)) return send({ id, error: { code: -32602, message: `Invalid params: session not found: ${params.sessionId}` } });
       sessionId = params.sessionId;
@@ -149,6 +165,7 @@ function acp() {
         send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'replayed', title: 'Replayed tool', kind: 'read', status: 'completed' } } });
       }
       send({ id, result: { configOptions: configOptions(models, selection) } });
+      announceCommands();
     } else if (method === 'session/set_config_option') {
       if (script.acp?.holdConfig) await released(script.acp.holdConfig);
       const { configId, value } = params;
