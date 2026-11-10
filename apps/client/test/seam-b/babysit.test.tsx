@@ -121,7 +121,10 @@ describe('Session info', () => {
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'pending', lastPollAt: at, stale: false } })] }));
 
     expect(within(row()).getByRole('button', { name: 'Merge request open, CI pending' })).toBeTruthy();
-    expect(row().textContent).toContain(`Checked ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    const checked = `Checked ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    expect(row().textContent).not.toContain('Checked');
+    fireEvent.click(within(row()).getByRole('button', { name: 'Merge request open, CI pending' }));
+    expect(screen.getByRole('dialog', { name: 'CI checks' }).textContent).toContain(checked);
     expect(row().textContent).not.toContain('Stale');
   });
 
@@ -238,24 +241,29 @@ describe('Session info', () => {
   it('greys out auto-prompt while the Merge request is not watched', () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
-    expect((within(row()).getByRole('checkbox', { name: 'Auto-prompt' }) as HTMLInputElement).disabled).toBe(false);
+    expect(toggle()!.disabled).toBe(false);
 
     act(() => main.publish('sessions', [session({ babysitOff: true })]));
-    expect((within(row()).getByRole('checkbox', { name: 'Auto-prompt' }) as HTMLInputElement).disabled).toBe(true);
+    expect(toggle()!.disabled).toBe(true);
+    fireEvent.mouseEnter(toggle()!);
+    expect(iconOf(toggle()!)).toBe('lucide-bot-off');
   });
 
-  const toggle = () => within(row()).queryByRole('checkbox', { name: 'Auto-prompt' }) as HTMLInputElement | null;
+  const toggle = (name = /^Auto-prompt/) => within(row()).queryByRole('button', { name }) as HTMLButtonElement | null;
 
   it('turns auto-prompt on and off for the Session, showing what it is', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
-    expect(toggle()!.checked).toBe(false);
+    expect(iconOf(toggle(/^Auto-prompt off/)!)).toBe('lucide-bot-off');
+    expect(row().textContent).not.toContain('Auto-prompt');
 
     fireEvent.click(toggle()!);
     await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }]));
 
     act(() => main.publish('sessions', [session({ autoPrompt: true })]));
-    expect(toggle()!.checked).toBe(true);
+    expect(iconOf(toggle(/^Auto-prompt on/)!)).toBe('lucide-bot');
+    fireEvent.mouseEnter(toggle()!);
+    expect(iconOf(toggle()!)).toBe('lucide-bot-off');
     fireEvent.click(toggle()!);
     await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }, { id: 1, on: false }]));
   });

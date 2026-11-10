@@ -1,7 +1,7 @@
 // The sidebar's Session info view: the open Session's details, which may
 // change while it runs, each with the actions that go with it, in four fixed
 // groups: Where, Git, Agent and Usage. An archived Session's are read-only.
-import { Archive, Check, CircleCheck, CircleDot, CircleMinus, CircleX, Clock, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed, GitPullRequestCreate, Link, SquareTerminal, TriangleAlert } from 'lucide-react';
+import { Archive, Bot, BotOff, Check, CircleCheck, CircleDot, CircleMinus, CircleX, Clock, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed, GitPullRequestCreate, Link, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type EnvironmentStatus, type MergeRequestState, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -256,10 +256,15 @@ function MergeRequestFact({
       actions={
         canAct && (
           <>
-            <label className="fact-toggle" title="Send this Merge request's feedback straight to the agent, instead of waiting for you">
-              <input type="checkbox" checked={!!session.autoPrompt} disabled={!watching} onChange={(event) => onAutoPrompt(event.target.checked)} />
-              Auto-prompt
-            </label>
+            <SwitchAction
+              on={!!session.autoPrompt}
+              label={!watching ? 'Auto-prompt needs this Merge request to be watched' : session.autoPrompt ? 'Auto-prompt on: feedback goes straight to the agent. Click to turn off' : 'Auto-prompt off: feedback waits for you. Click to turn on'}
+              onIcon={<Bot />}
+              offIcon={<BotOff />}
+              onClassName="tone-accent"
+              disabled={!watching}
+              onSwitch={onAutoPrompt}
+            />
             {mergeRequest ? (
               <IconAction label="Update Merge request" icon={<GitPullRequestArrow />} onClick={onAsk} />
             ) : (
@@ -277,14 +282,13 @@ function MergeRequestFact({
             {ref}
             <ExternalLink className="sm" />
           </button>
-          {watchable && <WatchToggle name={ref} watching={watching} onSwitch={onWatch} />}
+          {watchable && <SwitchAction on={watching} label={watching ? `Watching ${ref}, click to stop` : `Not watching ${ref}, click to watch`} onIcon={<Eye />} offIcon={<EyeOff />} onSwitch={onWatch} />}
           {session.mergeRequestState && <MergeRequestStatus state={session.mergeRequestState} session={session} onOpen={onOpen} />}
           {session.babysit?.stale && (
             <span className="chip stale" title="Loom couldn't reach the Forge on its last check: this may be out of date.">
               Stale
             </span>
           )}
-          {session.babysit?.lastPollAt !== undefined && <span className="muted">{`Checked ${new Date(session.babysit.lastPollAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span>}
         </>
       ) : (
         <span className="muted">None</span>
@@ -293,25 +297,25 @@ function MergeRequestFact({
   );
 }
 
-/** The eye: whether the Merge request is watched, and the switch. Hovered, it shows what a click will do; once clicked, what it did. */
-function WatchToggle({ name, watching, onSwitch }: { name: string; watching: boolean; onSwitch: (on: boolean) => void }) {
+/** An icon that shows a setting and switches it. Hovered, it shows what a click will do; once clicked, what it did. */
+function SwitchAction({ on, label, onIcon, offIcon, onClassName, disabled, onSwitch }: { on: boolean; label: string; onIcon: ReactNode; offIcon: ReactNode; onClassName?: string; disabled?: boolean; onSwitch: (on: boolean) => void }) {
   const [previewing, setPreviewing] = useState(false);
-  const label = watching ? `Watching ${name}, click to stop` : `Not watching ${name}, click to watch`;
-  const open = previewing ? !watching : watching;
+  const shown = previewing && !disabled ? !on : on;
   return (
     <button
-      className="icon-btn sm"
+      className={['icon-btn sm', shown ? onClassName : undefined].filter(Boolean).join(' ')}
       type="button"
+      disabled={disabled}
       title={label}
       aria-label={label}
       onMouseEnter={() => setPreviewing(true)}
       onMouseLeave={() => setPreviewing(false)}
       onClick={() => {
         setPreviewing(false);
-        onSwitch(!watching);
+        onSwitch(!on);
       }}
     >
-      {open ? <Eye /> : <EyeOff />}
+      {shown ? onIcon : offIcon}
     </button>
   );
 }
@@ -325,7 +329,7 @@ const CHECK_STATES: Record<BabysitCheckState, { label: string; icon: ReactNode }
 
 /** What sums up a Merge request in one icon: merged or closed, or else how its CI is going. */
 function statusLook(state: MergeRequestState, ci: BabysitCi | undefined): { label: string; icon: ReactNode; tone?: string } {
-  if (state === 'merged') return { label: 'Merge request merged', icon: <GitMerge />, tone: 'tone-merged' };
+  if (state === 'merged') return { label: 'Merge request merged', icon: <GitMerge />, tone: 'tone-accent' };
   if (state === 'closed') return { label: 'Merge request closed', icon: <GitPullRequestClosed />, tone: 'tone-failed' };
   if (ci === 'passed') return { label: 'Merge request open, CI passed', icon: <CircleCheck />, tone: 'tone-passed' };
   if (ci === 'failed') return { label: 'Merge request open, CI failed', icon: <CircleX />, tone: 'tone-failed' };
@@ -348,7 +352,7 @@ function checksSummary(checks: BabysitCheck[]): string {
 function MergeRequestStatus({ state, session, onOpen }: { state: MergeRequestState; session: Session; onOpen: (url: string) => void }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [listing, setListing] = useState(false);
-  const { ci, checks = [] } = session.babysit ?? {};
+  const { ci, checks = [], lastPollAt } = session.babysit ?? {};
   const { label, icon, tone } = statusLook(state, ci);
   const heading = state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : ci ? CI_HEADINGS[ci] : 'No CI checks';
   const empty = session.babysitOff ? "Loom isn't watching this Merge request, so it can't say how its CI is going." : "Loom hasn't seen any checks on this Merge request.";
@@ -377,6 +381,7 @@ function MergeRequestStatus({ state, session, onOpen }: { state: MergeRequestSta
               ))}
             </ul>
           )}
+          {lastPollAt !== undefined && <p className="muted checked">{`Checked ${new Date(lastPollAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</p>}
         </Popover>
       )}
     </>

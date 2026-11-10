@@ -371,14 +371,15 @@ body.resizing { cursor: col-resize; user-select: none; }
 .fact .value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fact .path { word-break: break-all; }
 .fact-actions { display: flex; gap: 0; flex: none; }
-.fact-toggle { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; font-size: 12px; white-space: nowrap; color: var(--muted); cursor: pointer; }
-.fact-toggle input { margin: 0; }
+.fact-actions .icon-btn:disabled { opacity: .4; cursor: default; }
+.fact-actions .icon-btn:disabled:hover { background: none; color: var(--muted); }
 .info .diff-stat { font-weight: 600; }
 .chip.stale { color: var(--wait); }
-.tone-passed { color: var(--ok); } .tone-pending { color: var(--wait); } .tone-failed { color: var(--err); } .tone-merged { color: var(--accent); }
+.tone-passed { color: var(--ok); } .tone-pending { color: var(--wait); } .tone-failed { color: var(--err); } .tone-accent { color: var(--accent); }
 .popover.ci-checks { width: 340px; padding: 10px 12px; gap: 4px; }
 .ci-checks h4 { margin: 0; font-size: 14px; outline: none; }
 .ci-checks p { margin: 0 0 4px; font-size: 12px; }
+.ci-checks p.checked { margin: 6px 0 0; }
 .ci-checks ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .ci-checks li { display: grid; grid-template-columns: auto 1fr 56px 48px; gap: 8px; align-items: center; font-size: 13px; }
 .ci-checks .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
