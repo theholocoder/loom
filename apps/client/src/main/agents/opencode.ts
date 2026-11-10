@@ -3,7 +3,7 @@
 // in (a private `opencode serve --stdio` lists a connected integration). It
 // never runs `opencode auth list` or `opencode models`, which start the
 // user's shared background service.
-import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentCommand, type AgentStatus, type ModelChoice } from '../../shared/api';
+import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentCommand, type AgentStatus, type ModelChoice, type SkillSource } from '../../shared/api';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import { agentCommandsOf, type AcpProfile } from './acp-adapter';
 import { OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
@@ -87,8 +87,22 @@ export async function probeOpenCodeCheckout(call: BridgeCall, directory: string)
       const id = `${model.providerID}/${model.id}`;
       return [{ id, name: typeof model.name === 'string' && model.name ? model.name : id, efforts: variants.length ? [...new Set([...variants, DEFAULT_EFFORT])] : [] }];
     }),
-    commands: [...agentCommandsOf('command', commands), ...agentCommandsOf('skill', skills)],
+    commands: [
+      ...agentCommandsOf('command', commands),
+      ...(Array.isArray(skills) ? skills : []).flatMap((skill: { path?: unknown }) => {
+        const source = sourceOf(skill?.path, directory);
+        return agentCommandsOf('skill', [skill]).map((listed) => (source ? { ...listed, source } : listed));
+      }),
+    ],
   };
+}
+
+/** Where the skill at `path` comes from: the checkout `directory`, OpenCode itself (`skill://…`), or elsewhere. */
+function sourceOf(path: unknown, directory: string): SkillSource | undefined {
+  if (typeof path !== 'string' || !path) return undefined;
+  if (path.startsWith('skill://')) return 'built-in';
+  const slashed = (p: string) => p.replaceAll('\\', '/').replace(/\/+$/, '');
+  return slashed(path).startsWith(`${slashed(directory)}/`) ? 'project' : 'personal';
 }
 
 /** `opencode v2.1.4`, `v2.1.4` or `1.19.4` → [major, minor, patch]. */

@@ -50,16 +50,18 @@ type probeResult struct {
 	// them.
 	Commands json.RawMessage `json:"commands,omitempty"`
 	// Skills is OpenCode's `GET /api/skill` list for params.Directory, each
-	// with only its id, name and description; absent when there are none, or as
+	// with only its id, name, description and path; absent when there are none, or as
 	// Commands is.
 	Skills []probeSkill `json:"skills,omitempty"`
 }
 
-// probeSkill is what the probe reports of a skill: not its path or content.
+// probeSkill is what the probe reports of a skill: not its content.
 type probeSkill struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Path is its SKILL.md, absolute, or `skill://…` for OpenCode's own.
+	Path string `json:"path,omitempty"`
 }
 
 // probeOpencode starts a short-lived, private `opencode serve --stdio` and

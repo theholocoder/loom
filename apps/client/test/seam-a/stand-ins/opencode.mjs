@@ -73,7 +73,7 @@ function serve() {
       return;
     }
     if (req.method === 'GET' && (req.url === '/api/command' || req.url === '/api/skill') && !script.noCatalog) {
-      const data = req.url === '/api/command' ? (script.commands ?? []) : loaded ? (script.skills ?? []).map((skill) => ({ ...skill, path: `/home/dev/.agents/skills/${skill.id}/SKILL.md`, content: `# ${skill.name}\n` })) : [];
+      const data = req.url === '/api/command' ? (script.commands ?? []) : loaded ? (script.skills ?? []).map((skill) => ({ path: `/home/dev/.agents/skills/${skill.id}/SKILL.md`, ...skill, content: `# ${skill.name}\n` })) : [];
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ data, location }));
       return;

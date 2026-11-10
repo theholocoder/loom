@@ -196,6 +196,24 @@ describe('/ skills and commands', () => {
     expect(composer.getByRole('option', { name: '/tdd' }).textContent).toContain('Test-driven development.');
   });
 
+  it("says where a skill comes from, when the agent says", async () => {
+    const listed: AgentCommand[] = [
+      { kind: 'command', name: 'init' },
+      { kind: 'skill', name: 'release', source: 'project' },
+      { kind: 'skill', name: 'tdd', source: 'personal' },
+      { kind: 'skill', name: 'OpenCode', source: 'built-in' },
+      { kind: 'skill', name: 'mystery' },
+    ];
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => listed });
+    const { composer, prompt } = openSession(main);
+
+    type(prompt, '/');
+
+    await composer.findByRole('option', { name: '/release' });
+    const source = (name: string) => composer.getByRole('option', { name }).querySelector('.chip')?.textContent;
+    expect(['/init', '/release', '/tdd', '/OpenCode', '/mystery'].map(source)).toEqual([undefined, 'Project', 'Personal', 'Built-in', undefined]);
+  });
+
   it('lists the ones matching what follows /, by name first, then by description', async () => {
     const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => checkoutCommands });
     const { composer, prompt } = openSession(main);

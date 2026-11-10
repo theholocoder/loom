@@ -2,9 +2,9 @@
 // files and images attached to the message, comments on the diff going with
 // it, @-mentions of the working copy's files, and `/` for the agent's skills
 // and commands.
-import { ArrowUp, FileText, Image, ListPlus, MessageSquareCode, Paperclip, Sparkles, Square, SquareSlash, SquareTerminal, X } from 'lucide-react';
+import { ArrowUp, Box, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, Paperclip, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { diffCommentRange, isImage, type AgentCommand, type Attachment, type DiffComment, type NewAttachment } from '../shared/api';
+import { diffCommentRange, isImage, type AgentCommand, type Attachment, type DiffComment, type NewAttachment, type SkillSource } from '../shared/api';
 import { useApi } from './api';
 import { stepIndex } from './Popover';
 
@@ -447,8 +447,12 @@ function MenuList({ id, open, optionId, onHover, onPick }: { id: string; open: O
               `/${command.name}`,
               <>
                 {command.kind === 'skill' ? <Sparkles className="sm" aria-label="Skill" /> : <SquareSlash className="sm" aria-label="Command" />}
-                <span className="tech">/{command.name}</span>
-                {command.description && <span className="muted grow ellipsis">{command.description}</span>}
+                <span className="cmd-name">
+                  <span className="muted">/</span>
+                  {command.name}
+                </span>
+                <span className="cmd-desc">{command.description}</span>
+                {command.source && <SourceChip source={command.source} />}
               </>,
             ),
           )
@@ -464,6 +468,24 @@ function MenuList({ id, open, optionId, onHover, onPick }: { id: string; open: O
           )}
       {open.options.length === 0 && <div className="muted composer-menu-empty">{empty}</div>}
     </div>
+  );
+}
+
+/** What each skill source is called, and its icon. */
+const SOURCES: Record<SkillSource, { label: string; icon: LucideIcon; title: string }> = {
+  project: { label: 'Project', icon: FolderGit2, title: "In the Project's checkout" },
+  personal: { label: 'Personal', icon: User, title: 'Your own, for every Project' },
+  'built-in': { label: 'Built-in', icon: Box, title: "The agent's own" },
+};
+
+/** Where a skill comes from, at the end of its row. */
+function SourceChip({ source }: { source: SkillSource }) {
+  const { label, icon: Icon, title } = SOURCES[source];
+  return (
+    <span className="chip" title={title}>
+      <Icon className="sm" aria-hidden />
+      {label}
+    </span>
   );
 }
 

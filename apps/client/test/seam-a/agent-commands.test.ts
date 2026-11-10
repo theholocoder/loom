@@ -46,13 +46,38 @@ describe("the agent's commands and skills before a Session exists", () => {
     expect(listed).toEqual([
       { kind: 'command', name: 'review', description: 'review changes [commit|branch|pr], defaults to uncommitted' },
       { kind: 'command', name: 'hello' },
-      { kind: 'skill', name: 'tdd', description: 'Test-driven development.' },
-      { kind: 'skill', name: 'grill-me' },
+      { kind: 'skill', name: 'tdd', description: 'Test-driven development.', source: 'personal' },
+      { kind: 'skill', name: 'grill-me', source: 'personal' },
     ]);
     const asked = machine.opencodeRequests().filter((r) => r.path === '/api/command' || r.path === '/api/skill');
     expect(asked).toEqual([
       { method: 'GET', path: '/api/command', directory: checkout },
       { method: 'GET', path: '/api/skill', directory: checkout },
+    ]);
+  });
+
+  it("says where each skill comes from: the Project's own, the user's, or the agent's", async () => {
+    const machine = tempMachine();
+    const checkout = machine.gitRepo('billing-api');
+    machine.installOpencode({
+      version: 'opencode v2.1.4',
+      integrations: signedIn,
+      models: [{ providerID: 'opencode', id: 'pulse-free', name: 'Pulse Free' }],
+      skills: [
+        { id: 'release', name: 'release', path: `${checkout}/.agents/skills/release/SKILL.md` },
+        { id: 'tdd', name: 'tdd', path: '/home/dev/.agents/skills/tdd/SKILL.md' },
+        { id: 'opencode', name: 'OpenCode', path: 'skill://opencode/SKILL.md' },
+        { id: 'neighbour', name: 'neighbour', path: `${checkout}-other/.agents/skills/neighbour/SKILL.md` },
+      ],
+      acp: { turns: [] },
+    });
+    const { main, project } = await withProject(machine, checkout);
+
+    expect(await main.api.invoke('projects.commands', { id: project.id })).toEqual([
+      { kind: 'skill', name: 'release', source: 'project' },
+      { kind: 'skill', name: 'tdd', source: 'personal' },
+      { kind: 'skill', name: 'OpenCode', source: 'built-in' },
+      { kind: 'skill', name: 'neighbour', source: 'personal' },
     ]);
   });
 

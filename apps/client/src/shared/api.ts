@@ -100,7 +100,14 @@ export interface AgentCommand {
   name: string;
   /** What it does, as the agent says. */
   description?: string;
+  /**
+   * Where a skill comes from, when the agent says: the Project's own (in its
+   * checkout), the user's (elsewhere on the machine), or the agent's.
+   */
+  source?: SkillSource;
 }
+
+export type SkillSource = 'project' | 'personal' | 'built-in';
 
 /**
  * The models and Effort levels a Session's agent offers, and what it runs
