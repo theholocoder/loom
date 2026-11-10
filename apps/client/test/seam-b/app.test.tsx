@@ -20,7 +20,7 @@ const connectedNative: EnvironmentStatus = {
   id: 'native',
   label: 'Native',
   state: 'connected',
-  bridge: { protocolVersion: 2, version: '0.1.0', os: 'linux', arch: 'amd64', home: '/home/dev' },
+  bridge: { protocolVersion: 3, version: '0.1.0', os: 'linux', arch: 'amd64', home: '/home/dev' },
   lastSeenAt: 1,
 };
 

@@ -18,7 +18,7 @@ describe('the native Environment', () => {
     expect(native(envs)).toMatchObject({
       label: 'Native',
       state: 'connected',
-      bridge: { protocolVersion: 2, version: appVersion, os: goOS, arch: goArch },
+      bridge: { protocolVersion: 3, version: appVersion, os: goOS, arch: goArch },
     });
   });
 });

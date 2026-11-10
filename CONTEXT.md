@@ -61,6 +61,14 @@ _Avoid_: PR (except when talking about GitHub specifically)
 Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on (at most 3 times in a row without a message from the user, then it pauses and the Session goes **Waiting**); a merged or closed Merge request archives the Session, once its run has ended, unless its worktree has unsaved work (the Session goes **Waiting** instead); one closed without merging is left unread. The user can stop and restart the watch per **Session**; a newly linked Merge request is always watched.
 _Avoid_: Watch, monitor
 
+**Dock**:
+The panel under an open **Session**'s conversation, holding applets. The only applet so far is the **Terminal**. Whether a Session's Dock is open, and its height, belong to that Session, while Loom runs.
+_Avoid_: Panel, bottom bar
+
+**Terminal**:
+A shell in Loom's **Dock**, run by the **Session**'s **Environment** in its working copy. A Session can have several. They keep running when another Session is shown, and end when closed, when their shell exits, when the Session is archived or when Loom quits. None outlives Loom. "Open in terminal" is different: it opens the working copy in the user's own terminal app.
+_Avoid_: Console, shell (for the Dock's tab)
+
 ## Relationships
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**

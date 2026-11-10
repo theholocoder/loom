@@ -11,6 +11,18 @@ export interface ChannelParams {
   cwd?: string;
   /** Variables added to the Environment's own for this process. */
   env?: Record<string, string>;
+  /**
+   * Runs the process on a pseudo-terminal of this size, with the
+   * Environment's full environment: a terminal in Loom. `command` then
+   * defaults to the user's login shell.
+   */
+  pty?: TerminalSize;
+}
+
+/** A terminal's size in character cells. */
+export interface TerminalSize {
+  cols: number;
+  rows: number;
 }
 
 export interface ChannelExit {
@@ -59,9 +71,21 @@ export class Channel {
     private readonly transport: ChannelTransport,
   ) {}
 
-  /** Starts delivering the process's output, including what came before. */
-  listen(listener: ChannelListener): void {
+  /**
+   * Whether the listener acknowledges what it has handled itself (see
+   * `acknowledge`), rather than the channel on delivery.
+   */
+  private manualAck = false;
+
+  /**
+   * Starts delivering the process's output, including what came before.
+   * With `manualAck`, nothing is acknowledged until the listener calls
+   * `acknowledge`, so the process is held back by whoever reads its output
+   * last, such as a terminal's renderer.
+   */
+  listen(listener: ChannelListener, options: { manualAck?: boolean } = {}): void {
     this.listener = listener;
+    this.manualAck = options.manualAck ?? false;
     for (const item of this.early.splice(0)) {
       if ('data' in item) this.deliver(item.data);
       else listener.onExit(item.exit);
@@ -92,6 +116,18 @@ export class Channel {
     return close;
   }
 
+  /** Acknowledges `bytes` of the output delivered, for a listener with `manualAck`. */
+  acknowledge(bytes: number): void {
+    if (bytes <= 0 || this.exited) return;
+    // A failed ack means the channel or the bridge is gone, which its exit reports.
+    this.transport.request('channel.ack', CHANNEL_REQUEST_TIMEOUT_MS, { channel: this.id, bytes }).catch(() => {});
+  }
+
+  /** Sets a terminal channel's size. */
+  resize(size: TerminalSize): Promise<void> {
+    return this.transport.request<void>('channel.resize', CHANNEL_REQUEST_TIMEOUT_MS, { channel: this.id, ...size });
+  }
+
   /** Kills the process and everything it started. */
   kill(): Promise<void> {
     return this.transport.request<void>('channel.kill', CHANNEL_REQUEST_TIMEOUT_MS, { channel: this.id });
@@ -113,11 +149,11 @@ export class Channel {
 
   private deliver(data: Buffer): void {
     this.listener!.onData(data);
+    if (this.manualAck) return;
     this.unacknowledged += data.length;
-    if (this.unacknowledged < ACK_THRESHOLD || this.exited) return;
+    if (this.unacknowledged < ACK_THRESHOLD) return;
     const bytes = this.unacknowledged;
     this.unacknowledged = 0;
-    // A failed ack means the channel or the bridge is gone, which its exit reports.
-    this.transport.request('channel.ack', CHANNEL_REQUEST_TIMEOUT_MS, { channel: this.id, bytes }).catch(() => {});
+    this.acknowledge(bytes);
   }
 }

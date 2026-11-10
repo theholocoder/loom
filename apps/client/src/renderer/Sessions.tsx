@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type DiffComment, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
@@ -10,6 +10,7 @@ import { IssuePicker } from './IssuePicker';
 import { ChangesView } from './Changes';
 import { SessionInfo } from './SessionInfo';
 import { Sidebar, type SidebarControl } from './Sidebar';
+import { Dock, type DockState } from './Dock';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
@@ -326,12 +327,17 @@ export function SessionView({
   onCommandDone,
   onRetryableChange,
   sidebar,
+  dock,
+  onDockChange,
 }: {
   session: Session;
   replyRequest?: number;
   command?: SessionCommand;
   onCommandDone?: () => void;
   onRetryableChange?: (retryable: boolean) => void;
+  /** The Session's bottom dock; none for a Session that can have no terminal. */
+  dock?: DockState;
+  onDockChange?: (change: Partial<DockState>) => void;
   sidebar: SidebarControl;
 }) {
   const api = useApi();
@@ -448,6 +454,9 @@ export function SessionView({
   // Loom quit or crashed during the run, which the agent can go on with.
   const continuable = session.status === 'waiting' && session.waitingReason === 'interrupted' && !session.worktreeMissing;
 
+  // Only a Session that can still work has terminals: not archived, its worktree there.
+  const dockable = dock && session.status !== 'archived' && !session.worktreeMissing ? dock : undefined;
+
   const archive = () => {
     setError(undefined);
     archiver.archive(session).catch((e: unknown) => setError((e as Error).message));
@@ -490,6 +499,19 @@ export function SessionView({
           >
             <PanelRight />
           </button>
+          {dockable && (
+            <button
+              className="icon-btn"
+              type="button"
+              title={dockable.open ? 'Hide terminal' : 'Show terminal'}
+              aria-label={dockable.open ? 'Hide terminal' : 'Show terminal'}
+              aria-expanded={dockable.open}
+              aria-controls="session-dock"
+              onClick={() => onDockChange?.(dockable.open ? { open: false } : { open: true, applet: 'terminal', focusPending: true })}
+            >
+              <SquareTerminal />
+            </button>
+          )}
           {archiver.dialog}
         </div>
         <div className="chat" role="log" aria-label="Conversation">
@@ -618,6 +640,7 @@ export function SessionView({
             ) : undefined
           }
         />
+        {dockable?.open && <Dock session={session} state={dockable} onChange={(change) => onDockChange?.(change)} />}
       </main>
       {sidebar.open && (
         <Sidebar control={sidebar}>

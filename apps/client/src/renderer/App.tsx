@@ -46,6 +46,7 @@ import { NewSession, SessionView, type SessionCommand } from './Sessions';
 import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
 import { useSidebar, type SidebarControl } from './Sidebar';
+import { useDocks, type DockControl } from './Dock';
 import { matchesShortcut, SHORTCUTS, type ShortcutName } from './shortcuts';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
@@ -77,6 +78,7 @@ function Workspace() {
     return () => window.removeEventListener('focus', check);
   }, [api]);
   const sidebar = useSidebar();
+  const docks = useDocks();
   const linker = useExistingCloneLinker();
   const sessions = useTopic('sessions') ?? [];
   const projects = useTopic('projects') ?? [];
@@ -135,6 +137,7 @@ function Workspace() {
     select,
     command: setCommand,
     sidebar,
+    docks,
     setTheme: (theme) => {
       api.invoke('settings.setAppearance', { theme }).catch((error: unknown) => console.error('theme change failed:', error));
     },
@@ -156,6 +159,13 @@ function Workspace() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select } = latest.current;
+      // A terminal takes every key but Ctrl+`, which xterm lets through to here.
+      if (event.target instanceof Element && event.target.closest('.terminal-screen')) {
+        if (!matchesShortcut(SHORTCUTS.toggleTerminal.shortcut, event)) return;
+        event.preventDefault();
+        actions.find((a) => a.label === SHORTCUTS.toggleTerminal.label)?.run(focusedElement());
+        return;
+      }
       // Not over a dialog, nor a menu or picker, which have keys of their own.
       const covered = () => !!document.querySelector('[aria-modal="true"], .popover');
       // The palette and the shortcuts list close on their own key too.
@@ -230,6 +240,8 @@ function Workspace() {
           onCommandDone={() => setCommand(undefined)}
           onRetryableChange={setRetryable}
           sidebar={sidebar}
+          dock={docks.of(selected.id)}
+          onDockChange={(change) => docks.change(selected.id, change)}
         />
       ) : (
         <main className="main" aria-label="Session">
@@ -313,6 +325,7 @@ function paletteActions(app: {
   select: (session: Session) => void;
   command: (command: SessionCommand) => void;
   sidebar: SidebarControl;
+  docks: DockControl;
   setTheme: (theme: Theme) => void;
   setView: (view: View) => void;
   showHelp: (returnFocus: HTMLElement | null) => void;
@@ -347,7 +360,9 @@ function paletteActions(app: {
     },
     active && project?.forge.state === 'available' && { label: 'Link Merge request…', icon: Link, run: () => app.command('linkMergeRequest') },
     open && shortcutAction('openInEditor', CodeXml, () => app.command('openInEditor')),
-    open && shortcutAction('openInTerminal', SquareTerminal, () => app.command('openInTerminal')),
+    // The user's own terminal app, which Ctrl+` no longer opens.
+    open && { label: 'Open in terminal', icon: ExternalLink, run: () => app.command('openInTerminal') },
+    active && shortcutAction('toggleTerminal', SquareTerminal, () => app.docks.toggleTerminal(active.id)),
     // The sidebar is the open Session's: with none, there is none to toggle.
     session && shortcutAction('toggleSidebar', PanelRight, app.sidebar.toggle),
     session && shortcutAction('toggleDiff', FileDiff, () => app.sidebar.toggleView('changes')),

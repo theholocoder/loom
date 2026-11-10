@@ -215,7 +215,9 @@ export class Machine {
     writeFileSync(
       shell,
       `#!/bin/sh
-# Stands in for the user's login shell: the bridge runs it as \`-ilc <command>\`.
+# Stands in for the user's login shell: the bridge runs it as \`-ilc <command>\`,
+# and with no arguments for a terminal in Loom, whose PATH is already the shell's.
+[ $# -eq 0 ] && exec /bin/sh
 PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
 `,
       { mode: 0o755 },

@@ -967,6 +967,23 @@ export type DatabaseStatus =
       snapshots: string[];
     };
 
+/**
+ * A terminal in Loom's dock: a shell in its Session's Environment, started in
+ * the Session's working copy, running until it exits, it is closed, its
+ * Session is archived or Loom quits. Nothing of it outlives Loom.
+ */
+export interface TerminalInfo {
+  id: number;
+  sessionId: number;
+  /** `Terminal 1`, `Terminal 2`, …: numbered in the order the Session's terminals were opened. */
+  title: string;
+}
+
+/** A piece of what a terminal printed: UTF-8 bytes, which may split a character. */
+export interface TerminalOutput {
+  data: Uint8Array;
+}
+
 /** Commands the renderer can invoke, with their parameters and results. */
 export interface Commands {
   'environments.list': { params: void; result: EnvironmentStatus[] };
@@ -1269,6 +1286,25 @@ export interface Commands {
    * one with no category or a push to the default branch.
    */
   'sessions.approve': { params: { id: number; itemId: number; decision: ApprovalDecision; message?: string }; result: void };
+  /**
+   * Opens a terminal of `cols` by `rows` for the Session: the user's login
+   * shell, in its working copy, in its Environment, with the Environment's
+   * full environment. Rejects for an archived Session, one whose worktree is
+   * missing, and in a native Windows Environment (WSL is fine).
+   */
+  'terminals.open': { params: { sessionId: number; cols: number; rows: number }; result: TerminalInfo };
+  /** Types `data` into the terminal. */
+  'terminals.write': { params: { id: number; data: string }; result: void };
+  /** Sets the terminal's size in character cells. */
+  'terminals.resize': { params: { id: number; cols: number; rows: number }; result: void };
+  /**
+   * Says `bytes` of the terminal's output have been shown. Until they are,
+   * the shell is held back once it gets far enough ahead, so a flood of
+   * output never outruns the screen.
+   */
+  'terminals.ack': { params: { id: number; bytes: number }; result: void };
+  /** Closes the terminal, killing its shell and everything it started. */
+  'terminals.close': { params: { id: number }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
   /** The usage dashboard over the last `days` days (see UsageDashboard). Rejects a range not in USAGE_RANGES. */
@@ -1291,13 +1327,26 @@ export interface Topics {
   sessions: Session[];
   /** One Session's conversation, as it streams in. */
   transcript: TranscriptItem[];
+  /** One Session's open terminals, in the order they were opened. */
+  terminals: TerminalInfo[];
+  /**
+   * What one terminal prints: first the end of what it printed so far
+   * (TERMINAL_REPLAY_BYTES at most, possibly nothing), then each new piece.
+   * Each piece is to be acknowledged with `terminals.ack` once shown.
+   */
+  terminalOutput: TerminalOutput;
   database: DatabaseStatus;
 }
 
 /** What the topics that need one are subscribed with. */
 export interface TopicParams {
   transcript: { sessionId: number };
+  terminals: { sessionId: number };
+  terminalOutput: { id: number };
 }
+
+/** How much of what a terminal printed main keeps, to show it to a new listener. */
+export const TERMINAL_REPLAY_BYTES = 1 << 20;
 
 export type CommandName = keyof Commands;
 export type TopicName = keyof Topics;

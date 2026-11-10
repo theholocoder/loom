@@ -1,0 +1,118 @@
+# Research: a bottom dock with a terminal applet (#124)
+
+Issue #124 asks for "a bottom dock similar to the sidebar, togglable from somewhere, with different 'applets'". The only applet for now is a terminal. This note covers what VS Code does, the libraries Loom could use, where the PTY should run in Loom's architecture, the concerns to plan for, and a recommendation.
+
+Researched 2026-11-10. Versions are the npm `latest` tags on that date. Paths with no host are files in this repo.
+
+---
+
+## TL;DR
+
+- **Renderer:** `@xterm/xterm` 6 (MIT), the same as VS Code, with the `fit`, `webgl` (falls back to DOM), `web-links`, `search`, `unicode11` and `serialize` addons. The alternatives built on WASM (`ghostty-web`, `@wterm/*`) are pre-1.0 and would need `'wasm-unsafe-eval'` in the CSP.
+- **PTY:** run it **in `loom-bridge`**, as a new kind of channel, using `github.com/creack/pty` on Unix. Native Windows is out of scope (decided 2026-11-10): WSL Sessions already run in the Linux bridge. **Don't use `node-pty` in main.** It has no Linux prebuild, so it needs node-gyp. It would also break ADR 0008 ("main never runs an Environment's commands"), and it can't reach a WSL distro's worktree, or a future SSH Environment, the way the bridge does.
+- **Transport:** the existing `channel.*` protocol already does credit-based flow control, multiplexed over the bridge's stdio. The terminal adds `pty` options to `channel.open` plus a `channel.resize` call. Main forwards bytes to the renderer, and the renderer acknowledges once xterm has parsed them.
+- **Dock:** there is no panel library in the dependencies. The right sidebar (`apps/client/src/renderer/Sidebar.tsx`) is hand-rolled: settings-backed `{open, view, width}`, a `role="separator"` drag edge and a tablist of views. The dock can be built the same way with `{open, applet, height}`, stored per Session rather than globally (decided 2026-11-10).
+
+---
+
+## 1. What VS Code uses
+
+| Piece | What | Source |
+|---|---|---|
+| Renderer | `@xterm/xterm` `^6.1.0-beta`, plus `@xterm/addon-clipboard`, `-image`, `-ligatures`, `-progress`, `-search`, `-serialize`, `-unicode11`, `-webgl`, and `@xterm/headless` | [vscode/package.json](https://github.com/microsoft/vscode/blob/main/package.json) (lines ~144–153) |
+| Not used | `addon-fit`: VS Code computes the dimensions itself. `addon-web-links`: it has its own link providers. | same `package.json` (neither is listed) |
+| Addon wiring | Clipboard, mark navigation, shell integration and decorations are always on. Search, unicode11, webgl, serialize, image and ligatures are optional and imported dynamically. | [xtermTerminal.ts](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/contrib/terminal/browser/xterm/xtermTerminal.ts) L140–161 |
+| GPU fallback | `gpuAcceleration: 'auto'` tries WebGL. On `onContextLoss` or a load failure it disposes WebGL and "Falling back to the DOM renderer". | same file, L647, L979–996 |
+| PTY | `node-pty` `^1.2.0-beta.18`, through `spawn(executable, args, options)`. ConPTY on Windows build 18309 or later; winpty support has been removed. | [package.json](https://github.com/microsoft/vscode/blob/main/package.json) L167, [terminalProcess.ts](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/node/terminalProcess.ts) L23, L161–173, L257, L322 |
+| Process model | PTYs live in a separate **pty host**, an Electron `UtilityProcess` (`type: 'ptyHost'`, entry `ptyHostMain`), reached over a MessagePort. | [electronPtyHostStarter.ts](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/electron-main/electronPtyHostStarter.ts) L51–69, [ptyHostMain.ts](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/node/ptyHostMain.ts) |
+| Remote | For remote windows, the same `IPtyHostService` runs on the remote server, behind `RemoteTerminalChannel`. The PTY lives where the code lives. | [remoteTerminalChannel.ts](https://github.com/microsoft/vscode/blob/main/src/vs/server/node/remoteTerminalChannel.ts) L105–123 |
+| Flow control | It counts unacknowledged chars, calls `pty.pause()` above 100,000 and `resume()` below 5,000. The client acks every 5,000 chars. | [terminal.ts `FlowControlConstants`](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/common/terminal.ts) L905–925, [terminalProcess.ts](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/node/terminalProcess.ts) L333–340, L611–620 |
+| Batching | PTY data is coalesced for 5 ms before it is sent over IPC. | [terminalDataBuffering.ts](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/common/terminalDataBuffering.ts) L28–38 |
+| Persistence | `PersistentTerminalProcess` mirrors each PTY into an `@xterm/headless` instance and replays it with `addon-serialize` (`XtermSerializer`). A reload reconnects within a 60 s grace period. A restart "revives" the process from its content and original environment. | [ptyService.ts](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/node/ptyService.ts) L19, L34, L243, L697, L1045; [terminal.ts `LocalReconnectConstants`](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/common/terminal.ts) L894–903; [docs: persistent sessions](https://code.visualstudio.com/docs/terminal/advanced) |
+| Keys | `terminal.integrated.commandsToSkipShell` decides which shortcuts go to the workbench and which go to the shell. | [docs](https://code.visualstudio.com/docs/terminal/advanced) |
+
+## 2. Renderer options
+
+| Option | Status | License | Fit for Loom |
+|---|---|---|---|
+| **`@xterm/xterm`** 6.0.0 (Dec 2025; 6.1 betas used by VS Code) | The de facto standard, 21k stars, actively pushed. The unscoped `xterm` package is deprecated ("Move to @xterm/xterm"). v6 **removed the canvas renderer**: use DOM (the default) or `@xterm/addon-webgl`. v6 also ships ESM. | MIT | **Best.** `write(data: string \| Uint8Array, cb?)` takes UTF-8 bytes directly, and the callback gives flow control. Theming goes through `ITheme`. It runs under Loom's current CSP (`style-src 'unsafe-inline'` is already allowed). Sources: [repo](https://github.com/xtermjs/xterm.js), [6.0.0 notes](https://github.com/xtermjs/xterm.js/releases/tag/6.0.0) (#5105 canvas removed, #5092 ESM), [typings](https://github.com/xtermjs/xterm.js/blob/master/typings/xterm.d.ts) L1381, `npm view xterm deprecated` |
+| Addons (latest) | `addon-fit` 0.11, `-webgl` 0.19, `-serialize` 0.14, `-search` 0.16, `-unicode11` 0.9, `-web-links` 0.12, `-clipboard` 0.2, `@xterm/headless` 6.0 | MIT | The [addons dir](https://github.com/xtermjs/xterm.js/tree/master/addons) also has `attach`, `image`, `ligatures`, `progress`, `unicode-graphemes` and `web-fonts`. |
+| **`ghostty-web`** 0.4.0 (coder) | Ghostty's VT parser compiled to WASM (about 400 KB), with an xterm.js-compatible API. Built for Coder's Mux (agentic dev, a similar product). Created Nov 2025, only `-next` prereleases since 0.4.0, 79 open issues. | MIT | Promising, because it is a drop-in for the xterm API, so it could be swapped in later. Not yet 1.0. WASM needs `'wasm-unsafe-eval'` added to `script-src` ([CSP3](https://www.w3.org/TR/CSP3/)). [README](https://github.com/coder/ghostty-web) |
+| **`@wterm/*`** 0.5.10 (vercel-labs) | Renders rows as DOM text (native selection, find, screen readers). The core is Zig/WASM (about 49 KB), with an optional `@wterm/ghostty` core. React package included. Labelled a "Vercel Labs Experiment", created Apr 2026. | Apache-2.0 | Interesting for accessibility, but experimental. [README](https://github.com/vercel-labs/wterm) |
+| hterm (Chromium libapps) | Used by ChromeOS Secure Shell. Packaged on npm only by third parties (`hterm-umdjs`). | BSD | Poor fit: no first-party npm package, small ecosystem. [libapps/hterm](https://chromium.googlesource.com/apps/libapps/+/HEAD/hterm/) |
+
+## 3. Where the PTY runs
+
+### What the code says
+
+- Main never runs an Environment's commands itself. Every Environment has one `loom-bridge`, and in WSL it runs **inside the distro** (`wsl.exe -d <distro> --exec`). The protocol "assumes only a byte stream", so a future remote Environment can be `ssh host loom-bridge` ([ADR 0008](../adr/0008-one-bridge-per-environment.md)).
+- The bridge already has long-lived **channels**: a process's stdio multiplexed over length-prefixed JSON frames. Each channel gets a 256 KiB credit window, refilled by `channel.ack`. When credit runs out, the bridge stops reading the process's stdout, so a fast producer blocks on its own pipe ([bridge/protocol/channel.go](../../bridge/protocol/channel.go) L18–36, L259–289). Main acks every 64 KiB and base64-encodes writes ([apps/client/src/main/environments/channel.ts](../../apps/client/src/main/environments/channel.ts) L35–44).
+- Each channel runs in its own `proc.Group`: `setsid` on Unix and a Job Object on Windows. Every group is killed when the bridge's stdin closes ([bridge/proc/proc_unix.go](../../bridge/proc/proc_unix.go), [bridge/proc/proc_windows.go](../../bridge/proc/proc_windows.go) L44–66).
+- The bridge resolves the user's login-shell environment. `Env.Full()` is documented as the environment "for the user's own editor and terminal" ([bridge/shellenv/shellenv.go](../../bridge/shellenv/shellenv.go) L93–112). The existing **Open in terminal** feature (`Ctrl+\``) already launches an *external* terminal in the Session's working copy through the bridge ([apps/client/src/main/sessions/open-in.ts](../../apps/client/src/main/sessions/open-in.ts), [apps/client/src/renderer/shortcuts.ts](../../apps/client/src/renderer/shortcuts.ts) L61).
+- A Session's `workingCopy` folder is in its Project's Environment ([apps/client/src/shared/api.ts](../../apps/client/src/shared/api.ts) L347–368).
+
+So the terminal has to open **in the Session's Environment, at its working copy**, which is the same place the agent and git run. Only the bridge can do that in every case: native, WSL, and a future SSH Environment. This is also VS Code's remote model, where the pty host runs on the remote side.
+
+### Option A: PTY in the Go bridge (recommended)
+
+- **Unix:** [`github.com/creack/pty`](https://github.com/creack/pty) (MIT, v1.1.24). Pure Go: it opens `/dev/ptmx` with no cgo ([pty_linux.go](https://github.com/creack/pty/blob/master/pty_linux.go)), so the bridge's `CGO_ENABLED=0` static build keeps working ([scripts/build-bridge.mjs](../../scripts/build-bridge.mjs)). It provides `Setsize` for resize. Its Windows `Start` returns `ErrUnsupported` ([start_windows.go](https://github.com/creack/pty/blob/master/start_windows.go)).
+- **Windows (native Environment), out of scope for now (WSL only):** ConPTY through [`charmbracelet/x/conpty`](https://github.com/charmbracelet/x/tree/main/conpty), which uses `windows.CreatePseudoConsole` and `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` from `golang.org/x/sys`, a dependency the bridge already has. [`charmbracelet/x/xpty`](https://github.com/charmbracelet/x/tree/main/xpty) wraps creack/pty and conpty behind one `Pty` interface. Caveat from its docs: "On Windows, calling Wait won't work since the Go runtime doesn't handle ConPTY processes correctly" ([golang/go#62710](https://github.com/golang/go/pull/62710)). `proc.Group`'s Windows path, which wraps `exec.Cmd` with a suspended start into a Job Object, would need a ConPTY variant. Alternative: [`aymanbagabas/go-pty`](https://github.com/aymanbagabas/go-pty) (MIT, 88 stars).
+- **Fit with `proc.Group` on Unix:** `proc.Start` keeps any existing `SysProcAttr` and forces `Setsid`, so setting `Setctty: true` with the tty as stdio works with group kill (inferred from `proc_unix.go` L51–60).
+- **Backpressure comes free.** When credit runs out, the bridge stops reading the PTY master, the kernel buffer fills, and the shell's writes block. Input keeps flowing on `channel.write`, so `Ctrl+C` during `yes` still gets through.
+
+### Option B: `node-pty` in main or a utility process (rejected)
+
+- `node-pty` 1.1.0 runs `node scripts/prebuild.js || node-gyp rebuild` on install. The published tarball has prebuilds only for `darwin-*` and `win32-*`, **not Linux** ([prebuild.js](https://github.com/microsoft/node-pty/blob/main/scripts/prebuild.js); `npm pack node-pty@1.1.0`). Loom's CI runners have no node-gyp: that is why `better-sqlite3`'s build script is ignored ([pnpm-workspace.yaml](../../pnpm-workspace.yaml)). `@lydell/node-pty` repackages it with per-platform prebuilds, but it is a third-party fork.
+- Electron requires native modules rebuilt for its ABI (`@electron/rebuild`) ([Electron docs](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules)). `node-pty` is built on `node-addon-api` (Node-API, whose [ABI is stable across versions](https://nodejs.org/api/n-api.html)), which softens this, but the Linux build still needs a compiler.
+- It is "not thread safe" across workers ([README](https://github.com/microsoft/node-pty#thread-safety)). VS Code isolates it in a UtilityProcess, which would mean another process for Loom to manage.
+- Fatal for Loom: it runs on the **Client's** OS. For a WSL Session it would have to spawn `wsl.exe -d … --cd …` under ConPTY, outside the bridge's shell environment and cleanup. That is the per-command `wsl.exe` pattern ADR 0008 rejected, and it doesn't work for a future SSH Environment at all.
+
+## 4. Concerns
+
+| Concern | Plan |
+|---|---|
+| **Flow control** | The bridge credit window already caps how far the PTY can get ahead. Today main acks on delivery ([channel.ts](../../apps/client/src/main/environments/channel.ts) L114–122). For terminals, the ack should come only after the renderer's `term.write(bytes, cb)` callback, so a slow renderer can't pile up IPC. That is what VS Code and the [xterm flow-control guide](https://xtermjs.org/docs/guides/flowcontrol/) do: watermarks with HIGH ≤ 500K, and xterm discards anything beyond its 50 MB write buffer. Batch data for about 5 ms per IPC send, as VS Code does. |
+| **Resize** | `FitAddon.fit()` on a `ResizeObserver` (dock drag, window resize, show). Debounce, then send a new `channel.resize {channel, cols, rows}` call. The bridge runs `pty.Setsize` (TIOCSWINSZ, which raises SIGWINCH) or `ConPty.Resize`. Skip the fit while the dock is hidden, because it measures 0×0. |
+| **Encoding** | Keep **bytes** end to end: bridge `[]byte` → base64 frame → `Buffer` in main → `Uint8Array` over IPC → `term.write(Uint8Array)`. xterm decodes UTF-8 statefully, so a multi-byte character split across chunks is safe. Input goes the other way: `onData` (a string) is UTF-8-encoded before `channel.write`. `onBinary` carries raw bytes, for example mouse reports ([typings](https://github.com/xtermjs/xterm.js/blob/master/typings/xterm.d.ts) L1052–1067). |
+| **Shell detection** | Unix and WSL: `Machine.Shell` (`$SHELL`), which the bridge already knows ([serve.go](../../bridge/protocol/serve.go) `Machine`), falling back to `/bin/sh`. (Native Windows is out of scope.) Add a Settings override later. |
+| **Env vars** | `Env.Full()` (the login-shell environment, including WSL's Windows PATH, as for the user's own terminal), plus `TERM=xterm-256color`, `COLORTERM=truecolor`, and optionally `LOOM_SESSION_ID`. Exclude anything agent-specific, such as `OPENCODE_CONFIG_CONTENT`. |
+| **Lifetime** | A PTY is a channel in a `proc.Group`, so it dies with the bridge. That matches ADR 0008's v1 rule: "a crashed bridge takes down every Session of its Environment". Kill a Session's terminals when the Session is archived. |
+| **Persistence across tab and Session switches** | Easiest: keep one `Terminal` instance per terminal alive in the renderer, and re-parent its element when the dock or Session view remounts (`open()` happens once). Re-`fit()` when it is shown again. More robust, and it survives a renderer reload: main keeps an `@xterm/headless` mirror plus `addon-serialize` per PTY and replays it on attach, as VS Code's `PersistentTerminalProcess` does. Reviving terminals after a restart is out of scope for v1. |
+| **Theming** | Build an `ITheme` from the CSS tokens (`--bg`, `--text`, `--accent`, selection colours) whenever `data-theme` changes ([apps/client/src/renderer/appearance.ts](../../apps/client/src/renderer/appearance.ts)). The 16 ANSI colours need a palette per theme. `THEMES` currently has only the background and scheme ([apps/client/src/shared/appearance.ts](../../apps/client/src/shared/appearance.ts) L5–11). Use `--mono` for `fontFamily`, and wait for `document.fonts.ready` before the first fit, because the fonts come from `@fontsource`. |
+| **Clipboard** | Copy on `Ctrl+Shift+C` and paste on `Ctrl+Shift+V`, through `attachCustomKeyEventHandler` and `navigator.clipboard`, which works in the sandboxed, context-isolated renderer ([apps/client/src/main/index.ts](../../apps/client/src/main/index.ts) L26). Paste goes through `term.paste()`, so bracketed paste is respected. OSC 52 is available via `@xterm/addon-clipboard` if wanted. |
+| **Links** | `@xterm/addon-web-links` with a handler that calls the existing `links.open` command, which accepts only http(s) ([apps/client/src/shared/api.ts](../../apps/client/src/shared/api.ts) L980). Main already denies `window.open` and navigation ([apps/client/src/main/index.ts](../../apps/client/src/main/index.ts) L33–39). File-path links into the working copy could reuse **Open in editor** later. |
+| **Keyboard conflicts** | Loom's shortcuts are app-wide Ctrl combos (`Ctrl+K` palette, `Ctrl+B` sidebar, `Ctrl+N`…), and they collide with the shell's readline keys (`Ctrl+K` kill-line, `Ctrl+B` back-char). The terminal needs a skip-the-shell list, as VS Code's `commandsToSkipShell` does, and the bare-letter shortcuts (`j`, `d`, `e`) must never fire while the terminal has focus. `Ctrl+\`` is already **Open in terminal**. `Ctrl+J`, VS Code's toggle-panel shortcut ([panelActions.ts](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/browser/parts/panel/panelActions.ts) L51), is free in Loom. |
+| **Rendering in tests** | The smoke tests can run with `--ozone-platform=headless` ([apps/client/e2e/smoke.spec.ts](../../apps/client/e2e/smoke.spec.ts)), where WebGL may be missing. The WebGL addon must fall back to DOM, as VS Code does. |
+| **Testing** | **Seam C** (Go): `channel.open{pty}` runs `sh -c 'stty size; printf é'`, then checks resize changes `stty size`, credit stalls the reader, and kill takes the group with it. **Seam A**: main ↔ real bridge, open a terminal in a Session's working copy, check its `pwd` and an end-to-end ack. **Seam B**: the dock (toggle, applet tabs, height drag and keyboard, settings round trip) against a fake main, with the xterm wrapper mocked, because jsdom has no layout or canvas. **E2E**: one smoke test that opens the dock, types `echo $((6*7))`, and waits for `42` in the DOM renderer's rows. |
+
+## 5. The dock
+
+- The existing pattern is the right sidebar: `useSidebar()` keeps `{open, view, width}` in Settings with an optimistic local override, and `Sidebar` renders a `role="tablist"` of icon tabs with arrow-key navigation. A `ResizeEdge` (`role="separator"`) handles mouse drag and arrow keys, clamped to `SIDEBAR_MIN/MAX_WIDTH` and 70% of the window ([apps/client/src/renderer/Sidebar.tsx](../../apps/client/src/renderer/Sidebar.tsx); persisted by `settings.setSidebar` in [apps/client/src/main/settings.ts](../../apps/client/src/main/settings.ts) L110–120; types in [apps/client/src/shared/api.ts](../../apps/client/src/shared/api.ts) L614–654). It is tested in `test/seam-a/sidebar.test.ts` and `test/seam-b/sidebar.test.tsx`.
+- **No panel or splitter library is in the dependencies** ([apps/client/package.json](../../apps/client/package.json)). The dock can reuse the same pattern with a horizontal separator: `DockSettings {open, applet: 'terminal', height}`, `settings.setDock`, `toggleDock` (`Ctrl+J`?), and `DOCK_APPLETS` as a registry keyed by applet id with a label and icon, mirroring `VIEWS`. Pulling the edge and tablist out of `Sidebar.tsx` into shared components lets both use them.
+- VS Code's model for comparison: one **Panel** part, toggled with `Ctrl+J`, that hosts view containers (Terminal, Problems, Output…). The terminal also has its own toggle, `Ctrl+\`` ([panelActions.ts](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/browser/parts/panel/panelActions.ts) L32–51, [terminal.contribution.ts](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/contrib/terminal/browser/terminal.contribution.ts) L127–131). Loom's applets correspond to view containers.
+- Layout: the sidebar belongs to the open Session ([App.tsx](../../apps/client/src/renderer/App.tsx) L351). The dock should also live in `SessionView`, under the conversation and beside the sidebar, because its terminal is the Session's. The prototype ([docs/prototypes/ui-layout.html](../prototypes/ui-layout.html)) has no bottom dock.
+
+---
+
+## Recommendation
+
+**Stack:** `@xterm/xterm` 6 with the `fit`, `webgl` (DOM fallback), `web-links`, `search`, `unicode11` and `serialize` addons in the renderer. PTYs run in `loom-bridge` on `creack/pty` (Unix and WSL only). They are carried as channels over the existing bridge protocol, with acks tied to xterm's write callbacks.
+
+**Slices** (each one can ship and be tested on its own):
+
+1. **Bridge PTY channel (Unix).** `channel.open` gains `pty: {cols, rows}`. Add `channel.resize`. A PTY channel merges stdout and stderr and has no stderr tail. Every PTY is killed when the client disconnects, so nothing outlives Loom. Bump `ProtocolVersion`. Seam C tests.
+2. **Main terminal service.** `terminals.open {sessionId}` resolves the Session's Environment, working copy and shell, and returns a terminal id, so a Session can have several. Add `terminals.list/write/resize/close`, plus a per-terminal data topic, or a dedicated IPC/MessagePort, carrying `Uint8Array`, with ack-after-render and 5 ms batching. Terminals keep running across Session switches. Kill them on archive and on quit. Seam A tests.
+3. **Dock shell.** Per-Session dock state `{open, applet, height}`, a shared resize edge and tablist taken from `Sidebar`, and an applet registry. Remap ``Ctrl+` `` from the external **Open in terminal** to "open a terminal in Loom's dock" (opens the dock and focuses or creates a terminal), and update the palette action. Seam B tests.
+4. **Terminal applet.** The xterm wrapper (theme from tokens, `--mono` font, fit on ResizeObserver, clipboard keys, links through `links.open`), with tabs for the Session's terminals. While a terminal has focus, every key goes to the shell except ``Ctrl+` ``, which toggles the dock. Instances stay alive across Session switches. E2E smoke test.
+5. **Later:** a headless mirror and serialize replay for renderer reloads, a shell setting, and per-theme ANSI palettes.
+
+## Decisions (2026-11-10)
+
+1. **Scope:** tied to the Session. The cwd is its working copy, in its Environment. No terminal without a Session.
+2. **How many:** several terminals per Session, from the start.
+3. **Lifetime:** terminals keep running when you switch Sessions. They are killed on archive and never survive a Loom restart, so no process outlives the app.
+4. **Shortcut:** ``Ctrl+` `` is remapped to open a terminal in Loom. The external **Open in terminal** loses that shortcut.
+5. **Keys while focused:** no Loom shortcuts while a terminal has focus, except ``Ctrl+` `` (toggles the dock / leaves the terminal). Everything else goes to the shell. More exceptions can be added later.
+6. **Dock state:** per Session, since some Sessions never need the terminal.
+7. **Windows:** WSL only. No native ConPTY.
+8. **Agent:** no agent access to the terminal. The agent has its own bash tool.

@@ -28,7 +28,16 @@ type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Command
 /** Topics that need no parameters, which the constructor can seed. */
 type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'settings' | 'sessions' | 'database'>;
 
-const EMPTY: { [T in TopicName]: Topics[T] } = { environments: [], projects: [], settings: DEFAULT_SETTINGS, sessions: [], transcript: [], database: { state: 'ok' } };
+const EMPTY: { [T in TopicName]: Topics[T] } = {
+  environments: [],
+  projects: [],
+  settings: DEFAULT_SETTINGS,
+  sessions: [],
+  transcript: [],
+  terminals: [],
+  terminalOutput: { data: new Uint8Array() },
+  database: { state: 'ok' },
+};
 
 export class FakeMain implements LoomApi {
   /** Each topic's value, by topic and parameters. */
@@ -131,6 +140,13 @@ export class FakeMain implements LoomApi {
       'sessions.setUnread': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
+      'terminals.open': () => {
+        throw new Error('terminals.open is not scripted');
+      },
+      'terminals.write': () => {},
+      'terminals.resize': () => {},
+      'terminals.ack': () => {},
+      'terminals.close': () => {},
       'sessions.diff': () => ({ available: false, reason: 'No diff available' }),
       'sessions.diffFile': () => ({ text: '', truncated: false }),
       'sessions.diffBases': () => [],

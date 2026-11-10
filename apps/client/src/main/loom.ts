@@ -13,6 +13,7 @@ import { Attachments } from './sessions/attachments';
 import { Babysit } from './sessions/babysit';
 import { openIn, type Opener } from './sessions/open-in';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
+import { Terminals } from './sessions/terminals';
 import { Settings } from './settings';
 import { DATABASE_FILE, DatabaseDamagedError, openDatabase, type LoomDatabase } from './storage/database';
 import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
@@ -163,6 +164,16 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   /** The commands and skills the agent offers in the Project's checkout, once its Environment is up. */
   const listCommands = async (projectId: number) => native.listCommands(await readyCheckout(projectId));
   const sessions = new Topic<Session[]>([]);
+  /** Which Environment a Session's Project is in, if Loom has it. */
+  const sessionEnvironment = (session: Session) =>
+    projectService.list().find((p) => p.id === session.projectId)?.checkout.environmentId === native.status.id ? native : undefined;
+  const terminals = new Terminals({
+    session: (id) => sessionService.list().find((s) => s.id === id),
+    environment: (session) => {
+      const environment = sessionEnvironment(session);
+      return environment && { label: environment.status.label, os: () => environment.status.bridge?.os, ready: () => environment.ready(), openChannel: (params) => environment.openChannel(params) };
+    },
+  });
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
@@ -173,6 +184,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     onChange: (list) => {
       sessions.set(list);
       babysit?.sessionsChanged(list);
+      terminals.sessionsChanged(list);
     },
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
@@ -214,6 +226,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, settings, sessions, database };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
+    terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
+    terminalOutput: ({ id }, listener) => terminals.subscribeOutput(id, listener),
   };
   const commands: { [C in keyof Commands]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> } = {
     'environments.list': () => environments.value,
@@ -273,6 +287,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
+    'terminals.open': (params) => terminals.open(params),
+    'terminals.write': ({ id, data }) => terminals.write(id, data),
+    'terminals.resize': ({ id, cols, rows }) => terminals.resize(id, cols, rows),
+    'terminals.ack': ({ id, bytes }) => terminals.ack(id, bytes),
+    'terminals.close': ({ id }) => terminals.close(id),
     'sessions.diff': ({ id, uncommittedOnly }) => sessionService.diff(id, uncommittedOnly),
     'sessions.diffFile': ({ id, path, uncommittedOnly }) => sessionService.diffFile(id, path, uncommittedOnly),
     'sessions.retry': (params) => sessionService.retry(params),
@@ -309,6 +328,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     api,
     close: async () => {
       await babysitter.stop();
+      await terminals.closeAll();
       await sessionService.shutdown();
       await native.stop();
       await db.destroy();
