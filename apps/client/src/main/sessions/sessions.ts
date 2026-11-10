@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -986,17 +986,18 @@ export class Sessions {
    * at, as for any archive. False if it must wait: the agent is mid-run, or
    * asking the user.
    */
-  async endMergeRequest(id: number, state: Exclude<MergeRequestState, 'open'>): Promise<boolean> {
+  async endMergeRequest(id: number, state: EndedMergeRequestState): Promise<boolean> {
     await this.loadTranscript(id);
     if (this.shuttingDown) return false;
     if (this.inRun(id)) return false;
     // The turn just ended may have opened another Merge request on the branch, which takes over.
     const ended = this.get(id).mergeRequest;
     await this.afterTurns.get(id)?.catch(() => {});
-    const session = this.get(id);
-    if (this.shuttingDown || session.status === 'archived' || !session.mergeRequest || session.mergeRequest.url !== ended?.url) return true;
+    const { status, mergeRequest } = this.get(id);
+    // Unlinked meanwhile, on the default branch, it still ended for this Session.
+    if (this.shuttingDown || status === 'archived' || !ended || (mergeRequest && mergeRequest.url !== ended.url)) return true;
     if (this.inRun(id)) return false;
-    const card = { kind: 'merge-request-ended' as const, ...session.mergeRequest, state };
+    const card = { kind: 'merge-request-ended' as const, number: ended.number, url: ended.url, state };
     let result: ArchiveResult;
     try {
       result = await this.archive({ id });

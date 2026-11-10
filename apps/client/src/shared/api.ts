@@ -201,6 +201,9 @@ export type WorkingCopyKind = 'worktree' | 'checkout';
 /** Where a Merge request is on its Forge. */
 export type MergeRequestState = 'open' | 'merged' | 'closed';
 
+/** Where a Merge request is once it is no longer open. */
+export type EndedMergeRequestState = Exclude<MergeRequestState, 'open'>;
+
 /** A Merge request's CI as a whole: `pending` until all of it has finished. */
 export type BabysitCi = 'pending' | 'passed' | 'failed';
 
@@ -839,7 +842,7 @@ export type TranscriptItem =
    * archived, or, its worktree having unsaved work, left Waiting
    * (`unsaved-work`) for the user to archive or carry on.
    */
-  | { kind: 'merge-request-ended'; id: number; number: number; url: string; state: Exclude<MergeRequestState, 'open'>; archived: boolean; unsavedWork?: UnsavedWork };
+  | { kind: 'merge-request-ended'; id: number; number: number; url: string; state: EndedMergeRequestState; archived: boolean; unsavedWork?: UnsavedWork };
 
 /** The ranges the usage dashboard covers, in days ending today. */
 export const USAGE_RANGES = [7, 30, 90] as const;

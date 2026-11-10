@@ -393,6 +393,21 @@ describe('a Merge request no longer open', () => {
     await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived');
   });
 
+  it('archives a Session whose run, going when it merged, ends on the default branch', async () => {
+    const { machine, main, id, forge, checkout } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { chunks: ['Working.'], hold: 'second' }] });
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Working.'), { sessionId: id });
+    forge({ state: 'merged' });
+    await pollEnded(main);
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).mergeRequestState === 'merged');
+    git(checkout, 'checkout', '--quiet', 'main');
+
+    machine.release('second');
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived');
+    const items = await waitFor(main.api, 'transcript', (all) => endedCards(all).length > 0, { sessionId: id });
+    expect(endedCards(items)[0]).toMatchObject({ number: 12, state: 'merged', archived: true });
+  });
+
   it('archives after a restart a Session whose Merge request ended while its run went on', async () => {
     const { machine, main, id, forge } = await babysat('gh', {}, { userDataDir: tempDir('loom-babysit-'), turns: [{ chunks: ['Done.'] }, { chunks: ['Working.'], hold: 'second' }] });
     await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
