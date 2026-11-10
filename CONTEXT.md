@@ -6,7 +6,10 @@ A local desktop workspace for AI-assisted software development: coding agents do
 
 **Project**:
 A git checkout the user has added to Loom on their machine, either an existing folder or a fresh clone. It belongs to that machine only. **Forge** features (starting a **Session** from an issue, **Merge requests**, **Babysit**) are available only when its remote is on a Forge the user is signed in to with that Forge's CLI.
-_Avoid_: Repo, workspace
+_Avoid_: Repo, workspace, delete (a Project is **Removed**, never deleted)
+
+**Removed** (Project):
+A **Project** the user took out of Loom: hidden everywhere but the history, its **Sessions** all **Archived** and kept read-only, its usage kept. Its checkout folder stays on disk. Adding a checkout of it again offers to restore it, with its Sessions and settings. Loom recognises it by its *identity*: the host and repository of its `origin`, or else its **Environment** and path. Two Projects in use may share an identity.
 
 **Session**:
 A unit of work on a **Project**: one agent conversation in a working copy, either a git worktree of the **Project**'s checkout (a *worktree Session*: a new one Loom makes, or one that already exists) or the **Project**'s checkout itself (a *checkout Session*), optionally linked to an issue and a merge request. The Session's branch is whatever its working copy has checked out at the moment; it may change during the Session. Several checkout Sessions may share the checkout. A Session is private to its user and lives only on the machine where it was created.
@@ -76,6 +79,7 @@ _Avoid_: Console, shell (for the Dock's tab)
 - A **Session** is on one branch at a time and has at most one linked issue and one **Merge request**: its current branch's, found after each turn, or one the user or the agent linked by hand for an edge case (a differently named source branch), which stays linked while the branch does
 - A **Session** runs on exactly one agent, chosen when the Session is created; it cannot change afterwards
 - A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
+- A **Removed** Project's Sessions are all **Archived**, and stay its Sessions
 
 ## Flagged ambiguities
 

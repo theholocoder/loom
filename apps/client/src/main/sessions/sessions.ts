@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -121,6 +121,8 @@ export class Sessions {
    * outcome, and is closed if the Session was archived; its closing isn't a failure.
    */
   private readonly archiving = new Map<number, Promise<unknown>>();
+  /** Projects being removed, which no new Session may start on. */
+  private readonly removing = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
   private readonly asks = new Map<number, Map<number, string>>();
   /**
@@ -295,6 +297,7 @@ export class Sessions {
     const { projectId, workingCopy, issue } = params;
     const project = this.options.project(projectId);
     if (!project) throw new Error(`unknown Project ${projectId}`);
+    if (this.removing.has(projectId)) throw new Error(`The Project "${project.name}" is being removed.`);
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
     if (issue) checkIssue(issue);
     checkPick(params);
@@ -895,6 +898,52 @@ export class Sessions {
     } finally {
       if (this.archiving.get(id) === archiving) this.archiving.delete(id);
     }
+  }
+
+  /**
+   * Removes a Project: archives every one of its Sessions, as `archive`
+   * would, then calls `hide` while no new Session can start on it. With any
+   * worktree's work unsaved, archives none and says which, unless `discard`.
+   */
+  async removeProject(projectId: number, discard: boolean, hide: () => Promise<void>): Promise<RemoveProjectResult> {
+    if (this.removing.has(projectId)) throw new Error('This Project is already being removed.');
+    this.removing.add(projectId);
+    try {
+      const result = await this.archiveProject(projectId, discard);
+      // A Session that was starting as the removal began has started by now.
+      const late = result.removed && this.list().some((s) => s.projectId === projectId && s.status !== 'archived');
+      const final = late ? await this.archiveProject(projectId, discard) : result;
+      if (final.removed) await hide();
+      return final;
+    } finally {
+      this.removing.delete(projectId);
+    }
+  }
+
+  private async archiveProject(projectId: number, discard: boolean): Promise<RemoveProjectResult> {
+    const open = () => this.list().filter((s) => s.projectId === projectId && s.status !== 'archived');
+    if (!discard) {
+      const unsaved: UnsavedSession[] = [];
+      for (const session of open()) {
+        if (session.workingCopy.kind !== 'worktree' || !(await this.worktreeLeftOver(session))) continue;
+        const work = await unsavedWork(this.environmentOf(session), session.workingCopy.path);
+        if (work) unsaved.push({ sessionId: session.id, title: session.title, unsavedWork: work });
+      }
+      if (unsaved.length) return { removed: false, unsaved };
+    }
+    // An archive left over from before is retried here too, so no worktree of the Project stays behind.
+    const leftOver = await Promise.all(
+      this.list()
+        .filter((s) => s.projectId === projectId && s.status === 'archived')
+        .map(async (s) => ((await this.worktreeLeftOver(s)) ? [s] : [])),
+    );
+    const unsaved: UnsavedSession[] = [];
+    for (const session of [...open(), ...leftOver.flat()]) {
+      const result = await this.archive({ id: session.id, discard });
+      // The agent wrote in its last moment.
+      if (!result.archived) unsaved.push({ sessionId: session.id, title: session.title, unsavedWork: result.unsavedWork });
+    }
+    return unsaved.length ? { removed: false, unsaved } : { removed: true };
   }
 
   private async worktreeLeftOver(session: Session): Promise<boolean> {
@@ -1521,6 +1570,8 @@ export class Sessions {
    */
   private async diffOf(id: number): Promise<WorkingCopyDiff | undefined> {
     const session = this.get(id);
+    // A removed Project's Sessions have no checkout left to diff in.
+    if (session.status === 'archived' && !this.options.project(session.projectId)) return undefined;
     const environment = this.environmentOf(session);
     if (session.status !== 'archived') return session.worktreeMissing ? undefined : new WorkingCopyDiff(environment, { repo: session.workingCopy.path }, this.options.maxUntrackedCounted);
     if (session.workingCopy.kind !== 'worktree' || !session.branch) return undefined;

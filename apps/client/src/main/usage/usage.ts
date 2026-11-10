@@ -79,11 +79,14 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   const from = dayList[0]!;
   const to = dayList.at(-1)!;
 
-  const [buckets, sessions, spans] = await Promise.all([
+  const [buckets, sessions, spans, removedRows] = await Promise.all([
     db.selectFrom('usage_buckets').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('sessions').selectAll().execute(),
     db.selectFrom('session_spans').selectAll().where('ended_at', '>=', since).where('ended_at', '<=', now).execute(),
+    db.selectFrom('projects').select('id').where('removed_at', 'is not', null).execute(),
   ]);
+  const removed = new Set(removedRows.map((r) => r.id));
+  const removedFlag = (projectId: number) => (removed.has(projectId) ? (true as const) : undefined);
 
   const mix: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   let reportedCost = 0;
@@ -138,6 +141,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
         title: row?.title ?? `Session ${sessionId}`,
         projectId: usage.projectId,
         project: projectNames.get(usage.projectId)!.name,
+        projectRemoved: removedFlag(usage.projectId),
         issue: row ? linkOf(row.issue_number, row.issue_url) : undefined,
         mergeRequest: row ? linkOf(row.merge_request_number, row.merge_request_url) : undefined,
         model: byTokens(usage.byModel)[0]!.key,
@@ -157,7 +161,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     mergeRequestsMerged: sessions.filter((s) => s.merge_request_state === 'merged' && s.archived_at !== null && s.archived_at >= since && s.archived_at <= now).length,
     medianRunMs: median(runs.map((s) => s.ended_at - s.started_at)),
     medianWaitMs: median(waits.map((s) => s.ended_at - s.started_at)),
-    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => ({ projectId, project: projectNames.get(projectId)!.name, tokens })),
+    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => withoutUndefined({ projectId, project: projectNames.get(projectId)!.name, tokens, removed: removedFlag(projectId) })),
     perModel: byTokens(perModel).map(({ key: model, tokens }) => ({ model, tokens })),
     mix,
     cacheHitRate: prompt > 0 ? mix.cacheRead / prompt : undefined,

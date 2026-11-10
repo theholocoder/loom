@@ -1,10 +1,10 @@
 // The Projects service: the git checkouts the user has added to Loom, kept in
 // the database, and what each one's Environment reports about them.
-import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type Project } from '../../shared/api';
+import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type Project, type RemovedProject, type RestorableProject } from '../../shared/api';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { LoomDatabase } from '../storage/database';
-import { detectForge, GIT_TIMEOUT_MS } from './forge';
+import { detectForge, GIT_TIMEOUT_MS, parseRemote } from './forge';
 import { listIssues } from './issues';
 
 /** What the Projects service needs from an Environment. */
@@ -19,12 +19,14 @@ export interface ProjectsOptions {
   clock: Clock;
   environment: (id: string) => ProjectEnvironment | undefined;
   onChange: (projects: Project[]) => void;
+  onRemovedChange: (removed: RemovedProject[]) => void;
 }
 
 const UNCHECKED: ForgeStatus = { state: 'unknown', checking: false };
 
 export class Projects {
   private projects = new Map<number, Project>();
+  private removed = new Map<number, RemovedProject>();
   /** Whether each Project's local files are trusted, once the user has said. */
   private trust = new Map<number, boolean>();
   /** Forge checks running, by Project id. */
@@ -50,6 +52,8 @@ export class Projects {
         forge: UNCHECKED,
       });
     }
+    const removed = await options.db.selectFrom('projects').select(['id', 'name']).where('removed_at', 'is not', null).execute();
+    for (const { id, name } of removed) projects.removed.set(id, { id, name });
     return projects;
   }
 
@@ -57,7 +61,12 @@ export class Projects {
     return [...this.projects.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
   }
 
-  async link({ path, environmentId = 'native' }: { path: string; environmentId?: string }): Promise<Project> {
+  /** The Projects the user removed, by name. */
+  listRemoved(): RemovedProject[] {
+    return [...this.removed.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+  }
+
+  async link({ path, environmentId = 'native', restore }: { path: string; environmentId?: string; restore?: number }): Promise<Project> {
     const environment = this.environment(environmentId);
     const topLevel = await topLevelOf(environment, path);
     const name = topLevel.split('/').filter(Boolean).pop() ?? topLevel;
@@ -66,22 +75,87 @@ export class Projects {
     const linked = () => this.list().find((p) => p.checkout.environmentId === environmentId && p.checkout.path === topLevel);
     const alreadyLinked = () => new Error(`${topLevel} is already the Project "${linked()?.name ?? name}"`);
     if (linked()) throw alreadyLinked();
-    const id = await this.options.db.transaction().execute(async (trx) => {
-      const { id } = await trx
-        .insertInto('projects')
-        .values({ name, branch_prefix: DEFAULT_BRANCH_PREFIX, created_at: this.options.clock.now() })
-        .returning('id')
-        .executeTakeFirstOrThrow();
-      await trx.insertInto('checkouts').values({ project_id: id, environment_id: environmentId, path: topLevel }).execute();
-      return id;
+    if (restore !== undefined) {
+      const match = await this.restorableAt(environment, environmentId, topLevel);
+      if (match?.id !== restore) throw new Error(`${topLevel} can't restore that Project: it isn't a checkout of the same repository`);
+    }
+    const db = this.options.db;
+    const row = await db.transaction().execute(async (trx) => {
+      let project: { id: number; name: string; branch_prefix: string; trusted: number | null };
+      if (restore === undefined) {
+        project = await trx
+          .insertInto('projects')
+          .values({ name, branch_prefix: DEFAULT_BRANCH_PREFIX, created_at: this.options.clock.now() })
+          .returning(['id', 'name', 'branch_prefix', 'trusted'])
+          .executeTakeFirstOrThrow();
+      } else {
+        // Only still removed, in case a restore of it alongside got there first.
+        const restored = await trx
+          .updateTable('projects')
+          .set({ removed_at: null, identity: null })
+          .where('id', '=', restore)
+          .where('removed_at', 'is not', null)
+          .returning(['id', 'name', 'branch_prefix', 'trusted'])
+          .executeTakeFirst();
+        if (!restored) throw new Error('That Project is no longer removed.');
+        project = restored;
+      }
+      await trx.insertInto('checkouts').values({ project_id: project.id, environment_id: environmentId, path: topLevel }).execute();
+      return project;
     }).catch((error: unknown) => {
       if ((error as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') throw alreadyLinked();
       throw error;
     });
-    this.projects.set(id, { id, name, branchPrefix: DEFAULT_BRANCH_PREFIX, checkout: { environmentId, path: topLevel }, forge: UNCHECKED });
+    const { id } = row;
+    if (row.trusted !== null) this.trust.set(id, row.trusted !== 0);
+    this.removed.delete(id);
+    this.projects.set(id, { id, name: row.name, branchPrefix: row.branch_prefix, checkout: { environmentId, path: topLevel }, forge: UNCHECKED });
     this.publish();
+    if (restore !== undefined) this.publishRemoved();
     await this.checkForge(id);
     return this.projects.get(id)!;
+  }
+
+  /** The removed Project a link of the checkout containing `path` would restore, if any. */
+  async restorable({ path, environmentId = 'native' }: { path: string; environmentId?: string }): Promise<RestorableProject | null> {
+    const environment = this.environment(environmentId);
+    return this.restorableAt(environment, environmentId, await topLevelOf(environment, path));
+  }
+
+  private async restorableAt(environment: ProjectEnvironment, environmentId: string, checkout: string): Promise<RestorableProject | null> {
+    if (this.removed.size === 0) return null;
+    const identity = await identityOf(environment, environmentId, checkout);
+    const match = await this.options.db
+      .selectFrom('projects')
+      .select(['id', 'name'])
+      .select((eb) => eb.selectFrom('sessions').select((s) => s.fn.countAll<number>().as('n')).whereRef('sessions.project_id', '=', 'projects.id').as('sessions'))
+      .where('removed_at', 'is not', null)
+      .where('identity', '=', identity)
+      .orderBy('removed_at', 'desc')
+      .orderBy('id', 'desc')
+      .executeTakeFirst();
+    return match ? { id: match.id, name: match.name, sessions: Number(match.sessions ?? 0) } : null;
+  }
+
+  /**
+   * Hides a Project whose Sessions are all archived: drops its checkout and
+   * records its identity, to restore it by. Its Sessions and usage stay.
+   */
+  async remove(id: number): Promise<void> {
+    const project = this.projects.get(id);
+    if (!project) throw new Error(`unknown Project ${id}`);
+    const { environmentId, path } = project.checkout;
+    const environment = this.options.environment(environmentId);
+    // Offline, origin can't be read: the checkout's place stands in.
+    const identity = environment?.connected() ? await identityOf(environment, environmentId, path).catch(() => placeIdentity(environmentId, path)) : placeIdentity(environmentId, path);
+    await this.options.db.transaction().execute(async (trx) => {
+      await trx.deleteFrom('checkouts').where('project_id', '=', id).execute();
+      await trx.updateTable('projects').set({ removed_at: this.options.clock.now(), identity }).where('id', '=', id).execute();
+    });
+    this.projects.delete(id);
+    this.removed.set(id, { id, name: project.name });
+    this.publish();
+    this.publishRemoved();
   }
 
   async setBranchPrefix(id: number, branchPrefix: string): Promise<Project> {
@@ -159,6 +233,25 @@ export class Projects {
   private publish(): void {
     this.options.onChange(this.list());
   }
+
+  private publishRemoved(): void {
+    this.options.onRemovedChange(this.listRemoved());
+  }
+}
+
+/**
+ * What tells a checkout's Project apart, to restore it by: `<host>/<repository>`
+ * of its origin, when origin is a network remote, or else where it is.
+ */
+async function identityOf(environment: ProjectEnvironment, environmentId: string, checkout: string): Promise<string> {
+  const result = await exec(environment.request, 'git', ['-C', checkout, 'remote', 'get-url', 'origin'], GIT_TIMEOUT_MS);
+  const remote = result.exitCode === 0 ? parseRemote(result.stdout.trim()) : undefined;
+  // Forges match owner and name whatever their case.
+  return remote ? `${remote.host}/${remote.repository.toLowerCase()}` : placeIdentity(environmentId, checkout);
+}
+
+function placeIdentity(environmentId: string, checkout: string): string {
+  return `${environmentId}:${checkout}`;
 }
 
 /** The top-level folder of the git checkout containing `path`, as git reports it. */

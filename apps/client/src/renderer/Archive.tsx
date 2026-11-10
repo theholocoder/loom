@@ -44,6 +44,20 @@ export function WorktreeMissing() {
   );
 }
 
+/** The flag on an archived Session whose Project the user removed. */
+export function ProjectRemoved() {
+  return (
+    <span className="chip" role="status">
+      Project removed
+    </span>
+  );
+}
+
+/** The muted tag on a removed Project's name, where its history shows. */
+export function RemovedTag() {
+  return <span className="chip removed-tag">removed</span>;
+}
+
 /** What a worktree has unsaved: "uncommitted changes and 2 unpushed commits". */
 export function unsavedWorkSummary({ uncommitted, unpushedCommits }: UnsavedWork): string {
   const commits = unpushedCommits === 1 ? '1 unpushed commit' : `${unpushedCommits} unpushed commits`;

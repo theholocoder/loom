@@ -13,7 +13,7 @@ import { Sidebar, type SidebarControl } from './Sidebar';
 import { Dock, type DockState } from './Dock';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
-import { useArchive, WorktreeMissing } from './Archive';
+import { ProjectRemoved, useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
@@ -344,6 +344,7 @@ export function SessionView({
   const commands = useAgentCommands(session.projectId, session.agentCommands);
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
+  const removedProject = useTopic('removedProjects')?.find((p) => p.id === session.projectId);
   const [error, setError] = useState<string>();
   /** Whether Session info's Link Merge request popover is open. */
   const [linking, setLinking] = useState(false);
@@ -469,7 +470,12 @@ export function SessionView({
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="crumb">
               {project && <span>{project.name}</span>}
-              {project && session.branch && <span aria-hidden="true">·</span>}
+              {removedProject && (
+                <span className="row">
+                  {removedProject.name} <ProjectRemoved />
+                </span>
+              )}
+              {(project || removedProject) && session.branch && <span aria-hidden="true">·</span>}
               {session.branch && (
                 <>
                   <GitBranch className="sm" />
