@@ -20,7 +20,7 @@ import (
 
 // ProtocolVersion is bumped whenever the frames or messages change in a way
 // an older peer would not understand.
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 // MaxFrameSize bounds a single frame so a corrupt length can't make the
 // bridge allocate without limit.
@@ -88,7 +88,7 @@ type handshakeResult struct {
 func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 	out := &writer{w: w}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &server{info: info, home: machine.Home, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out, machine.StopGrace)}
+	s := &server{info: info, home: machine.Home, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out, machine.StopGrace, machine.Shell)}
 	var inFlight sync.WaitGroup
 	defer s.channels.wait()
 	defer inFlight.Wait()
@@ -208,6 +208,12 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(s.channels.closeStdin(params))
+	case "channel.resize":
+		var params resizeParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.channels.resize(params))
 	case "channel.kill":
 		var params channelParams
 		if err := decodeParams(req.Params, &params); err != nil {

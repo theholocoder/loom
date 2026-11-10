@@ -58,7 +58,8 @@ export const SHORTCUTS = {
   retry: { label: 'Retry the last prompt', shortcut: { key: 'enter', ctrl: true, shift: true } },
   mergeRequest: { label: 'Create or open the Merge request', shortcut: { key: 'm', ctrl: true, shift: true } },
   openInEditor: { label: 'Open in editor', shortcut: { key: 'e', ctrl: true, shift: true } },
-  openInTerminal: { label: 'Open in terminal', shortcut: { key: '`', ctrl: true, code: 'Backquote' } },
+  // The one shortcut that also works while a terminal has the focus.
+  toggleTerminal: { label: 'Toggle terminal', shortcut: { key: '`', ctrl: true, code: 'Backquote' } },
   toggleSidebar: { label: 'Toggle sidebar', shortcut: { key: 'b', ctrl: true } },
   toggleDiff: { label: 'Toggle diff', shortcut: { key: 'd' } },
   toggleInfo: { label: 'Toggle Session info', shortcut: { key: 'i', ctrl: true } },

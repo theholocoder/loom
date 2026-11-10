@@ -266,6 +266,84 @@ test('closing the window with a Working Session asks first, and quitting stops i
   }
 });
 
+test('Ctrl+` opens a terminal in the dock, which takes what is typed, Ctrl+C included', async () => {
+  test.skip(process.platform === 'win32', 'terminals need a Unix or WSL Environment');
+  const machine = new Machine();
+  try {
+    machine.installOpencode({
+      version: 'opencode v2.1.4',
+      integrations: [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }],
+      acp: { turns: [{ chunks: ['Done'] }] },
+    });
+    const checkout = machine.gitRepo('billing-api');
+    const window = await launch(machine.bridgeEnv());
+    await window.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const loom = (globalThis as unknown as { loom: LoomApi }).loom;
+          loom.subscribe('environments', (envs: EnvironmentStatus[]) => {
+            if (envs.find((e) => e.id === 'native')?.agent?.state === 'ready') resolve();
+          });
+        }),
+    );
+    await window.evaluate(async (path) => {
+      const loom = (globalThis as unknown as { loom: LoomApi }).loom;
+      const project = await loom.invoke('projects.link', { path });
+      await loom.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the build' });
+    }, checkout);
+    await window.getByRole('complementary', { name: 'Inbox' }).getByRole('button', { name: 'Fix the build' }).click();
+
+    await window.keyboard.press('Control+Backquote');
+    const dock = window.getByRole('region', { name: 'Dock' });
+    await expect(dock.getByRole('tab', { name: 'Terminal 1' })).toBeVisible();
+    // What the terminal printed, as main has it: the screen may be a WebGL canvas.
+    const printed = () =>
+      window.evaluate(
+        () =>
+          new Promise<string>((resolve) => {
+            const loom = (globalThis as unknown as { loom: LoomApi }).loom;
+            const stopList = loom.subscribe(
+              'terminals',
+              (list) => {
+                queueMicrotask(() => stopList());
+                if (!list[0]) return resolve('');
+                const stop = loom.subscribe('terminalOutput', ({ data }) => {
+                  queueMicrotask(() => stop());
+                  resolve(new TextDecoder().decode(data));
+                }, { id: list[0].id });
+              },
+              { sessionId: 1 },
+            );
+          }),
+      );
+
+    // The focus is in the terminal, so typing goes to its shell.
+    await window.keyboard.type('echo "[$((6*7))]"');
+    await window.keyboard.press('Enter');
+    await expect.poll(printed).toContain('[42]');
+    // Ctrl+C reaches the shell, not the menu's Copy: the read is interrupted, so
+    // the next line runs rather than being read. (`read` is a builtin; the
+    // test machine's PATH has no sleep.)
+    await window.keyboard.type('read line');
+    await window.keyboard.press('Enter');
+    await window.keyboard.press('Control+c');
+    await window.keyboard.type('echo "[af""ter]"');
+    await window.keyboard.press('Enter');
+    await expect.poll(printed, { timeout: 5_000 }).toContain('[after]');
+
+    // Ctrl+` from inside the terminal hides the dock, its terminal still running.
+    await window.keyboard.press('Control+Backquote');
+    await expect(dock).toHaveCount(0);
+    await window.keyboard.press('Control+Backquote');
+    await expect(dock.getByRole('tab', { name: 'Terminal 1' })).toBeVisible();
+    await expect(dock.getByRole('tab')).toHaveCount(2);
+  } finally {
+    await app?.close();
+    app = undefined;
+    rmSync(machine.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
+});
+
 function running(pid: number): boolean {
   try {
     process.kill(pid, 0);

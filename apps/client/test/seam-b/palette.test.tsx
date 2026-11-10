@@ -113,6 +113,7 @@ describe('palette actions', () => {
       'Link Merge request…',
       'Open in editor',
       'Open in terminal',
+      'Toggle terminal',
       'Toggle sidebar',
       'Toggle diff',
       'Toggle Session info',
@@ -493,7 +494,7 @@ describe('more shortcuts', () => {
     expect(screen.getByRole('dialog', { name: 'Pick a Project' })).toBeTruthy();
   });
 
-  it('Ctrl+Shift+M asks for a Merge request; Ctrl+Shift+E and Ctrl+` open the editor and terminal', async () => {
+  it('Ctrl+Shift+M asks for a Merge request; Ctrl+Shift+E opens the editor, Ctrl+` a terminal in the dock', async () => {
     const main = renderApp(three());
     press('j');
     const prompt = screen.getByRole('textbox', { name: 'Prompt' });
@@ -503,7 +504,7 @@ describe('more shortcuts', () => {
     ctrl('²', { code: 'Backquote' }, prompt);
     await waitFor(() =>
       expect(main.invoked.filter((i) => i.command !== 'sessions.setUnread').map((i) => i.command)).toEqual(
-        expect.arrayContaining(['sessions.requestMergeRequest', 'sessions.openInEditor', 'sessions.openInTerminal']),
+        expect.arrayContaining(['sessions.requestMergeRequest', 'sessions.openInEditor', 'terminals.open']),
       ),
     );
   });
@@ -541,7 +542,8 @@ describe('more shortcuts', () => {
     expect(keys('New Session from an issue…')).toBe('Ctrl Shift N');
     expect(keys('Create Merge request for this Session')).toBe('Ctrl Shift M');
     expect(keys('Open in editor')).toBe('Ctrl Shift E');
-    expect(keys('Open in terminal')).toBe('Ctrl `');
+    expect(keys('Toggle terminal')).toBe('Ctrl `');
+    expect(keys('Open in terminal')).toBeUndefined();
     expect(actionNames()).not.toContain('Retry the last prompt');
   });
 });

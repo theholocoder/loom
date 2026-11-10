@@ -30,7 +30,9 @@ const maxExitStderr = 4 << 10
 
 // A channel is a long-lived process whose stdin and stdout main drives over
 // the bridge's stream, multiplexed with every other channel's: an agent's
-// ACP stdio. Main writes with channel.write, which is answered once the bytes
+// ACP stdio, or the shell of a terminal in Loom. A terminal channel's process
+// runs on a pseudo-terminal, whose master is both its stdin and its stdout,
+// and gets the stderr too: its exit carries none. Main writes with channel.write, which is answered once the bytes
 // are in the process's stdin, and acknowledges what it has read with
 // channel.ack. The bridge sends what the process prints as channel.data
 // events, then a channel.exit event once it has exited.
@@ -38,6 +40,8 @@ type channel struct {
 	id    int
 	group *proc.Group
 	stdin io.WriteCloser
+	// terminal is the pseudo-terminal's master, for a terminal channel.
+	terminal *os.File
 	// writing keeps writes in the order main sent them.
 	writing sync.Mutex
 
@@ -55,6 +59,22 @@ type openParams struct {
 	Args    []string          `json:"args"`
 	Cwd     string            `json:"cwd"`
 	Env     map[string]string `json:"env"`
+	// Pty makes it a terminal channel: the process runs on a pseudo-terminal
+	// of this size, with the Environment's full environment, as in the
+	// user's own terminal. Command is then looked up on the full PATH, and
+	// defaults to the user's login shell.
+	Pty *terminalSize `json:"pty"`
+}
+
+// terminalSize is a terminal's size in character cells.
+type terminalSize struct {
+	Cols int `json:"cols"`
+	Rows int `json:"rows"`
+}
+
+type resizeParams struct {
+	Channel int `json:"channel"`
+	terminalSize
 }
 
 type openResult struct {
@@ -97,7 +117,9 @@ type exitEvent struct {
 // process group (proc.Group) with whatever it starts, and every group is
 // stopped when ctx ends, which is when the bridge shuts down.
 type channels struct {
-	ctx     context.Context
+	ctx context.Context
+	// shell is what a terminal channel runs when given no command.
+	shell   string
 	out     *writer
 	grace   time.Duration
 	running sync.WaitGroup
@@ -107,53 +129,83 @@ type channels struct {
 	open   map[int]*channel
 }
 
-func newChannels(ctx context.Context, out *writer, grace time.Duration) *channels {
+func newChannels(ctx context.Context, out *writer, grace time.Duration, shell string) *channels {
 	if grace <= 0 {
 		grace = proc.DefaultGrace
 	}
-	return &channels{ctx: ctx, out: out, grace: grace, open: map[int]*channel{}}
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	return &channels{ctx: ctx, out: out, grace: grace, shell: shell, open: map[int]*channel{}}
 }
 
 func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Error) {
+	if params.Pty != nil {
+		if params.Command == "" {
+			params.Command = cs.shell
+		}
+		if params.Pty.Cols <= 0 || params.Pty.Rows <= 0 {
+			return nil, &Error{Code: "bad_params", Message: "a terminal needs at least one column and one row"}
+		}
+	}
 	if params.Command == "" {
 		return nil, &Error{Code: "bad_params", Message: "channel.open needs a command"}
 	}
-	path, err := env.LookPath(params.Command)
+	lookPath, vars := env.LookPath, env.ForTools()
+	if params.Pty != nil {
+		lookPath, vars = env.LookPathFull, append(env.Full(), "TERM=xterm-256color", "COLORTERM=truecolor")
+	}
+	path, err := lookPath(params.Command)
 	if err != nil {
 		return nil, &Error{Code: "not_found", Message: fmt.Sprintf("%s is not on the PATH", params.Command)}
 	}
 	cmd := exec.Command(path, params.Args...)
 	cmd.Dir = params.Cwd
-	cmd.Env = env.ForTools()
+	cmd.Env = vars
 	// exec.Cmd keeps the last of duplicate variables, so these win.
 	for name, value := range params.Env {
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, spawnFailed(err)
-	}
-	// Not StdoutPipe: Wait would close it once the process exits. This pipe
-	// reaches EOF only when the process and everything it started that holds
-	// it have gone, so its last output is never lost.
-	stdout, stdoutW, err := os.Pipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, spawnFailed(err)
-	}
-	cmd.Stdout = stdoutW
 	stderr := &tailBuffer{}
-	cmd.Stderr = stderr
-	group, err := proc.Start(cmd, cs.grace)
-	_ = stdoutW.Close()
-	if err != nil {
-		_ = stdout.Close()
-		return nil, spawnFailed(err)
+	var (
+		stdin    io.WriteCloser
+		stdout   io.ReadCloser
+		terminal *os.File
+		group    *proc.Group
+	)
+	if params.Pty != nil {
+		terminal, group, err = startTerminal(cmd, *params.Pty, cs.grace)
+		if err != nil {
+			return nil, spawnFailed(err)
+		}
+		stdin, stdout = terminal, terminal
+	} else {
+		pipeIn, err := cmd.StdinPipe()
+		if err != nil {
+			return nil, spawnFailed(err)
+		}
+		// Not StdoutPipe: Wait would close it once the process exits. This
+		// pipe reaches EOF only when the process and everything it started
+		// that holds it have gone, so its last output is never lost.
+		pipeOut, stdoutW, err := os.Pipe()
+		if err != nil {
+			_ = pipeIn.Close()
+			return nil, spawnFailed(err)
+		}
+		cmd.Stdout = stdoutW
+		cmd.Stderr = stderr
+		group, err = proc.Start(cmd, cs.grace)
+		_ = stdoutW.Close()
+		if err != nil {
+			_ = pipeOut.Close()
+			return nil, spawnFailed(err)
+		}
+		stdin, stdout = pipeIn, pipeOut
 	}
 
 	cs.mu.Lock()
 	cs.nextID++
-	c := &channel{id: cs.nextID, group: group, stdin: stdin, credit: ChannelWindow}
+	c := &channel{id: cs.nextID, group: group, stdin: stdin, terminal: terminal, credit: ChannelWindow}
 	c.changed = sync.NewCond(&c.mu)
 	cs.open[c.id] = c
 	cs.mu.Unlock()
@@ -234,6 +286,24 @@ func (cs *channels) closeStdin(params channelParams) (any, *Error) {
 	c.writing.Lock()
 	defer c.writing.Unlock()
 	_ = c.stdin.Close()
+	return struct{}{}, nil
+}
+
+// resize sets a terminal channel's size, which sends its process SIGWINCH.
+func (cs *channels) resize(params resizeParams) (any, *Error) {
+	c, err := cs.get(params.Channel)
+	if err != nil {
+		return nil, err
+	}
+	if c.terminal == nil {
+		return nil, &Error{Code: "not_a_terminal", Message: fmt.Sprintf("channel %d is not a terminal", params.Channel)}
+	}
+	if params.Cols <= 0 || params.Rows <= 0 {
+		return nil, &Error{Code: "bad_params", Message: "a terminal needs at least one column and one row"}
+	}
+	if err := setTerminalSize(c.terminal, params.terminalSize); err != nil {
+		return nil, &Error{Code: "resize_failed", Message: err.Error()}
+	}
 	return struct{}{}, nil
 }
 

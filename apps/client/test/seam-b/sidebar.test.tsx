@@ -236,7 +236,7 @@ describe("the sidebar's shortcuts", () => {
 });
 
 describe('the slimmer Session header', () => {
-  it('shows only the crumb (Project · branch), title, status and the sidebar icon', () => {
+  it('shows only the crumb (Project · branch), title, status and the sidebar and terminal icons', () => {
     renderApp(
       fakeMain({}, [
         { ...session, issue: { number: 31, url: 'https://github.com/acme/billing-api/issues/31' }, mergeRequest: { number: 40, url: 'https://github.com/acme/billing-api/pull/40' }, diffStat: { files: 4, added: 12, removed: 3 } },
@@ -247,7 +247,7 @@ describe('the slimmer Session header', () => {
     expect(h.querySelector('.crumb')!.textContent).toBe('billing-api·loom/fix-login');
     expect(within(h).getByRole('heading').textContent).toBe('Fix login');
     expect(within(h).getByRole('status', { name: 'Session status' }).textContent).toBe('Finished');
-    expect(within(h).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Show sidebar']);
+    expect(within(h).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Show sidebar', 'Show terminal']);
     expect(h.textContent).not.toContain('acme/billing-api');
     expect(h.textContent).not.toContain('#31');
     expect(h.textContent).not.toContain('worktree');

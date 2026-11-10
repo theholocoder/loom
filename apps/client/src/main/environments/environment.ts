@@ -15,7 +15,7 @@ export const RESTART_BACKOFF_MS = [1_000, 5_000, 30_000];
 /** Resolving the shell environment runs the shell twice at most, 5 s each. */
 export const SHELL_ENVIRONMENT_TIMEOUT_MS = 15_000;
 /** The bridge protocol version this Client speaks. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export interface EnvironmentOptions {
   id: string;
