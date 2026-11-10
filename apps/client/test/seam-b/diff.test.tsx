@@ -646,6 +646,26 @@ describe('commenting on the diff', () => {
     ]);
   });
 
+  it("numbers a range on the new side when it holds any new line, on the old side only when it's all removed lines", async () => {
+    // Old and new numbers have drifted apart: line 50 of the old file is where line 45 of the new one is.
+    const patch = `diff --git a/${loginTs} b/${loginTs}\n--- a/${loginTs}\n+++ b/${loginTs}\n@@ -50,3 +45,3 @@\n-gone\n-also gone\n+here\n context\n`;
+    await open(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        { 'sessions.diff': () => ({ ...summary, files: [files[0]!] }), 'sessions.diffFile': () => ({ text: patch, truncated: false }) },
+      ),
+    );
+    const plus = (range: SelectedLineRange) => act(() => drawn.get(patch)!.options.onGutterUtilityClick!(range));
+    const add = async (range: SelectedLineRange, label: string) => {
+      plus(range);
+      fireEvent.change(await within(panel()).findByRole('textbox', { name: `Comment on ${label}` }), { target: { value: label } });
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Add comment' }));
+    };
+    await add({ start: 50, side: 'deletions', end: 46, endSide: 'additions' }, `${loginTs}:45-46`);
+    await add({ start: 50, side: 'deletions', end: 51, endSide: 'deletions' }, `${loginTs}:50-51`);
+    expect(within(chips()!).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`${loginTs}:45-46`, `${loginTs}:50-51`]);
+  });
+
   it('keeps a note being written when a turn end reloads the diff with the same lines', async () => {
     const main = await open();
     pressPlus({ start: 2, side: 'additions', end: 2, endSide: 'additions' });

@@ -20,8 +20,8 @@ const SHIKI_THEMES: Record<Theme, string> = {
 
 /** Commenting on the diff: the "+" by each line, and what it was last pressed for. */
 export interface Commenting {
-  /** Called with the line, or the range dragged over or selected, the "+" was pressed for. */
-  onPlus: (range: LineRange) => void;
+  /** Starts a comment on the line, or the range dragged over or selected, the "+" was pressed for. */
+  onStartComment: (range: LineRange) => void;
   /** The comment being written, if any: its range, kept selected, and its form, under its last line. */
   draft?: { range: LineRange; at: Required<LinePoint>; form: ReactNode };
 }
@@ -40,9 +40,9 @@ export function FileDiffView({
   commenting?: Commenting;
 }) {
   const commentable = commenting !== undefined;
-  // The latest `onPlus`, so that a new one doesn't make new options, which would draw the diff again.
-  const onPlus = useRef(commenting?.onPlus);
-  onPlus.current = commenting?.onPlus;
+  // The latest `onStartComment`, so that a new one doesn't make new options, which would draw the diff again.
+  const onStartComment = useRef(commenting?.onStartComment);
+  onStartComment.current = commenting?.onStartComment;
   /** The lines the user selected, kept here: the selection is controlled, so a comment's range can be shown selected. */
   const [selection, setSelection] = useState<LineRange | null>(null);
   const options = useMemo(
@@ -61,7 +61,7 @@ export function FileDiffView({
               enableGutterUtility: true,
               enableLineSelection: true,
               onLineSelected: setSelection,
-              onGutterUtilityClick: (range: LineRange) => onPlus.current?.(range),
+              onGutterUtilityClick: (range: LineRange) => onStartComment.current?.(range),
             }
           : {}),
       }) as const,

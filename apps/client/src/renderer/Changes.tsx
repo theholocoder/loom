@@ -7,7 +7,7 @@ import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, diffCommentRange, type DiffComment
 import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
-import { FileDiffView } from './FileDiffView';
+import { FileDiffView, type Commenting } from './FileDiffView';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 
 /** Files with more changed lines than this start collapsed. */
@@ -341,46 +341,7 @@ function FileSection({
     // `file` is compared by what identifies its diff.
   }, [api, session.id, file.path, file.oldPath, file.status, file.added, file.removed, uncommittedOnly, expanded, visible, version]);
 
-  /** The comment being written on this file: what its range quotes, and its range as picked. */
-  const [draft, setDraft] = useState<{ quote: Quote; range: LineRange }>();
-  const patch = text.state === 'done' ? text.text : undefined;
-  // A diff loaded again keeps the comment being written while it still holds the same lines there.
-  useEffect(() => {
-    setDraft((was) => {
-      if (!was || patch === undefined) return undefined;
-      const quote = quoteRange(file.path, patch, was.range);
-      return quote && quote.lines.join('\n') === was.quote.lines.join('\n') ? { quote, range: was.range } : undefined;
-    });
-  }, [patch]);
-  const commenting =
-    onComment && patch !== undefined
-      ? {
-          onPlus: (range: LineRange) => {
-            const quote = quoteRange(file.path, patch, range);
-            if (quote) setDraft({ quote, range });
-          },
-          ...(draft
-            ? {
-                draft: {
-                  range: draft.range,
-                  at: draft.quote.last,
-                  form: (
-                    <CommentForm
-                      key={diffCommentRange(draft.quote)}
-                      quote={draft.quote}
-                      onAdd={(note) => {
-                        const { last: _, ...quoted } = draft.quote;
-                        onComment({ ...quoted, note });
-                        setDraft(undefined);
-                      }}
-                      onCancel={() => setDraft(undefined)}
-                    />
-                  ),
-                },
-              }
-            : {}),
-        }
-      : undefined;
+  const commenting = useCommenting(file.path, text.state === 'done' ? text.text : undefined, onComment);
 
   const openInEditor = () => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error));
   return (
@@ -415,6 +376,42 @@ function FileSection({
       )}
     </section>
   );
+}
+
+/**
+ * Commenting on the file at `path`, whose diff is `patch`, while it can be:
+ * the comment being written, and its form. A diff loaded again keeps the
+ * comment being written while it still holds the same lines there.
+ */
+function useCommenting(path: string, patch: string | undefined, onComment: ((comment: DiffComment) => void) | undefined): Commenting | undefined {
+  /** The comment being written: what its range quotes, and its range as picked. */
+  const [draft, setDraft] = useState<{ quote: Quote; range: LineRange }>();
+  useEffect(() => {
+    setDraft((was) => {
+      if (!was || patch === undefined) return undefined;
+      const quote = quoteRange(path, patch, was.range);
+      return quote && quote.lines.join('\n') === was.quote.lines.join('\n') ? { quote, range: was.range } : undefined;
+    });
+  }, [patch]);
+  if (!onComment || patch === undefined) return undefined;
+  const onStartComment = (range: LineRange) => {
+    const quote = quoteRange(path, patch, range);
+    if (quote) setDraft({ quote, range });
+  };
+  if (!draft) return { onStartComment };
+  const add = (note: string) => {
+    const { last: _, ...quoted } = draft.quote;
+    onComment({ ...quoted, note });
+    setDraft(undefined);
+  };
+  return {
+    onStartComment,
+    draft: {
+      range: draft.range,
+      at: draft.quote.last,
+      form: <CommentForm key={diffCommentRange(draft.quote)} quote={draft.quote} onAdd={add} onCancel={() => setDraft(undefined)} />,
+    },
+  };
 }
 
 /** The note on a line or range of a diff, under its last line: added as a chip in the composer. */

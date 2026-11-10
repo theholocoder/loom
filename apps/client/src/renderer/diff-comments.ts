@@ -1,6 +1,7 @@
 // What a range picked in a file's diff quotes of it: the lines between its
 // ends in the order the patch has them, whichever end was picked first and
-// whichever side (old or new) each end is on.
+// whichever side (old or new) each end is on, and the lines it spans in one
+// file's numbering.
 import type { DiffComment } from '../shared/api';
 
 /** A side of a diff: the old file's (removed lines) or the new file's. */
@@ -55,7 +56,7 @@ function rowIndex(rows: Row[], { lineNumber, side }: LinePoint): number {
   return side === 'deletions' ? rows.findIndex((r) => r.old === lineNumber) : rows.findIndex((r) => r.new === lineNumber);
 }
 
-/** A row's number as a comment's range gives it: its old one for a removed line, its new one otherwise. */
+/** A row's number on the side it is drawn on: its old one for a removed line, its new one otherwise. */
 const numberOf = (row: Row) => row.new ?? row.old!;
 const sideOf = (row: Row): Side => (row.new === undefined ? 'deletions' : 'additions');
 
@@ -66,13 +67,16 @@ export function quoteRange(path: string, patch: string, range: LineRange): Quote
   const endAt = rowIndex(rows, { lineNumber: range.end, side: range.endSide ?? range.side });
   if (startAt < 0 || endAt < 0) return undefined;
   const [top, bottom] = [Math.min(startAt, endAt), Math.max(startAt, endAt)];
-  const first = rows[top]!;
-  const last = rows[bottom]!;
+  const quoted = rows.slice(top, bottom + 1);
+  const last = quoted.at(-1)!;
+  // One numbering for the whole range, as the two may have drifted apart: the new file's for a
+  // range holding any line of it, the old file's only for a range of removed lines alone.
+  const numbers = quoted.some((r) => r.new !== undefined) ? quoted.flatMap((r) => (r.new === undefined ? [] : [r.new])) : quoted.map((r) => r.old!);
   return {
     path,
-    start: numberOf(first),
-    end: numberOf(last),
-    lines: rows.slice(top, bottom + 1).map((r) => r.text),
+    start: numbers[0]!,
+    end: numbers.at(-1)!,
+    lines: quoted.map((r) => r.text),
     last: { lineNumber: numberOf(last), side: sideOf(last) },
   };
 }

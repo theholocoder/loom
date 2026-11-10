@@ -2,13 +2,14 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, diffCommentRange, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { FeedbackDelivery } from './babysit';
+import { diffCommentBlocks } from './diff-comment-prompt';
 import { feedbackPrompt } from './feedback-prompt';
 import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import type { LoomDatabase } from '../storage/database';
@@ -1935,29 +1936,9 @@ function spanOf(status: SessionStatus, waitingReason: WaitingReason | undefined)
 /** The prompt's text, trimmed; it may be empty only with files attached. */
 function promptText(prompt: string, { attached = false, comments }: { attached?: boolean; comments?: DiffComment[] } = {}): string {
   if (typeof prompt !== 'string') throw new Error('A prompt must be text.');
-  const text = [prompt.trim(), ...checkComments(comments).map(commentBlock)].filter(Boolean).join('\n\n');
+  const text = [prompt.trim(), ...diffCommentBlocks(comments)].filter(Boolean).join('\n\n');
   if (!text && !attached) throw new Error('A prompt needs some text.');
   return text;
-}
-
-/** The diff comments sent with a prompt, none when absent; rejects one that isn't whole, or has no note. */
-function checkComments(comments: DiffComment[] | undefined): DiffComment[] {
-  if (comments === undefined) return [];
-  if (!Array.isArray(comments)) throw new Error('Diff comments must be a list.');
-  for (const { path, start, end, lines, note } of comments) {
-    if (typeof path !== 'string' || !path || !Number.isInteger(start) || !Number.isInteger(end) || !Array.isArray(lines) || !lines.every((l) => typeof l === 'string')) {
-      throw new Error('A diff comment needs a path, a range and its lines.');
-    }
-    if (typeof note !== 'string' || !note.trim()) throw new Error('A diff comment needs a note.');
-  }
-  return comments;
-}
-
-/** A diff comment as the agent reads it: where, the lines quoted in a fence longer than any they hold, then the note. */
-function commentBlock(comment: DiffComment): string {
-  const longest = Math.max(0, ...comment.lines.map((line) => Math.max(0, ...[...line.matchAll(/`+/g)].map((m) => m[0].length))));
-  const fence = '`'.repeat(Math.max(3, longest + 1));
-  return [`Comment on \`${diffCommentRange(comment)}\`:`, '', `${fence}diff`, ...comment.lines, fence, '', comment.note.trim()].join('\n');
 }
 
 /** What is sent of a queued message or a user's transcript item: its text and attachments. */
