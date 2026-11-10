@@ -1,12 +1,12 @@
 // The sidebar's Changes view: what the open Session's branch changed, as a
 // file tree and unified per-file diffs loaded as they are expanded or
 // scrolled to.
-import { ChevronDown, ChevronRight, Folder, GitBranch, PanelLeft, RefreshCw, SquarePen } from 'lucide-react';
+import { ArrowRightToLine, ChevronDown, ChevronRight, Columns2, Folder, GitBranch, PanelLeft, RefreshCw, Rows2, SquarePen, WrapText, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type FileDiff, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
-import { FileDiffView } from './FileDiffView';
+import { FileDiffView, type DiffLayout } from './FileDiffView';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 
 /** Files with more changed lines than this start collapsed. */
@@ -148,6 +148,8 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
     document.getElementById(fileId(file.path))?.scrollIntoView?.({ block: 'start' });
   };
   const [listOpen, setListOpen] = useState(false);
+  const [wrap, setWrap] = useState(false);
+  const [sideBySide, setSideBySide] = useState(false);
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
   const matching = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(needle)), [files, needle]);
@@ -167,6 +169,8 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
         />
+        <StateToggle label="Wrap long lines" pressed={wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => setWrap((w) => !w)} />
+        <StateToggle label="Side by side" pressed={sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => setSideBySide((s) => !s)} />
       </div>
       <div className="diff-files-body">
         <FileTree files={matching} searching={needle !== ''} hidden={!listOpen || matching.length === 0} onPick={show} />
@@ -174,11 +178,22 @@ function DiffFiles(props: { session: Session; files: DiffFile[]; readOnly: boole
           {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
           {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
           {files.map((file) => (
-            <FileSection key={file.path} {...props} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
+            <FileSection key={file.path} {...props} layout={{ wrap, sideBySide }} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+/** An on/off icon button: it shows the current state's icon and, on hover, the icon of the state a click gives. */
+function StateToggle({ label, pressed, onIcon: On, offIcon: Off, onToggle }: { label: string; pressed: boolean; onIcon: LucideIcon; offIcon: LucideIcon; onToggle: () => void }) {
+  const [Current, Next] = pressed ? [On, Off] : [Off, On];
+  return (
+    <button className="icon-btn sm state-toggle" type="button" title={label} aria-label={label} aria-pressed={pressed} onClick={onToggle}>
+      <Current className="at-rest" />
+      <Next className="on-hover" />
+    </button>
   );
 }
 
@@ -270,6 +285,7 @@ function FileSection({
   uncommittedOnly,
   expanded,
   onToggle,
+  layout,
   theme,
   version,
 }: {
@@ -280,6 +296,7 @@ function FileSection({
   uncommittedOnly: boolean;
   expanded: boolean;
   onToggle: () => void;
+  layout: DiffLayout;
   theme: Theme;
   version: string;
 }) {
@@ -331,7 +348,7 @@ function FileSection({
         </div>
       ) : text.state === 'done' ? (
         <>
-          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} /> : null}
+          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} layout={layout} /> : null}
           {text.truncated ? <div className="diff-note">This diff is too large to show in full.</div> : null}
           {!text.truncated && !hasHunks(text.text) ? <div className="diff-note">No changes to its content.</div> : null}
         </>

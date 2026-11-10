@@ -15,11 +15,27 @@ const SHIKI_THEMES: Record<Theme, string> = {
   daylight: 'github-light',
 };
 
+/** How the user has chosen to lay out the diffs. */
+export interface DiffLayout {
+  wrap: boolean;
+  sideBySide: boolean;
+}
+
 /** Draws a patch for one file. It must have a hunk: the library throws on text that holds no file diff. */
-export function FileDiffView({ patch, theme }: { patch: string; theme: Theme }) {
+export function FileDiffView({ patch, theme, layout: { wrap, sideBySide } }: { patch: string; theme: Theme; layout: DiffLayout }) {
   const options = useMemo(
-    () => ({ diffStyle: 'unified', lineDiffType: 'word', disableFileHeader: true, disableLineNumbers: false, theme: SHIKI_THEMES[theme], themeType: THEMES[theme].scheme }) as const,
-    [theme],
+    () =>
+      ({
+        diffStyle: sideBySide ? 'split' : 'unified',
+        overflow: wrap ? 'wrap' : 'scroll',
+        lineDiffType: 'word',
+        lineHoverHighlight: 'both',
+        disableFileHeader: true,
+        disableLineNumbers: false,
+        theme: SHIKI_THEMES[theme],
+        themeType: THEMES[theme].scheme,
+      }) as const,
+    [theme, wrap, sideBySide],
   );
   return <PatchDiff className="file-diff" patch={patch} options={options} />;
 }

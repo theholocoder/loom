@@ -107,7 +107,7 @@ describe('the Changes view', () => {
     expect(toggle('src/auth/login.ts').getAttribute('aria-expanded')).toBe('true');
     const diff = await within(section('src/auth/login.ts')).findByTestId('patch-diff');
     expect(diff.textContent).toBe(text('src/auth/login.ts'));
-    expect(JSON.parse(diff.dataset.options!)).toMatchObject({ diffStyle: 'unified', lineDiffType: 'word', disableFileHeader: true, disableLineNumbers: false });
+    expect(JSON.parse(diff.dataset.options!)).toMatchObject({ diffStyle: 'unified', overflow: 'scroll', lineDiffType: 'word', lineHoverHighlight: 'both', disableFileHeader: true, disableLineNumbers: false });
     for (const collapsed of ['docs/logo.png', 'pnpm-lock.yaml']) expect(toggle(collapsed).getAttribute('aria-expanded')).toBe('false');
     expect(diffCalls(main, 'sessions.diffFile').map((c) => (c.params as { path: string }).path).sort()).toEqual(['src/auth/login.ts', 'src/auth/session.ts']);
 
@@ -250,6 +250,43 @@ describe('a file\'s diff', () => {
 
     await waitFor(() => expect(JSON.parse(file.getByTestId('patch-diff').dataset.options!)).toMatchObject({ theme: 'github-light', themeType: 'light' }));
     expect(diffCalls(main, 'sessions.diffFile')).toHaveLength(1);
+  });
+});
+
+describe("how the diffs are laid out", () => {
+  const optionsOf = (element: HTMLElement) => JSON.parse(element.dataset.options!);
+  const open = async () => {
+    const main = renderOpen(fakeMain());
+    showChanges();
+    await within(panel()).findAllByTestId('patch-diff');
+    return main;
+  };
+  const allOptions = () => within(panel()).getAllByTestId('patch-diff').map(optionsOf);
+
+  it.each([
+    ['Wrap long lines', { overflow: 'scroll' }, { overflow: 'wrap' }],
+    ['Side by side', { diffStyle: 'unified' }, { diffStyle: 'split' }],
+  ])('%s switches every open diff, and back, without loading them again', async (label, off, on) => {
+    const main = await open();
+    const loads = diffCalls(main, 'sessions.diffFile').length;
+    const button = within(panel()).getByRole('button', { name: label });
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    for (const options of allOptions()) expect(options).toMatchObject(off);
+
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    for (const options of allOptions()) expect(options).toMatchObject(on);
+
+    fireEvent.click(button);
+    for (const options of allOptions()) expect(options).toMatchObject(off);
+    expect(diffCalls(main, 'sessions.diffFile')).toHaveLength(loads);
+  });
+
+  it('wraps and goes side by side independently', async () => {
+    await open();
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Wrap long lines' }));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Side by side' }));
+    for (const options of allOptions()) expect(options).toMatchObject({ overflow: 'wrap', diffStyle: 'split' });
   });
 });
 

@@ -373,6 +373,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .diff-files-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0; }
 .diff-files-bar .icon-btn { flex: none; }
 .diff-files-bar .icon-btn[aria-pressed='true'] { color: var(--accent); }
+.state-toggle .on-hover, .state-toggle:hover .at-rest, .state-toggle:focus-visible .at-rest { display: none; }
+.state-toggle:hover .on-hover, .state-toggle:focus-visible .on-hover { display: block; }
 .diff-files-body { flex: 1; min-height: 0; display: flex; gap: 10px; }
 .diff-sections { flex: 1; min-width: 0; overflow: auto; }
 .diff-sections .diff-file { margin: 0 0 10px; }
