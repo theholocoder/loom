@@ -160,6 +160,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   };
   /** The models the agent offers in the Project's checkout, once its Environment is up. */
   const listModels = async (projectId: number) => native.listModels(await readyCheckout(projectId));
+  /** The commands and skills the agent offers in the Project's checkout, once its Environment is up. */
+  const listCommands = async (projectId: number) => native.listCommands(await readyCheckout(projectId));
   const sessions = new Topic<Session[]>([]);
   const sessionService = await Sessions.load({
     db,
@@ -235,7 +237,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
     'projects.models': ({ id }) => listModels(id),
-    'projects.commands': async ({ id }) => native.listCommands(await readyCheckout(id)),
+    'projects.commands': ({ id }) => listCommands(id),
     'projects.files': ({ id, ref }) => sessionService.projectFiles(id, ref),
     'sessions.check': async () => {
       await Promise.all(environments.value.map((e) => sessionService.lookUpBranches(e.id)));

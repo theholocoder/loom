@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,18 +51,67 @@ type probeResult struct {
 	// them.
 	Commands json.RawMessage `json:"commands,omitempty"`
 	// Skills is OpenCode's `GET /api/skill` list for params.Directory, each
-	// with only its id, name, description and path; absent when there are none, or as
+	// with only its id, name, description and where it comes from; absent when there are none, or as
 	// Commands is.
 	Skills []probeSkill `json:"skills,omitempty"`
 }
 
-// probeSkill is what the probe reports of a skill: not its content.
+// probeSkill is what the probe reports of a skill: not its path or content.
 type probeSkill struct {
+	// ID is OpenCode's id for it.
+	ID string `json:"id"`
+	// Name is what the user types after `/`.
+	Name string `json:"name"`
+	// Description says what it does, as its SKILL.md does.
+	Description string `json:"description,omitempty"`
+	// Source is where it comes from (see skillSource); absent when unknown.
+	Source string `json:"source,omitempty"`
+}
+
+// apiSkill is a skill as OpenCode's `GET /api/skill` lists it: only what the
+// probe reads.
+type apiSkill struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Description string `json:"description"`
 	// Path is its SKILL.md, absolute, or `skill://…` for OpenCode's own.
-	Path string `json:"path,omitempty"`
+	Path string `json:"path"`
+}
+
+// skillSource says where the skill at path comes from: "project" when it is
+// in the checkout directory, "built-in" for OpenCode's own (`skill://…`), and
+// "personal" when it is elsewhere on the machine; "" without a path. Symlinks
+// are resolved on both sides, and case is ignored where the OS does.
+func skillSource(path, directory string) string {
+	switch {
+	case path == "":
+		return ""
+	case strings.HasPrefix(path, "skill://"):
+		return "built-in"
+	}
+	rel, err := filepath.Rel(resolved(directory), resolved(path))
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "personal"
+	}
+	return "project"
+}
+
+// resolved is path with its symlinks resolved, as far as it exists: what
+// doesn't exist (any more) is kept as written.
+func resolved(path string) string {
+	path = filepath.Clean(path)
+	rest := ""
+	for {
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return filepath.Join(path, rest)
+		}
+		rest = filepath.Join(filepath.Base(path), rest)
+		path = parent
+	}
 }
 
 // probeOpencode starts a short-lived, private `opencode serve --stdio` and
@@ -159,9 +209,11 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 			result.Commands = commands
 		}
 		if skills, failure := probeGet(ctx, base, password, "/api/skill", params.Directory, maxSkillsOutput); failure == nil {
-			var listed []probeSkill
+			var listed []apiSkill
 			if json.Unmarshal(skills, &listed) == nil {
-				result.Skills = listed
+				for _, skill := range listed {
+					result.Skills = append(result.Skills, probeSkill{ID: skill.ID, Name: skill.Name, Description: skill.Description, Source: skillSource(skill.Path, params.Directory)})
+				}
 			}
 		}
 	}

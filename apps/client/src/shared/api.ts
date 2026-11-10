@@ -90,23 +90,25 @@ export const DEFAULT_EFFORT = 'default';
 
 /**
  * Something the agent runs from the composer's `/`: one of its commands
- * (its own, or the user's), or one of the user's skills. Sent as
- * `/name args`, which the agent runs as the command or loads the skill for.
+ * (its own, or the user's), or one of its skills (the Project's, the user's,
+ * or its own). Sent as `/name args`, which the agent runs as the command or
+ * loads the skill for.
  */
 export interface AgentCommand {
-  /** Whether it is one of the agent's commands or one of the user's skills. */
+  /** Whether it is a command or a skill. */
   kind: 'command' | 'skill';
   /** What follows the `/`. */
   name: string;
   /** What it does, as the agent says. */
   description?: string;
-  /**
-   * Where a skill comes from, when the agent says: the Project's own (in its
-   * checkout), the user's (elsewhere on the machine), or the agent's.
-   */
+  /** Where a skill comes from, when known. */
   source?: SkillSource;
 }
 
+/**
+ * Where a skill comes from: the Project's own (its SKILL.md is in the
+ * checkout), the user's (elsewhere on their machine), or the agent's own.
+ */
 export type SkillSource = 'project' | 'personal' | 'built-in';
 
 /**

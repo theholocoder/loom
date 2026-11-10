@@ -70,33 +70,6 @@ export function effortsOf(listed: Loaded<ModelChoice[]>, model: string | undefin
   return (listed && 'value' in listed ? listed.value.find((m) => m.id === model)?.efforts : undefined) ?? [];
 }
 
-/**
- * The models the agent offers in the Project's checkout, listed by main when
- * `projectId` is given (main asks the agent once per checkout) and again on
- * `refresh` after a failure; nothing while `projectId` is undefined.
- */
-export function useCheckoutModels(projectId: number | undefined): { listed: Loaded<ModelChoice[]>; refresh: () => void } {
-  const api = useApi();
-  const [listed, setListed] = useState<{ projectId: number; result: NonNullable<Loaded<ModelChoice[]>> }>();
-  const [generation, setGeneration] = useState(0);
-  useEffect(() => {
-    if (projectId === undefined) return;
-    let current = true;
-    api
-      .invoke('projects.models', { id: projectId })
-      .then((value) => current && setListed({ projectId, result: { value } }))
-      .catch((e: unknown) => current && setListed({ projectId, result: { error: (e as Error).message } }));
-    return () => {
-      current = false;
-    };
-  }, [api, projectId, generation]);
-  const result = listed && listed.projectId === projectId ? listed.result : undefined;
-  // Listed, they stay so until the agent is checked again; only a failure is worth asking again.
-  const failed = !!result && 'error' in result;
-  const refresh = useCallback(() => failed && setGeneration((n) => n + 1), [failed]);
-  return { listed: result, refresh };
-}
-
 const tokens = new Intl.NumberFormat('en');
 
 /** How full the agent's context is, as a share of the model's window. */

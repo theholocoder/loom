@@ -3,9 +3,10 @@
 // in (a private `opencode serve --stdio` lists a connected integration). It
 // never runs `opencode auth list` or `opencode models`, which start the
 // user's shared background service.
-import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentCommand, type AgentStatus, type ModelChoice, type SkillSource } from '../../shared/api';
+import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentCommand, type AgentStatus, type ModelChoice } from '../../shared/api';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
-import { agentCommandsOf, type AcpProfile } from './acp-adapter';
+import type { AcpProfile } from './acp-adapter';
+import { agentCommandsOf } from './commands';
 import { OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
 
 /**
@@ -75,7 +76,8 @@ export interface CheckoutOffer {
  * `opencode serve --stdio`: its models as `provider/model`, with their Effort
  * levels as its ACP bridge offers them (their variants, then `default`),
  * leaving out the models the user turned off; then its commands and skills,
- * none if it didn't list them.
+ * none if it didn't list them, each skill with where it comes from as the
+ * bridge tells.
  */
 export async function probeOpenCodeCheckout(call: BridgeCall, directory: string): Promise<CheckoutOffer> {
   const { models, commands, skills } = await call<{ models?: ApiModel[]; commands?: unknown; skills?: unknown }>('opencode.probe', PROBE_REQUEST_TIMEOUT_MS, { directory });
@@ -87,22 +89,8 @@ export async function probeOpenCodeCheckout(call: BridgeCall, directory: string)
       const id = `${model.providerID}/${model.id}`;
       return [{ id, name: typeof model.name === 'string' && model.name ? model.name : id, efforts: variants.length ? [...new Set([...variants, DEFAULT_EFFORT])] : [] }];
     }),
-    commands: [
-      ...agentCommandsOf('command', commands),
-      ...(Array.isArray(skills) ? skills : []).flatMap((skill: { path?: unknown }) => {
-        const source = sourceOf(skill?.path, directory);
-        return agentCommandsOf('skill', [skill]).map((listed) => (source ? { ...listed, source } : listed));
-      }),
-    ],
+    commands: [...agentCommandsOf('command', commands), ...agentCommandsOf('skill', skills)],
   };
-}
-
-/** Where the skill at `path` comes from: the checkout `directory`, OpenCode itself (`skill://…`), or elsewhere. */
-function sourceOf(path: unknown, directory: string): SkillSource | undefined {
-  if (typeof path !== 'string' || !path) return undefined;
-  if (path.startsWith('skill://')) return 'built-in';
-  const slashed = (p: string) => p.replaceAll('\\', '/').replace(/\/+$/, '');
-  return slashed(path).startsWith(`${slashed(directory)}/`) ? 'project' : 'personal';
 }
 
 /** `opencode v2.1.4`, `v2.1.4` or `1.19.4` → [major, minor, patch]. */

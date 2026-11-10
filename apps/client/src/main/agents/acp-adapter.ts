@@ -1,10 +1,11 @@
 // An AgentAdapter for any agent that speaks ACP v1 over stdio, one process per
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
-import { isImage, type AgentCommand, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type TokenCounts, type ToolStatus } from '../../shared/api';
+import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type TokenCounts, type ToolStatus } from '../../shared/api';
 import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection, AcpError } from './acp';
+import { agentCommandsOf } from './commands';
 
 /** How to start one ACP agent. */
 export interface AcpProfile {
@@ -92,6 +93,11 @@ export class AcpAdapter implements AgentAdapter {
         onEvent(event(requestId));
       });
     };
+    /** Reports what Loom shows of a session update, if anything. */
+    const report = (update: SessionUpdate) => {
+      const event = translate(update);
+      if (event) onEvent(event);
+    };
     const connection = new AcpConnection(channel, {
       onNotification: (method, params) => {
         if (method !== 'session/update') return;
@@ -99,14 +105,12 @@ export class AcpAdapter implements AgentAdapter {
         // The agent may announce its commands before its answer to `session/new` is read, and does while it replays history.
         if (update?.sessionUpdate === 'available_commands_update') {
           if (sessionId === undefined) return void (earlyCommands = { forSession, update });
-          if (forSession !== sessionId) return;
-          const event = translate(update);
-          return event && onEvent(event);
+          if (forSession === sessionId) report(update);
+          return;
         }
         if (forSession !== sessionId || replaying) return;
         if (update.sessionUpdate === 'config_option_update') return configured((update as { configOptions?: unknown }).configOptions);
-        const event = translate(update);
-        if (event) onEvent(event);
+        report(update);
       },
       onRequest: (method, params) => {
         if (method === 'session/request_permission') {
@@ -180,9 +184,8 @@ export class AcpAdapter implements AgentAdapter {
         reported = taken?.configOptions;
       }
       configured(reported);
-      const announced = earlyCommands?.forSession === sessionId ? translate(earlyCommands.update) : undefined;
+      if (earlyCommands?.forSession === sessionId) report(earlyCommands.update);
       earlyCommands = undefined;
-      if (announced) onEvent(announced);
     } catch (error) {
       abandoned = true;
       await channel.kill().catch(() => {});
@@ -299,20 +302,6 @@ function translate(update: SessionUpdate): AgentEvent | undefined {
     }
   }
   return undefined;
-}
-
-/**
- * The agent's commands or skills, as it lists them (ACP's available commands,
- * OpenCode's API), as Loom's; those without a name are left out.
- */
-export function agentCommandsOf(kind: AgentCommand['kind'], list: unknown): AgentCommand[] {
-  if (!Array.isArray(list)) return [];
-  return list.flatMap((item: { name?: unknown; description?: unknown }) => {
-    const name = text(item?.name);
-    if (!name) return [];
-    const description = text(item.description);
-    return [{ kind, name, ...(description ? { description } : {}) }];
-  });
 }
 
 /** What Loom reads of the capabilities an ACP agent reports in `initialize`. */

@@ -17,8 +17,9 @@ import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { ThinkingBlock, ToolCard } from './WorkCards';
-import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
-import { AttachmentList, Composer, useAgentCommands } from './Composer';
+import { useAgentCommands, useCheckoutModels } from './checkout';
+import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
+import { AttachmentList, Composer } from './Composer';
 
 /** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
 const WAITING: Record<Exclude<WaitingReason, 'unsaved-work'>, { label: string; icon: LucideIcon }> = {

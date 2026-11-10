@@ -360,7 +360,6 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .composer-menu .cmd-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12.5px; }
 .composer-menu .chip { flex-shrink: 0; padding: 2px 8px; border: 1px solid var(--line); background: var(--panel); }
 .composer-menu [role="option"][aria-selected="true"] { background: var(--sel); }
-.composer-menu [role="option"] kbd { margin-left: auto; }
 .composer-menu-empty { padding: 6px 10px; font-size: 13px; }
 /* Merge request: the timeline card's Open, the Link popover. */
 .merge-request .link, .info .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }

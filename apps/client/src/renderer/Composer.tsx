@@ -3,13 +3,9 @@
 // it, @-mentions of the working copy's files, and `/` for the agent's skills
 // and commands.
 import { ArrowUp, Box, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, Paperclip, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { diffCommentRange, isImage, type AgentCommand, type Attachment, type DiffComment, type NewAttachment, type SkillSource } from '../shared/api';
-import { useApi } from './api';
 import { stepIndex } from './Popover';
-
-/** No skills or commands, the same each time. */
-const NONE: AgentCommand[] = [];
 
 /** The most files an @-mention suggests at once. */
 const MAX_SUGGESTED = 50;
@@ -67,7 +63,7 @@ export function Composer({
   gauge?: ReactNode;
   /** Lists the working copy's files, for @-mentions; asked again each time one starts. */
   loadFiles?: () => Promise<string[]>;
-  /** What `/` offers: the agent's skills and commands (see useAgentCommands). */
+  /** What `/` offers: the agent's skills and commands (see `useAgentCommands`). */
   commands?: AgentCommand[];
   /** The diff comments that go with what is sent, shown as chips; whoever gives them clears them once sent. */
   comments?: DiffComment[];
@@ -365,35 +361,6 @@ function matchCommands(commands: AgentCommand[], query: string): AgentCommand[] 
     .filter((c) => c.rank < 4)
     .sort((a, b) => a.rank - b.rank)
     .map((c) => c.command);
-}
-
-/**
- * The skills and commands `/` offers: the agent's in the Project's checkout,
- * listed by main (once per checkout), with `announced`, the commands a
- * Session's agent announced, in place of the checkout's commands when given;
- * each name once, a command before a skill of the same name, as the agent
- * runs it. None while they aren't listed, or when they can't be.
- */
-export function useAgentCommands(projectId: number | undefined, announced?: AgentCommand[]): AgentCommand[] {
-  const api = useApi();
-  const [listed, setListed] = useState<{ projectId: number; commands: AgentCommand[] }>();
-  useEffect(() => {
-    if (projectId === undefined) return;
-    let current = true;
-    api.invoke('projects.commands', { id: projectId }).then(
-      (commands) => current && setListed({ projectId, commands }),
-      () => current && setListed({ projectId, commands: [] }),
-    );
-    return () => {
-      current = false;
-    };
-  }, [api, projectId]);
-  const checkout = listed && listed.projectId === projectId ? listed.commands : NONE;
-  return useMemo(() => {
-    const all = announced ? [...announced, ...checkout.filter((c) => c.kind === 'skill')] : checkout;
-    const names = new Set<string>();
-    return all.filter(({ name }) => !names.has(name) && !!names.add(name));
-  }, [announced, checkout]);
 }
 
 /**
