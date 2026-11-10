@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type DiffComment, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
@@ -15,7 +15,7 @@ import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
-import { FeedbackCard, FeedbackInfoCard } from './FeedbackCards';
+import { FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
 import { AttachmentList, Composer } from './Composer';
@@ -30,6 +30,7 @@ const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
   error: { label: 'Error', icon: OctagonX },
   interrupted: { label: 'Interrupted', icon: CirclePause },
   feedback: { label: 'Feedback', icon: MessageSquareWarning },
+  'unsaved-work': { label: 'Merged with unsaved work', icon: GitMerge },
 };
 
 /** What the Session's status says, in words and as an icon. */
@@ -37,6 +38,7 @@ export function statusOf(session: Session): { label: string; icon: LucideIcon; c
   if (session.status === 'working') return { label: 'Working', icon: LoaderCircle, className: 'st-working' };
   if (session.status === 'archived') return { label: 'Archived', icon: Archive, className: 'st-archived' };
   const reason = session.waitingReason ?? 'finished';
+  if (reason === 'unsaved-work' && session.mergeRequestState === 'closed') return { label: 'Closed with unsaved work', icon: GitPullRequestClosed, className: `st-waiting-${reason}` };
   return { ...WAITING[reason], className: `st-waiting-${reason}` };
 }
 
@@ -557,6 +559,8 @@ export function SessionView({
               />
             ) : item.kind === 'feedback-info' ? (
               <FeedbackInfoCard key={item.id} item={item} onOpen={() => openLink(item.url)} />
+            ) : item.kind === 'merge-request-ended' ? (
+              <MergeRequestEndedCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
             ) : (
               <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
             ),

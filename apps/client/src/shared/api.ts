@@ -190,7 +190,7 @@ export const DEFAULT_BRANCH_PREFIX = 'loom';
  */
 export type SessionStatus = 'working' | 'waiting' | 'archived';
 
-export type WaitingReason = 'finished' | 'stopped' | 'question' | 'approval' | 'stuck' | 'error' | 'interrupted' | 'feedback';
+export type WaitingReason = 'finished' | 'stopped' | 'question' | 'approval' | 'stuck' | 'error' | 'interrupted' | 'feedback' | 'unsaved-work';
 
 /**
  * - `worktree`: the Session's own git worktree.
@@ -833,7 +833,13 @@ export type TranscriptItem =
    */
   | { kind: 'feedback'; id: number; number: number; url: string; items: FeedbackItem[]; ci?: BabysitCi; state: 'new' | 'sent'; paused?: boolean }
   /** Babysit saw progress on the Merge request that needs nothing done. */
-  | ({ kind: 'feedback-info'; id: number } & FeedbackInfo);
+  | ({ kind: 'feedback-info'; id: number } & FeedbackInfo)
+  /**
+   * Babysit found the Merge request merged or closed: the Session was
+   * archived, or, its worktree having unsaved work, left Waiting
+   * (`unsaved-work`) for the user to archive or carry on.
+   */
+  | { kind: 'merge-request-ended'; id: number; number: number; url: string; state: Exclude<MergeRequestState, 'open'>; archived: boolean; unsavedWork?: UnsavedWork };
 
 /** The ranges the usage dashboard covers, in days ending today. */
 export const USAGE_RANGES = [7, 30, 90] as const;

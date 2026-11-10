@@ -44,10 +44,16 @@ export function WorktreeMissing() {
   );
 }
 
-/** What archiving would lose, in words. */
-export function unsavedWorkText({ uncommitted, unpushedCommits, detached }: UnsavedWork): string {
+/** What a worktree has unsaved: "uncommitted changes and 2 unpushed commits". */
+export function unsavedWorkWhat({ uncommitted, unpushedCommits }: UnsavedWork): string {
   const commits = unpushedCommits === 1 ? '1 unpushed commit' : `${unpushedCommits} unpushed commits`;
-  const what = uncommitted && unpushedCommits ? `uncommitted changes and ${commits}` : uncommitted ? 'uncommitted changes' : commits;
+  return uncommitted && unpushedCommits ? `uncommitted changes and ${commits}` : uncommitted ? 'uncommitted changes' : commits;
+}
+
+/** What archiving would lose, in words. */
+export function unsavedWorkText(work: UnsavedWork): string {
+  const { uncommitted, unpushedCommits, detached } = work;
+  const what = unsavedWorkWhat(work);
   const kept = !unpushedCommits ? '' : detached ? ' Its HEAD is on no branch, so those commits will be lost.' : ' Commits stay on its local branch.';
   return `This Session's worktree has ${what}. Archiving removes the worktree${uncommitted ? ' and discards the changes' : ''}.${kept}`;
 }

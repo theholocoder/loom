@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { git, startMain, tempDir, tempMachine, waitFor, type AcpTurn, type ForgeCli, type ForgeCliScript, type Machine, type MainHarness } from './harness';
 import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
@@ -17,7 +19,8 @@ type Activity = Omit<Scripted, 'number' | 'url' | 'branch'>;
 type Extras = Pick<ForgeCliScript, 'viewer' | 'offline'>;
 
 /** Main with one Session whose Merge request 12 is linked and has had its baseline poll, over `initial` activity. */
-async function babysat(cli: ForgeCli, initial: Activity = {}, { turns = [], userDataDir }: { turns?: AcpTurn[]; userDataDir?: string } = {}) {
+/** With `worktree`, the Session works in a worktree of the branch, with all of it pushed to a second remote. */
+async function babysat(cli: ForgeCli, initial: Activity = {}, { turns = [], userDataDir, worktree = false }: { turns?: AcpTurn[]; userDataDir?: string; worktree?: boolean } = {}) {
   const machine = tempMachine();
   machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns } });
   const host = cli === 'gh' ? 'github.com' : 'gitlab.example.org';
@@ -29,15 +32,23 @@ async function babysat(cli: ForgeCli, initial: Activity = {}, { turns = [], user
   git(checkout, 'checkout', '--quiet', '-b', 'main');
   machine.commit(checkout, 'README.md', '# loom\n');
   git(checkout, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
-  git(checkout, 'checkout', '--quiet', '-b', BRANCH);
+  if (worktree) {
+    git(checkout, 'branch', BRANCH);
+    const mirror = machine.gitOrigin('mirror');
+    git(checkout, 'remote', 'add', 'mirror', mirror);
+    git(checkout, 'push', '--quiet', '--force', 'mirror', 'main', BRANCH);
+  } else {
+    git(checkout, 'checkout', '--quiet', '-b', BRANCH);
+  }
 
   const main = await startMain({ machine, userDataDir });
   await waitFor(main.api, 'environments', ready);
   const project = await main.api.invoke('projects.link', { path: checkout });
   await waitFor(main.api, 'projects', (list) => list.some((p) => p.id === project.id && p.forge.state === 'available'));
-  const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+  const workingCopy = worktree ? { workingCopy: 'worktree' as const, existing: { branch: { name: BRANCH, remote: false } } } : { workingCopy: 'checkout' as const };
+  const { id, workingCopy: { path } } = await main.api.invoke('sessions.create', { projectId: project.id, ...workingCopy, prompt: 'Fix the login bug' });
   await waitFor(main.api, 'sessions', (list) => list.some((s) => s.id === id && !!s.mergeRequest && s.status === 'waiting' && s.babysit?.lastPollAt !== undefined));
-  return { machine, main, id, forge, checkout, projectId: project.id };
+  return { machine, main, id, forge, checkout, path, projectId: project.id };
 }
 
 const sessionOf = (list: Session[], id: number) => list.find((s) => s.id === id)!;
@@ -288,17 +299,122 @@ describe('Babysit state', () => {
   });
 });
 
+const endedCards = (items: TranscriptItem[]) => items.filter((i) => i.kind === 'merge-request-ended');
+/** Asks for a poll now, for a Merge request that has just ended: the Session may be archived before the poll's time shows. */
+async function pollEnded(main: MainHarness) {
+  await main.elapse(1000);
+  await main.api.invoke('sessions.check');
+}
+const sessionNow = async (main: MainHarness, id: number) => sessionOf(await main.api.invoke('sessions.list'), id);
+
 describe('a Merge request no longer open', () => {
-  it('records its state and stops being polled', async () => {
+  it('archives the Session once merged, saying so in its conversation, and stops being polled', async () => {
     const { machine, main, id, forge } = await babysat('gh');
     forge({ state: 'merged' });
-    await pollNow(main, id);
-    expect(sessionOf(await main.api.invoke('sessions.list'), id).mergeRequestState).toBe('merged');
+    await pollEnded(main);
+
+    const list = await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived');
+    expect(sessionOf(list, id)).toMatchObject({ mergeRequestState: 'merged', unread: false });
+    const items = await waitFor(main.api, 'transcript', (all) => endedCards(all).length > 0, { sessionId: id });
+    expect(endedCards(items)).toEqual([{ kind: 'merge-request-ended', id: expect.any(Number), number: 12, url: URLS.gh, state: 'merged', archived: true }]);
 
     const before = graphql(machine).length;
     await main.elapse(10 * MINUTE);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(graphql(machine)).toHaveLength(before);
+  });
+
+  it('archives the Session once closed without merging, leaving it unread for the user to notice', async () => {
+    const { main, id, forge } = await babysat('gh');
+    await main.api.invoke('sessions.setUnread', { id, unread: false });
+    forge({ state: 'closed' });
+    await pollEnded(main);
+
+    const list = await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived' && sessionOf(sessions, id).unread);
+    expect(sessionOf(list, id)).toMatchObject({ mergeRequestState: 'closed' });
+    const items = await waitFor(main.api, 'transcript', (all) => endedCards(all).length > 0, { sessionId: id });
+    expect(endedCards(items)).toEqual([{ kind: 'merge-request-ended', id: expect.any(Number), number: 12, url: URLS.gh, state: 'closed', archived: true }]);
+  });
+
+  it('puts a worktree Session with uncommitted changes in the Inbox instead, its worktree untouched', async () => {
+    const { main, id, forge, path } = await babysat('gh', {}, { worktree: true });
+    writeFileSync(join(path, 'README.md'), 'half done\n');
+    forge({ state: 'merged' });
+    await pollEnded(main);
+
+    const list = await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).waitingReason === 'unsaved-work');
+    expect(sessionOf(list, id)).toMatchObject({ status: 'waiting', unread: true, mergeRequestState: 'merged' });
+    const items = await waitFor(main.api, 'transcript', (all) => endedCards(all).length > 0, { sessionId: id });
+    expect(endedCards(items)).toEqual([
+      { kind: 'merge-request-ended', id: expect.any(Number), number: 12, url: URLS.gh, state: 'merged', archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } },
+    ]);
+    expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('half done\n');
+
+    // Told once: later polls and checks leave it be.
+    await pollEnded(main);
+    await main.elapse(10 * MINUTE);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(endedCards(await waitFor(main.api, 'transcript', () => true, { sessionId: id }))).toHaveLength(1);
+    expect(await sessionNow(main, id)).toMatchObject({ status: 'waiting', waitingReason: 'unsaved-work' });
+  });
+
+  it('puts a worktree Session with unpushed commits in the Inbox instead', async () => {
+    const { machine, main, id, forge, path } = await babysat('gh', {}, { worktree: true });
+    machine.commit(path, 'fix.txt', 'fixed\n');
+    forge({ state: 'closed' });
+    await pollEnded(main);
+
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).waitingReason === 'unsaved-work');
+    const items = await waitFor(main.api, 'transcript', (all) => endedCards(all).length > 0, { sessionId: id });
+    expect(endedCards(items)[0]).toMatchObject({ state: 'closed', archived: false, unsavedWork: { uncommitted: false, unpushedCommits: 1 } });
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it('archives a worktree Session with nothing unsaved, removing its worktree', async () => {
+    const { main, id, forge, path } = await babysat('gh', {}, { worktree: true });
+    forge({ state: 'merged' });
+    await pollEnded(main);
+
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived');
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('waits for the run going to end before archiving', async () => {
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }, { chunks: ['Working.'], hold: 'second' }] });
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Working.'), { sessionId: id });
+    forge({ state: 'merged' });
+    await pollEnded(main);
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).mergeRequestState === 'merged');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await sessionNow(main, id)).toMatchObject({ status: 'working' });
+
+    machine.release('second');
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived');
+  });
+
+  it('archives after a restart a Session whose Merge request ended while its run went on', async () => {
+    const { machine, main, id, forge } = await babysat('gh', {}, { userDataDir: tempDir('loom-babysit-'), turns: [{ chunks: ['Done.'] }, { chunks: ['Working.'], hold: 'second' }] });
+    await main.api.invoke('sessions.send', { id, prompt: 'Carry on' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Working.'), { sessionId: id });
+    forge({ state: 'merged' });
+    await pollEnded(main);
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).mergeRequestState === 'merged');
+    await main.close();
+
+    const again = await startMain({ machine, userDataDir: main.userDataDir, now: main.clock.now() });
+    await waitFor(again.api, 'environments', ready);
+    await waitFor(again.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived');
+  });
+
+  it("archives a checkout Session whatever its checkout holds", async () => {
+    const { main, id, forge, checkout } = await babysat('gh');
+    writeFileSync(join(checkout, 'README.md'), 'half done\n');
+    forge({ state: 'merged' });
+    await pollEnded(main);
+
+    await waitFor(main.api, 'sessions', (sessions) => sessionOf(sessions, id).status === 'archived');
+    expect(readFileSync(join(checkout, 'README.md'), 'utf8')).toBe('half done\n');
   });
 });
 

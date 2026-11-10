@@ -30,7 +30,7 @@ _Avoid_: Thought level, variant, reasoning effort
 The agent is currently running; the **Session** does not need the user's attention.
 
 **Waiting** (Session status):
-The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, is held on an **Approval request**, or its **Merge request** has new feedback from **Babysit**; the **Session** needs the user's attention.
+The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, is held on an **Approval request**, its **Merge request** has new feedback from **Babysit**, or was merged or closed while its worktree has uncommitted changes or unpushed commits; the **Session** needs the user's attention.
 
 **Queued message**:
 A message the user, or **Babysit**'s auto-prompt, sent a **Working** Session, waiting in the Session's queue to be sent to the agent once the runs before it settle. The user can remove it, or send it now: interrupt the run and send it. **Stop** interrupts the run and keeps the queue. "The queue" always means a Session's queued messages, never the **Inbox**.
@@ -58,7 +58,7 @@ A request to merge a **Session**'s branch, whatever the **Forge** calls it (MR o
 _Avoid_: PR (except when talking about GitHub specifically)
 
 **Babysit**:
-Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on (at most 3 times in a row without a message from the user, then it pauses and the Session goes **Waiting**); a merged or closed Merge request archives the Session. The user can stop and restart the watch per **Session**; a newly linked Merge request is always watched.
+Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on (at most 3 times in a row without a message from the user, then it pauses and the Session goes **Waiting**); a merged or closed Merge request archives the Session, once its run has ended, unless its worktree has unsaved work (the Session goes **Waiting** instead); one closed without merging is left unread. The user can stop and restart the watch per **Session**; a newly linked Merge request is always watched.
 _Avoid_: Watch, monitor
 
 ## Relationships
