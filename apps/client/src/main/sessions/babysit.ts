@@ -2,7 +2,7 @@
 // brings what is new on it back to its Session. Nothing a poll sees reaches
 // the Session straight away: feedback waits out a quiet window, so a burst is
 // one wake-up, and everything waits for the agent to be done with its run.
-import type { BabysitCheck, BabysitCi, BabysitStatus, FeedbackInfo, FeedbackItem, MergeRequestState, Project, Session } from '../../shared/api';
+import type { BabysitCheck, BabysitCi, BabysitStatus, EndedMergeRequestState, FeedbackInfo, FeedbackItem, MergeRequestState, Project, Session } from '../../shared/api';
 import type { Clock, TimerHandle } from '../clock';
 import type { BridgeCall } from '../environments/exec';
 import { readMergeRequestActivity, type MergeRequestActivity } from '../projects/merge-request-activity';
@@ -25,6 +25,8 @@ export interface BabysitSessions {
   setMergeRequestState(id: number, state: MergeRequestState): void;
   /** Adds what is given to the Session; false if it must wait, the agent being mid-run. */
   deliverFeedback(id: number, delivery: FeedbackDelivery): Promise<boolean>;
+  /** Archives the Session, or brings it to the user; false if it must wait, the agent being mid-run. */
+  endMergeRequest(id: number, state: EndedMergeRequestState): Promise<boolean>;
 }
 
 export interface BabysitOptions {
@@ -55,6 +57,8 @@ interface BabysitRecord {
   checks?: BabysitCheck[];
   lastPollAt?: number;
   stale: boolean;
+  /** Merged or closed, as a poll found it, until the Session has been archived or told. */
+  ended?: EndedMergeRequestState;
 }
 
 export class Babysit {
@@ -134,7 +138,8 @@ export class Babysit {
   /** Polls every watched Merge request now: at startup, and when the window gains focus. */
   pollAll(): void {
     if (this.stopped) return;
-    for (const id of this.records.keys()) void this.poll(id);
+    // One that ended before a restart, but wasn't dealt with, is dealt with now.
+    for (const [id, record] of this.records) void (record.ended ? this.flush(id) : this.poll(id));
   }
 
   /** Stops watching, and resolves once what was seen is written. */
@@ -167,8 +172,11 @@ export class Babysit {
     this.options.sessions.setBabysit(id, statusOf(record));
     this.save(id, record);
     if (activity && activity.state !== 'open') {
+      this.clearTimers(id);
+      record.ended = activity.state;
+      this.save(id, record);
       this.options.sessions.setMergeRequestState(id, activity.state);
-      return this.clearTimers(id);
+      return this.flush(id);
     }
     this.armNextPoll(id, record);
     if (activity) void this.flush(id);
@@ -230,6 +238,7 @@ export class Babysit {
   private async flush(id: number): Promise<void> {
     const record = this.records.get(id);
     if (!record || this.stopped || this.flushing.has(id) || this.off.has(id)) return;
+    if (record.ended) return this.end(id, record, record.ended);
     const quiet = record.pending.length > 0 && record.quietUntil !== undefined && record.quietUntil <= this.options.clock.now();
     if (!quiet && !record.info.length) return;
     const info = [...record.info];
@@ -250,6 +259,22 @@ export class Babysit {
     record.info = record.info.filter((entry) => !info.includes(entry));
     record.pending = record.pending.filter((entry) => !items.includes(entry));
     if (!record.pending.length) record.quietUntil = undefined;
+    this.save(id, record);
+  }
+
+  /** Has the Session archived, or brought to the user, for its Merge request merged or closed; tried again as the Session changes. */
+  private async end(id: number, record: BabysitRecord, state: EndedMergeRequestState): Promise<void> {
+    this.flushing.add(id);
+    let done = false;
+    try {
+      done = await this.options.sessions.endMergeRequest(id, state);
+    } catch (error) {
+      console.error(`could not archive Session ${id} for its Merge request ${state}:`, error);
+    } finally {
+      this.flushing.delete(id);
+    }
+    if (!done || this.records.get(id) !== record) return;
+    record.ended = undefined;
     this.save(id, record);
   }
 

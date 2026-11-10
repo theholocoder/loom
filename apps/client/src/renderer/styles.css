@@ -278,7 +278,7 @@ input.prefix { background: var(--panel2); border: 1px solid var(--line); border-
 /* Sidebar rows and status are buttons here. */
 button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-align: left; }
 .st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }
-.st-waiting-approval, .st-waiting-feedback { color: var(--wait); }
+.st-waiting-approval, .st-waiting-feedback, .st-waiting-unsaved-work { color: var(--wait); }
 .bubble { overflow-wrap: anywhere; }
 .tool.failed { border-color: var(--err); } .tool.failed .name { color: var(--err); }
 .composer-wrap button.send:disabled { opacity: .5; cursor: default; filter: none; }

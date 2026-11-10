@@ -1,10 +1,17 @@
 // What Babysit found on the Session's Merge request, in its transcript: a card
 // of feedback the agent may need to act on, and quiet notes of progress.
-import { CircleCheckBig, MessageSquareWarning } from 'lucide-react';
-import { codePlace, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
+import { CircleCheckBig, GitMerge, GitPullRequestClosed, MessageSquareWarning, type LucideIcon } from 'lucide-react';
+import { codePlace, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type EndedMergeRequestState, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
 import { AskCard, ErrorAlert, useAction } from './Questions';
+import { unsavedWorkSummary } from './Archive';
 
 const CI_LABELS: Record<BabysitCi, string> = { pending: 'CI pending', passed: 'CI passed', failed: 'CI failed' };
+
+/** How a Merge request no longer open shows: its icon, and what became of it. */
+export const ENDED: Record<EndedMergeRequestState, { icon: LucideIcon; label: string }> = {
+  merged: { icon: GitMerge, label: 'Merged' },
+  closed: { icon: GitPullRequestClosed, label: 'Closed' },
+};
 
 /** The feedback, its CI status, Send to agent while it can be sent, and Open on Forge. */
 export function FeedbackCard({
@@ -112,6 +119,30 @@ export function FeedbackInfoCard({ item, onOpen }: { item: Extract<TranscriptIte
     <div className="interruption merge-request" role="note">
       <CircleCheckBig className="sm" />
       <span>{item.event === 'approved' ? `${item.author} approved the Merge request` : 'CI passed'}</span>
+      <span aria-hidden="true">·</span>
+      <button type="button" className="link" onClick={onOpen}>
+        Open
+      </button>
+    </div>
+  );
+}
+
+/**
+ * "Merge request #12 was merged. Loom archived this Session.", or, a worktree
+ * holding unsaved work, why it wasn't and what is left to do.
+ */
+export function MergeRequestEndedCard({ item, forge, onOpen }: { item: Extract<TranscriptItem, { kind: 'merge-request-ended' }>; forge: ForgeKind | undefined; onOpen: () => void }) {
+  const Icon = ENDED[item.state].icon;
+  const ended = `Merge request ${mergeRequestRef(forge, item.number)} was ${item.state === 'merged' ? 'merged' : 'closed without merging'}`;
+  const outcome = item.archived
+    ? `${ended}. Loom archived this Session.`
+    : item.unsavedWork
+      ? `${ended}, but this Session's worktree has ${unsavedWorkSummary(item.unsavedWork)}, so Loom didn't archive it. Archive it, or carry on.`
+      : `${ended}, but Loom couldn't archive this Session.`;
+  return (
+    <div className="interruption merge-request" role="note">
+      <Icon className="sm" />
+      <span>{outcome}</span>
       <span aria-hidden="true">·</span>
       <button type="button" className="link" onClick={onOpen}>
         Open

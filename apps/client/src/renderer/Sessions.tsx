@@ -15,13 +15,14 @@ import { Markdown } from './Markdown';
 import { useArchive, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
-import { FeedbackCard, FeedbackInfoCard } from './FeedbackCards';
+import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers, useCheckoutModels } from './ModelPicker';
 import { AttachmentList, Composer } from './Composer';
 import type { PaletteAction } from './CommandPalette';
 
-const WAITING: Record<WaitingReason, { label: string; icon: LucideIcon }> = {
+/** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
+const WAITING: Record<Exclude<WaitingReason, 'unsaved-work'>, { label: string; icon: LucideIcon }> = {
   finished: { label: 'Finished', icon: CircleCheckBig },
   stopped: { label: 'Stopped', icon: Pause },
   question: { label: 'Asked a question', icon: MessageCircleQuestionMark },
@@ -37,7 +38,10 @@ export function statusOf(session: Session): { label: string; icon: LucideIcon; c
   if (session.status === 'working') return { label: 'Working', icon: LoaderCircle, className: 'st-working' };
   if (session.status === 'archived') return { label: 'Archived', icon: Archive, className: 'st-archived' };
   const reason = session.waitingReason ?? 'finished';
-  return { ...WAITING[reason], className: `st-waiting-${reason}` };
+  const className = `st-waiting-${reason}`;
+  if (reason !== 'unsaved-work') return { ...WAITING[reason], className };
+  const { label, icon } = ENDED[session.mergeRequestState === 'closed' ? 'closed' : 'merged'];
+  return { label: `${label} with unsaved work`, icon, className };
 }
 
 export function StatusIcon({ session }: { session: Session }) {
@@ -557,6 +561,8 @@ export function SessionView({
               />
             ) : item.kind === 'feedback-info' ? (
               <FeedbackInfoCard key={item.id} item={item} onOpen={() => openLink(item.url)} />
+            ) : item.kind === 'merge-request-ended' ? (
+              <MergeRequestEndedCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
             ) : (
               <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
             ),

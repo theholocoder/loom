@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type Session, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -157,6 +157,8 @@ export class Sessions {
   private readonly mergeRequestLinks = new Map<number, MergeRequestLinkage>();
   /** Each Session's latest Merge request lookup: an earlier one still going is stale. */
   private readonly mergeRequestLookups = new Map<number, number>();
+  /** What is being looked up after each Session's last turn, until it is done. */
+  private readonly afterTurns = new Map<number, Promise<unknown>>();
   /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
   private readonly linkCalls = new Map<number, Set<string>>();
   /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
@@ -976,6 +978,48 @@ export class Sessions {
   }
 
   /**
+   * Archives the Session, its Merge request merged or closed as Babysit
+   * found it, with a card saying so; one closed without merging is left
+   * unread, for the user to notice. A worktree with uncommitted changes or
+   * unpushed commits holds the archive back: the Session goes Waiting
+   * (`unsaved-work`) instead. A checkout Session's checkout is never looked
+   * at, as for any archive. False if it must wait: the agent is mid-run, or
+   * asking the user.
+   */
+  async endMergeRequest(id: number, state: EndedMergeRequestState): Promise<boolean> {
+    await this.loadTranscript(id);
+    if (this.shuttingDown) return false;
+    if (this.inRun(id)) return false;
+    // The turn just ended may have opened another Merge request on the branch, which takes over.
+    const ended = this.get(id).mergeRequest;
+    await this.afterTurns.get(id)?.catch(() => {});
+    const { status, mergeRequest } = this.get(id);
+    // Unlinked meanwhile, on the default branch, it still ended for this Session.
+    if (this.shuttingDown || status === 'archived' || !ended || (mergeRequest && mergeRequest.url !== ended.url)) return true;
+    if (this.inRun(id)) return false;
+    const card = { kind: 'merge-request-ended' as const, number: ended.number, url: ended.url, state };
+    let result: ArchiveResult;
+    try {
+      result = await this.archive({ id });
+    } catch (error) {
+      // The worktree couldn't be removed: the Session stays, saying why.
+      const message = (error as Error).message;
+      this.addItem(id, { ...card, archived: false });
+      this.addItem(id, { kind: 'error', message });
+      this.setStatus(id, { status: 'waiting', waitingReason: 'error', error: message });
+      return true;
+    }
+    if (!result.archived) {
+      this.addItem(id, { ...card, archived: false, unsavedWork: result.unsavedWork });
+      this.setStatus(id, { status: 'waiting', waitingReason: 'unsaved-work' });
+      return true;
+    }
+    this.addItem(id, { ...card, archived: true });
+    if (state === 'closed') this.setUnread({ id, unread: true });
+    return true;
+  }
+
+  /**
    * Adds what Babysit has for the Session to its transcript: quiet info cards,
    * and feedback. With auto-prompt on, the feedback goes to the agent as one
    * message, queued behind a run going, unless the Session can't be given it
@@ -1374,7 +1418,11 @@ export class Sessions {
 
   /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */
   private afterTurn(id: number): void {
-    void this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
+    const looking = this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
+    this.afterTurns.set(id, looking);
+    void looking.finally(() => {
+      if (this.afterTurns.get(id) === looking) this.afterTurns.delete(id);
+    });
   }
 
   /** Sends `message` as the next run, the Session staying Working. */

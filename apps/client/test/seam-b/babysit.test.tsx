@@ -295,3 +295,51 @@ describe('the auto-prompt default in Settings', () => {
     await waitFor(() => expect(box.checked).toBe(true));
   });
 });
+
+describe('a Merge request merged or closed', () => {
+  it('badges a Session held back by unsaved work in the Inbox, and says why in its conversation', () => {
+    const main = new FakeMain({ projects: [project], sessions: [session({ waitingReason: 'unsaved-work', mergeRequestState: 'merged' })] });
+    main.publish('transcript', [{ kind: 'merge-request-ended', id: 0, number: 12, url, state: 'merged', archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 2, detached: false } }], { sessionId: 1 });
+    render(
+      <ApiProvider api={main}>
+        <App />
+      </ApiProvider>,
+    );
+    const row = screen.getByRole('listitem', { name: 'Fix login' });
+    expect(within(row).getByRole('img', { name: 'Merged with unsaved work' })).toBeTruthy();
+
+    fireEvent.click(within(row).getByRole('button', { name: 'Fix login' }));
+    const log = screen.getByRole('log', { name: 'Conversation' });
+    expect(log.textContent).toContain("Merge request #12 was merged, but this Session's worktree has uncommitted changes and 2 unpushed commits, so Loom didn't archive it.");
+    fireEvent.click(within(log).getByRole('button', { name: 'Open' }));
+    expect(calls(main, 'links.open')).toEqual([{ url }]);
+  });
+
+  it('badges one closed without merging as closed', () => {
+    const main = new FakeMain({ projects: [project], sessions: [session({ waitingReason: 'unsaved-work', mergeRequestState: 'closed' })] });
+    render(
+      <ApiProvider api={main}>
+        <App />
+      </ApiProvider>,
+    );
+    expect(within(screen.getByRole('listitem', { name: 'Fix login' })).getByRole('img', { name: 'Closed with unsaved work' })).toBeTruthy();
+  });
+
+  it('marks the Archived section and row of a Session archived as closed without merging, with a card saying so', () => {
+    const main = new FakeMain({ projects: [project], sessions: [session({ status: 'archived', waitingReason: undefined, mergeRequestState: 'closed', unread: true })] });
+    main.publish('transcript', [{ kind: 'merge-request-ended', id: 0, number: 12, url, state: 'closed', archived: true }], { sessionId: 1 });
+    render(
+      <ApiProvider api={main}>
+        <App />
+      </ApiProvider>,
+    );
+    const section = screen.getByRole('button', { name: 'Archived' });
+    expect(within(section).getByRole('img', { name: 'Unread' })).toBeTruthy();
+    fireEvent.click(section);
+    const row = screen.getByRole('button', { name: 'Fix login' });
+    expect(within(row).getByRole('img', { name: 'Unread' })).toBeTruthy();
+
+    fireEvent.click(row);
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).toContain('Merge request #12 was closed without merging. Loom archived this Session.');
+  });
+});

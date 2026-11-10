@@ -119,7 +119,7 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
           <StatusIcon session={session} />
           <span className="title grow ellipsis">{session.title}</span>
           {session.worktreeMissing && <WorktreeMissing />}
-          {session.unread && <span className="unread-dot" role="img" aria-label="Unread" />}
+          {session.unread && <UnreadDot />}
           <time className="time" dateTime={at.toISOString()} title={at.toLocaleString()}>
             {timeOf(session.updatedAt, now)}
           </time>
@@ -218,6 +218,11 @@ interface SessionListProps {
   onSelect: (session: Session) => void;
 }
 
+/** The mark of news the user hasn't opened yet. */
+function UnreadDot() {
+  return <span className="unread-dot" role="img" aria-label="Unread" />;
+}
+
 /** A collapsible sidebar section (Working, Archived) below the Inbox. */
 function Section({ label, icon: Icon, ...list }: { label: string; icon: LucideIcon } & SessionListProps) {
   const [open, setOpen] = useState(false);
@@ -229,6 +234,7 @@ function Section({ label, icon: Icon, ...list }: { label: string; icon: LucideIc
         <Icon className="sm" />
         {label}
         <span className="grow" />
+        {list.sessions.some((s) => s.unread) && <UnreadDot />}
         {list.sessions.length}
       </button>
       {open && <SessionRows {...list} />}
@@ -242,6 +248,7 @@ function SessionRows({ sessions, selectedId, onSelect }: SessionListProps) {
     <button key={session.id} type="button" className={`mini${session.id === selectedId ? ' sel' : ''}`} aria-label={session.title} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => onSelect(session)}>
       <StatusIcon session={session} />
       <span className="grow ellipsis">{session.title}</span>
+      {session.unread && <UnreadDot />}
     </button>
   ));
 }
