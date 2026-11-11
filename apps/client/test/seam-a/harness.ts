@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach } from 'vitest';
+import { afterAll, afterEach } from 'vitest';
 import { createLoom, type Loom } from '../../src/main/loom';
 import type { Clock, TimerHandle } from '../../src/main/clock';
 import type { AgentAdapter } from '../../src/main/agents/adapter';
@@ -60,7 +60,9 @@ export class ManualClock implements Clock {
 }
 
 export * from './machine';
-import { Machine } from './machine';
+import { Machine, removeTemplates } from './machine';
+
+afterAll(removeTemplates);
 
 export interface MainHarness {
   api: LoomApi;

@@ -14,12 +14,15 @@ const session = (id: number, check: (s: Session) => boolean) => (sessions: Sessi
 async function started(workingCopy: 'worktree' | 'checkout' = 'worktree', turns = 1, defaultBranch = 'main', maxUntrackedCounted?: number) {
   const machine = tempMachine();
   machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: Array.from({ length: turns }, () => ({ chunks: ['Done.'] })) } });
-  const origin = machine.gitOrigin('billing-api', defaultBranch);
-  const checkout = machine.gitClone(origin, 'billing-api');
-  git(checkout, 'config', 'core.autocrlf', 'false');
-  machine.commit(checkout, 'app.js', 'one\ntwo\nthree\n');
-  git(checkout, 'push', '--quiet', 'origin', `HEAD:${defaultBranch}`);
-  git(checkout, 'fetch', '--quiet', 'origin');
+  const { origin, checkout } = machine.setUp(defaultBranch, (m) => {
+    const origin = m.gitOrigin('billing-api', defaultBranch);
+    const checkout = m.gitClone(origin, 'billing-api');
+    git(checkout, 'config', 'core.autocrlf', 'false');
+    m.commit(checkout, 'app.js', 'one\ntwo\nthree\n');
+    git(checkout, 'push', '--quiet', 'origin', `HEAD:${defaultBranch}`);
+    git(checkout, 'fetch', '--quiet', 'origin');
+    return { origin, checkout };
+  });
   const main = await startMain({ machine, maxUntrackedCounted });
   await waitFor(main.api, 'environments', ready);
   const project = await main.api.invoke('projects.link', { path: checkout });
