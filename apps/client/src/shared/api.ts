@@ -384,6 +384,9 @@ export interface UnsavedWork {
 /** What `sessions.archive` did: archived, or held back by unsaved work. */
 export type ArchiveResult = { archived: true } | { archived: false; unsavedWork: UnsavedWork };
 
+/** What `sessions.delete` did: deleted, or held back by unsaved work. */
+export type DeleteResult = { deleted: true } | { deleted: false; unsavedWork: UnsavedWork };
+
 export interface Session {
   id: number;
   projectId: number;
@@ -1239,6 +1242,14 @@ export interface Commands {
    * A Session whose worktree is missing archives as it is.
    */
   'sessions.archive': { params: { id: number; discard?: boolean }; result: ArchiveResult };
+  /**
+   * Deletes a Session for good, whatever its status: its agent is stopped
+   * and its worktree removed as `sessions.archive` would (its local branch
+   * kept, held back by unsaved work unless `discard`), then its record, its
+   * conversation and its attachments are gone. Its usage still counts on the
+   * dashboard. Rejects while the Session is being archived or reopened.
+   */
+  'sessions.delete': { params: { id: number; discard?: boolean }; result: DeleteResult };
   /**
    * Asks a Waiting Session's agent to open its branch's Merge request, or
    * update it, with a canned prompt; Loom never creates one itself. Rejects

@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -121,6 +121,10 @@ export class Sessions {
    * outcome, and is closed if the Session was archived; its closing isn't a failure.
    */
   private readonly archiving = new Map<number, Promise<unknown>>();
+  /** Deletions running, by Session: archived first, then forgotten. */
+  private readonly deleting = new Map<number, Promise<unknown>>();
+  /** Sessions deleted since the Client started, whose late news is dropped; ids are never used again. */
+  private readonly deleted = new Set<number>();
   /** Archived Sessions being reopened, by Session. */
   private readonly reopening = new Map<number, Promise<void>>();
   /** Projects being removed, which no new Session may start on. */
@@ -489,6 +493,7 @@ export class Sessions {
     if (!project) throw new Error("This Session's Project was removed, so it can't be reopened.");
     if (this.removing.has(project.id)) throw beingRemoved(project);
     if (this.archiving.has(id)) throw new Error('This Session is being archived.');
+    if (this.deleting.has(id)) throw new Error('This Session is being deleted.');
     if (session.status !== 'archived') throw new Error('This Session is no longer archived.');
   }
 
@@ -979,6 +984,11 @@ export class Sessions {
    * that fails can be tried again.
    */
   async archive({ id, discard = false }: { id: number; discard?: boolean }): Promise<ArchiveResult> {
+    if (this.deleting.has(id)) throw new Error('This Session is being deleted.');
+    return this.archiveTracked(id, discard);
+  }
+
+  private async archiveTracked(id: number, discard: boolean): Promise<ArchiveResult> {
     // An agent still starting up for this Session waits for this, and is closed if the Session is archived.
     const archiving = this.archiveSession(id, discard);
     this.archiving.set(id, archiving);
@@ -990,6 +1000,79 @@ export class Sessions {
   }
 
   /**
+   * Deletes the Session for good: archives it first, as `archive` does
+   * (its agent stopped, its worktree removed, its branch kept, unsaved work
+   * holding it back unless `discard`), then forgets it: its record, its
+   * conversation, its queue and its attachments. Its usage stays.
+   */
+  async delete({ id, discard = false }: { id: number; discard?: boolean }): Promise<DeleteResult> {
+    const session = this.get(id);
+    if (this.deleting.has(id)) throw new Error('This Session is already being deleted.');
+    if (this.archiving.has(id)) throw new Error('This Session is being archived.');
+    if (this.reopening.has(id)) throw new Error('This Session is being reopened.');
+    const project = this.options.project(session.projectId);
+    if (project && this.removing.has(project.id)) throw beingRemoved(project);
+    const deleting = this.deleteSession(id, discard);
+    this.deleting.set(id, deleting);
+    try {
+      return await deleting;
+    } finally {
+      if (this.deleting.get(id) === deleting) this.deleting.delete(id);
+    }
+  }
+
+  private async deleteSession(id: number, discard: boolean): Promise<DeleteResult> {
+    const session = this.get(id);
+    // An archived worktree Session's worktree may be left over: its Environment must say, or the worktree would outlive the Session.
+    if (session.status === 'archived' && session.workingCopy.kind === 'worktree' && this.options.project(session.projectId)) {
+      await pathExists(this.environmentOf(session), session.workingCopy.path);
+    }
+    const result = await this.archiveTracked(id, discard);
+    if (!result.archived) return { deleted: false, unsavedWork: result.unsavedWork };
+    // What was being looked up after its last turn ends before it is forgotten.
+    await this.afterTurns.get(id)?.catch(() => {});
+    await this.forget(id);
+    return { deleted: true };
+  }
+
+  /** Forgets an archived Session: everything Loom keeps of it but its usage. */
+  private async forget(id: number): Promise<void> {
+    for (const timers of [this.checkpoints, this.idleStops, this.stuckWatches]) {
+      const handle = timers.get(id);
+      if (handle !== undefined) this.options.clock.clearTimeout(handle);
+      timers.delete(id);
+    }
+    for (const map of [
+      this.sessions,
+      this.transcripts,
+      this.loading,
+      this.live,
+      this.closing,
+      this.asks,
+      this.grants,
+      this.approvedCalls,
+      this.denyMessages,
+      this.switching,
+      this.interrupting,
+      this.mergeRequestLinks,
+      this.mergeRequestLookups,
+      this.afterTurns,
+      this.linkCalls,
+      this.reportedCosts,
+      this.autoPromptsInARow,
+      this.runModels,
+      this.spans,
+    ])
+      map.delete(id);
+    this.deleted.add(id);
+    // After the writes made before, in order; its events, queue and Babysit record go with it.
+    this.write((trx) => trx.deleteFrom('sessions').where('id', '=', id).execute());
+    this.publish();
+    await this.flush();
+    await this.options.attachments.remove(id).catch((error: unknown) => console.error(`could not remove Session ${id}'s attachments:`, error));
+  }
+
+  /**
    * Removes a Project: archives every one of its Sessions, as `archive`
    * would, then calls `hide` while no new Session can start on it. With any
    * worktree's work unsaved, archives none and says which, unless `discard`.
@@ -998,8 +1081,8 @@ export class Sessions {
     if (this.removing.has(projectId)) throw new Error('This Project is already being removed.');
     this.removing.add(projectId);
     try {
-      // A reopen under way either gets its Session Working first, to be archived again here, or is turned down.
-      await Promise.allSettled(this.list().flatMap((s) => (s.projectId === projectId && this.reopening.has(s.id) ? [this.reopening.get(s.id)!] : [])));
+      // A reopen under way either gets its Session Working first, to be archived again here, or is turned down; a deletion under way ends first.
+      await Promise.allSettled(this.list().flatMap((s) => (s.projectId === projectId ? [this.reopening.get(s.id), this.deleting.get(s.id)].filter((p) => p !== undefined) : [])));
       const result = await this.archiveProject(projectId, discard);
       // A Session that was starting as the removal began has started by now.
       const late = result.removed && this.list().some((s) => s.projectId === projectId && s.status !== 'archived');
@@ -1030,6 +1113,8 @@ export class Sessions {
     );
     const unsaved: UnsavedSession[] = [];
     for (const session of [...open(), ...leftOver.flat()]) {
+      // Deleted meanwhile: nothing of it is left to archive.
+      if (!this.sessions.has(session.id)) continue;
       const result = await this.archive({ id: session.id, discard });
       // The agent wrote in its last moment.
       if (!result.archived) unsaved.push({ sessionId: session.id, title: session.title, unsavedWork: result.unsavedWork });
@@ -1102,7 +1187,7 @@ export class Sessions {
     }
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
-    void this.lookUpMergeRequestState(id);
+    if (!this.deleting.has(id)) void this.lookUpMergeRequestState(id);
     for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
   }
 
@@ -1133,6 +1218,8 @@ export class Sessions {
     // The turn just ended may have opened another Merge request on the branch, which takes over.
     const ended = this.get(id).mergeRequest;
     await this.afterTurns.get(id)?.catch(() => {});
+    // Being deleted, or gone already: nothing is left to archive.
+    if (this.deleting.has(id) || !this.sessions.has(id)) return true;
     const { status, mergeRequest } = this.get(id);
     // Unlinked meanwhile, on the default branch, it still ended for this Session.
     if (this.shuttingDown || status === 'archived' || !ended || (mergeRequest && mergeRequest.url !== ended.url)) return true;
@@ -1929,6 +2016,8 @@ export class Sessions {
   }
 
   private writeItem(id: number, { id: seq, kind, ...data }: TranscriptItem): void {
+    // Its row is gone: the event would fail the whole transaction it is in.
+    if (this.deleted.has(id)) return;
     const row: EventsTable = { session_id: id, seq, kind, data: JSON.stringify(data) };
     this.write((trx) =>
       trx
@@ -2069,6 +2158,8 @@ export class Sessions {
   }
 
   private update(id: number, change: Partial<Session>): void {
+    // A deleted Session is gone: late news of it counts for nothing.
+    if (this.deleted.has(id)) return;
     this.sessions.set(id, withoutUndefined({ ...this.get(id), ...change }));
     this.publish();
   }

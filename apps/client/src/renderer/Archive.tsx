@@ -75,12 +75,12 @@ export function unsavedWorkSummary({ uncommitted, unpushedCommits }: UnsavedWork
   return uncommitted && unpushedCommits ? `uncommitted changes and ${commits}` : uncommitted ? 'uncommitted changes' : commits;
 }
 
-/** What archiving would lose, in words. */
-export function unsavedWorkText(work: UnsavedWork): string {
+/** What archiving (or deleting, as `doing` says) would lose, in words. */
+export function unsavedWorkText(work: UnsavedWork, doing: 'Archiving' | 'Deleting' = 'Archiving'): string {
   const { uncommitted, unpushedCommits, detached } = work;
   const what = unsavedWorkSummary(work);
   const kept = !unpushedCommits ? '' : detached ? ' Its HEAD is on no branch, so those commits will be lost.' : ' Commits stay on its local branch.';
-  return `This Session's worktree has ${what}. Archiving removes the worktree${uncommitted ? ' and discards the changes' : ''}.${kept}`;
+  return `This Session's worktree has ${what}. ${doing} removes the worktree${uncommitted ? ' and discards the changes' : ''}.${kept}`;
 }
 
 function DiscardWarning({ unsavedWork, onDiscard, onCancel }: { unsavedWork: UnsavedWork; onDiscard: () => Promise<void>; onCancel: () => void }) {

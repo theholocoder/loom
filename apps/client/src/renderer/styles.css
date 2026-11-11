@@ -442,5 +442,5 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .context { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .context .bar { display: block; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
 .context .bar > span { display: block; height: 100%; background: var(--accent); }
-.info-foot { padding-top: 12px; display: flex; justify-content: flex-end; }
+.info-foot { padding-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
 .removed-tag { margin-left: 6px; font-size: 11px; padding: 0 6px; vertical-align: 1px; }
