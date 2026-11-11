@@ -10,6 +10,7 @@ import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
 import { ChangesView, type DiffComments } from './Changes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
+import { MergeRequestPanel, type MergeRequestFocus } from './MergeRequestPanel';
 import { PanelArea, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
 import { Select } from './Popover';
@@ -348,6 +349,7 @@ export type SessionCommand =
   | 'openMergeRequest'
   | 'requestMergeRequest'
   | 'linkMergeRequest'
+  | 'toggleMergeRequest'
   | 'openInEditor'
   | 'openInTerminal'
   | 'retry'
@@ -388,12 +390,19 @@ export function SessionView({
   // An archived Session takes a message, which reopens it, while its Project is there.
   const readOnly = session.status === 'archived' && !project;
   const [error, setError] = useState<string>();
-  /** The header's popover open, if any: Session details, the Merge request's, its checks, Link issue or the ⋯ menu. */
+  /** The header's popover open, if any: Session details, the Merge request's checks, Link issue or the ⋯ menu. */
   const [popover, setPopover] = useState<HeaderPopover>();
+  /** Where the Merge request Panel was last asked to take the user. */
+  const [mergeRequestFocus, setMergeRequestFocus] = useState<MergeRequestFocus>();
   // Only a Session that can still work has Terminals: not archived, its worktree there.
   const dockable = session.status !== 'archived' && !session.worktreeMissing;
   const terminals = useTopic('terminals', { sessionId: session.id });
   const panels = usePanels(session.id, terminals);
+  /** Shows the Merge request Panel, at its link form or its reviews when asked. */
+  const showMergeRequest = (to?: MergeRequestFocus['to']) => {
+    panels.show('merge-request');
+    if (to) setMergeRequestFocus((was) => ({ to, n: (was?.n ?? 0) + 1 }));
+  };
   const { side, dock } = panels.state;
   const sideShown = panels.sideShown;
   const archiver = useArchive();
@@ -433,7 +442,8 @@ export function SessionView({
       delete: async () => deleter.delete(session),
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
       requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
-      linkMergeRequest: async () => setPopover({ kind: 'merge-request', linking: true }),
+      linkMergeRequest: async () => showMergeRequest('link'),
+      toggleMergeRequest: async () => panels.toggle('merge-request'),
       openInEditor: () => api.invoke('sessions.openInEditor', { id }),
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
       retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
@@ -548,6 +558,8 @@ export function SessionView({
     switch (kindOf(panel)) {
       case 'changes':
         return <ChangesView session={session} comments={diffComments} />;
+      case 'merge-request':
+        return <MergeRequestPanel session={session} project={project} focus={mergeRequestFocus} onError={setError} />;
       case 'terminal': {
         const terminal = terminals?.find((t) => t.id === terminalOf(panel));
         return terminal && <TerminalView key={terminal.id} terminal={terminal} focusPending={panels.focus === panel} onFocused={panels.onFocused} />;
@@ -571,6 +583,7 @@ export function SessionView({
         dock={dockable ? { shown: dock.open, onToggle: () => panels.toggleArea('dock') } : undefined}
         menu={menu}
         onShowChanges={() => panels.show('changes')}
+        onShowMergeRequest={showMergeRequest}
         onError={setError}
       >
         {archiver.dialog}

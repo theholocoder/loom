@@ -12,6 +12,7 @@ import {
   FileDiff,
   FolderGit2,
   FolderOpen,
+  GitPullRequest,
   GitPullRequestArrow,
   GitPullRequestCreate,
   Info,
@@ -35,7 +36,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { mergeRequestRef, type Project, type Session } from '../shared/api';
+import { FORGE_NAMES, mergeRequestRef, type Project, type Session } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
@@ -395,8 +396,13 @@ function paletteActions(app: {
     active?.status === 'waiting' && shortcutAction('reply', Reply, () => app.reply(active)),
     app.retryable && shortcutAction('retry', RotateCw, () => app.command('retry')),
     mergeRequest && {
-      ...shortcutAction('mergeRequest', ExternalLink, () => app.command('openMergeRequest')),
-      label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} for this Session`,
+      ...shortcutAction('mergeRequest', GitPullRequest, () => app.command('toggleMergeRequest')),
+      label: `Show Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} for this Session`,
+    },
+    mergeRequest && {
+      label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} on ${project?.forge.kind ? FORGE_NAMES[project.forge.kind] : 'the Forge'}`,
+      icon: ExternalLink,
+      run: () => app.command('openMergeRequest'),
     },
     canCreateMergeRequest && {
       ...shortcutAction('mergeRequest', GitPullRequestCreate, () => app.command('requestMergeRequest')),

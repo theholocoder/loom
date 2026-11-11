@@ -56,7 +56,7 @@ export const SHORTCUTS = {
   inboxPosition: { label: 'Open the nth Waiting Session in the Inbox', shortcut: { key: '1', ctrl: true, code: 'Digit1' }, display: 'Ctrl 1…9' },
   reply: { label: 'Reply to this Session', shortcut: { key: 'r' } },
   retry: { label: 'Retry the last prompt', shortcut: { key: 'enter', ctrl: true, shift: true } },
-  mergeRequest: { label: 'Create or open the Merge request', shortcut: { key: 'm', ctrl: true, shift: true } },
+  mergeRequest: { label: 'Show or create the Merge request', shortcut: { key: 'm', ctrl: true, shift: true } },
   openInEditor: { label: 'Open in editor', shortcut: { key: 'e', ctrl: true, shift: true } },
   // The one shortcut that also works while a terminal has the focus.
   toggleTerminal: { label: 'Toggle terminal', shortcut: { key: '`', ctrl: true, code: 'Backquote' } },

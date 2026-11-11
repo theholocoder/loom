@@ -139,6 +139,31 @@ describe('what counts as feedback', () => {
     expect(await cardsOf(main, id)).toEqual([]);
   });
 
+  it("counts others' reviews and comments for the Glance strip, changes requested while a reviewer's latest verdict asks for them", async () => {
+    const { main, id, forge } = await babysat('gh');
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.reviews).toEqual({ reviews: 0, comments: 0, changesRequested: false });
+
+    forge({
+      reviews: [
+        { id: 1, author: 'alice', state: 'CHANGES_REQUESTED', body: 'Needs work', url: `${URLS.gh}#r1` },
+        { id: 2, author: 'alice', state: 'COMMENTED', body: 'And this', url: `${URLS.gh}#r2` },
+        { id: 3, author: 'octocat', state: 'COMMENTED', body: 'My own', url: `${URLS.gh}#r3` },
+      ],
+      comments: [{ id: 4, author: 'bob', body: 'Nice', url: `${URLS.gh}#c4` }],
+    });
+    await pollNow(main, id);
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.reviews).toEqual({ reviews: 2, comments: 1, changesRequested: true });
+
+    forge({
+      reviews: [
+        { id: 1, author: 'alice', state: 'CHANGES_REQUESTED', body: 'Needs work', url: `${URLS.gh}#r1` },
+        { id: 5, author: 'alice', state: 'APPROVED', url: `${URLS.gh}#r5` },
+      ],
+    });
+    await pollNow(main, id);
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.reviews).toEqual({ reviews: 2, comments: 0, changesRequested: false });
+  });
+
   it('counts failing checks and conflicts that were there at link time, but not a green CI', async () => {
     const { main, id } = await babysat('gh', { conflicts: true, checks: [{ id: 7, name: 'test', conclusion: 'FAILURE', url: 'https://ci/7' }, { id: 8, name: 'lint', conclusion: 'SUCCESS' }] });
     await main.elapse(QUIET_WINDOW);

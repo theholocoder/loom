@@ -112,13 +112,13 @@ describe('info cards', () => {
 describe("the Glance strip's Merge request", () => {
   const glance = () => screen.getByRole('group', { name: 'Session at a glance' });
   const ciButton = (name: string) => within(glance()).getByRole('button', { name });
-  /** The Merge request popover, opened from its chip if it isn't open. */
-  const popover = () => {
-    if (!screen.queryByRole('dialog', { name: 'Merge request' })) fireEvent.click(within(glance()).getByRole('button', { name: 'Merge request #12' }));
-    return screen.getByRole('dialog', { name: 'Merge request' });
+  /** The Merge request Panel, shown from its chip if it isn't shown. */
+  const panel = () => {
+    if (!screen.queryByRole('tabpanel', { name: 'Merge request' })) fireEvent.click(within(glance()).getByRole('button', { name: 'Merge request #12' }));
+    return screen.getByRole('tabpanel', { name: 'Merge request' });
   };
-  const watch = () => within(popover()).queryByRole('switch', { name: 'Babysit' }) as HTMLButtonElement | null;
-  const autoPrompt = () => within(popover()).queryByRole('switch', { name: 'Auto-prompt' }) as HTMLButtonElement | null;
+  const watch = () => within(panel()).queryByRole('switch', { name: 'Babysit' }) as HTMLButtonElement | null;
+  const autoPrompt = () => within(panel()).queryByRole('switch', { name: 'Auto-prompt' }) as HTMLButtonElement | null;
 
   it('shows how CI is going beside the number, its checks saying when they were last polled', () => {
     const at = new Date(2026, 10, 10, 14, 32).getTime();
@@ -136,7 +136,7 @@ describe("the Glance strip's Merge request", () => {
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'passed', lastPollAt: 1, stale: true } })] }));
 
     expect(ciButton('CI passed').title).toBe('CI passed (may be out of date)');
-    expect(within(popover()).getByRole('heading').textContent).toContain('Stale');
+    expect(within(panel()).getByText('Stale').getAttribute('title')).toBe("Loom couldn't reach the Forge on its last check: this may be out of date.");
   });
 
   const checks: NonNullable<NonNullable<Session['babysit']>['checks']> = [
@@ -209,13 +209,15 @@ describe("the Glance strip's Merge request", () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
     expect(watch()!.getAttribute('aria-checked')).toBe('true');
-    expect(watch()!.getAttribute('aria-description')).toBe('Babysit watches #12 for new feedback.');
+    expect(watch()!.getAttribute('aria-description')).toBe('New reviews, failed checks and conflicts put the Session in the Inbox.');
+    // Labelled: what it means shows under its name.
+    expect(watch()!.textContent).toBe('BabysitNew reviews, failed checks and conflicts put the Session in the Inbox.');
     fireEvent.click(watch()!);
     await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }]));
 
     act(() => main.publish('sessions', [session({ babysitOff: true })]));
     expect(watch()!.getAttribute('aria-checked')).toBe('false');
-    expect(watch()!.getAttribute('aria-description')).toBe("Loom isn't watching #12.");
+    expect(watch()!.getAttribute('aria-description')).toBe('Babysit is off for #12.');
     fireEvent.click(watch()!);
     await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }, { id: 1, on: true }]));
   });
@@ -238,21 +240,21 @@ describe("the Glance strip's Merge request", () => {
 
     act(() => main.publish('sessions', [session({ babysitOff: true })]));
     expect(autoPrompt()!.disabled).toBe(true);
-    expect(autoPrompt()!.getAttribute('aria-description')).toBe('Auto-prompt needs this Merge request to be watched.');
+    expect(autoPrompt()!.getAttribute('aria-description')).toBe('Auto-prompt needs Babysit on.');
   });
 
   it('turns Auto-prompt on and off for the Session, showing what it is', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
     expect(autoPrompt()!.getAttribute('aria-checked')).toBe('false');
-    expect(autoPrompt()!.getAttribute('aria-description')).toBe('Feedback waits for you.');
+    expect(autoPrompt()!.getAttribute('aria-description')).toBe('New feedback waits for you.');
 
     fireEvent.click(autoPrompt()!);
     await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }]));
 
     act(() => main.publish('sessions', [session({ autoPrompt: true })]));
     expect(autoPrompt()!.getAttribute('aria-checked')).toBe('true');
-    expect(autoPrompt()!.getAttribute('aria-description')).toBe('Feedback goes straight to the agent.');
+    expect(autoPrompt()!.getAttribute('aria-description')).toBe('New feedback goes straight to the agent, up to 3 times in a row.');
     fireEvent.click(autoPrompt()!);
     await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }, { id: 1, on: false }]));
   });

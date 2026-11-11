@@ -165,6 +165,9 @@ export function mergeRequestRef(kind: ForgeKind | undefined, number: number): st
   return `${kind === 'gitlab' ? '!' : '#'}${number}`;
 }
 
+/** Each Forge by its name. */
+export const FORGE_NAMES: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
+
 /** The CLI Loom reaches each Forge through, with the user's own login. */
 export const FORGE_CLI: Record<ForgeKind, 'gh' | 'glab'> = { github: 'gh', gitlab: 'glab' };
 
@@ -275,6 +278,73 @@ export interface BabysitStatus {
   lastPollAt?: number;
   /** Set while the last poll failed: what's shown may be out of date. */
   stale: boolean;
+  /** The reviews and comments others left on it, as last seen; absent before the first poll that worked. */
+  reviews?: ReviewCount;
+}
+
+/** How many reviews and comments others left on a Merge request, for the Glance strip. */
+export interface ReviewCount {
+  /** Whole reviews, approvals among them. */
+  reviews: number;
+  /** Comments outside a review. */
+  comments: number;
+  /** Set while a reviewer's latest verdict asks for changes. */
+  changesRequested: boolean;
+}
+
+/** What a reviewer said of a Merge request as a whole. */
+export type ReviewVerdict = 'approved' | 'changes-requested' | 'commented' | 'dismissed';
+
+/** A review on a Merge request: its verdict, what it says, and its comments on the code. */
+export interface MergeRequestReview {
+  author: string;
+  verdict: ReviewVerdict;
+  /** Markdown; empty when the review says nothing but its verdict or its comments. */
+  body: string;
+  /** Clock time it was submitted, when the Forge says. */
+  at?: number;
+  url: string;
+  comments: MergeRequestComment[];
+}
+
+/** A comment on a Merge request, on a place in its code when `path` is set. */
+export interface MergeRequestComment {
+  author: string;
+  /** Markdown. */
+  body: string;
+  path?: string;
+  line?: number;
+  /** Clock time it was written, when the Forge says. */
+  at?: number;
+  url: string;
+}
+
+/**
+ * A Merge request as its Panel shows it, read from the Forge when asked:
+ * everyone's reviews and comments, the user's own among them.
+ */
+export interface MergeRequestDetails extends ForgeLink {
+  title: string;
+  state: MergeRequestState;
+  draft: boolean;
+  /** Its source branch, and the one it merges into. */
+  sourceBranch: string;
+  targetBranch: string;
+  author: string;
+  /** How many commits it has; `moreCommits` when the Forge listed only the first of them. */
+  commits: number;
+  moreCommits?: boolean;
+  /** What it changes, all commits together; `moreFiles` when the Forge listed only the first files, which these count. */
+  files: number;
+  moreFiles?: boolean;
+  added: number;
+  removed: number;
+  ci?: BabysitCi;
+  checks: BabysitCheck[];
+  /** Oldest first. */
+  reviews: MergeRequestReview[];
+  /** Those outside a review, oldest first. */
+  comments: MergeRequestComment[];
 }
 
 /** A comment on a place in the code. */
@@ -1329,6 +1399,13 @@ export interface Commands {
    * on that branch.
    */
   'sessions.linkMergeRequest': { params: { id: number; mergeRequest: string }; result: void };
+  /**
+   * The Session's Merge request as its Forge has it now, for its Panel: its
+   * state, branches, commits and changes, its checks, and its reviews and
+   * comments. Rejects with no Merge request linked, or the Project's Forge
+   * off or out of reach.
+   */
+  'sessions.mergeRequest': { params: { id: number }; result: MergeRequestDetails };
   /**
    * Sends the agent the feedback on card `itemId`, as one message, queued if
    * the Session is Working. Rejects when the card has been sent already.

@@ -178,6 +178,136 @@ describe('Link Merge request, by hand', () => {
   });
 });
 
+describe("the Merge request Panel's read of it", () => {
+  it('reads its state, branches, commits, changes, checks and everyone\'s reviews and comments from GitHub', async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, {
+      mergeRequests: [
+        {
+          number: 12,
+          url: pr(12),
+          branch: 'loom/fix-login',
+          title: 'Fix the login bug',
+          draft: true,
+          author: 'octocat',
+          commits: 3,
+          additions: 67,
+          deletions: 1,
+          changedFiles: 3,
+          checks: [
+            { id: 1, name: 'test', conclusion: 'FAILURE', url: 'https://ci/1' },
+            { id: 2, name: 'lint', conclusion: 'SUCCESS' },
+          ],
+          reviews: [
+            { id: 1, author: 'alice', state: 'CHANGES_REQUESTED', body: 'Needs **work**', url: `${pr(12)}#r1`, submittedAt: '2026-11-01T10:00:00Z', comments: [{ path: 'src/a.ts', line: 3, body: 'Off by one', url: `${pr(12)}#c1`, createdAt: '2026-11-01T10:00:00Z' }] },
+            // A draft review, and an empty one holding only a reply elsewhere, aren't shown.
+            { id: 2, author: 'octocat', state: 'PENDING', body: 'Draft', url: `${pr(12)}#r2` },
+            { id: 3, author: 'bob', state: 'COMMENTED', url: `${pr(12)}#r3` },
+            { id: 4, author: 'octocat', state: 'COMMENTED', body: 'Done', url: `${pr(12)}#r4` },
+          ],
+          comments: [{ id: 5, author: 'carol', body: 'Ship it', url: `${pr(12)}#c5`, createdAt: '2026-11-01T11:00:00Z' }],
+        },
+      ],
+    });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 12));
+
+    expect(await main.api.invoke('sessions.mergeRequest', { id })).toEqual({
+      number: 12,
+      url: pr(12),
+      title: 'Fix the login bug',
+      state: 'open',
+      draft: true,
+      sourceBranch: 'loom/fix-login',
+      targetBranch: 'main',
+      author: 'octocat',
+      commits: 3,
+      files: 3,
+      added: 67,
+      removed: 1,
+      ci: 'failed',
+      checks: [
+        { name: 'test', state: 'failed', url: 'https://ci/1' },
+        { name: 'lint', state: 'passed' },
+      ],
+      reviews: [
+        {
+          author: 'alice',
+          verdict: 'changes-requested',
+          body: 'Needs **work**',
+          at: Date.parse('2026-11-01T10:00:00Z'),
+          url: `${pr(12)}#r1`,
+          comments: [{ author: 'alice', body: 'Off by one', path: 'src/a.ts', line: 3, at: Date.parse('2026-11-01T10:00:00Z'), url: `${pr(12)}#c1` }],
+        },
+        { author: 'octocat', verdict: 'commented', body: 'Done', url: `${pr(12)}#r4`, comments: [] },
+      ],
+      comments: [{ author: 'carol', body: 'Ship it', at: Date.parse('2026-11-01T11:00:00Z'), url: `${pr(12)}#c5` }],
+    });
+    const query = machine.forgeCliInvocations('gh').findLast((args) => args[1] === 'graphql')!;
+    expect(query).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'owner=theholocoder', 'name=loom', 'number=12']));
+  });
+
+  it('reads it from GitLab through glab, in the working copy, approvals as its reviews', async () => {
+    const { machine, checkout } = machineOn('glab', GITLAB, {
+      mergeRequests: [
+        {
+          number: 87,
+          url: mr(87),
+          branch: 'loom/fix-login',
+          title: 'Fix the login bug',
+          author: 'dave',
+          target: 'develop',
+          commits: 2,
+          diffs: [
+            { new_path: 'lib/a.rb', diff: '@@ -1,2 +1,2 @@\n-old\n+new\n+more\n context' },
+            { new_path: 'lib/b.rb', diff: '@@ -1 +0,0 @@\n-gone' },
+          ],
+          pipeline: { id: 77, status: 'success', jobs: [{ id: 1, name: 'rspec', status: 'success', url: 'https://ci/1' }] },
+          approvedBy: ['erin'],
+          comments: [
+            { id: 1, author: 'erin', body: 'On the code', path: 'lib/a.rb', line: 2, createdAt: '2026-11-01T10:00:00Z' },
+            { id: 2, author: 'gitlab', body: 'added 1 commit', system: true },
+          ],
+        },
+      ],
+    });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 87));
+
+    expect(await main.api.invoke('sessions.mergeRequest', { id })).toEqual({
+      number: 87,
+      url: mr(87),
+      title: 'Fix the login bug',
+      state: 'open',
+      draft: false,
+      sourceBranch: 'loom/fix-login',
+      targetBranch: 'develop',
+      author: 'dave',
+      commits: 2,
+      files: 2,
+      added: 2,
+      removed: 2,
+      ci: 'passed',
+      checks: [{ name: 'rspec', state: 'passed', url: 'https://ci/1' }],
+      reviews: [{ author: 'erin', verdict: 'approved', body: '', url: mr(87), comments: [] }],
+      comments: [{ author: 'erin', body: 'On the code', path: 'lib/a.rb', line: 2, at: Date.parse('2026-11-01T10:00:00Z'), url: `${mr(87)}#note_1` }],
+    });
+    const at = machine.forgeCliInvocations('glab').findLastIndex((args) => args[0] === 'api' && /\/diffs/.test(args[1]!));
+    expect(machine.forgeCliCwds('glab')[at]).toBe(checkout);
+  });
+
+  it('rejects a Session with no Merge request, and says why the Forge could not answer', async () => {
+    const { machine, checkout, forge } = machineOn('gh', GITHUB, { mergeRequests: [] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await expect(main.api.invoke('sessions.mergeRequest', { id })).rejects.toThrow('This Session has no Merge request.');
+
+    forge([{ number: 12, url: pr(12), branch: 'loom/fix-login' }]);
+    await main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: '12' });
+    forge([]);
+    await expect(main.api.invoke('sessions.mergeRequest', { id })).rejects.toThrow('GitHub has no pull request #12 in theholocoder/loom.');
+  });
+});
+
 describe("the agent's Link merge request tool", () => {
   it("is Loom's MCP server, the bridge run as `mcp`, given to the agent's session", async () => {
     const { machine, checkout } = machineOn('gh', GITHUB);
