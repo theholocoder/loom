@@ -67,7 +67,8 @@ describe('a new message to an archived Session', () => {
     await main.api.invoke('sessions.send', { id: created.id, prompt: 'One more thing' });
 
     await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
-    expect(readFileSync(join(path, 'fix.txt'), 'utf8')).toBe('fixed\n');
+    // Checked out again, it may have Windows line endings.
+    expect(readFileSync(join(path, 'fix.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('fixed\n');
     expect(git(path, 'rev-parse', 'HEAD')).toBe(commit);
     expect(git(path, 'branch', '--show-current')).toBe('loom/fix-the-login-bug');
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)).toMatchObject({ workingCopy: { kind: 'worktree', path }, branch: 'loom/fix-the-login-bug' });
