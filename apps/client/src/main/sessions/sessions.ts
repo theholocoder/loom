@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -99,21 +99,30 @@ type Message = { text: string; attachments?: Attachment[] };
 type NewItem = TranscriptItem extends infer I ? (I extends TranscriptItem ? Omit<I, 'id'> : never) : never;
 
 export class Sessions {
-  private sessions = new Map<number, Session>();
+  /**
+   * Every map of what Loom holds of each Session while it runs, by Session id:
+   * a deleted Session is dropped from each. A new one is made with
+   * `perSession` (or `perSessionTimers`), never `new Map`, so it is too.
+   * Archives, deletions and reopens running are left out: they end on their own.
+   */
+  private readonly perSessionMaps: Array<Map<number, unknown>> = [];
+  /** The maps of each Session's pending timers, cleared as well as dropped. */
+  private readonly perSessionTimerMaps: Array<Map<number, TimerHandle>> = [];
+  private readonly sessions = this.perSession<Session>();
   /** Conversations read from the database or started since, by Session. */
-  private transcripts = new Map<number, Topic<TranscriptItem[]>>();
+  private readonly transcripts = this.perSession<Topic<TranscriptItem[]>>();
   /** Conversations being read from the database. */
-  private loading = new Map<number, Promise<Topic<TranscriptItem[]>>>();
+  private readonly loading = this.perSession<Promise<Topic<TranscriptItem[]>>>();
   /** The pending checkpoint of each Session's streaming agent text. */
-  private checkpoints = new Map<number, TimerHandle>();
+  private readonly checkpoints = this.perSessionTimers();
   /** The agent conversation of each Session whose agent process is running. */
-  private live = new Map<number, AgentSession>();
+  private readonly live = this.perSession<AgentSession>();
   /** The pending idle stop of each Waiting Session's agent (IDLE_STOP_MS). */
-  private readonly idleStops = new Map<number, TimerHandle>();
+  private readonly idleStops = this.perSessionTimers();
   /** The stuck watchdog of each Working Session: it fires once the agent has said nothing for `stuckAfterMs`. */
-  private readonly stuckWatches = new Map<number, TimerHandle>();
+  private readonly stuckWatches = this.perSessionTimers();
   /** Idle agents still closing, by Session: the next one opened for the Session waits for the process to exit, so two never share its conversation. */
-  private readonly closing = new Map<number, Promise<void>>();
+  private readonly closing = this.perSession<Promise<void>>();
   /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
   private readonly diffSummaries = new Map<string, DiffSummary>();
   /**
@@ -130,25 +139,25 @@ export class Sessions {
   /** Projects being removed, which no new Session may start on. */
   private readonly removing = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
-  private readonly asks = new Map<number, Map<number, string>>();
+  private readonly asks = this.perSession<Map<number, string>>();
   /**
    * The approval categories the user approved for the rest of each Session
    * ("for this Session"), while the Client runs.
    */
-  private readonly grants = new Map<number, Set<ApprovalCategory>>();
+  private readonly grants = this.perSession<Set<ApprovalCategory>>();
   /** The tool calls approved in each Session's current run: more asks for the same call go through. */
-  private readonly approvedCalls = new Map<number, Set<string>>();
+  private readonly approvedCalls = this.perSession<Set<string>>();
   /** What the user said on denying Approval requests, sent to the agent as the next prompt once its run ends. */
-  private readonly denyMessages = new Map<number, string>();
+  private readonly denyMessages = this.perSession<string>();
   /** Model and Effort changes in flight, by Session: a prompt given meanwhile waits for them. */
-  private readonly switching = new Map<number, Promise<void>>();
+  private readonly switching = this.perSession<Promise<void>>();
   /** The id the next queued message gets: ids are given here, so a message is queued at once. */
   private nextQueuedId = 1;
   /**
    * The runs the user interrupted, by Session, until they end: with Stop, or
    * to send the queued message `sendNow`.
    */
-  private readonly interrupting = new Map<number, Interruption>();
+  private readonly interrupting = this.perSession<Interruption>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -162,23 +171,37 @@ export class Sessions {
    * How each Session's Merge request was linked: on which branch, and whether
    * by hand (the user or the agent's tool) rather than found on the branch.
    */
-  private readonly mergeRequestLinks = new Map<number, MergeRequestLinkage>();
+  private readonly mergeRequestLinks = this.perSession<MergeRequestLinkage>();
   /** Each Session's latest Merge request lookup: an earlier one still going is stale. */
-  private readonly mergeRequestLookups = new Map<number, number>();
+  private readonly mergeRequestLookups = this.perSession<number>();
   /** What is being looked up after each Session's last turn, until it is done. */
-  private readonly afterTurns = new Map<number, Promise<unknown>>();
+  private readonly afterTurns = this.perSession<Promise<unknown>>();
   /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
-  private readonly linkCalls = new Map<number, Set<string>>();
+  private readonly linkCalls = this.perSession<Set<string>>();
   /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
-  private readonly reportedCosts = new Map<number, number>();
+  private readonly reportedCosts = this.perSession<number>();
   /** The auto-prompts each Session has been sent since the user's last message; none if absent. */
-  private readonly autoPromptsInARow = new Map<number, number>();
+  private readonly autoPromptsInARow = this.perSession<number>();
   /** The model each Session's run goes with, as Loom set it. */
-  private readonly runModels = new Map<number, string>();
+  private readonly runModels = this.perSession<string>();
   /** The run or wait each Session is in, while the Client runs (see spanOf). */
-  private readonly spans = new Map<number, OpenSpan>();
+  private readonly spans = this.perSession<OpenSpan>();
 
   private constructor(private readonly options: SessionsOptions) {}
+
+  /** A map of something held per Session, which a deleted Session is dropped from. */
+  private perSession<V>(): Map<number, V> {
+    const map = new Map<number, V>();
+    this.perSessionMaps.push(map);
+    return map;
+  }
+
+  /** A map of a timer per Session, which a deleted Session's is cleared and dropped from. */
+  private perSessionTimers(): Map<number, TimerHandle> {
+    const map = this.perSession<TimerHandle>();
+    this.perSessionTimerMaps.push(map);
+    return map;
+  }
 
   /**
    * The Session service, with the Sessions in the database. A Session that
@@ -983,7 +1006,7 @@ export class Sessions {
    * Session counts as archived only once its worktree is gone, so a removal
    * that fails can be tried again.
    */
-  async archive({ id, discard = false }: { id: number; discard?: boolean }): Promise<ArchiveResult> {
+  async archive({ id, discard = false }: CloseSessionParams): Promise<ArchiveResult> {
     if (this.deleting.has(id)) throw new Error('This Session is being deleted.');
     return this.archiveTracked(id, discard);
   }
@@ -1005,7 +1028,7 @@ export class Sessions {
    * holding it back unless `discard`), then forgets it: its record, its
    * conversation, its queue and its attachments. Its usage stays.
    */
-  async delete({ id, discard = false }: { id: number; discard?: boolean }): Promise<DeleteResult> {
+  async delete({ id, discard = false }: CloseSessionParams): Promise<DeleteResult> {
     const session = this.get(id);
     if (this.deleting.has(id)) throw new Error('This Session is already being deleted.');
     if (this.archiving.has(id)) throw new Error('This Session is being archived.');
@@ -1037,33 +1060,11 @@ export class Sessions {
 
   /** Forgets an archived Session: everything Loom keeps of it but its usage. */
   private async forget(id: number): Promise<void> {
-    for (const timers of [this.checkpoints, this.idleStops, this.stuckWatches]) {
+    for (const timers of this.perSessionTimerMaps) {
       const handle = timers.get(id);
       if (handle !== undefined) this.options.clock.clearTimeout(handle);
-      timers.delete(id);
     }
-    for (const map of [
-      this.sessions,
-      this.transcripts,
-      this.loading,
-      this.live,
-      this.closing,
-      this.asks,
-      this.grants,
-      this.approvedCalls,
-      this.denyMessages,
-      this.switching,
-      this.interrupting,
-      this.mergeRequestLinks,
-      this.mergeRequestLookups,
-      this.afterTurns,
-      this.linkCalls,
-      this.reportedCosts,
-      this.autoPromptsInARow,
-      this.runModels,
-      this.spans,
-    ])
-      map.delete(id);
+    for (const map of this.perSessionMaps) map.delete(id);
     this.deleted.add(id);
     // After the writes made before, in order; its events, queue and Babysit record go with it.
     this.write((trx) => trx.deleteFrom('sessions').where('id', '=', id).execute());
