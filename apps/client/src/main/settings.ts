@@ -1,5 +1,6 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
-import { clampSidebarWidth, DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isSidebarView, type ApprovalCategory, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues, type SidebarSettings } from '../shared/api';
+import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, type ApprovalCategory, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues } from '../shared/api';
+import { clampPanelSize, isPanelDimension, isPanelKind, readLayout, type PanelDimension, type PanelKind } from '../shared/panels';
 import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
@@ -30,16 +31,9 @@ export class Settings {
       for (const [category, setting] of Object.entries(stored.approvals)) if (isApprovalCategory(category) && isApprovalSetting(setting)) approvals[category] = setting;
       current.approvals = approvals;
     }
-    // Each part of the sidebar's state stands alone: one Loom no longer takes falls back to its default.
-    if (typeof stored.sidebar === 'object' && stored.sidebar !== null) {
-      const { open, view, width } = stored.sidebar as Record<string, unknown>;
-      current.sidebar = {
-        open: typeof open === 'boolean' ? open : current.sidebar.open,
-        view: isSidebarView(view) ? view : current.sidebar.view,
-        width: typeof width === 'number' && Number.isFinite(width) ? clampSidebarWidth(width) : current.sidebar.width,
-      };
-    }
-    // Likewise each part of the Changes view's layout.
+    // Each Panel kind's size stands alone: one Loom no longer has is dropped, one never set takes its preferred size.
+    current.layout = readLayout(stored.layout);
+    // Each part of the Changes view's layout stands alone: one Loom no longer takes falls back to its default.
     if (typeof stored.diffView === 'object' && stored.diffView !== null) {
       const { fileList, wrap, sideBySide } = stored.diffView as Record<string, unknown>;
       current.diffView = {
@@ -107,17 +101,13 @@ export class Settings {
     return this.current;
   }
 
-  /** Sets what is given of the sidebar's state, keeping the width within bounds; rejects a view Loom has not. */
-  async setSidebar(sidebar: Partial<SidebarSettings>): Promise<SettingsValues> {
-    const { open, view, width } = sidebar;
-    if (open !== undefined && typeof open !== 'boolean') throw new Error('Whether the sidebar is open must be true or false.');
-    if (view !== undefined && !isSidebarView(view)) throw new Error(`"${String(view)}" is not a sidebar view.`);
-    if (width !== undefined && (typeof width !== 'number' || !Number.isFinite(width))) throw new Error("The sidebar's width must be a number of pixels.");
-    return this.set('sidebar', {
-      open: open ?? this.current.sidebar.open,
-      view: view ?? this.current.sidebar.view,
-      width: width === undefined ? this.current.sidebar.width : clampSidebarWidth(width),
-    });
+  /** Sets a Panel kind's width or height in the Layout, kept within its minimum and maximum. */
+  async setPanelSize(kind: PanelKind, dimension: PanelDimension, size: number): Promise<SettingsValues> {
+    if (!isPanelKind(kind)) throw new Error(`"${String(kind)}" is not a Panel.`);
+    if (!isPanelDimension(dimension)) throw new Error(`A Panel's size is its width or its height, not "${String(dimension)}".`);
+    if (typeof size !== 'number' || !Number.isFinite(size)) throw new Error("A Panel's size must be a number of pixels.");
+    const { layout } = this.current;
+    return this.set('layout', { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } });
   }
 
   /** Sets the Changes view's layout, all of it, so that quick changes can't undo each other. */

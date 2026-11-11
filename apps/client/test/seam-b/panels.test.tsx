@@ -2,8 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import { DEFAULT_SETTINGS, type Project, type Session, type SidebarSettings } from '../../src/shared/api';
-import { FakeMain } from './fake-main';
+import { DEFAULT_SETTINGS, type Project, type Session } from '../../src/shared/api';
+import { DEFAULT_SESSION_PANELS, type LayoutSettings, type PanelAreaState, type SessionPanels } from '../../src/shared/panels';
+import { FakeMain, HIDDEN_PANELS } from './fake-main';
 
 afterEach(cleanup);
 
@@ -27,9 +28,16 @@ const session: Session = {
   createdAt: 1,
   updatedAt: 1,
 };
+const other: Session = { ...session, id: 8, title: 'Fix billing', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/billing-api/fix-billing' } };
 
-function fakeMain(sidebar: Partial<SidebarSettings> = {}, sessions: Session[] = [session]) {
-  return new FakeMain({ projects: [project], sessions, settings: { ...DEFAULT_SETTINGS, sidebar: { ...DEFAULT_SETTINGS.sidebar, ...sidebar } } });
+/** Both Panels in the Side area, Session info shown. */
+const BOTH: PanelAreaState = { panels: ['info', 'changes'], shown: 'info', open: true };
+
+/** A main where Session 7's Side area is `side` (a new Session's until given), and the Layout `layout`. */
+function fakeMain({ side, layout, sessions = [session] }: { side?: Partial<PanelAreaState>; layout?: Partial<LayoutSettings>; sessions?: Session[] } = {}) {
+  const main = new FakeMain({ projects: [project], sessions, settings: { ...DEFAULT_SETTINGS, layout: { ...DEFAULT_SETTINGS.layout, ...layout } } });
+  if (side) main.publish('panels', { ...DEFAULT_SESSION_PANELS, side: { ...DEFAULT_SESSION_PANELS.side, ...side } }, { sessionId: session.id });
+  return main;
 }
 
 function renderApp(main: FakeMain) {
@@ -43,61 +51,88 @@ function renderApp(main: FakeMain) {
 
 const openSession = (title = session.title) => fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: title }));
 const header = () => screen.getByRole('region', { name: 'Session header' });
-const sidebar = () => screen.queryByRole('complementary', { name: 'Session sidebar' });
-const sidebarCalls = (main: FakeMain) => main.invoked.filter((c) => c.command === 'settings.setSidebar').map((c) => c.params);
-
-describe('the right sidebar', () => {
-  it('is opened and closed by one plain icon at the end of the Session header, and kept in settings', () => {
-    const main = renderApp(fakeMain());
-    openSession();
-    const toggle = within(header()).getByRole('button', { name: 'Show sidebar' });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.textContent).toBe('');
-    expect(sidebar()).toBeNull();
-
-    fireEvent.click(toggle);
-    expect(sidebar()).toBeTruthy();
-    expect(within(header()).getByRole('button', { name: 'Hide sidebar' }).getAttribute('aria-expanded')).toBe('true');
-    expect(sidebarCalls(main)).toEqual([{ open: true }]);
-
-    fireEvent.click(within(header()).getByRole('button', { name: 'Hide sidebar' }));
-    expect(sidebar()).toBeNull();
-    expect(sidebarCalls(main)).toEqual([{ open: true }, { open: false }]);
-  });
-
-  it('goes back to what settings hold when they refuse a change', async () => {
-    const main = new FakeMain({ projects: [project], sessions: [session], settings: DEFAULT_SETTINGS }, {
-      'settings.setSidebar': () => {
-        throw new Error('database is locked');
-      },
-    });
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    renderApp(main);
-    openSession();
-    fireEvent.click(within(header()).getByRole('button', { name: 'Show sidebar' }));
-    await waitFor(() => expect(sidebar()).toBeNull());
-    vi.restoreAllMocks();
-  });
-
-  it('is hidden altogether while no Session is selected, even when left open', () => {
-    renderApp(fakeMain({ open: true }));
-    expect(sidebar()).toBeNull();
-    openSession();
-    expect(sidebar()).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(sidebar()).toBeNull();
-  });
-});
-
-const tab = (name: string) => within(sidebar()!).getByRole('tab', { name });
-const view = () => within(sidebar()!).getByRole('tabpanel');
-/** The shown view's name, as its tab gives it. */
+const sideArea = () => screen.queryByRole('complementary', { name: 'Side area' });
+/** What the renderer asked main to keep of Session `id`'s Side area. */
+const kept = (main: FakeMain, id = session.id) =>
+  main.invoked.filter((c) => c.command === 'sessions.setPanels' && (c.params as { id: number }).id === id).map((c) => (c.params as { panels: SessionPanels }).panels.side);
+const sizes = (main: FakeMain) => main.invoked.filter((c) => c.command === 'settings.setPanelSize').map((c) => c.params);
+const tab = (name: string) => within(sideArea()!).getByRole('tab', { name });
+const tabNames = () => within(sideArea()!).queryAllByRole('tab').map((t) => t.getAttribute('aria-label'));
+const view = () => within(sideArea()!).getByRole('tabpanel');
+/** The shown Panel's name, as its tab gives it. */
 const viewName = () => document.getElementById(view().getAttribute('aria-labelledby')!)!.getAttribute('aria-label');
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
 
-describe("the sidebar's views", () => {
-  it('shows one view at a time, picked by the tab icons in its header, remembered app-wide', () => {
-    const main = renderApp(fakeMain({ open: true }));
+describe('the Side area', () => {
+  it('shows Changes on a new Session, its tab labelled, with the count of files changed as its badge', () => {
+    renderApp(fakeMain({ sessions: [{ ...session, diffStat: { files: 4, added: 12, removed: 3 } }] }));
+    openSession();
+    expect(tabNames()).toEqual(['Changes']);
+    expect(viewName()).toBe('Changes');
+    expect(tab('Changes').textContent).toBe('Changes4');
+    expect(tab('Changes').getAttribute('aria-description')).toBe('4 files changed');
+  });
+
+  it("is shown and hidden by one plain icon at the end of the Session header, kept as the Session's own", () => {
+    const main = renderApp(fakeMain({ sessions: [session, other] }));
+    openSession();
+    const toggle = within(header()).getByRole('button', { name: 'Hide the Side area' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toBe('');
+
+    fireEvent.click(toggle);
+    expect(sideArea()).toBeNull();
+    expect(within(header()).getByRole('button', { name: 'Show the Side area' }).getAttribute('aria-expanded')).toBe('false');
+    expect(kept(main)).toEqual([{ panels: ['changes'], shown: 'changes', open: false }]);
+
+    // Another Session has its own.
+    openSession('Fix billing');
+    expect(sideArea()).toBeTruthy();
+    openSession();
+    expect(sideArea()).toBeNull();
+    fireEvent.click(within(header()).getByRole('button', { name: 'Show the Side area' }));
+    expect(sideArea()).toBeTruthy();
+    expect(kept(main).at(-1)).toEqual({ panels: ['changes'], shown: 'changes', open: true });
+  });
+
+  it('goes back to what main holds when it refuses a change', async () => {
+    const main = new FakeMain(
+      { projects: [project], sessions: [session] },
+      {
+        'sessions.setPanels': () => {
+          throw new Error('database is locked');
+        },
+      },
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderApp(main);
+    openSession();
+    fireEvent.click(within(header()).getByRole('button', { name: 'Hide the Side area' }));
+    await waitFor(() => expect(sideArea()).toBeTruthy());
+    vi.restoreAllMocks();
+  });
+
+  it('is hidden altogether while no Session is selected', () => {
+    renderApp(fakeMain());
+    expect(sideArea()).toBeNull();
+    openSession();
+    expect(sideArea()).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(sideArea()).toBeNull();
+  });
+
+  it('opens on the Panels, the one shown and the width main had, at startup', () => {
+    renderApp(fakeMain({ side: { panels: ['changes', 'info'], shown: 'info' }, layout: { width: { info: 555 } } }));
+    openSession();
+    expect(tabNames()).toEqual(['Changes', 'Session info']);
+    expect(viewName()).toBe('Session info');
+    expect(sideArea()!.style.width).toBe('555px');
+  });
+});
+
+describe("the Side area's Panels", () => {
+  it('shows one at a time, picked by their tabs, kept for the Session', () => {
+    const main = renderApp(fakeMain({ side: BOTH }));
     openSession();
     expect(tab('Session info').getAttribute('aria-selected')).toBe('true');
     expect(viewName()).toBe('Session info');
@@ -107,11 +142,11 @@ describe("the sidebar's views", () => {
     expect(tab('Session info').getAttribute('aria-selected')).toBe('false');
     expect(viewName()).toBe('Changes');
     expect(within(view()).queryByRole('region', { name: 'Where' })).toBeNull();
-    expect(sidebarCalls(main)).toEqual([{ open: true, view: 'changes' }]);
+    expect(kept(main)).toEqual([{ ...BOTH, shown: 'changes' }]);
   });
 
   it('has its tabs as one Tab stop, the arrow keys moving between them', () => {
-    renderApp(fakeMain({ open: true }));
+    renderApp(fakeMain({ side: BOTH }));
     openSession();
     expect(tab('Session info').tabIndex).toBe(0);
     expect(tab('Changes').tabIndex).toBe(-1);
@@ -124,137 +159,200 @@ describe("the sidebar's views", () => {
     expect(screen.getByRole('tabpanel', { name: 'Session info' })).toBeTruthy();
   });
 
-  it('opens on the view, open state and width settings had, at startup', () => {
-    renderApp(fakeMain({ open: true, view: 'changes', width: 555 }));
+  it('adds one from the + menu, at the end, shown; one already open is only shown', () => {
+    const main = renderApp(fakeMain());
     openSession();
+    const add = () => {
+      fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Add a Panel to the Side area' }));
+      return screen.getByRole('menu', { name: 'Add a Panel to the Side area' });
+    };
+    expect(within(add()).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Session info', 'Changes']);
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Session info' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(tabNames()).toEqual(['Changes', 'Session info']);
+    expect(viewName()).toBe('Session info');
+
+    fireEvent.click(within(add()).getByRole('menuitem', { name: 'Changes' }));
+    expect(tabNames()).toEqual(['Changes', 'Session info']);
     expect(viewName()).toBe('Changes');
-    expect(sidebar()!.style.width).toBe('555px');
+    expect(kept(main)).toEqual([
+      { panels: ['changes', 'info'], shown: 'info', open: true },
+      { panels: ['changes', 'info'], shown: 'changes', open: true },
+    ]);
   });
 
-  it('is resized by dragging its left edge, within its minimum and maximum, the width kept once let go', () => {
-    const main = renderApp(fakeMain({ open: true, width: 420 }));
+  it('closes one with its ✕, showing its neighbour; closing the last hides the area, and d brings Changes back', () => {
+    const main = renderApp(fakeMain({ side: { ...BOTH, shown: 'changes' } }));
     openSession();
-    const edge = within(sidebar()!).getByRole('separator', { name: 'Resize sidebar' });
-    fireEvent.mouseDown(edge, { clientX: 1000 });
-    fireEvent.mouseMove(window, { clientX: 900 });
-    expect(sidebar()!.style.width).toBe('520px');
-    expect(sidebarCalls(main)).toEqual([]);
-    fireEvent.mouseUp(window, { clientX: 880 });
-    expect(sidebar()!.style.width).toBe('540px');
-    expect(sidebarCalls(main)).toEqual([{ width: 540 }]);
+    fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Close Changes' }));
+    expect(tabNames()).toEqual(['Session info']);
+    expect(viewName()).toBe('Session info');
 
-    fireEvent.mouseDown(edge, { clientX: 1000 });
-    fireEvent.mouseUp(window, { clientX: 1900 });
-    expect(sidebarCalls(main).at(-1)).toEqual({ width: 280 });
-    // The same width for every view.
-    fireEvent.click(tab('Changes'));
-    expect(sidebar()!.style.width).toBe('280px');
+    fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Close Session info' }));
+    expect(sideArea()).toBeNull();
+    expect(kept(main)).toEqual([
+      { panels: ['info'], shown: 'info', open: true },
+      { panels: [], shown: null, open: false },
+    ]);
+
+    // Shown empty, it says how to add one.
+    press('b', { ctrlKey: true });
+    expect(within(sideArea()!).getByRole('tabpanel', { name: 'Side area' }).textContent).toBe('No Panels here. Add one with +.');
+    press('d');
+    expect(tabNames()).toEqual(['Changes']);
+    expect(viewName()).toBe('Changes');
   });
 
-  it('takes at most 70% of the window, however wide settings say, dragging from what shows', () => {
-    // jsdom's window is 1024px wide.
-    const main = renderApp(fakeMain({ open: true, width: 1000 }));
+  it('is hidden by its own button, as by the header icon', () => {
+    renderApp(fakeMain());
     openSession();
-    expect(sidebar()!.style.width).toBe('716px');
-    const edge = within(sidebar()!).getByRole('separator', { name: 'Resize sidebar' });
-    expect(edge.getAttribute('aria-valuemax')).toBe('716');
-    fireEvent.mouseDown(edge, { clientX: 500 });
-    fireEvent.mouseUp(window, { clientX: 600 });
-    expect(sidebarCalls(main)).toEqual([{ width: 616 }]);
-  });
-
-  it('keeps a drag going through an unrelated settings change', () => {
-    const main = renderApp(fakeMain({ open: true, width: 420 }));
-    openSession();
-    const edge = within(sidebar()!).getByRole('separator', { name: 'Resize sidebar' });
-    fireEvent.mouseDown(edge, { clientX: 1000 });
-    fireEvent.mouseMove(window, { clientX: 900 });
-    act(() => main.publish('settings', { ...main.value('settings'), theme: 'nord' }));
-    expect(sidebar()!.style.width).toBe('520px');
-    fireEvent.mouseUp(window, { clientX: 900 });
-  });
-
-  it('is resized with the arrow keys on its edge too', () => {
-    const main = renderApp(fakeMain({ open: true, width: 420 }));
-    openSession();
-    const edge = within(sidebar()!).getByRole('separator', { name: 'Resize sidebar' });
-    fireEvent.keyDown(edge, { key: 'ArrowLeft' });
-    expect(edge.getAttribute('aria-valuenow')).toBe('444');
-    expect(sidebarCalls(main)).toEqual([{ width: 444 }]);
+    fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Hide the Side area' }));
+    expect(sideArea()).toBeNull();
   });
 });
 
-describe("the sidebar's shortcuts", () => {
-  it('toggles on its last view with Ctrl+B, and d and Ctrl+I open a view, closing it when already on it', () => {
-    const main = renderApp(fakeMain({ view: 'changes' }));
+describe('Panel sizes', () => {
+  it("are each kind's own: dragging the left edge resizes the Panel shown, kept once let go", () => {
+    const main = renderApp(fakeMain({ side: BOTH }));
+    openSession();
+    expect(sideArea()!.style.width).toBe('420px');
+    const edge = within(sideArea()!).getByRole('separator', { name: 'Resize the Side area' });
+    fireEvent.mouseDown(edge, { clientX: 1000 });
+    fireEvent.mouseMove(window, { clientX: 900 });
+    expect(sideArea()!.style.width).toBe('520px');
+    expect(sizes(main)).toEqual([]);
+    fireEvent.mouseUp(window, { clientX: 880 });
+    expect(sideArea()!.style.width).toBe('540px');
+    expect(sizes(main)).toEqual([{ kind: 'info', dimension: 'width', size: 540 }]);
+
+    // Changes keeps its own, and Session info its new one.
+    fireEvent.click(tab('Changes'));
+    expect(sideArea()!.style.width).toBe('640px');
+    fireEvent.click(tab('Session info'));
+    expect(sideArea()!.style.width).toBe('540px');
+
+    fireEvent.mouseDown(edge, { clientX: 1000 });
+    fireEvent.mouseUp(window, { clientX: 1900 });
+    expect(sizes(main).at(-1)).toEqual({ kind: 'info', dimension: 'width', size: 280 });
+  });
+
+  it('take at most 70% of the window, however large the Layout says, dragging from what shows', () => {
+    // jsdom's window is 1024px wide.
+    const main = renderApp(fakeMain({ layout: { width: { changes: 1000 } } }));
+    openSession();
+    expect(sideArea()!.style.width).toBe('716px');
+    const edge = within(sideArea()!).getByRole('separator', { name: 'Resize the Side area' });
+    expect(edge.getAttribute('aria-valuemax')).toBe('716');
+    fireEvent.mouseDown(edge, { clientX: 500 });
+    fireEvent.mouseUp(window, { clientX: 600 });
+    expect(sizes(main)).toEqual([{ kind: 'changes', dimension: 'width', size: 616 }]);
+  });
+
+  it('keep a drag going through an unrelated settings change', () => {
+    const main = renderApp(fakeMain({ side: BOTH }));
+    openSession();
+    const edge = within(sideArea()!).getByRole('separator', { name: 'Resize the Side area' });
+    fireEvent.mouseDown(edge, { clientX: 1000 });
+    fireEvent.mouseMove(window, { clientX: 900 });
+    act(() => main.publish('settings', { ...main.value('settings'), theme: 'nord' }));
+    expect(sideArea()!.style.width).toBe('520px');
+    fireEvent.mouseUp(window, { clientX: 900 });
+  });
+
+  it('change with the arrow keys on the edge too', () => {
+    const main = renderApp(fakeMain({ side: BOTH }));
+    openSession();
+    const edge = within(sideArea()!).getByRole('separator', { name: 'Resize the Side area' });
+    fireEvent.keyDown(edge, { key: 'ArrowLeft' });
+    expect(edge.getAttribute('aria-valuenow')).toBe('444');
+    expect(sizes(main)).toEqual([{ kind: 'info', dimension: 'width', size: 444 }]);
+  });
+});
+
+describe("the Side area's shortcuts", () => {
+  it('toggles it with Ctrl+B, and d and Ctrl+I show a Panel, hiding the area when already on it', () => {
+    const main = renderApp(fakeMain({ side: HIDDEN_PANELS.side }));
     openSession();
     press('b', { ctrlKey: true });
     expect(viewName()).toBe('Changes');
     press('b', { ctrlKey: true });
-    expect(sidebar()).toBeNull();
+    expect(sideArea()).toBeNull();
 
     press('i', { ctrlKey: true });
     expect(viewName()).toBe('Session info');
     press('d');
     expect(viewName()).toBe('Changes');
     press('d');
-    expect(sidebar()).toBeNull();
+    expect(sideArea()).toBeNull();
     press('i', { ctrlKey: true });
     press('i', { ctrlKey: true });
-    expect(sidebar()).toBeNull();
-    expect(sidebarCalls(main)).toEqual([{ open: true }, { open: false }, { open: true, view: 'info' }, { open: true, view: 'changes' }, { open: false }, { open: true, view: 'info' }, { open: false }]);
+    expect(sideArea()).toBeNull();
+    expect(kept(main)).toEqual([
+      { panels: ['changes'], shown: 'changes', open: true },
+      { panels: ['changes'], shown: 'changes', open: false },
+      { panels: ['changes', 'info'], shown: 'info', open: true },
+      { panels: ['changes', 'info'], shown: 'changes', open: true },
+      { panels: ['changes', 'info'], shown: 'changes', open: false },
+      { panels: ['changes', 'info'], shown: 'info', open: true },
+      { panels: ['changes', 'info'], shown: 'info', open: false },
+    ]);
   });
 
-  it('does nothing while no Session is selected', () => {
+  it('do nothing while no Session is selected', () => {
     const main = renderApp(fakeMain());
     press('b', { ctrlKey: true });
     press('d');
     press('i', { ctrlKey: true });
-    expect(sidebarCalls(main)).toEqual([]);
+    expect(kept(main)).toEqual([]);
     openSession();
-    expect(sidebar()).toBeNull();
+    expect(viewName()).toBe('Changes');
   });
 
   it('are in the palette while a Session is open, and in the shortcut list', () => {
     renderApp(fakeMain());
     press('k', { ctrlKey: true });
     const names = () => within(screen.getByRole('dialog', { name: 'Command palette' })).queryAllByRole('option').map((o) => o.getAttribute('aria-label'));
-    expect(names()).not.toContain('Toggle sidebar');
+    expect(names()).not.toContain('Toggle the Side area');
     press('k', { ctrlKey: true });
     openSession();
     press('k', { ctrlKey: true });
-    expect(names()).toEqual(expect.arrayContaining(['Toggle sidebar', 'Toggle diff', 'Toggle Session info']));
+    expect(names()).toEqual(expect.arrayContaining(['Toggle the Side area', 'Toggle diff', 'Toggle Session info']));
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Command palette' })).getByRole('option', { name: 'Toggle Session info' }));
     expect(viewName()).toBe('Session info');
 
     press('?', { ctrlKey: true });
     const help = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
-    for (const [label, keys] of [['Toggle sidebar', 'Ctrl B'], ['Toggle diff', 'D'], ['Toggle Session info', 'Ctrl I']]) {
+    for (const [label, keys] of [
+      ['Toggle the Side area', 'Ctrl B'],
+      ['Toggle diff', 'D'],
+      ['Toggle Session info', 'Ctrl I'],
+    ]) {
       expect(within(help).getByRole('row', { name: new RegExp(`^${label} ${keys}$`) })).toBeTruthy();
     }
   });
 });
 
 describe('the slimmer Session header', () => {
-  it('shows only the crumb (Project · branch), title, status and the sidebar and terminal icons', () => {
+  it('shows only the crumb (Project · branch), title, status and the Side area and Dock icons', () => {
     renderApp(
-      fakeMain({}, [
+      fakeMain({ sessions: [
         { ...session, issue: { number: 31, url: 'https://github.com/acme/billing-api/issues/31' }, mergeRequest: { number: 40, url: 'https://github.com/acme/billing-api/pull/40' }, diffStat: { files: 4, added: 12, removed: 3 } },
-      ]),
+        ],
+      }),
     );
     openSession();
     const h = header();
     expect(h.querySelector('.crumb')!.textContent).toBe('billing-api·loom/fix-login');
     expect(within(h).getByRole('heading').textContent).toBe('Fix login');
     expect(within(h).getByRole('status', { name: 'Session status' }).textContent).toBe('Finished');
-    expect(within(h).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Show sidebar', 'Show terminal']);
+    expect(within(h).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Hide the Side area', 'Show the Dock']);
     expect(h.textContent).not.toContain('acme/billing-api');
     expect(h.textContent).not.toContain('#31');
     expect(h.textContent).not.toContain('worktree');
   });
 
   it('keeps the worktree-missing warning, and Archive keeps its palette entry and e', async () => {
-    const main = renderApp(fakeMain({}, [{ ...session, worktreeMissing: true }]));
+    const main = renderApp(fakeMain({ sessions: [{ ...session, worktreeMissing: true }] }));
     openSession();
     expect(within(header()).getByRole('status', { name: 'Worktree missing' })).toBeTruthy();
     press('e');
@@ -290,7 +388,8 @@ const full: Session = {
 };
 
 function renderInfo(s: Session = full, handlers: ConstructorParameters<typeof FakeMain>[1] = {}) {
-  const main = new FakeMain({ projects: [project], sessions: [s], environments: [native], settings: { ...DEFAULT_SETTINGS, sidebar: { open: true, view: 'info', width: 420 } } }, handlers);
+  const main = new FakeMain({ projects: [project], sessions: [s], environments: [native] }, handlers);
+  main.publish('panels', { ...DEFAULT_SESSION_PANELS, side: BOTH }, { sessionId: s.id });
   renderApp(main);
   if (s.status === 'archived') fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: 'Archived' }));
   openSession(s.title);
@@ -360,16 +459,17 @@ describe('the Session info view', () => {
 
   it('opens Link Merge request from the palette, opening Session info first', () => {
     const main = new FakeMain({ projects: [project], sessions: [full], settings: DEFAULT_SETTINGS });
+    main.publish('panels', HIDDEN_PANELS, { sessionId: full.id });
     renderApp(main);
     openSession();
-    expect(sidebar()).toBeNull();
+    expect(sideArea()).toBeNull();
     press('k', { ctrlKey: true });
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Command palette' })).getByRole('option', { name: 'Link Merge request…' }));
     expect(viewName()).toBe('Session info');
     expect(screen.getByRole('dialog', { name: 'Link Merge request' })).toBeTruthy();
-    // Closing the sidebar drops it, and opening it again doesn't bring it back.
-    fireEvent.click(within(header()).getByRole('button', { name: 'Hide sidebar' }));
-    fireEvent.click(within(header()).getByRole('button', { name: 'Show sidebar' }));
+    // Hiding the Side area drops it, and showing it again doesn't bring it back.
+    fireEvent.click(within(header()).getByRole('button', { name: 'Hide the Side area' }));
+    fireEvent.click(within(header()).getByRole('button', { name: 'Show the Side area' }));
     expect(screen.queryByRole('dialog', { name: 'Link Merge request' })).toBeNull();
   });
 

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type Project, type Session } from '../../src/shared/api';
-import { FakeMain } from './fake-main';
+import { FakeMain, HIDDEN_PANELS } from './fake-main';
 
 type DiffProps = {
   patch: string;
@@ -67,6 +67,8 @@ const summary: DiffSummary = { available: true, readOnly: false, base: 'origin/m
 const text = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n context\n-old line\n+new line\n`;
 
 function renderOpen(main: FakeMain, s: Session = session) {
+  // Hidden, so that `d` shows it.
+  main.publish('panels', HIDDEN_PANELS, { sessionId: s.id });
   render(
     <ApiProvider api={main}>
       <App />
@@ -78,7 +80,7 @@ function renderOpen(main: FakeMain, s: Session = session) {
   return main;
 }
 
-/** Opens the sidebar's Changes view, as `d` does. */
+/** Shows the Changes Panel, as `d` does. */
 const showChanges = () => fireEvent.keyDown(document.body, { key: 'd' });
 const hideChanges = showChanges;
 

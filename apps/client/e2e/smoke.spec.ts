@@ -55,9 +55,9 @@ test('launches into the three-pane window and connects the native Environment', 
 
   await expect(window.getByRole('complementary', { name: 'Inbox' })).toBeVisible();
   await expect(window.getByRole('main', { name: 'Session' })).toBeVisible();
-  // The right sidebar is the open Session's: this empty start screen has none, nor its toggle.
-  await expect(window.getByRole('button', { name: /sidebar/i })).toHaveCount(0);
-  await expect(window.getByRole('complementary', { name: 'Session sidebar' })).toHaveCount(0);
+  // The Side area is the open Session's: this empty start screen has none, nor its toggle.
+  await expect(window.getByRole('button', { name: /Side area/ })).toHaveCount(0);
+  await expect(window.getByRole('complementary', { name: 'Side area' })).toHaveCount(0);
 
   await window.getByRole('button', { name: 'Settings' }).click();
   const native = window.getByRole('row', { name: /Native/ });
@@ -338,7 +338,8 @@ test('Ctrl+` opens a terminal in the dock, which takes what is typed, Ctrl+C inc
     await expect(dock).toHaveCount(0);
     await window.keyboard.press('Control+Backquote');
     await expect(dock.getByRole('tab', { name: 'Terminal 1' })).toBeVisible();
-    await expect(dock.getByRole('tab')).toHaveCount(2);
+    // The same Terminal, no new one.
+    await expect(dock.getByRole('tab')).toHaveCount(1);
   } finally {
     await app?.close();
     app = undefined;

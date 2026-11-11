@@ -1,6 +1,7 @@
 // Seam B: a fake main implementing the same typed API the real one does, so
 // renderer tests control exactly what main reports.
-import { clampSidebarWidth, DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
+import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
+import { clampPanelSize, DEFAULT_SESSION_PANELS, type SessionPanels } from '../../src/shared/panels';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
 export function emptyDashboard(days: UsageRange): UsageDashboard {
@@ -23,6 +24,9 @@ export function emptyDashboard(days: UsageRange): UsageDashboard {
   };
 }
 
+/** A Session's Panels with both areas hidden: Changes open in the Side area, but not shown. */
+export const HIDDEN_PANELS: SessionPanels = { side: { panels: ['changes'], shown: 'changes', open: false }, dock: { panels: [], shown: null, open: false } };
+
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
@@ -35,6 +39,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   settings: DEFAULT_SETTINGS,
   sessions: [],
   transcript: [],
+  panels: DEFAULT_SESSION_PANELS,
   terminals: [],
   terminalOutput: { data: new Uint8Array() },
   database: { state: 'ok' },
@@ -111,10 +116,10 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
-      'settings.setSidebar': (sidebar) => {
+      'settings.setPanelSize': ({ kind, dimension, size }) => {
         const current = this.value('settings');
-        const next = { ...current.sidebar, ...sidebar };
-        const settings = { ...current, sidebar: { ...next, width: clampSidebarWidth(next.width) } };
+        const { layout } = current;
+        const settings = { ...current, layout: { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } } };
         this.publish('settings', settings);
         return settings;
       },
@@ -144,6 +149,7 @@ export class FakeMain implements LoomApi {
       'sessions.setUnread': () => {},
       'sessions.snooze': () => {},
       'sessions.rename': () => {},
+      'sessions.setPanels': ({ id, panels }) => this.publish('panels', panels, { sessionId: id }),
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
       'terminals.open': () => {
