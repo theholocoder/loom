@@ -120,15 +120,63 @@ describe('starting a Session from an issue', () => {
 });
 
 describe("a Session's linked issue", () => {
-  it('shows in Session info, opening the issue', () => {
+  const glance = () => screen.getByRole('group', { name: 'Session at a glance' });
+  const openSession = (title: string) => fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: title }));
+  const plain: Session = { ...fromIssue, title: 'Fix SSO', issue: undefined };
+
+  it('shows in the Glance strip, opening the issue', () => {
     const main = renderApp(new FakeMain({ projects: [project], sessions: [fromIssue] }));
-    fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: fromIssue.title }));
+    openSession(fromIssue.title);
 
     expect(within(screen.getByRole('region', { name: 'Session header' })).queryByText('#31')).toBeNull();
-    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
-    const git = within(screen.getByRole('tabpanel', { name: 'Session info' })).getByRole('region', { name: 'Git' });
-    const link = within(git).getByRole('button', { name: '#31' });
-    fireEvent.click(link);
+    expect(within(glance()).queryByRole('button', { name: 'Link issue' })).toBeNull();
+    fireEvent.click(within(glance()).getByRole('button', { name: '#31' }));
     expect(main.invoked).toContainEqual({ command: 'links.open', params: { url: loginBug.url } });
+  });
+
+  it('is linked from the Link issue chip, searching the open issues', async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project], sessions: [plain] }, {
+        'projects.issues': () => [loginBug, darkMode],
+        'sessions.linkIssue': ({ issue }) => main.publish('sessions', [{ ...plain, issue }]),
+      }),
+    );
+    openSession('Fix SSO');
+
+    fireEvent.click(within(glance()).getByRole('button', { name: 'Link issue' }));
+    const picker = screen.getByRole('dialog', { name: 'Pick an issue' });
+    fireEvent.click(await within(picker).findByRole('option', { name: '#7 Dark mode' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Pick an issue' })).toBeNull();
+    expect(main.invoked).toContainEqual({ command: 'sessions.linkIssue', params: { id: 9, issue: { number: 7, url: darkMode.url } } });
+    await waitFor(() => expect(within(glance()).getByRole('button', { name: '#7' })).toBeTruthy());
+  });
+
+  it('says why linking one failed', async () => {
+    renderApp(
+      new FakeMain({ projects: [project], sessions: [plain] }, {
+        'projects.issues': () => [loginBug],
+        'sessions.linkIssue': () => {
+          throw new Error("This Session's Project was removed, so it can't be linked to an issue.");
+        },
+      }),
+    );
+    openSession('Fix SSO');
+    fireEvent.click(within(glance()).getByRole('button', { name: 'Link issue' }));
+    fireEvent.click(await within(screen.getByRole('dialog', { name: 'Pick an issue' })).findByRole('option', { name: '#31 Fix the login bug' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain("can't be linked to an issue");
+  });
+
+  it('offers no Link issue with the Forge off, nor on an archived Session', () => {
+    renderApp(new FakeMain({ projects: [{ ...project, forge: { state: 'no-remote', checking: false } }], sessions: [plain] }));
+    openSession('Fix SSO');
+    expect(within(glance()).queryByRole('button', { name: 'Link issue' })).toBeNull();
+    cleanup();
+
+    renderApp(new FakeMain({ projects: [project], sessions: [{ ...plain, status: 'archived', waitingReason: undefined }] }));
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: 'Archived' }));
+    openSession('Fix SSO');
+    expect(within(glance()).queryByRole('button', { name: 'Link issue' })).toBeNull();
   });
 });

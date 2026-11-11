@@ -4,7 +4,7 @@
 // the one shown and whether each area is shown are the Session's own, kept
 // in the database; each kind's size is the Layout's, the same for every
 // Session. An area takes the size of the Panel it shows.
-import { ChevronDown, FileDiff, Info, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
+import { ChevronDown, FileDiff, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { Session, TerminalInfo } from '../shared/api';
 import {
@@ -48,7 +48,6 @@ export interface PanelKindView extends PanelKindSpec {
 
 /** The Panel registry: every kind of Panel, once. */
 export const PANELS: Record<PanelKind, PanelKindView> = {
-  info: { ...PANEL_SPECS.info, label: 'Session info', icon: Info },
   changes: {
     ...PANEL_SPECS.changes,
     label: 'Changes',
@@ -92,7 +91,7 @@ export interface PanelsControl {
   close(panel: PanelId): void;
   /** Shows or hides `area`; an empty Dock shown starts a Terminal. */
   toggleArea(area: PanelAreaName): void;
-  /** `d` and Ctrl+I: shows `panel`, or hides its area when that is what it shows. */
+  /** `d`: shows `panel`, or hides its area when that is what it shows. */
   toggle(panel: PanelId): void;
   /** Starts a Terminal in the Session and shows it in the Dock, with the focus in it. */
   newTerminal(): void;

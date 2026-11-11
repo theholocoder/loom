@@ -72,9 +72,14 @@ export function effortsOf(listed: Loaded<ModelChoice[]>, model: string | undefin
 
 const tokens = new Intl.NumberFormat('en');
 
+/** How much of its context window the agent has used, as a whole percentage. */
+export function contextPercent(context: ContextUsage): number {
+  return context.size > 0 ? Math.min(100, Math.round((context.used / context.size) * 100)) : 0;
+}
+
 /** How full the agent's context is, as a share of the model's window. */
 export function ContextGauge({ context }: { context: ContextUsage }) {
-  const percent = Math.min(100, Math.round((context.used / context.size) * 100));
+  const percent = contextPercent(context);
   return (
     <span
       className="gauge"

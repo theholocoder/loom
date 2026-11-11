@@ -105,7 +105,7 @@ describe('the Changes view', () => {
     fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
     expect(diffCalls(main, 'sessions.diff')).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Changes' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Session at a glance' })).getByRole('button', { name: /^Show changes/ }));
     expect(panel()).toBeTruthy();
     expect(diffCalls(main, 'sessions.diff')).toHaveLength(1);
   });

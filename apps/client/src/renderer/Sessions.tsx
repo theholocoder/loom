@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, PanelBottom, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Commands, type ExistingBranch, type MessageComment, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
@@ -9,12 +9,12 @@ import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
 import { ChangesView } from './Changes';
-import { SessionInfo } from './SessionInfo';
+import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { PanelArea, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
 import { Popover, Select } from './Popover';
 import { Markdown } from './Markdown';
-import { ProjectRemoved, useArchive, useRemovedProject, WorktreeMissing } from './Archive';
+import { useArchive, useRemovedProject } from './Archive';
 import { useDelete } from './Delete';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
@@ -26,7 +26,7 @@ import { useNow } from './now';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
 import { AttachmentList, Composer, quoteSummary } from './Composer';
 import { useSessionMenu } from './SessionMenu';
-import { addToContextMenu, copyable, selectedText } from './ContextMenu';
+import { addToContextMenu, selectedText } from './ContextMenu';
 
 /** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
 const WAITING: Record<Exclude<WaitingReason, 'unsaved-work'>, { label: string; icon: LucideIcon }> = {
@@ -353,7 +353,7 @@ export type SessionCommand =
   | 'markUnread'
   | 'toggleSideArea'
   | 'toggleChanges'
-  | 'toggleInfo'
+  | 'sessionDetails'
   | 'toggleTerminal';
 
 /**
@@ -386,18 +386,14 @@ export function SessionView({
   // An archived Session takes a message, which reopens it, while its Project is there.
   const readOnly = session.status === 'archived' && !project;
   const [error, setError] = useState<string>();
-  /** Whether Session info's Link Merge request popover is open. */
-  const [linking, setLinking] = useState(false);
+  /** The header's popover open, if any: Session details, the Merge request's, its checks, Link issue or the ⋯ menu. */
+  const [popover, setPopover] = useState<HeaderPopover>();
   // Only a Session that can still work has Terminals: not archived, its worktree there.
   const dockable = session.status !== 'archived' && !session.worktreeMissing;
   const terminals = useTopic('terminals', { sessionId: session.id });
   const panels = usePanels(session.id, terminals);
   const { side, dock } = panels.state;
   const sideShown = panels.sideShown;
-  const infoShown = sideShown && side.shown === 'info';
-  useEffect(() => {
-    if (!infoShown) setLinking(false);
-  }, [infoShown]);
   const archiver = useArchive();
   const deleter = useDelete();
   const menu = useSessionMenu(session, setError);
@@ -435,17 +431,14 @@ export function SessionView({
       delete: async () => deleter.delete(session),
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
       requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
-      linkMergeRequest: async () => {
-        panels.show('info');
-        setLinking(true);
-      },
+      linkMergeRequest: async () => setPopover({ kind: 'merge-request', linking: true }),
       openInEditor: () => api.invoke('sessions.openInEditor', { id }),
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
       retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
       markUnread: () => api.invoke('sessions.setUnread', { id, unread: true }),
       toggleSideArea: async () => panels.toggleArea('side'),
       toggleChanges: async () => panels.toggle('changes'),
-      toggleInfo: async () => panels.toggle('info'),
+      sessionDetails: async () => setPopover((open) => (open?.kind === 'details' ? undefined : { kind: 'details', from: 'title' })),
       toggleTerminal: async () => {
         if (dockable) panels.toggleTerminal();
       },
@@ -538,29 +531,11 @@ export function SessionView({
     ]);
   };
 
-  const archive = () => {
-    setError(undefined);
-    archiver.archive(session).catch((e: unknown) => setError((e as Error).message));
-  };
-
   /** A Panel's content, in whichever area it sits. */
   const renderPanel = (panel: PanelId) => {
     switch (kindOf(panel)) {
       case 'changes':
         return <ChangesView session={session} onComment={(comment) => setComments((list) => [...list, comment])} />;
-      case 'info':
-        return (
-          <SessionInfo
-            session={session}
-            project={project}
-            linking={linking}
-            onLinkingChange={setLinking}
-            onShowChanges={() => panels.show('changes')}
-            onArchive={archive}
-            onDelete={() => deleter.delete(session)}
-            onError={setError}
-          />
-        );
       case 'terminal': {
         const terminal = terminals?.find((t) => t.id === terminalOf(panel));
         return terminal && <TerminalView key={terminal.id} terminal={terminal} focusPending={panels.focus === panel} onFocused={panels.onFocused} />;
@@ -568,200 +543,165 @@ export function SessionView({
     }
   };
 
+  const StatusGlyph = status.icon;
+  const statusIcon = <StatusGlyph className="sm" />;
   return (
-    <>
-      <main className="main" aria-label="Session">
-        <div className="main-head" role="region" aria-label="Session header" onContextMenu={menu.onContextMenu}>
-          <div className="grow" style={{ minWidth: 0 }}>
-            <div className="crumb">
-              {project && <span>{project.name}</span>}
-              {removedProject && (
-                <span className="row">
-                  {removedProject.name} <ProjectRemoved />
-                </span>
-              )}
-              {(project || removedProject) && session.branch && <span aria-hidden="true">·</span>}
-              {session.branch && (
-                <>
-                  <GitBranch className="sm" />
-                  <span className="tech ellipsis" title="Branch" {...copyable('branch name', session.branch)}>
-                    {session.branch}
+    <main className="main" aria-label="Session">
+      <SessionHeader
+        session={session}
+        project={project}
+        removedProject={removedProject}
+        status={{ ...status, icon: working ? <span className="spin">{statusIcon}</span> : statusIcon }}
+        flags={isSnoozed(session) && <Snoozed session={session} onError={setError} />}
+        popover={popover}
+        onPopover={setPopover}
+        side={{ shown: sideShown, onToggle: () => panels.toggleArea('side') }}
+        dock={dockable ? { shown: dock.open, onToggle: () => panels.toggleArea('dock') } : undefined}
+        menu={menu}
+        onShowChanges={() => panels.show('changes')}
+        onError={setError}
+      >
+        {archiver.dialog}
+        {deleter.dialog}
+        {menu.dialogs}
+      </SessionHeader>
+      <div className="session-body">
+        <div className="convo">
+          <div className="chat" role="log" aria-label="Conversation" onContextMenu={commentOnSelection}>
+            {items.map((item) =>
+              item.kind === 'user' ? (
+                <div key={item.id} className="msg user">
+                  <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div className="bubble">
+                      {item.text && <Markdown text={item.text} breaks />}
+                      {item.attachments && <AttachmentList attachments={item.attachments} />}
+                    </div>
+                  </div>
+                </div>
+              ) : item.kind === 'agent' ? (
+                <div key={item.id} className="msg agent">
+                  <div className="who">
+                    <Bot />
+                  </div>
+                  <div className="body">
+                    <div className="name">{session.agent}</div>
+                    <div className="bubble">
+                      <Markdown text={item.text} />
+                    </div>
+                  </div>
+                </div>
+              ) : item.kind === 'thinking' ? (
+                <ThinkingBlock key={item.id} item={item} />
+              ) : item.kind === 'tool' ? (
+                <ToolCard key={item.id} item={item} />
+              ) : item.kind === 'question' ? (
+                <QuestionCard key={item.id} item={item} />
+              ) : item.kind === 'approval' ? (
+                <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
+              ) : item.kind === 'trust' ? (
+                <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
+              ) : item.kind === 'interruption' ? (
+                <Interruption key={item.id} item={item} onContinue={continuable && item === items.at(-1) ? () => void runCommand(() => api.invoke('sessions.continue', { id: session.id })) : undefined} />
+              ) : item.kind === 'model' ? (
+                <ModelMarker key={item.id} item={item} />
+              ) : item.kind === 'merge-request-refused' ? (
+                <div key={item.id} className="interruption" role="note">
+                  <TriangleAlert className="sm" />
+                  <span>
+                    Couldn't link Merge request <span className="tech">{item.mergeRequest}</span>: {item.reason}
                   </span>
-                </>
-              )}
-            </div>
-            <div className="row">
-              <h1 className="ellipsis">{session.title}</h1>
-              <StatusIcon session={session} />
-              <span className={`${status.className} chip`} role="status" aria-label="Session status">
-                {status.label}
-              </span>
-              {session.worktreeMissing && <WorktreeMissing />}
-              {isSnoozed(session) && <Snoozed session={session} onError={setError} />}
-            </div>
+                </div>
+              ) : item.kind === 'merge-request' ? (
+                <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
+              ) : item.kind === 'feedback' ? (
+                <FeedbackCard
+                  key={item.id}
+                  item={item}
+                  forge={project?.forge.kind}
+                  readOnly={session.status === 'archived' || !!session.worktreeMissing}
+                  onOpen={openLink}
+                  onSend={() => api.invoke('sessions.sendFeedback', { id: session.id, itemId: item.id })}
+                />
+              ) : item.kind === 'feedback-info' ? (
+                <FeedbackInfoCard key={item.id} item={item} onOpen={() => openLink(item.url)} />
+              ) : item.kind === 'merge-request-ended' ? (
+                <MergeRequestEndedCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
+              ) : (
+                <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
+              ),
+            )}
+            {unshownError && <ErrorCard message={unshownError} />}
+            {starting && environment && (
+              <div className="tools">
+                <div className="tool" role="status">
+                  <div className="tool-head">
+                    <span className="spin">
+                      <LoaderCircle className="sm" />
+                    </span>
+                    <span className="grow">{`Starting ${environment.label}…`}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {error && (
+              <div className="err" role="alert">
+                {error}
+              </div>
+            )}
+            <div ref={end} />
           </div>
-          <button
-            className="icon-btn"
-            type="button"
-            title={sideShown ? 'Hide the Side area' : 'Show the Side area'}
-            aria-label={sideShown ? 'Hide the Side area' : 'Show the Side area'}
-            aria-expanded={sideShown}
-            aria-controls="session-side"
-            onClick={() => panels.toggleArea('side')}
-          >
-            <PanelRight />
-          </button>
-          {dockable && (
-            <button
-              className="icon-btn"
-              type="button"
-              title={dock.open ? 'Hide the Dock' : 'Show the Dock'}
-              aria-label={dock.open ? 'Hide the Dock' : 'Show the Dock'}
-              aria-expanded={dock.open}
-              aria-controls="session-dock"
-              onClick={() => panels.toggleArea('dock')}
-            >
-              <PanelBottom />
-            </button>
-          )}
-          {archiver.dialog}
-          {deleter.dialog}
-          {menu.dialogs}
-        </div>
-        <div className="chat" role="log" aria-label="Conversation" onContextMenu={commentOnSelection}>
-          {items.map((item) =>
-            item.kind === 'user' ? (
-              <div key={item.id} className="msg user">
-                <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <div className="bubble">
-                    {item.text && <Markdown text={item.text} breaks />}
-                    {item.attachments && <AttachmentList attachments={item.attachments} />}
-                  </div>
-                </div>
-              </div>
-            ) : item.kind === 'agent' ? (
-              <div key={item.id} className="msg agent">
-                <div className="who">
-                  <Bot />
-                </div>
-                <div className="body">
-                  <div className="name">{session.agent}</div>
-                  <div className="bubble">
-                    <Markdown text={item.text} />
-                  </div>
-                </div>
-              </div>
-            ) : item.kind === 'thinking' ? (
-              <ThinkingBlock key={item.id} item={item} />
-            ) : item.kind === 'tool' ? (
-              <ToolCard key={item.id} item={item} />
-            ) : item.kind === 'question' ? (
-              <QuestionCard key={item.id} item={item} />
-            ) : item.kind === 'approval' ? (
-              <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
-            ) : item.kind === 'trust' ? (
-              <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
-            ) : item.kind === 'interruption' ? (
-              <Interruption key={item.id} item={item} onContinue={continuable && item === items.at(-1) ? () => void runCommand(() => api.invoke('sessions.continue', { id: session.id })) : undefined} />
-            ) : item.kind === 'model' ? (
-              <ModelMarker key={item.id} item={item} />
-            ) : item.kind === 'merge-request-refused' ? (
-              <div key={item.id} className="interruption" role="note">
-                <TriangleAlert className="sm" />
-                <span>
-                  Couldn't link Merge request <span className="tech">{item.mergeRequest}</span>: {item.reason}
-                </span>
-              </div>
-            ) : item.kind === 'merge-request' ? (
-              <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
-            ) : item.kind === 'feedback' ? (
-              <FeedbackCard
-                key={item.id}
-                item={item}
-                forge={project?.forge.kind}
-                readOnly={session.status === 'archived' || !!session.worktreeMissing}
-                onOpen={openLink}
-                onSend={() => api.invoke('sessions.sendFeedback', { id: session.id, itemId: item.id })}
+          <Composer
+            agent={session.agent}
+            placeholder={composerPlaceholder()}
+            disabled={composerDisabled}
+            dock={panel}
+            clearKey={stepKey}
+            focusRequest={replyRequest}
+            onSend={send}
+            canAttach={!freeAnswer}
+            loadFiles={readOnly || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
+            commands={commands}
+            // Not with an answer to a question: they wait for the next message.
+            comments={freeAnswer ? undefined : comments}
+            onRemoveComment={(index) => setComments((list) => list.filter((_, i) => i !== index))}
+            queueing={working}
+            tools={
+              <ModelPickers
+                agent={session.agent}
+                models={agentConfig ? { value: agentConfig.models } : checkoutModels.listed}
+                model={shownModel}
+                efforts={shownEfforts}
+                effort={session.effort ?? agentConfig?.effort}
+                disabled={pickersDisabled}
+                onOpen={checkoutModels.refresh}
+                onModel={(model) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, model }))}
+                onEffort={(effort) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, effort }))}
               />
-            ) : item.kind === 'feedback-info' ? (
-              <FeedbackInfoCard key={item.id} item={item} onOpen={() => openLink(item.url)} />
-            ) : item.kind === 'merge-request-ended' ? (
-              <MergeRequestEndedCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
-            ) : (
-              <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
-            ),
-          )}
-          {unshownError && <ErrorCard message={unshownError} />}
-          {starting && environment && (
-            <div className="tools">
-              <div className="tool" role="status">
-                <div className="tool-head">
-                  <span className="spin">
-                    <LoaderCircle className="sm" />
-                  </span>
-                  <span className="grow">{`Starting ${environment.label}…`}</span>
-                </div>
-              </div>
-            </div>
-          )}
-          {error && (
-            <div className="err" role="alert">
-              {error}
-            </div>
-          )}
-          <div ref={end} />
+            }
+            gauge={session.context && <ContextGauge context={session.context} />}
+            onStop={working ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
+            queue={
+              session.queue && session.status !== 'archived' ? (
+                <Queue
+                  queue={session.queue}
+                  // Steering needs a run going; otherwise Send now sends it as the reply.
+                  steer={working && !!session.canSteer}
+                  onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
+                  onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
+                  onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
+                />
+              ) : undefined
+            }
+          />
         </div>
-        <Composer
-          agent={session.agent}
-          placeholder={composerPlaceholder()}
-          disabled={composerDisabled}
-          dock={panel}
-          clearKey={stepKey}
-          focusRequest={replyRequest}
-          onSend={send}
-          canAttach={!freeAnswer}
-          loadFiles={readOnly || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
-          commands={commands}
-          // Not with an answer to a question: they wait for the next message.
-          comments={freeAnswer ? undefined : comments}
-          onRemoveComment={(index) => setComments((list) => list.filter((_, i) => i !== index))}
-          queueing={working}
-          tools={
-            <ModelPickers
-              agent={session.agent}
-              models={agentConfig ? { value: agentConfig.models } : checkoutModels.listed}
-              model={shownModel}
-              efforts={shownEfforts}
-              effort={session.effort ?? agentConfig?.effort}
-              disabled={pickersDisabled}
-              onOpen={checkoutModels.refresh}
-              onModel={(model) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, model }))}
-              onEffort={(effort) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, effort }))}
-            />
-          }
-          gauge={session.context && <ContextGauge context={session.context} />}
-          onStop={working ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
-          queue={
-            session.queue && session.status !== 'archived' ? (
-              <Queue
-                queue={session.queue}
-                // Steering needs a run going; otherwise Send now sends it as the reply.
-                steer={working && !!session.canSteer}
-                onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
-                onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
-                onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
-              />
-            ) : undefined
-          }
-        />
-        {panels.ready && dockable && dock.open && (
-          <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
+        {panels.ready && sideShown && (
+          <PanelArea area="side" session={session} terminals={terminals} control={panels} render={renderPanel} />
         )}
-      </main>
-      {panels.ready && sideShown && (
-        <PanelArea area="side" session={session} terminals={terminals} control={panels} render={renderPanel} />
+      </div>
+      {panels.ready && dockable && dock.open && (
+        <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
       )}
-    </>
+    </main>
   );
 }
 

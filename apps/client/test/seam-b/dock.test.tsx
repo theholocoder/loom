@@ -184,6 +184,24 @@ describe('the dock', () => {
     expect(calls(main, 'terminals.close')).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
+  it('has its tabs as one Tab stop, the arrow keys moving between them', async () => {
+    renderApp(fakeMain());
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getByRole('menuitem', { name: 'Terminal' }));
+    await waitFor(() => expect(terminalTabs()).toHaveLength(2));
+
+    expect(terminalTabs().map((t) => t.tabIndex)).toEqual([-1, 0]);
+    fireEvent.keyDown(terminalTabs()[1]!, { key: 'ArrowRight' });
+    expect(terminalTabs()[0]!.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(terminalTabs()[0]);
+    expect(terminalTabs().map((t) => t.tabIndex)).toEqual([0, -1]);
+    fireEvent.keyDown(terminalTabs()[0]!, { key: 'End' });
+    expect(terminalTabs()[1]!.getAttribute('aria-selected')).toBe('true');
+  });
+
   it('is open or not for each Session, and keeps its terminals going while another Session is shown', async () => {
     const main = renderApp(fakeMain());
     openSession('Fix login');

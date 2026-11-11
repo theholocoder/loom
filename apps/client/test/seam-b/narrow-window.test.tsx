@@ -102,8 +102,8 @@ describe('in a narrow window, the Side area', () => {
     fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Close Changes' }));
     expect(sideArea()).toBeNull();
     (document.activeElement as HTMLElement | null)?.blur();
-    press('i', { ctrlKey: true });
-    expect(within(sideArea()!).getByRole('tab', { name: 'Session info' }).getAttribute('aria-selected')).toBe('true');
+    press('d');
+    expect(within(sideArea()!).getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('closes on Esc, the focus going back where it was', () => {
@@ -130,14 +130,14 @@ describe('in a narrow window, the Side area', () => {
     expect(sideArea()).toBeTruthy();
   });
 
-  it('opens when a Panel is shown in it, and Ctrl+B, d and Ctrl+I open and close it', () => {
+  it('opens when a Panel is shown in it, and Ctrl+B and d open and close it', () => {
     window.innerWidth = 1000;
     const main = renderApp({ side: { open: false } });
     openSession();
-    press('i', { ctrlKey: true });
+    press('d');
     expect(sideArea()!.classList.contains('drawer')).toBe(true);
-    expect(within(sideArea()!).getByRole('tab', { name: 'Session info' }).getAttribute('aria-selected')).toBe('true');
-    press('i', { ctrlKey: true });
+    expect(within(sideArea()!).getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
+    press('d');
     expect(sideArea()).toBeNull();
 
     (document.activeElement as HTMLElement | null)?.blur();
@@ -148,7 +148,7 @@ describe('in a narrow window, the Side area', () => {
     press('b', { ctrlKey: true });
     expect(sideArea()).toBeTruthy();
     // Showing a Panel shows the area for the Session in a wide window too.
-    expect(kept(main).at(0)).toEqual({ panels: ['changes', 'info'], shown: 'info', open: true });
+    expect(kept(main).at(0)).toEqual({ panels: ['changes'], shown: 'changes', open: true });
   });
 
   it('is closed by opening another Session, and when the window crosses the breakpoint', () => {

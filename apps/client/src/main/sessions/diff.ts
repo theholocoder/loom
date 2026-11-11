@@ -58,7 +58,7 @@ export class WorkingCopyDiff {
     return { available: true, readOnly: !!this.target.branch, ...(base ? { base: base.ref, baseSource: base.source } : { base: 'HEAD' }), files };
   }
 
-  /** Session info's diff stat, from a summary of the whole diff. */
+  /** The Glance strip's diff stat, from a summary of the whole diff. */
   static stat(files: DiffFile[]): DiffStat {
     return { files: files.length, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0) };
   }
