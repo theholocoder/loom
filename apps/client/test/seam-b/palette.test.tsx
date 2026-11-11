@@ -119,6 +119,7 @@ describe('palette actions', () => {
       'Toggle Session info',
       'Mark this Session unread',
       'Archive this Session',
+      'Delete this Session…',
       'Theme: Midnight',
       'Theme: Paper',
       'Theme: Nord',

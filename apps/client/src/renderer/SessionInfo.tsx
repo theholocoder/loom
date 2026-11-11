@@ -1,7 +1,7 @@
 // The sidebar's Session info view: the open Session's details, which may
 // change while it runs, each with the actions that go with it, in four fixed
 // groups: Where, Git, Agent and Usage. An archived Session's are read-only.
-import { Archive, Bot, BotOff, Check, CircleCheck, CircleDot, CircleMinus, CircleX, Clock, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed, GitPullRequestCreate, Link, SquareTerminal, TriangleAlert } from 'lucide-react';
+import { Archive, Bot, BotOff, Check, CircleCheck, CircleDot, CircleMinus, CircleX, Clock, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed, GitPullRequestCreate, Link, SquareTerminal, Trash2, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type EnvironmentStatus, type MergeRequestState, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -25,7 +25,7 @@ const wholeNumber = new Intl.NumberFormat('en');
 /**
  * The Session's details in their four groups, with their actions; an
  * archived Session's without editor, terminal, Archive or Merge request
- * actions, and one whose worktree is missing without editor or terminal. `linking` opens the Link Merge request popover, as the palette asks;
+ * actions (Delete stays), and one whose worktree is missing without editor or terminal. `linking` opens the Link Merge request popover, as the palette asks;
  * `onLinkingChange` says when it opens or closes. What goes wrong running
  * an action goes to `onError`.
  */
@@ -36,6 +36,7 @@ export function SessionInfo({
   onLinkingChange,
   onShowChanges,
   onArchive,
+  onDelete,
   onError,
 }: {
   session: Session;
@@ -44,6 +45,7 @@ export function SessionInfo({
   onLinkingChange: (linking: boolean) => void;
   onShowChanges: () => void;
   onArchive: () => void;
+  onDelete: () => void;
   onError: (message: string | undefined) => void;
 }) {
   const api = useApi();
@@ -141,14 +143,18 @@ export function SessionInfo({
           <WorkingTime session={session} />
         </Fact>
       </Group>
-      {!archived && (
-        <div className="info-foot">
+      <div className="info-foot">
+        {!archived && (
           <button type="button" onClick={onArchive}>
             <Archive className="sm" />
             Archive
           </button>
-        </div>
-      )}
+        )}
+        <button type="button" onClick={onDelete}>
+          <Trash2 className="sm" />
+          Delete
+        </button>
+      </div>
     </div>
   );
 }

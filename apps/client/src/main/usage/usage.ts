@@ -138,7 +138,8 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
       const row = byId.get(sessionId);
       return withoutUndefined({
         sessionId,
-        title: row?.title ?? `Session ${sessionId}`,
+        // Only a deleted Session has no row: its usage still counts.
+        title: row?.title ?? 'Deleted Session',
         projectId: usage.projectId,
         project: projectNames.get(usage.projectId)!.name,
         projectRemoved: removedFlag(usage.projectId),

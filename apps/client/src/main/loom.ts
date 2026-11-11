@@ -287,6 +287,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.steer': (params) => sessionService.steer(params),
     'sessions.setModel': (params) => sessionService.setModel(params),
     'sessions.archive': (params) => sessionService.archive(params),
+    'sessions.delete': (params) => sessionService.delete(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
     'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
