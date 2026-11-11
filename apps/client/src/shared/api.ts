@@ -3,7 +3,7 @@
 // also the seam tests drive main through (seam A) and fake for the renderer
 // (seam B), so everything the UI can see or do goes through here.
 import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
-import { DEFAULT_LAYOUT, type LayoutSettings, type PanelDimension, type PanelKind, type SessionPanels } from './panels';
+import { DEFAULT_LAYOUT, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type SessionPanels } from './panels';
 import { DEFAULT_INBOX, type InboxSettings } from './window';
 
 /** What the Environment's bridge reported in its handshake. */
@@ -1253,6 +1253,8 @@ export interface Commands {
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
   /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */
   'settings.setPanelSize': { params: { kind: PanelKind; dimension: PanelDimension; size: number }; result: Settings };
+  /** Sets the area a Panel kind sits in, in the Layout. Rejects a kind or an area Loom has not. */
+  'settings.setPanelArea': { params: { kind: PanelKind; area: PanelArea }; result: Settings };
   /** Sets the Inbox's width (kept within its least and most), whether it is shown, or both. */
   'settings.setInbox': { params: Partial<InboxSettings>; result: Settings };
   /** Sets the Changes view's layout, all of it. Rejects anything but true or false. */

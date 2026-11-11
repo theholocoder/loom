@@ -11,7 +11,7 @@ import { IssuePicker } from './IssuePicker';
 import { ChangesView, type DiffComments } from './Changes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { MergeRequestPanel, type MergeRequestFocus } from './MergeRequestPanel';
-import { PanelArea, usePanels } from './Panels';
+import { canRunTerminals, PanelArea, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
@@ -394,8 +394,7 @@ export function SessionView({
   const [popover, setPopover] = useState<HeaderPopover>();
   /** Where the Merge request Panel was last asked to take the user. */
   const [mergeRequestFocus, setMergeRequestFocus] = useState<MergeRequestFocus>();
-  // Only a Session that can still work has Terminals: not archived, its worktree there.
-  const dockable = session.status !== 'archived' && !session.worktreeMissing;
+  const runsTerminals = canRunTerminals(session);
   const terminals = useTopic('terminals', { sessionId: session.id });
   const panels = usePanels(session.id, terminals);
   /** Shows the Merge request Panel, at its link form or its reviews when asked. */
@@ -405,6 +404,8 @@ export function SessionView({
   };
   const { side, dock } = panels.state;
   const sideShown = panels.sideShown;
+  // The Dock holds Terminals, and whatever Panels were moved there, which any Session can show.
+  const hasDock = runsTerminals || dock.panels.length > 0;
   const archiver = useArchive();
   const deleter = useDelete();
   const menu = useSessionMenu(session, setError);
@@ -453,7 +454,7 @@ export function SessionView({
       reviewChanges: async () => panels.toggleReview('changes'),
       sessionDetails: async () => setPopover((open) => (open?.kind === 'details' ? undefined : { kind: 'details', from: 'title' })),
       toggleTerminal: async () => {
-        if (dockable) panels.toggleTerminal();
+        if (runsTerminals) panels.toggleTerminal();
       },
     };
     runs[command]().catch((e: unknown) => setError((e as Error).message));
@@ -580,7 +581,7 @@ export function SessionView({
         popover={popover}
         onPopover={setPopover}
         side={{ shown: sideShown, onToggle: () => panels.toggleArea('side') }}
-        dock={dockable ? { shown: dock.open, onToggle: () => panels.toggleArea('dock') } : undefined}
+        dock={hasDock ? { shown: dock.open, onToggle: () => panels.toggleArea('dock') } : undefined}
         menu={menu}
         onShowChanges={() => panels.show('changes')}
         onShowMergeRequest={showMergeRequest}
@@ -724,7 +725,7 @@ export function SessionView({
           <PanelArea area="side" session={session} terminals={terminals} control={panels} render={renderPanel} />
         )}
       </div>
-      {panels.ready && dockable && dock.open && (
+      {panels.ready && hasDock && dock.open && (
         <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
       )}
     </main>

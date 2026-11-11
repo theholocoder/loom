@@ -163,7 +163,7 @@ describe("the Side area's Panels", () => {
 
     // Shown empty, it says how to add one.
     press('b', { ctrlKey: true });
-    expect(within(sideArea()!).getByRole('tabpanel', { name: 'Side area' }).textContent).toBe('No Panels here. Add one with +.');
+    expect(within(sideArea()!).getByRole('tabpanel', { name: 'Side area' }).textContent).toBe('No Panels here. Add one with +, or move a tab here from its menu.');
     press('d');
     expect(tabNames()).toEqual(['Changes']);
     expect(viewName()).toBe('Changes');

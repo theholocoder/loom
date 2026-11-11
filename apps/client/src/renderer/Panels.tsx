@@ -3,20 +3,26 @@
 // the conversation and the Dock under it. Which Panels a Session has open,
 // the one shown and whether each area is shown are the Session's own, kept
 // in the database; each kind's size is the Layout's, the same for every
-// Session. An area takes the size of the Panel it shows. A Panel with a large
-// work surface can take the Session's main area instead, in Review mode.
-import { ChevronDown, FileDiff, GitPullRequest, Maximize2, Minimize2, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
+// Session, and so is the area each kind sits in: a Panel moved to the other
+// area takes every Panel of its kind there, in every Session. An area takes
+// the size of the Panel it shows. A Panel with a large work surface can take
+// the Session's main area instead, in Review mode.
+import { ChevronDown, Ellipsis, FileDiff, GitPullRequest, Maximize2, Minimize2, PanelBottom, PanelRight, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { Session, TerminalInfo } from '../shared/api';
 import {
+  areaOf,
   DEFAULT_LAYOUT,
   DEFAULT_SESSION_PANELS,
   dimensionOf,
+  inLayout,
   kindOf,
+  otherArea,
   PANEL_AREAS,
   PANEL_KINDS,
   PANEL_MAX_SIZE,
   PANEL_SPECS,
+  panelArea,
   panelSize,
   terminalOf,
   terminalPanel,
@@ -30,6 +36,7 @@ import {
   type SessionPanels,
 } from '../shared/panels';
 import { useApi, useTopic } from './api';
+import { addToContextMenu, MenuButtonMenu, type ContextMenuSection } from './ContextMenu';
 import { countText } from './MergeRequestLooks';
 import { Popover } from './Popover';
 import { ResizeEdge } from './ResizeEdge';
@@ -74,8 +81,13 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
       return { text: String(reviews), description: `${countText(reviews, 'review')}${babysit.reviews!.changesRequested ? ', changes requested' : ''}` };
     },
   },
-  terminal: { ...PANEL_SPECS.terminal, label: 'Terminal', icon: SquareTerminal },
+  terminal: { ...PANEL_SPECS.terminal, label: 'Terminal', icon: SquareTerminal, offered: (session) => canRunTerminals(session) },
 };
+
+/** Whether `session` can have Terminals: it can still work, so it is not archived, and its worktree is there. */
+export function canRunTerminals(session: Session): boolean {
+  return session.status !== 'archived' && !session.worktreeMissing;
+}
 
 /** The Panel areas' names, as the user reads them. */
 export const AREA_LABELS: Record<PanelAreaName, string> = { side: 'Side area', dock: 'Dock' };
@@ -104,26 +116,39 @@ export interface PanelsControl {
   leaveReview(): void;
   /** Closes the drawer, leaving the Session's Panels as they are. */
   closeDrawer(): void;
-  /** Why the last Terminal couldn't open, shown in the Dock. */
+  /** Why the last Terminal couldn't open, shown in the area Terminals sit in. */
   error?: string;
+  /** The area Panels of `kind` sit in, in the Layout: where a Panel of it opens. */
+  areaFor(kind: PanelKind): PanelAreaName;
   /** The Panel to put the focus in once it shows: a Terminal just opened or asked for. */
   focus?: PanelId;
   onFocused(): void;
+  /** The Panel just moved, whose tab takes the focus in its new area. */
+  moved?: PanelId;
+  onMoved(): void;
   /** The size of a Panel of `kind` across its area, as the Layout has it (or the user is dragging it to). */
   size(kind: PanelKind, dimension: PanelDimension): number;
   /** Shows `panel` in its area, opening it there first if it isn't open; one in Review mode stays there. */
   show(panel: PanelId): void;
   /** Closes `panel`; a Terminal ends with it. An area left with no Panel is hidden. */
   close(panel: PanelId): void;
-  /** Shows or hides `area`; an empty Dock shown starts a Terminal. Showing the Side area leaves Review mode. */
+  /**
+   * Moves `panel` to the other area, and with it every Panel of its kind,
+   * in this Session and in the others as they are next shown: the Layout
+   * keeps where the kind sits. It is shown there, and the area it leaves
+   * shows its neighbour, or is hidden when left with none.
+   */
+  move(panel: PanelId): void;
+  /** Shows or hides `area`; an empty Dock shown starts a Terminal, when Terminals sit there. Showing the Side area leaves Review mode. */
   toggleArea(area: PanelAreaName): void;
   /** `d`: shows `panel`, or hides its area when that is what it shows; leaves Review mode when it is in it. */
   toggle(panel: PanelId): void;
   /** Starts a Terminal in the Session and shows it in the Dock, with the focus in it. */
   newTerminal(): void;
   /**
-   * Ctrl+`: shows the Dock on a Terminal with the focus in it (starting one
-   * when it has none), and hides the Dock when its Terminal has the focus.
+   * Ctrl+`: shows the area Terminals sit in on a Terminal with the focus in
+   * it (starting one when it has none), and hides that area when its
+   * Terminal has the focus.
    */
   toggleTerminal(): void;
   /** Sets a kind's size while dragging; `done` keeps it in the Layout. */
@@ -141,6 +166,10 @@ export interface PanelsControl {
  * crosses the breakpoint or the area is left with no Panel. Whether it is open is not kept: the Session's
  * Panels say whether the area shows in a wide window.
  *
+ * Each Panel sits in the area the Layout has for its kind, once settings
+ * say what that is: one the Session left in the other is moved there, and
+ * kept so.
+ *
  * Review mode isn't kept either: it lasts while the Session stays open. It
  * hides the Side area without changing the Session's Panels, so leaving it
  * brings the area back as it was. Showing another Panel of the Side area, or
@@ -157,6 +186,7 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   const layout = useLayout();
   const [error, setError] = useState<string>();
   const [focus, setFocus] = useState<PanelId>();
+  const [moved, setMoved] = useState<PanelId>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   useEffect(() => setDrawerOpen(false), [narrow]);
   const [review, setReview] = useState<PanelId>();
@@ -171,7 +201,9 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     for (const { id } of terminals ?? []) starting.current.delete(id);
   }, [terminals]);
   const base = local ?? stored ?? DEFAULT_SESSION_PANELS;
-  const current = terminals ? withTerminals(base, new Set([...terminals.map((t) => t.id), ...starting.current])) : base;
+  const running = terminals ? withTerminals(base, new Set([...terminals.map((t) => t.id), ...starting.current])) : base;
+  // Not before settings say where each kind sits: it would move them back to where their kinds open.
+  const current = layout.loaded ? inLayout(running, layout.value) : running;
   const latest = useRef(current);
   latest.current = current;
 
@@ -192,17 +224,18 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     save(next);
     return next;
   };
-  // Terminals that ended are kept closed.
-  const ended = !!stored && !same(current, base);
+  // Terminals that ended are kept closed, and Panels the Layout moved are kept where it has them.
+  // Keyed on what to keep, so that a change coming before main holds the last one is kept too.
+  const unkept = stored && !same(current, base) ? JSON.stringify(current) : undefined;
   useEffect(() => {
-    if (ended) save(current);
-  }, [ended]);
+    if (unkept) save(current);
+  }, [unkept]);
 
   const show = (panel: PanelId) => {
     if (reviewing.current === panel) return;
     // Another of the Side area's Panels brings the area back.
-    if (reviewing.current && (areaOf(latest.current, panel) ?? PANEL_SPECS[kindOf(panel)].area) === 'side') setReview(undefined);
-    const next = update((state) => showing(state, panel));
+    if (reviewing.current && (areaOf(latest.current, panel) ?? panelArea(layout.value, kindOf(panel))) === 'side') setReview(undefined);
+    const next = update((state) => showing(state, panel, layout.value));
     if (narrow && next?.side.panels.includes(panel)) setDrawerOpen(true);
   };
   /** Whether the Side area shows in `state`: beside the conversation, or as the open drawer. */
@@ -212,7 +245,12 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     opening.current = true;
     setError(undefined);
     // Shown at once, the terminal coming in once started, or why it couldn't.
-    if (!latest.current.dock.open) update((state) => ({ ...state, dock: { ...state.dock, open: true } }));
+    const area = panelArea(layout.value, 'terminal');
+    if (!latest.current[area].open) update((state) => ({ ...state, [area]: { ...state[area], open: true } }));
+    if (area === 'side') {
+      setReview(undefined);
+      if (narrow) setDrawerOpen(true);
+    }
     try {
       const terminal = await api.invoke('terminals.open', { sessionId, ...START_SIZE });
       starting.current.add(terminal.id);
@@ -239,7 +277,7 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
       return;
     }
     if (state.open) return update((all) => ({ ...all, [area]: { ...all[area], open: false } }));
-    if (area === 'dock' && !state.panels.length) return void newTerminal();
+    if (area === 'dock' && !state.panels.length && panelArea(layout.value, 'terminal') === 'dock') return void newTerminal();
     update((all) => ({ ...all, [area]: { ...all[area], open: true } }));
   };
 
@@ -264,8 +302,23 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     error,
     focus,
     onFocused: () => setFocus(undefined),
+    moved,
+    onMoved: () => setMoved(undefined),
+    areaFor: (kind) => panelArea(layout.value, kind),
     size: (kind, dimension) => panelSize(layout.value, kind, dimension),
     show,
+    move: (panel) => {
+      const from = areaOf(latest.current, panel);
+      if (!loaded.current || !from) return;
+      const to = otherArea(from);
+      const next = layout.setArea(kindOf(panel), to);
+      // The Side area comes back for the Panel brought into it; the one in Review mode leaves it for the Dock.
+      if (reviewing.current && (to === 'side' || reviewing.current === panel)) setReview(undefined);
+      update((state) => showing(inLayout(state, next), panel, next));
+      // In a narrow window, the drawer opens on the Panel brought in, and closes on one taken out to the Dock, which it would cover.
+      if (narrow) setDrawerOpen(to === 'side');
+      setMoved(panel);
+    },
     close: (panel) => {
       const terminal = terminalOf(panel);
       // A Terminal ends first: its Panel goes once main no longer lists it.
@@ -283,14 +336,16 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     },
     newTerminal: () => void newTerminal(),
     toggleTerminal: () => {
-      const { dock } = latest.current;
-      if (dock.open && document.activeElement?.closest('.panel-area.dock')) {
-        toggleArea('dock');
+      const area = panelArea(layout.value, 'terminal');
+      const state = latest.current[area];
+      const areaShown = area === 'side' ? !reviewing.current && sideShownIn(latest.current) : state.open;
+      if (areaShown && document.activeElement?.closest(`.panel-area.${area} .terminal-host`)) {
+        toggleArea(area);
         // Back to the conversation's composer.
         document.querySelector<HTMLElement>('.main .composer textarea')?.focus();
         return;
       }
-      const shown = dock.shown && terminalOf(dock.shown) !== undefined ? dock.shown : dock.panels.findLast((panel) => terminalOf(panel) !== undefined);
+      const shown = state.shown && terminalOf(state.shown) !== undefined ? state.shown : state.panels.findLast((panel) => terminalOf(panel) !== undefined);
       if (!shown) return void newTerminal();
       show(shown);
       setFocus(shown);
@@ -299,8 +354,19 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   };
 }
 
-/** The Layout's sizes: settings', or what the user is dragging to until settings hold the same. */
-function useLayout(): { value: LayoutSettings; resize: PanelsControl['resize'] } {
+/**
+ * The Layout: settings', or what the user is dragging a Panel to, or moved
+ * one to, until settings hold the same. A change settings refuse is undone,
+ * unless a later one has replaced it.
+ */
+function useLayout(): {
+  /** Whether settings have said what the Layout is. */
+  loaded: boolean;
+  value: LayoutSettings;
+  resize: PanelsControl['resize'];
+  /** Puts Panels of `kind` in `area`, and gives the Layout that has them there. */
+  setArea(kind: PanelKind, area: PanelAreaName): LayoutSettings;
+} {
   const api = useApi();
   const stored = useTopic('settings')?.layout;
   const [local, setLocal] = useState<LayoutSettings>();
@@ -308,16 +374,27 @@ function useLayout(): { value: LayoutSettings; resize: PanelsControl['resize'] }
     if (stored) setLocal((pending) => (pending && same(pending, stored) ? undefined : pending));
   }, [stored]);
   const value = local ?? stored ?? DEFAULT_LAYOUT;
+  const latest = useRef(value);
+  latest.current = value;
+  const keep = (next: LayoutSettings, saving: Promise<unknown> | undefined, what: string) => {
+    latest.current = next;
+    setLocal(next);
+    saving?.catch((e: unknown) => {
+      console.error(`could not keep the Panel ${what}:`, e);
+      setLocal((pending) => (pending && same(pending, next) ? undefined : pending));
+    });
+  };
   return {
+    loaded: !!stored,
     value,
     resize: (kind, dimension, size, done) => {
-      const next = { ...value, [dimension]: { ...value[dimension], [kind]: size } };
-      setLocal(next);
-      if (!done) return;
-      api.invoke('settings.setPanelSize', { kind, dimension, size }).catch((e: unknown) => {
-        console.error('could not keep the Panel size:', e);
-        setLocal((pending) => (pending && same(pending, next) ? undefined : pending));
-      });
+      const next = { ...latest.current, [dimension]: { ...latest.current[dimension], [kind]: size } };
+      keep(next, done ? api.invoke('settings.setPanelSize', { kind, dimension, size }) : undefined, 'size');
+    },
+    setArea: (kind, area) => {
+      const next = { ...latest.current, area: { ...latest.current.area, [kind]: area } };
+      keep(next, api.invoke('settings.setPanelArea', { kind, area }), 'area');
+      return next;
     },
   };
 }
@@ -326,14 +403,9 @@ function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** The area `panel` is open in, if it is. */
-function areaOf(state: SessionPanels, panel: PanelId): PanelAreaName | undefined {
-  return PANEL_AREAS.find((area) => state[area].panels.includes(panel));
-}
-
-/** `state` with `panel` shown in its area, opened at the end of the one its kind opens in if it wasn't open. */
-function showing(state: SessionPanels, panel: PanelId): SessionPanels {
-  const area = areaOf(state, panel) ?? PANEL_SPECS[kindOf(panel)].area;
+/** `state` with `panel` shown in its area, opened at the end of the one its kind sits in, in `layout`, if it wasn't open. */
+function showing(state: SessionPanels, panel: PanelId, layout: LayoutSettings): SessionPanels {
+  const area = areaOf(state, panel) ?? panelArea(layout, kindOf(panel));
   const { panels } = state[area];
   return { ...state, [area]: { panels: panels.includes(panel) ? panels : [...panels, panel], shown: panel, open: true } };
 }
@@ -388,9 +460,9 @@ interface PanelChoice {
   run: () => void;
 }
 
-/** What the + menu of `area` adds for `session`: each kind that opens there and it offers, a new Terminal for those a Session has several of. */
+/** What the + menu of `area` adds for `session`: each kind that sits there and it offers, a new Terminal for those a Session has several of. */
 function choicesFor(area: PanelAreaName, session: Session, control: PanelsControl): PanelChoice[] {
-  return PANEL_KINDS.filter((kind) => PANELS[kind].area === area && (PANELS[kind].offered?.(session) ?? true)).map((kind) => ({
+  return PANEL_KINDS.filter((kind) => control.areaFor(kind) === area && (PANELS[kind].offered?.(session) ?? true)).map((kind) => ({
     label: PANELS[kind].label,
     icon: PANELS[kind].icon,
     run: PANELS[kind].several ? control.newTerminal : () => control.show(kind as PanelId),
@@ -400,6 +472,8 @@ function choicesFor(area: PanelAreaName, session: Session, control: PanelsContro
 /**
  * A shown Panel area of `session`: a tab per Panel, the one shown as
  * `render` draws it, a + menu to add one, and the edge facing the conversation to resize the Panel shown.
+ * A tab's right-click menu, and the area's ⋯ menu for the Panel shown, move
+ * it to the other area, put it in Review mode, or close it.
  * The tabs are one Tab stop, the arrow keys moving between them. When they
  * don't fit, the inactive ones drop to their icon and badge, then those that
  * still don't fit go into a ⌄ menu, last first; the active one keeps its label.
@@ -448,6 +522,33 @@ export function PanelArea({
     control.show(panel);
     tabs.current?.querySelector<HTMLElement>(`#${tabId(panel)}`)?.focus();
   };
+  // The tab of the Panel just moved here takes the focus, its old one gone with the menu that moved it.
+  const { moved, onMoved } = control;
+  useEffect(() => {
+    if (!moved || !state.panels.includes(moved)) return;
+    tabs.current?.querySelector<HTMLElement>(`#${tabId(moved)}`)?.focus();
+    onMoved();
+  }, [moved, state.panels]);
+  const other = otherArea(area);
+  /** What a tab's right-click menu, and the ⋯ menu for the Panel shown, offer for `panel`. */
+  const menuFor = (panel: PanelId): ContextMenuSection[] => [
+    [
+      { label: `Move to the ${AREA_LABELS[other]}`, icon: other === 'dock' ? PanelBottom : PanelRight, run: () => control.move(panel) },
+      ...(area === 'side' && PANELS[kindOf(panel)].reviewable
+        ? [
+            {
+              label: 'Review mode',
+              icon: Maximize2,
+              run: () => {
+                control.show(panel);
+                control.toggleReview(panel);
+              },
+            },
+          ]
+        : []),
+    ],
+    [{ label: 'Close', icon: X, run: () => control.close(panel) }],
+  ];
   const element = useRef<HTMLElement>(null);
   useDrawer(drawer, element, control.closeDrawer);
   useReview(!!reviewing, element, control.leaveReview);
@@ -487,7 +588,14 @@ export function PanelArea({
             const { label: tabLabel, icon: Icon, badge } = tab(panel);
             const selected = panel === state.shown;
             return (
-              <span key={panel} className={selected ? 'panel-tab on' : 'panel-tab'} data-panel={panel} data-selected={selected} style={fit.hidden.includes(panel) ? { display: 'none' } : undefined}>
+              <span
+                key={panel}
+                className={selected ? 'panel-tab on' : 'panel-tab'}
+                data-panel={panel}
+                data-selected={selected}
+                style={fit.hidden.includes(panel) ? { display: 'none' } : undefined}
+                onContextMenu={(event) => addToContextMenu(event, ...menuFor(panel))}
+              >
                 <button
                   type="button"
                   role="tab"
@@ -531,6 +639,7 @@ export function PanelArea({
             <Maximize2 />
           </button>
         )}
+        {state.shown && <PanelMenu label={tab(state.shown).label} sections={menuFor(state.shown)} />}
         <button className="icon-btn sm" type="button" title={`Hide the ${label}`} aria-label={`Hide the ${label}`} aria-controls={id} onClick={() => control.toggleArea(area)}>
           <X />
         </button>
@@ -543,12 +652,12 @@ export function PanelArea({
         aria-labelledby={!reviewing && state.shown ? tabId(state.shown) : undefined}
         aria-label={reviewing || state.shown ? undefined : label}
       >
-        {area === 'dock' && control.error && (
+        {area === control.areaFor('terminal') && control.error && (
           <p className="panel-error" role="alert">
             {control.error}
           </p>
         )}
-        {reviewing ? render(reviewing) : state.shown ? render(state.shown) : area === 'side' && <div className="panel-empty">No Panels here. Add one with +.</div>}
+        {reviewing ? render(reviewing) : state.shown ? render(state.shown) : <div className="panel-empty">No Panels here. Add one with +, or move a tab here from its menu.</div>}
       </div>
     </Element>
     </>
@@ -725,6 +834,20 @@ function OverflowMenu({ hidden, tabOf, onShow }: { hidden: PanelId[]; tabOf: (pa
           })}
         </Popover>
       )}
+    </>
+  );
+}
+
+/** The ⋯ menu of the Panel an area shows, `label`: what its tab's right-click menu offers. */
+function PanelMenu({ label, sections }: { label: string; sections: ContextMenuSection[] }) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button ref={trigger} className="icon-btn sm" type="button" title={`${label}: more`} aria-label={`More for ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Ellipsis />
+      </button>
+      {open && <MenuButtonMenu anchor={trigger} label={`More for ${label}`} sections={sections} onClose={() => setOpen(false)} />}
     </>
   );
 }
