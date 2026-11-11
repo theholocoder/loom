@@ -385,4 +385,17 @@ describe("a Session's own usage", () => {
     const restored = await waitFor(later.api, 'sessions', session(id, () => true));
     expect(restored.find((s) => s.id === id)!.usage).toEqual({ tokens: 1800, reportedCost: expect.closeTo(0.2) as number, workingMs: 4 * 60_000 });
   });
+
+  it('keeps a deleted Session’s usage, under no title of its own', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'], tokens: { inputTokens: 100, outputTokens: 0 } }]);
+    const { main, project } = await start(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(main, id);
+    expect(await main.api.invoke('sessions.delete', { id })).toEqual({ deleted: true });
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+
+    expect(dashboard.tokens).toBe(100);
+    expect(dashboard.topSessions).toMatchObject([{ sessionId: id, title: 'Deleted Session', tokens: 100 }]);
+  });
 });

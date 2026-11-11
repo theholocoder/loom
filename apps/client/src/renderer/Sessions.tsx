@@ -14,6 +14,7 @@ import { Dock, type DockState } from './Dock';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
 import { ProjectRemoved, useArchive, useRemovedProject, WorktreeMissing } from './Archive';
+import { useDelete } from './Delete';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
@@ -309,7 +310,7 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
 }
 
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */
-export type SessionCommand = 'archive' | 'openMergeRequest' | 'requestMergeRequest' | 'linkMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
+export type SessionCommand = 'archive' | 'delete' | 'openMergeRequest' | 'requestMergeRequest' | 'linkMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
 
 /**
  * One Session: its header, its conversation and the composer, and the right
@@ -355,6 +356,7 @@ export function SessionView({
     if (!infoShown) setLinking(false);
   }, [infoShown]);
   const archiver = useArchive();
+  const deleter = useDelete();
   const status = statusOf(session);
   const working = session.status === 'working';
   // The conversation lives only while the Client runs; the error is stored.
@@ -386,6 +388,7 @@ export function SessionView({
     const { id } = session;
     const runs: Record<SessionCommand, () => Promise<void>> = {
       archive: () => archiver.archive(session),
+      delete: async () => deleter.delete(session),
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
       requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
       linkMergeRequest: async () => {
@@ -521,6 +524,7 @@ export function SessionView({
             </button>
           )}
           {archiver.dialog}
+          {deleter.dialog}
         </div>
         <div className="chat" role="log" aria-label="Conversation">
           {items.map((item) =>
@@ -662,6 +666,7 @@ export function SessionView({
               onLinkingChange={setLinking}
               onShowChanges={() => sidebar.reveal('changes')}
               onArchive={archive}
+              onDelete={() => deleter.delete(session)}
               onError={setError}
             />
           )}

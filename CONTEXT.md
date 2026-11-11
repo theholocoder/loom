@@ -49,8 +49,12 @@ _Avoid_: Permission prompt, confirmation
 **Archived** (Session status):
 The **Session** is closed and kept for history. A new message reopens it (a worktree Session gets a worktree again, on the branch archiving kept), unless its **Project** was **Removed**: then it is read-only.
 
+**Deleted** (Session):
+A **Session** the user did away with for good, whatever its status: its agent stopped, its worktree removed as **Archive** does (its local branch kept, unsaved work held back until the user discards it), then its conversation, queue and **Attachments** gone. Only its usage stays, still counted on the dashboard. A checkout Session's checkout is left as it is. It can't be undone; **Archive** is the way to close a Session and keep it.
+_Avoid_: Remove (a **Project** is Removed)
+
 **Inbox**:
-The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**) or archives it.
+The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**), archives it or deletes it.
 _Avoid_: Queue, notifications
 
 **Forge**:

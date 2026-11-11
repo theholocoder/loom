@@ -27,6 +27,7 @@ import {
   Search,
   Settings as SettingsIcon,
   SquareTerminal,
+  Trash2,
   Waypoints,
   type LucideIcon,
 } from 'lucide-react';
@@ -369,6 +370,7 @@ function paletteActions(app: {
     session && shortcutAction('toggleInfo', Info, () => app.sidebar.toggleView('info')),
     active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
     open && shortcutAction('archive', Archive, () => app.command('archive')),
+    session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.setView('projects') },
     { label: 'Open Dashboard', icon: ChartColumn, run: () => app.setView('dashboard') },
