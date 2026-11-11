@@ -178,6 +178,12 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(writeFile(params))
+	case "files.stat":
+		var params statParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(statFiles(params))
 	case "opencode.probe":
 		var params probeParams
 		if err := decodeParams(req.Params, &params); err != nil {

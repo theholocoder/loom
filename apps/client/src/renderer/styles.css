@@ -172,6 +172,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .seg span.on { background: var(--panel2); color: var(--text); }
 .seg button { padding: 2px 9px; font-size: 12px; color: var(--muted); background: none; border: 0; border-radius: 0; }
 .seg button.on { background: var(--panel2); color: var(--text); }
+.seg button .n { padding: 0; margin-left: 4px; font: 11px var(--mono); color: var(--muted); }
+.seg button.on .n { color: var(--text); }
 .gauge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); padding: 0 6px; }
 .send { border-radius: 10px; padding: 6px 12px; }
 .hint { font-size: 11.5px; color: var(--muted); padding: 6px 4px 0; display: flex; gap: 12px; }
@@ -193,16 +195,10 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .diff-stat { display: inline-flex; align-items: baseline; gap: 6px; font: 600 12px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .diff-stat .files { color: var(--text); }
 .diff-stat .add, .diff-counts .add { color: var(--ok); } .diff-stat .del, .diff-counts .del { color: var(--err); }
-.diff-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: transparent; border: 0; cursor: pointer; padding: 2px 4px; border-radius: 6px; }
-.diff-toggle .knob { width: 24px; height: 14px; border-radius: 7px; background: var(--panel2); border: 1px solid var(--line); position: relative; }
-.diff-toggle .knob::after { content: ''; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: left .12s; }
-.diff-toggle[aria-pressed='true'] { color: var(--text); }
-.diff-toggle[aria-pressed='true'] .knob { background: color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
-.diff-toggle[aria-pressed='true'] .knob::after { left: 11px; background: var(--accent); }
-.diff-search { flex: 1; min-width: 0; box-sizing: border-box; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: 12px var(--font); }
-.diff-tree { flex: 0 0 min(280px, 45%); box-sizing: border-box; align-self: flex-start; max-height: calc(100% - 10px); overflow: auto; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 0; }
+.diff-search { display: block; width: calc(100% - 20px); margin: 4px 10px 6px; box-sizing: border-box; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: 12px var(--font); }
+.diff-tree { box-sizing: border-box; }
 .diff-tree ul { list-style: none; margin: 0; padding: 0; }
-.diff-tree-row { width: 100%; display: flex; align-items: center; gap: 6px; padding: 2px 8px; border: 0; background: transparent; color: var(--text); font: 12px var(--mono); cursor: pointer; text-align: left; }
+.diff-tree-row { width: 100%; display: flex; align-items: center; gap: 6px; padding: 2px 10px; border: 0; background: transparent; color: var(--text); font: 12px var(--mono); cursor: pointer; text-align: left; }
 .diff-tree-row:hover { background: var(--panel2); }
 .diff-tree-row:disabled { cursor: default; background: transparent; color: var(--text); }
 .diff-tree-row svg, .diff-file-toggle svg { width: 13px; height: 13px; flex: none; color: var(--muted); }
@@ -211,6 +207,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .diff-status { font: 500 10.5px var(--ui, inherit); padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 .diff-status.modified { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .diff-status.untracked { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.diff-status.deleted { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, transparent); }
+.diff-status.renamed { color: var(--wait); border-color: color-mix(in srgb, var(--wait) 50%, transparent); }
 /* Just a dot in the narrow file list: the word stays for screen readers, and in each file's header. */
 .diff-tree .diff-status { flex: none; font-size: 0; padding: 0; width: 7px; height: 7px; border: 0; background: currentColor; }
 .diff-counts { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
@@ -301,7 +299,8 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .database-problem code { word-break: break-all; }
 .database-problem .error { color: var(--err); }
 .popover.search-popover { width: max-content; min-width: 360px; gap: 4px; }
-.diff-base { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0 0; font-size: 12px; }
+.diff-base { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; }
+.diff-base .err { font-size: 12px; }
 
 /* the queue, above the composer, and where the user interrupted a run */
 .queue { list-style: none; margin: 0 8px 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -405,17 +404,26 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .resize-edge:hover, .resize-edge:focus-visible { background: color-mix(in srgb, var(--accent) 40%, transparent); outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing-rows { cursor: row-resize; user-select: none; }
-.panel-view .diff-panes { display: flex; flex-direction: column; overflow: hidden; }
-.diff-files { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.diff-files-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0; }
-.diff-files-bar .icon-btn { flex: none; }
-.diff-files-bar .icon-btn[aria-pressed='true'] { color: var(--accent); }
 .state-toggle .on-hover, .state-toggle:hover .at-rest, .state-toggle:focus-visible .at-rest { display: none; }
 .state-toggle:hover .on-hover, .state-toggle:focus-visible .on-hover { display: block; }
-.diff-files-body { flex: 1; min-height: 0; display: flex; gap: 10px; }
-.diff-sections { flex: 1; min-width: 0; overflow: auto; }
+/* The Changes Panel: one toolbar row, then the file tree above the diffs, or beside them once the Panel is wide. */
+.changes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.changes-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
+.changes-bar .icon-btn { flex: none; }
+.changes-bar .icon-btn[aria-pressed='true'] { color: var(--accent); }
+.changes-bar .seg { flex: none; }
+.compared { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; cursor: help; white-space: nowrap; }
+.compared b { color: var(--text); font-weight: 500; }
+.ch-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ch-body.wide { flex-direction: row; }
+.ch-tree { flex: none; display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+.ch-body.wide .ch-tree { width: 260px; border-bottom: 0; border-right: 1px solid var(--line); }
+.tree-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 10px; font-size: 12px; color: var(--muted); background: none; border: 0; border-radius: 0; text-align: left; cursor: pointer; }
+.tree-head:hover { background: var(--panel2); }
+.tree-list { max-height: 200px; overflow: auto; padding: 0 0 6px; }
+.ch-body.wide .tree-list { flex: 1; max-height: none; }
+.diff-sections { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 10px 12px; }
 .diff-sections .diff-file { margin: 0 0 10px; }
-.changes-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
 /* The open Session: its one-line header and the Glance strip over the conversation and the
    Side area beside it, the Dock under both (ADR 0009). */
 .session-body { flex: 1; min-height: 0; display: flex; position: relative; }
