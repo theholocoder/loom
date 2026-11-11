@@ -127,14 +127,33 @@ describe('snoozing a Session from its Inbox row', () => {
 });
 
 describe('a snoozed Session', () => {
-  it('leaves the Inbox for the Snoozed section, with when it comes back', () => {
-    renderApp([session({ title: 'Now' }), session({ title: 'Later', snoozedUntil: new Date(2026, 10, 12, 9, 0).getTime() })]);
+  it('leaves the Inbox for the Snoozed section, as the same cards grouped by Project, soonest back first', () => {
+    renderApp([
+      session({ title: 'Now' }),
+      session({ title: 'Next week', snoozedUntil: new Date(2026, 10, 16, 9, 0).getTime() }),
+      session({ title: 'Later', snoozedUntil: new Date(2026, 10, 12, 9, 0).getTime(), branch: 'loom/later' }),
+    ]);
     expect(within(inbox()).getAllByRole('listitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Now']);
     const section = within(inbox()).getByRole('button', { name: 'Snoozed' });
-    expect(section.textContent).toContain('1');
+    expect(section.textContent).toContain('2');
     fireEvent.click(section);
-    const snoozed = within(inbox()).getByRole('button', { name: 'Later' });
-    expect(within(snoozed).getByRole('time').textContent).toBe('Tomorrow 09:00');
+    const group = within(inbox()).getAllByRole('group').find((g) => within(g).queryByRole('listitem', { name: 'Later' }))!;
+    expect(group.getAttribute('aria-label')).toBe('loom');
+    expect(within(group).getByLabelText('Snoozed').textContent).toBe('2');
+    expect(within(group).getAllByRole('listitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Later', 'Next week']);
+    const later = within(row('Later'));
+    expect(later.getByRole('time').textContent).toBe('Tomorrow 09:00');
+    expect(later.getByTitle('Branch').textContent).toBe('loom/later');
+  });
+
+  it('is woken from its card, where Snooze was', async () => {
+    const later = session({ title: 'Later', snoozedUntil: NOW + HOUR });
+    const main = renderApp([later]);
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Snoozed' }));
+    const card = within(row('Later'));
+    expect(card.queryByRole('button', { name: 'Snooze' })).toBeNull();
+    fireEvent.click(card.getByRole('button', { name: 'Wake' }));
+    await waitFor(() => expect(snoozes(main)).toEqual([{ id: later.id, until: null }]));
   });
 
   it('is skipped by j and k', () => {

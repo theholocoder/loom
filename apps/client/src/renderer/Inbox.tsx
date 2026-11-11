@@ -1,8 +1,8 @@
 // The sidebar's Inbox, following docs/prototypes/ui-layout.html (variant B):
-// Waiting Sessions grouped by Project, with Working and Archived Sessions in
-// collapsed sections below.
-import { AlarmClock, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+// Waiting Sessions grouped by Project, with Snoozed Sessions (the same cards),
+// Working and Archived Sessions in collapsed sections below.
+import { AlarmClock, AlarmClockOff, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
 import { useNow } from './now';
@@ -25,7 +25,11 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
   const now = useNow();
   const waiting = sessions.filter(inInbox);
   const groups = groupByProject(waiting, projects);
+  const snoozed = sessions.filter(isSnoozed);
+  const working = sessions.filter((s) => s.status === 'working');
+  const archived = sessions.filter((s) => s.status === 'archived');
   const rows = { selectedId, onSelect };
+  const cards = { now, selectedId, onSelect, onReply };
   return (
     <>
       <div className="section-head" style={{ borderTop: 0, cursor: 'default' }}>
@@ -33,6 +37,24 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
         {waiting.length}
       </div>
       {groups.length === 0 && <div className="empty">Nothing needs you right now.</div>}
+      <ProjectGroups groups={groups} count="Waiting" {...cards} />
+      <Section label="Snoozed" icon={AlarmClock} sessions={snoozed}>
+        <ProjectGroups groups={groupByProject(snoozed, projects, (a, b) => a.snoozedUntil! - b.snoozedUntil!)} count="Snoozed" {...cards} />
+      </Section>
+      <Section label="Working" icon={LoaderCircle} sessions={working}>
+        <SessionRows sessions={working} {...rows} />
+      </Section>
+      <Section label="Archived" icon={Archive} sessions={archived}>
+        <SessionRows sessions={archived} {...rows} />
+      </Section>
+    </>
+  );
+}
+
+/** Sessions as Inbox cards, under their Project's head saying how many there are (`count`: what they are). */
+function ProjectGroups({ groups, count, now, selectedId, onSelect, onReply }: { groups: ProjectGroup[]; count: string; now: number } & Omit<InboxProps, 'sessions' | 'projects'>) {
+  return (
+    <>
       {groups.map(({ project, sessions }) => (
         <section key={project.id} role="group" aria-label={project.name}>
           <div className="B-group-head">
@@ -44,7 +66,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
               </span>
             )}
             <span className="grow" />
-            <span className="chip" aria-label="Waiting">
+            <span className="chip" aria-label={count}>
               {sessions.length}
             </span>
           </div>
@@ -55,9 +77,6 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
           </div>
         </section>
       ))}
-      <Section label="Snoozed" icon={AlarmClock} sessions={sessions.filter(isSnoozed)} now={now} {...rows} />
-      <Section label="Working" icon={LoaderCircle} sessions={sessions.filter((s) => s.status === 'working')} {...rows} />
-      <Section label="Archived" icon={Archive} sessions={sessions.filter((s) => s.status === 'archived')} {...rows} />
     </>
   );
 }
@@ -75,13 +94,16 @@ export function inboxOrder(sessions: Session[], projects: Project[]): Session[] 
   ).flatMap((group) => group.sessions);
 }
 
+/** A Project's Sessions, as the sidebar groups them. */
+type ProjectGroup = { project: Project; sessions: Session[] };
+
 /**
- * The Waiting Sessions of each Project that has some, Projects by name and
- * Sessions most recently Waiting first.
+ * The Sessions of each Project that has some, Projects by name and Sessions
+ * in `order`: most recently Waiting first, unless said otherwise.
  */
-function groupByProject(waiting: Session[], projects: Project[]): Array<{ project: Project; sessions: Session[] }> {
+function groupByProject(sessions: Session[], projects: Project[], order: (a: Session, b: Session) => number = (a, b) => b.updatedAt - a.updatedAt): ProjectGroup[] {
   const groups = new Map<number, Session[]>();
-  for (const session of [...waiting].sort((a, b) => b.updatedAt - a.updatedAt)) {
+  for (const session of [...sessions].sort(order)) {
     groups.set(session.projectId, [...(groups.get(session.projectId) ?? []), session]);
   }
   return [...groups.entries()]
@@ -108,7 +130,8 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
   const [error, setError] = useState<string>();
   // A failure is about the Session as it was; once its status changes, it's stale.
   useEffect(() => setError(undefined), [session.updatedAt]);
-  const at = new Date(session.updatedAt);
+  const snoozed = isSnoozed(session);
+  const at = new Date(snoozed ? session.snoozedUntil! : session.updatedAt);
   const { issue, mergeRequest, branch } = session;
   const mergeRequestNumber = mergeRequest && mergeRequestRef(project.forge.kind, mergeRequest.number);
   const archiver = useArchive();
@@ -126,8 +149,9 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
           <span className="title grow ellipsis">{session.title}</span>
           {session.worktreeMissing && <WorktreeMissing />}
           {session.unread && <UnreadDot />}
-          <time className="time" dateTime={at.toISOString()} title={at.toLocaleString()}>
-            {timeOf(session.updatedAt, now)}
+          {/* A snoozed Session's card says when it comes back, any other when it last changed status. */}
+          <time className="time" dateTime={at.toISOString()} title={snoozed ? `Comes back ${at.toLocaleString()}` : at.toLocaleString()}>
+            {snoozed ? wakeTime(at.getTime(), now) : timeOf(session.updatedAt, now)}
           </time>
         </div>
         {(issue || mergeRequest || branch) && (
@@ -151,7 +175,11 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
         ) : (
           project.forge.state === 'available' && <Action label="Create Merge request" icon={GitPullRequestCreate} onClick={withRowError(() => api.invoke('sessions.requestMergeRequest', { id: session.id }))} />
         )}
-        {!session.worktreeMissing && <SnoozeButton session={session} onOpenChange={setSnoozing} onError={setError} />}
+        {snoozed ? (
+          <Action label="Wake" icon={AlarmClockOff} onClick={withRowError(() => api.invoke('sessions.snooze', { id: session.id, until: null }))} />
+        ) : (
+          !session.worktreeMissing && <SnoozeButton session={session} onOpenChange={setSnoozing} onError={setError} />
+        )}
         <Action label="Archive" icon={Archive} onClick={withRowError(() => archiver.archive(session))} />
         {!session.worktreeMissing && !session.unread && <Action label="Mark unread" icon={Mail} onClick={withRowError(() => api.invoke('sessions.setUnread', { id: session.id, unread: true }))} />}
       </div>
@@ -213,8 +241,6 @@ function ForgeMark({ kind }: { kind: ForgeKind }) {
 
 interface SessionListProps {
   sessions: Session[];
-  /** The time now, for when snoozed Sessions come back. */
-  now?: number;
   selectedId: number | undefined;
   onSelect: (session: Session) => void;
 }
@@ -224,8 +250,8 @@ function UnreadDot() {
   return <span className="unread-dot" role="img" aria-label="Unread" />;
 }
 
-/** A collapsible sidebar section (Working, Archived) below the Inbox. */
-function Section({ label, icon: Icon, ...list }: { label: string; icon: LucideIcon } & SessionListProps) {
+/** A collapsible sidebar section (Snoozed, Working, Archived) below the Inbox, showing `children` when open. */
+function Section({ label, icon: Icon, sessions, children }: { label: string; icon: LucideIcon; sessions: Session[]; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
@@ -235,16 +261,16 @@ function Section({ label, icon: Icon, ...list }: { label: string; icon: LucideIc
         <Icon className="sm" />
         {label}
         <span className="grow" />
-        {list.sessions.some((s) => s.unread) && <UnreadDot />}
-        {list.sessions.length}
+        {sessions.some((s) => s.unread) && <UnreadDot />}
+        {sessions.length}
       </button>
-      {open && <SessionRows {...list} />}
+      {open && children}
     </>
   );
 }
 
 /** Sessions as one-line rows: status and title. */
-function SessionRows({ sessions, selectedId, onSelect, now = Date.now() }: SessionListProps) {
+function SessionRows({ sessions, selectedId, onSelect }: SessionListProps) {
   const removed = useRemovedProjectIds();
   return sessions.map((session) => (
     <button key={session.id} type="button" className={`mini${session.id === selectedId ? ' sel' : ''}`} aria-label={session.title} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => onSelect(session)}>
@@ -252,11 +278,6 @@ function SessionRows({ sessions, selectedId, onSelect, now = Date.now() }: Sessi
       <span className="grow ellipsis">{session.title}</span>
       {removed.has(session.projectId) && <ProjectRemoved />}
       {session.unread && <UnreadDot />}
-      {session.snoozedUntil !== undefined && (
-        <time className="time" dateTime={new Date(session.snoozedUntil).toISOString()} title={new Date(session.snoozedUntil).toLocaleString()}>
-          {wakeTime(session.snoozedUntil, now)}
-        </time>
-      )}
     </button>
   ));
 }
