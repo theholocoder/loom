@@ -54,6 +54,8 @@ export interface SessionsTable {
   auto_prompts_in_a_row: number;
   /** 1 while the Session has news the user hasn't opened, else 0. */
   unread: number;
+  /** Clock time it comes back from being Snoozed; null while it isn't. */
+  snoozed_until: number | null;
   /** The branch its working copy had checked out when last looked at. */
   branch: string | null;
   /** The linked issue: both set, or both null. */

@@ -79,6 +79,9 @@ export const CONTINUE_PROMPT = 'Loom stopped while you were working. Continue wh
 /** How long a Session waits with nothing in flight before its agent's process is stopped; its next prompt resumes it. */
 export const IDLE_STOP_MS = 10 * 60_000;
 
+/** The longest a timer can wait: setTimeout's limit. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 /** What to do once a run the user interrupted has ended: send the queued message `sendNow`, or else stop. */
 type Interruption = { sendNow?: number };
 /**
@@ -173,6 +176,8 @@ export class Sessions {
   private readonly runModels = new Map<number, string>();
   /** The run or wait each Session is in, while the Client runs (see spanOf). */
   private readonly spans = new Map<number, OpenSpan>();
+  /** The pending wake of each Snoozed Session. */
+  private readonly wakes = new Map<number, TimerHandle>();
 
   private constructor(private readonly options: SessionsOptions) {}
 
@@ -215,6 +220,8 @@ export class Sessions {
       sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
       sessions.setStatus(session.id, { status: 'waiting', waitingReason: 'interrupted' });
     }
+    // One whose time came while Loom was closed comes back now.
+    for (const session of sessions.list()) if (session.snoozedUntil !== undefined) sessions.watchWake(session.id);
     await sessions.flush();
     return sessions;
   }
@@ -359,6 +366,7 @@ export class Sessions {
       waiting_reason: null,
       error: null,
       unread: 0,
+      snoozed_until: null,
       branch,
       issue_number: issue?.number ?? null,
       issue_url: issue?.url ?? null,
@@ -1193,6 +1201,7 @@ export class Sessions {
     }
     this.addItem(id, { kind: 'feedback', ...feedback, state: 'new', ...(paused ? { paused } : {}) });
     if (session.waitingReason === 'error' || session.waitingReason === 'interrupted') {
+      this.endSnooze(id);
       this.update(id, { unread: true });
       this.save(id, { unread: 1 });
     } else {
@@ -1286,6 +1295,58 @@ export class Sessions {
     this.save(id, { unread: unread ? 1 : 0 });
   }
 
+  /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */
+  snooze({ id, until }: Commands['sessions.snooze']['params']): void {
+    const session = this.get(id);
+    if (until === null) {
+      this.endSnooze(id);
+      return;
+    }
+    if (typeof until !== 'number' || !Number.isFinite(until)) throw new Error('A snooze needs a time to wake at.');
+    if (until <= this.options.clock.now()) throw new Error('A snooze must end in the future.');
+    if (session.status !== 'waiting') throw new Error('Only a Waiting Session can be snoozed.');
+    this.update(id, { snoozedUntil: until });
+    this.save(id, { snoozed_until: until });
+    this.watchWake(id);
+  }
+
+  /** Ends the Session's snooze, if it has one; `wake` brings it back unread. */
+  private endSnooze(id: number, wake = false): void {
+    this.clearWake(id);
+    if (this.get(id).snoozedUntil === undefined) return;
+    this.update(id, { snoozedUntil: undefined, ...(wake ? { unread: true } : {}) });
+    this.save(id, { snoozed_until: null, ...(wake ? { unread: 1 } : {}) });
+  }
+
+  /**
+   * Sets the Snoozed Session to wake at its time: at once if it has come.
+   * A timer can't wait more than about 24 days, so a longer snooze waits in
+   * steps.
+   */
+  private watchWake(id: number): void {
+    this.clearWake(id);
+    const until = this.get(id).snoozedUntil;
+    if (until === undefined || this.shuttingDown) return;
+    const left = until - this.options.clock.now();
+    if (left <= 0) {
+      this.endSnooze(id, true);
+      return;
+    }
+    this.wakes.set(
+      id,
+      this.options.clock.setTimeout(() => {
+        this.wakes.delete(id);
+        if (!this.shuttingDown) this.watchWake(id);
+      }, Math.min(left, MAX_TIMER_MS)),
+    );
+  }
+
+  private clearWake(id: number): void {
+    const handle = this.wakes.get(id);
+    if (handle !== undefined) this.options.clock.clearTimeout(handle);
+    this.wakes.delete(id);
+  }
+
   /**
    * Reads again which branch each Session's working copy has, for the
    * Sessions that aren't archived in the Environment `environmentId`.
@@ -1345,6 +1406,8 @@ export class Sessions {
     this.idleStops.clear();
     for (const handle of this.stuckWatches.values()) this.options.clock.clearTimeout(handle);
     this.stuckWatches.clear();
+    for (const handle of this.wakes.values()) this.options.clock.clearTimeout(handle);
+    this.wakes.clear();
     for (const id of [...this.checkpoints.keys()]) this.checkpoint(id);
     // Time while Loom is closed counts for nothing: a wait goes on once it starts again, a run is over.
     const now = this.options.clock.now();
@@ -1981,8 +2044,10 @@ export class Sessions {
     if (status === 'archived' && was.status !== 'archived') this.save(id, { archived_at: updatedAt });
     // Reopened: it is archived no longer.
     if (status !== 'archived' && was.status === 'archived') this.save(id, { archived_at: null });
-    this.update(id, { status, waitingReason, error, unread, updatedAt });
-    this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt });
+    // Snoozed only while nothing happens: news, or a reply, ends it.
+    this.clearWake(id);
+    this.update(id, { status, waitingReason, error, unread, updatedAt, snoozedUntil: undefined });
+    this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt, snoozed_until: null });
     this.watchIdle(id);
     this.watchStuck(id);
   }
@@ -2227,6 +2292,7 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     waitingReason: row.waiting_reason ?? undefined,
     error: row.error ?? undefined,
     unread: row.unread !== 0,
+    snoozedUntil: row.snoozed_until ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     autoPrompt: row.auto_prompt !== 0 || undefined,

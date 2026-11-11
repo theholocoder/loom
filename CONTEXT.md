@@ -50,8 +50,12 @@ _Avoid_: Permission prompt, confirmation
 The **Session** is closed and kept for history. A new message reopens it (a worktree Session gets a worktree again, on the branch archiving kept), unless its **Project** was **Removed**: then it is read-only.
 
 **Inbox**:
-The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**) or archives it.
+The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**), archives it or **Snoozes** it.
 _Avoid_: Queue, notifications
+
+**Snoozed**:
+A **Waiting** Session the user set aside until a time they picked: out of the **Inbox** until then, when it comes back unread. Anything that changes its status (a reply, new feedback, archiving) ends the snooze early, as does waking it by hand. It is still **Waiting**: a snooze is not a status.
+_Avoid_: Muted, deferred
 
 **Forge**:
 The service hosting a **Project**'s repository, issues and merge requests (GitHub or GitLab).
@@ -78,7 +82,7 @@ _Avoid_: Console, shell (for the Dock's tab)
 - A **Project** checkout on a **Client** machine runs in exactly one **Environment**; its **Sessions** run there too
 - A **Session** is on one branch at a time and has at most one linked issue and one **Merge request**: its current branch's, found after each turn, or one the user or the agent linked by hand for an edge case (a differently named source branch), which stays linked while the branch does
 - A **Session** runs on exactly one agent, chosen when the Session is created; it cannot change afterwards
-- A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**
+- A **Session** is in exactly one status: **Working**, **Waiting** or **Archived**; only a **Waiting** one can be **Snoozed**
 - A **Removed** Project's Sessions are all **Archived**, and stay its Sessions
 
 ## Flagged ambiguities

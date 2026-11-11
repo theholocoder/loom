@@ -70,7 +70,7 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .item:hover { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
 .item.sel { background: var(--sel); }
 .item .hover-actions { display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: inherit; gap: 0; }
-.item:hover .hover-actions { display: flex; background: var(--hover); }
+.item:hover .hover-actions, .item.menu-open .hover-actions, .item:focus-within .hover-actions { display: flex; background: var(--hover); }
 .item:hover .time { visibility: hidden; }
 .unread .title { font-weight: 700; }
 .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
