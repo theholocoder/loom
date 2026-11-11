@@ -12,7 +12,7 @@ function checkComments(comments: MessageComment[] | undefined): MessageComment[]
   if (comments === undefined) return [];
   if (!Array.isArray(comments)) throw new Error('Comments must be a list.');
   for (const comment of comments) {
-    if (typeof comment !== 'object' || comment === null) throw new Error('A comment needs a note.');
+    if (typeof comment !== 'object' || comment === null) throw new Error('A comment must be on the diff or on the conversation.');
     if (isConversationComment(comment)) {
       if (typeof comment.note !== 'string' || !comment.note.trim()) throw new Error('A comment needs a note.');
       if (typeof comment.quote !== 'string' || !comment.quote.trim()) throw new Error('A comment on the conversation needs what it quotes.');

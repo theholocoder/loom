@@ -302,7 +302,9 @@ export class Sessions {
     const { workingCopy } = this.get(id);
     if (workingCopy.kind !== 'worktree') return false;
     if (this.claimed.has(workingCopy.path)) return true;
-    return [...this.sessions.values()].some((other) => other.id !== id && other.status !== 'archived' && other.workingCopy.kind === 'worktree' && other.workingCopy.path === workingCopy.path);
+    // An archived Session being reopened is about to work in it again.
+    const inUse = (other: Session) => other.status !== 'archived' || this.reopening.has(other.id);
+    return [...this.sessions.values()].some((other) => other.id !== id && inUse(other) && other.workingCopy.kind === 'worktree' && other.workingCopy.path === workingCopy.path);
   }
 
   /** The files in the Session's working copy, for @-mentions. */
@@ -1117,8 +1119,11 @@ export class Sessions {
     const open = () => this.list().filter((s) => s.projectId === projectId && s.status !== 'archived');
     if (!discard) {
       const unsaved: UnsavedSession[] = [];
+      // A worktree Sessions share is reported once, as the first of them.
+      const looked = new Set<string>();
       for (const session of open()) {
-        if (session.workingCopy.kind !== 'worktree' || !(await this.worktreeLeftOver(session))) continue;
+        if (session.workingCopy.kind !== 'worktree' || looked.has(session.workingCopy.path) || !(await this.worktreeLeftOver(session))) continue;
+        looked.add(session.workingCopy.path);
         const work = await unsavedWork(this.environmentOf(session), session.workingCopy.path);
         if (work) unsaved.push({ sessionId: session.id, title: session.title, unsavedWork: work });
       }
@@ -1185,13 +1190,17 @@ export class Sessions {
       }
     }
     const checkout = this.options.project(session.projectId)!.checkout.path;
-    // A Session that started in the worktree meanwhile keeps it.
-    if (this.worktreeShared(id)) {
-      this.markArchived(id);
-      return { archived: true };
-    }
     try {
-      await removeWorktree(environment, { checkout, path: worktree, force: discard });
+      // Along with Sessions starting in existing worktrees, so none can take this one while it goes; one that did meanwhile keeps it.
+      const removed = await this.oneAtATime(session.projectId, async () => {
+        if (this.worktreeShared(id)) return false;
+        await removeWorktree(environment, { checkout, path: worktree, force: discard });
+        return true;
+      });
+      if (!removed) {
+        this.markArchived(id);
+        return { archived: true };
+      }
     } catch (error) {
       const message = `The worktree at ${worktree} is still there, so the Session isn't archived. ${(error as Error).message}`;
       this.fail(id, `Loom stopped the agent to archive this Session. ${message}`, { evenIfWaiting });
@@ -1399,16 +1408,17 @@ export class Sessions {
     this.save(id, { unread: unread ? 1 : 0 });
   }
 
-  /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */
-  /** Gives the Session a title of the user's, whatever its status. */
+  /** Gives the Session a title of the user's, whatever its status, while its Project is there. */
   rename({ id, title }: Commands['sessions.rename']['params']): void {
-    this.get(id);
+    const session = this.get(id);
+    if (!this.options.project(session.projectId)) throw new Error("This Session's Project was removed, so it can't be renamed.");
     const trimmed = typeof title === 'string' ? title.trim() : '';
     if (!trimmed) throw new Error('A Session needs a title.');
     this.update(id, { title: trimmed });
     this.save(id, { title: trimmed });
   }
 
+  /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */
   snooze({ id, until }: Commands['sessions.snooze']['params']): void {
     const session = this.get(id);
     if (until === null) {

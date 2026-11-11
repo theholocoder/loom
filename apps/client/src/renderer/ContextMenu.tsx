@@ -116,6 +116,7 @@ export function ContextMenuHost() {
   return createPortal(<OpenMenu key={`${open.x}:${open.y}`} open={open} onPick={(item) => setOpen({ ...open, item })} onClose={() => setOpen(undefined)} />, document.body);
 }
 
+/** The menu open at a point, or the popover of the item picked in its place. */
 function OpenMenu({ open, onPick, onClose }: { open: Open; onPick: (item: ContextMenuItem) => void; onClose: () => void }) {
   const point = useRef<HTMLDivElement>(null);
   const close = () => {
@@ -147,6 +148,7 @@ function OpenMenu({ open, onPick, onClose }: { open: Open; onPick: (item: Contex
   );
 }
 
+/** A section's items, after a separator unless it is the first. */
 function Section({ first, section, onPick }: { first: boolean; section: ContextMenuSection; onPick: (item: ContextMenuItem) => void }) {
   return (
     <>

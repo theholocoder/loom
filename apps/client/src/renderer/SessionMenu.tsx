@@ -65,7 +65,7 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
       event,
       [{ label: same?.label ?? 'New Session here', icon: MessageSquarePlus, disabled: !same, run: () => same && newSession(session.projectId, same.start) }, snooze],
       [
-        { label: 'Rename…', icon: Pencil, open: (anchor, close) => <RenameSession anchor={anchor} session={session} onClose={close} onError={onError} /> },
+        { label: 'Rename…', icon: Pencil, disabled: !project, open: (anchor, close) => <RenameSession anchor={anchor} session={session} onClose={close} onError={onError} /> },
         { label: 'Mark unread', icon: Mail, disabled: session.unread, run: () => void api.invoke('sessions.setUnread', { id: session.id, unread: true }).catch(fail) },
       ],
       [

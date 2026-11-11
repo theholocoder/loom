@@ -72,6 +72,30 @@ describe('removing a Project', () => {
     expect(await main.api.invoke('projects.list')).toEqual([]);
   });
 
+  it('reports a worktree two Sessions share once, as the first of them', async () => {
+    const { machine, checkout } = machineWithClone();
+    const { main, project } = await withProject(machine, checkout);
+    const first = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(first.id, (s) => s.status === 'waiting'));
+    const second = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { worktree: first.workingCopy.path }, prompt: 'Also this' });
+    await waitFor(main.api, 'sessions', session(second.id, (s) => s.status === 'waiting'));
+    writeFileSync(join(first.workingCopy.path, 'notes.txt'), 'half done\n');
+
+    const result = await main.api.invoke('projects.remove', { id: project.id });
+    expect(result).toMatchObject({ removed: false, unsaved: [{ unsavedWork: { uncommitted: true } }] });
+    expect(result.removed ? [] : result.unsaved).toHaveLength(1);
+  });
+
+  it("keeps its Sessions read-only: they can't be renamed", async () => {
+    const { machine, checkout } = machineWithClone();
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    expect(await main.api.invoke('projects.remove', { id: project.id })).toEqual({ removed: true });
+
+    await expect(main.api.invoke('sessions.rename', { id: created.id, title: 'Renamed' })).rejects.toThrow("This Session's Project was removed, so it can't be renamed.");
+  });
+
   it('leaves its archived Sessions with no diff to show, rather than an error', async () => {
     const { machine, checkout } = machineWithClone();
     const { main, project } = await withProject(machine, checkout);
