@@ -320,6 +320,20 @@ describe('a worktree Session in an existing worktree', () => {
     expect(git(checkout, 'rev-parse', 'refs/heads/feat/49-cards')).toBe(tip);
   });
 
+  it('starts on the branch of a worktree deleted outside git, which git still counted as checked out there', async () => {
+    const { machine, checkout } = machineWithClone();
+    const path = machine.folder('by-hand');
+    git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat/49-cards', path);
+    rmSync(path, { recursive: true, force: true });
+    expect(git(checkout, 'worktree', 'list', '--porcelain')).toContain(path);
+    const { main, project } = await withProject(machine, checkout);
+
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { branch: { name: 'feat/49-cards', remote: false } }, prompt: 'Start over' });
+
+    expect(created).toMatchObject({ workingCopy: { kind: 'worktree' }, branch: 'feat/49-cards' });
+    expect(existsSync(created.workingCopy.path)).toBe(true);
+  });
+
   it("rejects a folder that isn't one of the checkout's other worktrees, making nothing", async () => {
     const { machine, checkout } = machineWithClone();
     const { main, project } = await withProject(machine, checkout);
@@ -375,17 +389,6 @@ describe('a worktree Session in a worktree another Session works in', () => {
     expect(await main.api.invoke('sessions.delete', { id: second.id })).toEqual({ deleted: true });
     expect(existsSync(path)).toBe(true);
     expect(await main.api.invoke('sessions.list')).toMatchObject([{ id: first.id, status: 'waiting' }]);
-  });
-
-  it("starts on the branch of a worktree deleted outside Loom, which git still counted as checked out there", async () => {
-    const { main, checkout, first, path } = await sharing();
-    rmSync(path, { recursive: true, force: true });
-    expect(git(checkout, 'worktree', 'list', '--porcelain')).toContain(path);
-
-    const again = await main.api.invoke('sessions.create', { projectId: first.projectId, workingCopy: 'worktree', existing: { branch: { name: first.branch!, remote: false } }, prompt: 'Start over' });
-
-    expect(again).toMatchObject({ workingCopy: { kind: 'worktree' }, branch: first.branch });
-    expect(existsSync(again.workingCopy.path)).toBe(true);
   });
 
   it("won't reopen an archived one once the other has switched the worktree to another branch, naming it", async () => {
