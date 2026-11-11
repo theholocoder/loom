@@ -341,9 +341,10 @@ export function SessionView({
   sidebar: SidebarControl;
 }) {
   const api = useApi();
-  const commands = useAgentCommands(session.projectId, session.agentCommands);
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
+  // None once the Project is removed: its archived Sessions stay readable, but it has no checkout to ask.
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
+  const commands = useAgentCommands(project?.id, session.agentCommands);
   const removedProject = useRemovedProject(session.projectId);
   // An archived Session takes a message, which reopens it, while its Project is there.
   const readOnly = session.status === 'archived' && !project;
@@ -372,7 +373,7 @@ export function SessionView({
   const pickersDisabled = working || asked || readOnly || !!session.worktreeMissing;
   const { agentConfig } = session;
   // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
-  const checkoutModels = useCheckoutModels(agentConfig ? undefined : session.projectId);
+  const checkoutModels = useCheckoutModels(agentConfig ? undefined : project?.id);
   const shownModel = session.model ?? agentConfig?.model;
   const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(checkoutModels.listed, shownModel);
   const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
