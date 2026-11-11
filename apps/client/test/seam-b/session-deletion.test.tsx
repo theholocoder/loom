@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session } from '../../src/shared/api';
+import { DEFAULT_SESSION_PANELS } from '../../src/shared/panels';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -31,7 +32,8 @@ const worktreeSession: Session = {
 
 /** The app with Session info open on `session`. */
 function renderInfo(session: Session = worktreeSession, handlers: ConstructorParameters<typeof FakeMain>[1] = {}) {
-  const main = new FakeMain({ projects: [project], sessions: [session], settings: { ...DEFAULT_SETTINGS, sidebar: { open: true, view: 'info', width: 420 } } }, handlers);
+  const main = new FakeMain({ projects: [project], sessions: [session], settings: DEFAULT_SETTINGS }, handlers);
+  main.publish('panels', { ...DEFAULT_SESSION_PANELS, side: { panels: ['info', 'changes'], shown: 'info', open: true } }, { sessionId: session.id });
   render(
     <ApiProvider api={main}>
       <App />
@@ -43,7 +45,7 @@ function renderInfo(session: Session = worktreeSession, handlers: ConstructorPar
   return main;
 }
 
-const info = () => within(screen.getByRole('complementary', { name: 'Session sidebar' })).getByRole('tabpanel');
+const info = () => within(screen.getByRole('complementary', { name: 'Side area' })).getByRole('tabpanel');
 const deleteCalls = (main: FakeMain) => main.invoked.filter((i) => i.command === 'sessions.delete').map((i) => i.params);
 
 describe('deleting a Session', () => {

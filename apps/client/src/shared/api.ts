@@ -3,6 +3,7 @@
 // also the seam tests drive main through (seam A) and fake for the renderer
 // (seam B), so everything the UI can see or do goes through here.
 import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
+import { DEFAULT_LAYOUT, type LayoutSettings, type PanelDimension, type PanelKind, type SessionPanels } from './panels';
 
 /** What the Environment's bridge reported in its handshake. */
 export interface BridgeInfo {
@@ -675,8 +676,8 @@ export interface Settings extends Appearance {
   autoPromptDefault: boolean;
   /** The Approval mode the New Session composer starts on. */
   approvalModeDefault: ApprovalMode;
-  /** The open Session's right sidebar, as the user left it: the same for every Session. */
-  sidebar: SidebarSettings;
+  /** The Layout: each Panel kind's size, as the user left it, the same for every Session. */
+  layout: LayoutSettings;
   /** How the Changes view is laid out, as the user left it: the same for every Session. */
   diffView: DiffViewSettings;
 }
@@ -693,39 +694,6 @@ export interface DiffViewSettings {
 
 /** The Changes view until the user changes it: unified, long lines scrolling, no file list. */
 export const DEFAULT_DIFF_VIEW: DiffViewSettings = { fileList: false, wrap: false, sideBySide: false };
-
-/** The right sidebar's views: Session info, or the Changes (the diff). */
-export const SIDEBAR_VIEWS = ['info', 'changes'] as const;
-/** One of the right sidebar's views. */
-export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
-
-/** How narrow the right sidebar can be dragged, in pixels. */
-export const SIDEBAR_MIN_WIDTH = 280;
-/** How wide the right sidebar can be dragged, in pixels; a narrower window caps it lower still (see the renderer's Sidebar). */
-export const SIDEBAR_MAX_WIDTH = 1200;
-
-/** The right sidebar's state, kept in settings. */
-export interface SidebarSettings {
-  /** Whether it shows, while a Session is selected. */
-  open: boolean;
-  /** The view it shows, or last showed. */
-  view: SidebarView;
-  /** Its width in pixels, one for all views, within SIDEBAR_MIN_WIDTH and SIDEBAR_MAX_WIDTH. */
-  width: number;
-}
-
-/** The sidebar until the user changes it: closed, on Session info. */
-export const DEFAULT_SIDEBAR: SidebarSettings = { open: false, view: 'info', width: 420 };
-
-/** Whether `value` names a sidebar view Loom has. */
-export function isSidebarView(value: unknown): value is SidebarView {
-  return typeof value === 'string' && (SIDEBAR_VIEWS as readonly string[]).includes(value);
-}
-
-/** A sidebar width, rounded and kept within the minimum and maximum. */
-export function clampSidebarWidth(width: number): number {
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
-}
 
 /**
  * The kinds of action an Approval request is about (see APPROVAL_CATEGORIES
@@ -803,7 +771,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stuckAfterMinutes: 15,
   autoPromptDefault: false,
   approvalModeDefault: 'supervised',
-  sidebar: DEFAULT_SIDEBAR,
+  layout: DEFAULT_LAYOUT,
   diffView: DEFAULT_DIFF_VIEW,
   ...DEFAULT_APPEARANCE,
 };
@@ -1187,8 +1155,8 @@ export interface Commands {
   'settings.setApproval': { params: { category: ApprovalCategory; setting: ApprovalSetting }; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
-  /** Sets what is given of the right sidebar's state; a width is kept within its minimum and maximum. Rejects a view Loom has not. */
-  'settings.setSidebar': { params: Partial<SidebarSettings>; result: Settings };
+  /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */
+  'settings.setPanelSize': { params: { kind: PanelKind; dimension: PanelDimension; size: number }; result: Settings };
   /** Sets the Changes view's layout, all of it. Rejects anything but true or false. */
   'settings.setDiffView': { params: DiffViewSettings; result: Settings };
   'sessions.list': { params: void; result: Session[] };
@@ -1435,6 +1403,13 @@ export interface Commands {
    * Rejects an empty title.
    */
   'sessions.rename': { params: { id: number; title: string }; result: void };
+  /**
+   * Keeps a Session's Panels as the user left them: which are open in each
+   * Panel area, the one shown and whether each area is shown. Its Terminals'
+   * Panels don't come back once Loom quits, as the Terminals end with it.
+   * Rejects Panels Loom has not, or one open twice.
+   */
+  'sessions.setPanels': { params: { id: number; panels: SessionPanels }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
   /**
@@ -1466,6 +1441,8 @@ export interface Topics {
   sessions: Session[];
   /** One Session's conversation, as it streams in. */
   transcript: TranscriptItem[];
+  /** One Session's Panels in each Panel area, as the user left them. */
+  panels: SessionPanels;
   /** One Session's open terminals, in the order they were opened. */
   terminals: TerminalInfo[];
   /**
@@ -1480,6 +1457,7 @@ export interface Topics {
 /** What the topics that need one are subscribed with. */
 export interface TopicParams {
   transcript: { sessionId: number };
+  panels: { sessionId: number };
   terminals: { sessionId: number };
   terminalOutput: { id: number };
 }

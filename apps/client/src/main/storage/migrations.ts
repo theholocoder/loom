@@ -156,4 +156,34 @@ export const migrations: Migration[] = [
     // A Session from before asked the user, as Supervised does.
     await db.schema.alterTable('sessions').addColumn('approval_mode', 'text', (c) => c.notNull().defaultTo('supervised')).execute();
   },
+  async (db) => {
+    // One Panel model (ADR 0009): each Session's Panels, and the Layout's sizes in settings.
+    await db.schema
+      .createTable('session_panels')
+      .addColumn('session_id', 'integer', (c) => c.primaryKey().references('sessions.id').onDelete('cascade'))
+      .addColumn('state', 'text', (c) => c.notNull())
+      .execute();
+    // The sidebar was app-wide, `{ open, view, width }`, with Session info and Changes as its views,
+    // closed on Session info at 420px until changed. Every Session had both views, as it left them.
+    const row = (await db.selectFrom('settings').select('value').where('key', '=', 'sidebar').executeTakeFirst()) as { value: string } | undefined;
+    let sidebar: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = row ? JSON.parse(row.value) : {};
+      if (typeof parsed === 'object' && parsed !== null) sidebar = parsed as Record<string, unknown>;
+    } catch {
+      // Unreadable: as if never set.
+    }
+    const open = typeof sidebar.open === 'boolean' ? sidebar.open : false;
+    const view = sidebar.view === 'changes' ? 'changes' : 'info';
+    const state = JSON.stringify({ side: { panels: ['info', 'changes'], shown: view, open }, dock: { panels: [], shown: null, open: false } });
+    const sessions = (await db.selectFrom('sessions').select('id').execute()) as Array<{ id: number }>;
+    if (sessions.length) await db.insertInto('session_panels').values(sessions.map(({ id }) => ({ session_id: id, state }))).execute();
+    // The one width both views had becomes each one's.
+    if (typeof sidebar.width === 'number' && Number.isFinite(sidebar.width)) {
+      const width = Math.min(1200, Math.max(280, Math.round(sidebar.width)));
+      const layout = JSON.stringify({ width: { info: width, changes: width }, height: {} });
+      await db.insertInto('settings').values({ key: 'layout', value: layout }).onConflict((c) => c.column('key').doUpdateSet({ value: layout })).execute();
+    }
+    await db.deleteFrom('settings').where('key', '=', 'sidebar').execute();
+  },
 ];

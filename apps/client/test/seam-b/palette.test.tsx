@@ -114,7 +114,7 @@ describe('palette actions', () => {
       'Open in editor',
       'Open in terminal',
       'Toggle terminal',
-      'Toggle sidebar',
+      'Toggle the Side area',
       'Toggle diff',
       'Toggle Session info',
       'Mark this Session unread',
@@ -270,10 +270,12 @@ describe('shortcuts', () => {
     press('j');
     expect(openSessionTitle()).toBe('Second');
 
-    press('d');
+    // A new Session shows Changes in the Side area.
     expect(screen.getByRole('tabpanel', { name: 'Changes' })).toBeTruthy();
     press('d');
     expect(screen.queryByRole('tabpanel', { name: 'Changes' })).toBeNull();
+    press('d');
+    expect(screen.getByRole('tabpanel', { name: 'Changes' })).toBeTruthy();
 
     press('e');
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.archive', params: { id: 2 } }));

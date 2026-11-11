@@ -1,5 +1,5 @@
-// The window's three panes, following docs/prototypes/ui-layout.html: the
-// Inbox sidebar, the main pane and the open Session's right sidebar. Also the
+// The window's panes, following docs/prototypes/ui-layout.html: the Inbox
+// sidebar, the main pane and the open Session's Side area. Also the
 // Ctrl+K palette and the keyboard shortcuts, which run the same actions.
 import {
   Archive,
@@ -48,8 +48,6 @@ import { NewSessionContext } from './SessionMenu';
 import { ContextMenuHost } from './ContextMenu';
 import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
-import { useSidebar, type SidebarControl } from './Sidebar';
-import { useDocks, type DockControl } from './Dock';
 import { matchesShortcut, SHORTCUTS, type ShortcutName } from './shortcuts';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
@@ -80,8 +78,6 @@ function Workspace() {
     window.addEventListener('focus', check);
     return () => window.removeEventListener('focus', check);
   }, [api]);
-  const sidebar = useSidebar();
-  const docks = useDocks();
   const linker = useExistingCloneLinker();
   const sessions = useTopic('sessions') ?? [];
   const projects = useTopic('projects') ?? [];
@@ -144,8 +140,6 @@ function Workspace() {
     addExistingClone,
     select,
     command: setCommand,
-    sidebar,
-    docks,
     setTheme: (theme) => {
       api.invoke('settings.setAppearance', { theme }).catch((error: unknown) => console.error('theme change failed:', error));
     },
@@ -249,9 +243,6 @@ function Workspace() {
             command={command}
             onCommandDone={() => setCommand(undefined)}
             onRetryableChange={setRetryable}
-            sidebar={sidebar}
-            dock={docks.of(selected.id)}
-            onDockChange={(change) => docks.change(selected.id, change)}
           />
         ) : (
           <main className="main" aria-label="Session">
@@ -335,8 +326,6 @@ function paletteActions(app: {
   addExistingClone: () => void;
   select: (session: Session) => void;
   command: (command: SessionCommand) => void;
-  sidebar: SidebarControl;
-  docks: DockControl;
   setTheme: (theme: Theme) => void;
   setView: (view: View) => void;
   showHelp: (returnFocus: HTMLElement | null) => void;
@@ -373,11 +362,11 @@ function paletteActions(app: {
     open && shortcutAction('openInEditor', CodeXml, () => app.command('openInEditor')),
     // The user's own terminal app, which Ctrl+` no longer opens.
     open && { label: 'Open in terminal', icon: ExternalLink, run: () => app.command('openInTerminal') },
-    active && shortcutAction('toggleTerminal', SquareTerminal, () => app.docks.toggleTerminal(active.id)),
-    // The sidebar is the open Session's: with none, there is none to toggle.
-    session && shortcutAction('toggleSidebar', PanelRight, app.sidebar.toggle),
-    session && shortcutAction('toggleDiff', FileDiff, () => app.sidebar.toggleView('changes')),
-    session && shortcutAction('toggleInfo', Info, () => app.sidebar.toggleView('info')),
+    active && shortcutAction('toggleTerminal', SquareTerminal, () => app.command('toggleTerminal')),
+    // The Side area is the open Session's: with none, there is none to toggle.
+    session && shortcutAction('toggleSideArea', PanelRight, () => app.command('toggleSideArea')),
+    session && shortcutAction('toggleDiff', FileDiff, () => app.command('toggleChanges')),
+    session && shortcutAction('toggleInfo', Info, () => app.command('toggleInfo')),
     active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
     open && shortcutAction('archive', Archive, () => app.command('archive')),
     session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },

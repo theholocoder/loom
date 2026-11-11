@@ -12,6 +12,7 @@ import { Projects } from './projects/projects';
 import { Attachments } from './sessions/attachments';
 import { Babysit } from './sessions/babysit';
 import { openIn, type Opener } from './sessions/open-in';
+import { Panels } from './sessions/panels';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Terminals } from './sessions/terminals';
 import { Settings } from './settings';
@@ -201,6 +202,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
   sessions.set(sessionService.list());
+  const panels = await Panels.load(db);
 
   babysit = await Babysit.load({
     db,
@@ -231,6 +233,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
+    panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
     terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
     terminalOutput: ({ id }, listener) => terminals.subscribeOutput(id, listener),
   };
@@ -274,7 +277,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setApprovalModeDefault': ({ mode }) => settingsService.setApprovalModeDefault(mode),
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
-    'settings.setSidebar': (sidebar) => settingsService.setSidebar(sidebar),
+    'settings.setPanelSize': ({ kind, dimension, size }) => settingsService.setPanelSize(kind, dimension, size),
     'settings.setDiffView': (diffView) => settingsService.setDiffView(diffView),
     'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
     'sessions.list': () => sessions.value,
@@ -298,6 +301,10 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.snooze': (params) => sessionService.snooze(params),
     'sessions.rename': (params) => sessionService.rename(params),
+    'sessions.setPanels': ({ id, panels: state }) => {
+      if (!sessionService.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
+      return panels.set(id, state);
+    },
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
     'terminals.open': (params) => terminals.open(params),

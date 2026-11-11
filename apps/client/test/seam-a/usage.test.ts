@@ -333,9 +333,9 @@ describe('reported cost after upgrading', () => {
         ],
       },
     });
-    // A database as the release before usage left it, with a Session whose conversation has cost $4.30 so far.
+    // A database as the release before usage (migration 12) left it, with a Session whose conversation has cost $4.30 so far.
     const userDataDir = tempDir('loom-usage-');
-    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, migrations.length - 1) })).destroy();
+    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, 11) })).destroy();
     const db = new Database(join(userDataDir, 'loom.db'));
     db.prepare("insert into projects (id, name, branch_prefix, created_at) values (1, 'loom', 'loom', 0)").run();
     db.prepare("insert into checkouts (project_id, environment_id, path) values (1, 'native', ?)").run(checkout);

@@ -311,8 +311,8 @@ describe('copying from any right-click', () => {
     await waitFor(() => expect(clipboard).toEqual(['loom/fix-login']));
 
     fireEvent.click(within(card('Fix login')).getByRole('button', { name: 'Fix login' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
-    fireEvent.contextMenu(within(screen.getByRole('complementary', { name: 'Session sidebar' })).getByText('/wt/fix-login'));
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+    fireEvent.contextMenu(within(screen.getByRole('complementary', { name: 'Side area' })).getByText('/wt/fix-login'));
     expect(items()).toEqual(['Copy worktree name', 'Copy worktree path']);
     pick('Copy worktree name');
     await waitFor(() => expect(clipboard).toEqual(['loom/fix-login', 'fix-login']));

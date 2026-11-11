@@ -137,9 +137,9 @@ describe('the dock', () => {
     openSession('Fix login');
     const header = screen.getByRole('region', { name: 'Session header' });
 
-    fireEvent.click(within(header).getByRole('button', { name: 'Show terminal' }));
+    fireEvent.click(within(header).getByRole('button', { name: 'Show the Dock' }));
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
-    fireEvent.click(within(header).getByRole('button', { name: 'Hide terminal' }));
+    fireEvent.click(within(header).getByRole('button', { name: 'Hide the Dock' }));
 
     expect(dock()).toBeNull();
   });
@@ -166,7 +166,8 @@ describe('the dock', () => {
     toggleTerminal();
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
 
-    fireEvent.click(within(dock()!).getByRole('button', { name: 'New terminal' }));
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getByRole('menuitem', { name: 'Terminal' }));
     await waitFor(() => expect(terminalTabs().map((t) => t.textContent)).toEqual(['Terminal 1', 'Terminal 2']));
     expect(terminalTabs()[1]!.getAttribute('aria-selected')).toBe('true');
 
@@ -210,7 +211,8 @@ describe('the dock', () => {
     fireEvent.keyDown(focusedInput(), { key: 'k', ctrlKey: true });
     fireEvent.keyDown(focusedInput(), { key: 'b', ctrlKey: true });
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.queryByRole('complementary', { name: 'Session sidebar' })).toBeNull();
+    // Ctrl+B left the Side area as it was.
+    expect(screen.getByRole('complementary', { name: 'Side area' })).toBeTruthy();
 
     toggleTerminal(focusedInput());
     expect(dock()).toBeNull();
@@ -230,17 +232,39 @@ describe('the dock', () => {
   });
 
   it('is resized by its top edge, with the arrow keys', async () => {
-    renderApp(fakeMain());
+    const main = renderApp(fakeMain());
     openSession('Fix login');
     toggleTerminal();
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
-    const edge = within(dock()!).getByRole('separator', { name: 'Resize dock' });
+    const edge = within(dock()!).getByRole('separator', { name: 'Resize the Dock' });
     const height = Number(edge.getAttribute('aria-valuenow'));
 
     fireEvent.keyDown(edge, { key: 'ArrowUp' });
 
     expect(Number(edge.getAttribute('aria-valuenow'))).toBe(height + 24);
     expect(dock()!.style.height).toBe(`${height + 24}px`);
+    // One height for every Terminal, kept in the Layout.
+    expect(calls(main, 'settings.setPanelSize')).toEqual([{ kind: 'terminal', dimension: 'height', size: height + 24 }]);
+  });
+
+  it('opens at the height the Layout has for Terminals', async () => {
+    const main = fakeMain();
+    main.publish('settings', { ...main.value('settings'), layout: { width: {}, height: { terminal: 333 } } });
+    renderApp(main);
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    expect(dock()!.style.height).toBe('333px');
+  });
+
+  it("keeps each Session's Terminal tabs while Loom runs, and offers only a Terminal in its + menu", async () => {
+    const main = renderApp(fakeMain());
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    expect(main.value('panels', { sessionId: 7 }).dock).toEqual({ panels: ['terminal:1'], shown: 'terminal:1', open: true });
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    expect(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Terminal']);
   });
 
   it('says why when a terminal fails to open', async () => {
