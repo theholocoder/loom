@@ -80,11 +80,30 @@ describe('in a narrow window, the Side area', () => {
     // The focus goes into it.
     expect(document.activeElement).toBe(within(sideArea()!).getByRole('tab', { name: 'Changes' }));
 
-    fireEvent.click(scrim()!);
+    fireEvent.pointerDown(scrim()!);
     expect(sideArea()).toBeNull();
     expect(scrim()).toBeNull();
     // Only the drawer closed: the Session's Panels are as they were.
     expect(kept(main)).toEqual([]);
+
+    // A click on the Inbox, outside the scrim, closes it too; one in it doesn't.
+    fireEvent.click(within(header()).getByRole('button', { name: 'Show the Side area' }));
+    fireEvent.pointerDown(within(sideArea()!).getByRole('tab', { name: 'Changes' }));
+    expect(sideArea()).toBeTruthy();
+    fireEvent.pointerDown(within(inbox()).getByRole('button', { name: 'Search Sessions and actions' }));
+    expect(sideArea()).toBeNull();
+  });
+
+  it('closes when its last Panel is closed, and opens again on the next one shown', () => {
+    window.innerWidth = 1000;
+    renderApp();
+    openSession();
+    fireEvent.click(within(header()).getByRole('button', { name: 'Show the Side area' }));
+    fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Close Changes' }));
+    expect(sideArea()).toBeNull();
+    (document.activeElement as HTMLElement | null)?.blur();
+    press('i', { ctrlKey: true });
+    expect(within(sideArea()!).getByRole('tab', { name: 'Session info' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('closes on Esc, the focus going back where it was', () => {

@@ -2,22 +2,24 @@
 // Side area, as it is now (see shared/window.ts), and the Inbox's own width
 // and whether it is shown, kept in settings.
 import { createContext, useContext, useEffect, useState } from 'react';
-import { DEFAULT_INBOX, windowLayout, type InboxSettings, type WindowLayout } from '../shared/window';
+import { DEFAULT_INBOX, type InboxSettings, type WindowLayout } from '../shared/window';
 import { useApi, useTopic } from './api';
 
-/** The window's width, as it changes. */
-export function useWindowWidth(): number {
-  const [width, setWidth] = useState(() => window.innerWidth);
+/** The window's size, as it changes. */
+export function useWindowSize(): { width: number; height: number } {
+  const current = () => ({ width: window.innerWidth, height: window.innerHeight });
+  const [size, setSize] = useState(current);
   useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth);
+    const onResize = () => setSize(current());
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  return width;
+  return size;
 }
 
 /** The Inbox as settings have it, or as the user is dragging it to, and what changes it. */
 export interface InboxControl {
+  /** Its width and whether it is shown. */
   value: InboxSettings;
   /** Sets its width while dragging; `done` keeps it in settings. */
   resize(width: number, done: boolean): void;
@@ -52,12 +54,19 @@ export function useInbox(): InboxControl {
   };
 }
 
-const WindowLayoutContext = createContext<WindowLayout | undefined>(undefined);
+/** How the window is shared out now, and its height, which bounds the Dock. */
+export interface WindowPanes extends WindowLayout {
+  height: number;
+}
+
+const WindowLayoutContext = createContext<WindowPanes | undefined>(undefined);
 
 /** Gives the window's layout to the panes within. */
 export const WindowLayoutProvider = WindowLayoutContext.Provider;
 
-/** How the window is shared out now: the App's, or, outside it, a window this wide with the Inbox as it starts. */
-export function useWindowLayout(): WindowLayout {
-  return useContext(WindowLayoutContext) ?? windowLayout(window.innerWidth, DEFAULT_INBOX);
+/** How the window is shared out now, as the App works it out. */
+export function useWindowLayout(): WindowPanes {
+  const layout = useContext(WindowLayoutContext);
+  if (!layout) throw new Error('useWindowLayout needs a WindowLayoutProvider: the App gives one.');
+  return layout;
 }

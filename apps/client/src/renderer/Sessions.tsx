@@ -11,7 +11,6 @@ import { IssuePicker } from './IssuePicker';
 import { ChangesView } from './Changes';
 import { SessionInfo } from './SessionInfo';
 import { PanelArea, usePanels } from './Panels';
-import { useWindowLayout } from './WindowLayout';
 import { TerminalView } from './TerminalView';
 import { Popover, Select } from './Popover';
 import { Markdown } from './Markdown';
@@ -379,7 +378,7 @@ export function SessionView({
   // Only a Session that can still work has Terminals: not archived, its worktree there.
   const dockable = session.status !== 'archived' && !session.worktreeMissing;
   const terminals = useTopic('terminals', { sessionId: session.id });
-  const panels = usePanels(session.id, terminals, useWindowLayout().narrow);
+  const panels = usePanels(session.id, terminals);
   const { side, dock } = panels.state;
   const sideShown = panels.sideShown;
   const infoShown = sideShown && side.shown === 'info';

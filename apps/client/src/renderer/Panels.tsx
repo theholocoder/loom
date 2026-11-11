@@ -111,12 +111,13 @@ export interface PanelsControl {
  * one has replaced it. A Terminal's Panel goes once `terminals` no longer
  * lists it, and the area it leaves empty is hidden.
  *
- * In a `narrow` window the Side area is a drawer, closed until a Panel is
+ * In a narrow window the Side area is a drawer, closed until a Panel is
  * shown in it or the area is toggled, and closed again when the window
- * crosses the breakpoint. Whether it is open is not kept: the Session's
+ * crosses the breakpoint or the area is left with no Panel. Whether it is open is not kept: the Session's
  * Panels say whether the area shows in a wide window.
  */
-export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefined, narrow: boolean): PanelsControl {
+export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefined): PanelsControl {
+  const { narrow } = useWindowLayout();
   const api = useApi();
   const stored = useTopic('panels', { sessionId });
   const [local, setLocal] = useState<SessionPanels>();
@@ -151,8 +152,11 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   const loaded = useRef(false);
   loaded.current = !!stored;
   // Not before main has said what they are: the change would replace them with a new Session's.
-  const update = (change: (state: SessionPanels) => SessionPanels) => {
-    if (loaded.current) save(change(latest.current));
+  const update = (change: (state: SessionPanels) => SessionPanels): SessionPanels | undefined => {
+    if (!loaded.current) return undefined;
+    const next = change(latest.current);
+    save(next);
+    return next;
   };
   // Terminals that ended are kept closed.
   const ended = !!stored && !same(current, base);
@@ -161,11 +165,11 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   }, [ended]);
 
   const show = (panel: PanelId) => {
-    if (!loaded.current) return;
-    const next = showing(latest.current, panel);
-    save(next);
-    if (narrow && next.side.panels.includes(panel)) setDrawerOpen(true);
+    const next = update((state) => showing(state, panel));
+    if (narrow && next?.side.panels.includes(panel)) setDrawerOpen(true);
   };
+  /** Whether the Side area shows in `state`: beside the conversation, or as the open drawer. */
+  const sideShownIn = (state: SessionPanels) => state.side.open && (!narrow || drawerOpen);
   const newTerminal = async () => {
     if (opening.current) return;
     opening.current = true;
@@ -196,7 +200,10 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     update((all) => ({ ...all, [area]: { ...all[area], open: true } }));
   };
 
-  const sideShown = current.side.open && (!narrow || drawerOpen);
+  const sideShown = sideShownIn(current);
+  useEffect(() => {
+    if (!current.side.open) setDrawerOpen(false);
+  }, [current.side.open]);
   return {
     ready: !!stored,
     state: current,
@@ -217,7 +224,7 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     toggleArea,
     toggle: (panel) => {
       const area = areaOf(latest.current, panel);
-      const shown = area === 'side' ? latest.current.side.open && (!narrow || drawerOpen) : area && latest.current[area].open;
+      const shown = area === 'side' ? sideShownIn(latest.current) : area && latest.current[area].open;
       if (area && shown && latest.current[area].shown === panel) toggleArea(area);
       else show(panel);
     },
@@ -300,23 +307,10 @@ function withTerminals(state: SessionPanels, running: Set<number>): SessionPanel
   return next;
 }
 
-/** How tall the Dock can be in the window as it is now. */
-function useLargestDock(): number {
-  const largest = () => Math.min(PANEL_MAX_SIZE.height, Math.floor(window.innerHeight * DOCK_SHARE));
-  const [size, setSize] = useState(largest);
-  useEffect(() => {
-    const onResize = () => setSize(largest());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return size;
-}
-
 /** How large `area` can be in the window as it is now: the Side area leaves the conversation its least width. */
 function useLargest(area: PanelAreaName): number {
-  const dock = useLargestDock();
-  const { sideMaxWidth } = useWindowLayout();
-  return area === 'side' ? sideMaxWidth : dock;
+  const { sideMaxWidth, height } = useWindowLayout();
+  return area === 'side' ? sideMaxWidth : Math.min(PANEL_MAX_SIZE.height, Math.floor(height * DOCK_SHARE));
 }
 
 /** A Panel's tab: its label and icon, and its badge. */
@@ -397,11 +391,11 @@ export function PanelArea({
     tabs.current?.querySelector<HTMLElement>(`#${tabId(panel)}`)?.focus();
   };
   const element = useRef<HTMLElement>(null);
-  useDrawerFocus(drawer, element, control.closeDrawer);
+  useDrawer(drawer, element, control.closeDrawer);
   const Element = area === 'side' ? 'aside' : 'section';
   return (
     <>
-    {drawer && <div className="drawer-scrim" aria-hidden="true" onClick={control.closeDrawer} />}
+    {drawer && <div className="drawer-scrim" aria-hidden="true" />}
     <Element ref={element} className={drawer ? `panel-area ${area} drawer` : `panel-area ${area}`} id={id} aria-label={label} style={size === undefined ? undefined : { [dimension]: size }}>
       {kind && size !== undefined && (
         <ResizeEdge
@@ -473,9 +467,10 @@ export function PanelArea({
  * While the Side area is a drawer over the conversation: the focus goes into
  * it as it opens, and back where it was as it closes. Esc closes it, unless
  * something in it (a menu, a search) took the key first, or a dialog or menu
- * is open over the window.
+ * is open over the window. So does a click outside it, on the scrim or the
+ * Inbox, but for one in a menu or dialog over it.
  */
-function useDrawerFocus(drawer: boolean, element: RefObject<HTMLElement | null>, close: () => void) {
+function useDrawer(drawer: boolean, element: RefObject<HTMLElement | null>, close: () => void) {
   const closing = useRef(close);
   closing.current = close;
   useEffect(() => {
@@ -490,9 +485,15 @@ function useDrawerFocus(drawer: boolean, element: RefObject<HTMLElement | null>,
       event.preventDefault();
       closing.current();
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || area?.contains(event.target) || event.target.closest('[aria-modal="true"], .popover')) return;
+      closing.current();
+    };
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
       // Back where it was, unless the focus has gone elsewhere since.
       if (returnFocus?.isConnected && (!document.activeElement || document.activeElement === document.body || area?.contains(document.activeElement))) returnFocus.focus();
     };

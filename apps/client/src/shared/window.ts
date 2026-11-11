@@ -59,7 +59,9 @@ export function isNarrow(width: number): boolean {
 
 /** How a window `width` wide is shared out, with the Inbox as `inbox` has it. */
 export interface WindowLayout {
+  /** The window's width. */
   width: number;
+  /** Whether the Side area is a drawer (see isNarrow). */
   narrow: boolean;
   /** The width the Inbox shows at: the rail's when collapsed. */
   inboxWidth: number;

@@ -5,6 +5,16 @@ import { useRef, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as Re
 /** Which edge of its pane it is: the pane grows when it is dragged away from the pane. */
 export type EdgeSide = 'left' | 'right' | 'top';
 
+/**
+ * Each edge's axis, and which way it grows its pane: dragging left widens a
+ * pane on the right; dragging right, one on the left; dragging up, one below.
+ */
+const EDGES: Record<EdgeSide, { across: boolean; grows: 1 | -1; grow: string; shrink: string }> = {
+  left: { across: true, grows: -1, grow: 'ArrowLeft', shrink: 'ArrowRight' },
+  right: { across: true, grows: 1, grow: 'ArrowRight', shrink: 'ArrowLeft' },
+  top: { across: false, grows: -1, grow: 'ArrowUp', shrink: 'ArrowDown' },
+};
+
 /** How far one arrow key press moves an edge, in pixels. */
 const KEY_STEP = 24;
 
@@ -34,11 +44,9 @@ export function ResizeEdge({
 }) {
   const resize = useRef(onResize);
   resize.current = onResize;
-  const across = side !== 'top';
+  const { across, grows, grow, shrink } = EDGES[side];
   const bodyClass = across ? 'resizing' : 'resizing-rows';
   const clamp = (to: number) => Math.min(Math.max(to, min), max);
-  // Dragging left widens a pane on the right; dragging right, one on the left; dragging up, one below.
-  const grows = side === 'right' ? 1 : -1;
   const start = (event: ReactMouseEvent) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -56,8 +64,6 @@ export function ResizeEdge({
     document.body.classList.add(bodyClass);
   };
   const key = (event: ReactKeyboardEvent) => {
-    const grow = side === 'left' ? 'ArrowLeft' : side === 'right' ? 'ArrowRight' : 'ArrowUp';
-    const shrink = side === 'left' ? 'ArrowRight' : side === 'right' ? 'ArrowLeft' : 'ArrowDown';
     const by = event.key === grow ? KEY_STEP : event.key === shrink ? -KEY_STEP : 0;
     if (!by) return;
     event.preventDefault();

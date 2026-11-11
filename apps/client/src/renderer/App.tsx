@@ -52,7 +52,7 @@ import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
 import { matchesShortcut, SHORTCUTS, type ShortcutName } from './shortcuts';
 import { ResizeEdge } from './ResizeEdge';
-import { useInbox, useWindowWidth, WindowLayoutProvider } from './WindowLayout';
+import { useInbox, useWindowSize, WindowLayoutProvider } from './WindowLayout';
 import { INBOX_WIDTH, windowLayout } from '../shared/window';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
@@ -131,7 +131,8 @@ function Workspace() {
   };
   const forgeProjects = projects.filter((p) => p.forge.state === 'available');
   const inbox = useInbox();
-  const layout = windowLayout(useWindowWidth(), inbox.value);
+  const windowSize = useWindowSize();
+  const layout = { ...windowLayout(windowSize.width, inbox.value), height: windowSize.height };
 
   const waiting = inboxOrder(sessions, projects);
   const actions = paletteActions({
@@ -243,12 +244,7 @@ function Workspace() {
             <div className="side-list">
               <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
             </div>
-            <nav className="side-foot">
-              <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => setView('projects')} />
-              <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => setView('dashboard')} />
-              <span className="grow" />
-              <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => setView('settings')} />
-            </nav>
+            <ViewNav className="side-foot" view={view} onView={setView} />
           </aside>
         ) : (
           <aside className="side rail" id="inbox" aria-label="Inbox">
@@ -274,11 +270,7 @@ function Workspace() {
               <Search />
             </button>
             <span className="grow" />
-            <nav className="rail-foot">
-              <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => setView('projects')} />
-              <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => setView('dashboard')} />
-              <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => setView('settings')} />
-            </nav>
+            <ViewNav className="rail-foot" view={view} onView={setView} />
           </aside>
         )}
         {view === 'settings' ? (
@@ -478,6 +470,18 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: (trigger:
         </Popover>
       )}
     </>
+  );
+}
+
+/** The Inbox's foot: Projects, Dashboard and Settings, Settings at the end. */
+function ViewNav({ className, view, onView }: { className: string; view: View; onView: (view: View) => void }) {
+  return (
+    <nav className={className}>
+      <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => onView('projects')} />
+      <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => onView('dashboard')} />
+      <span className="grow" />
+      <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => onView('settings')} />
+    </nav>
   );
 }
 
