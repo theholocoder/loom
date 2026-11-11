@@ -1,0 +1,1510 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. "Side panels" restructure of the open Session's right side and Dock.
+  Question: does the three-layer model (A: glance strip, B: one panel model for the right area and the Dock,
+  C: review mode) hold up once it is clickable, before the panel registry and the Merge request panel (#131)
+  are built on it?
+  How to run: open this file in a browser. No build step; the app's own styles are inlined verbatim
+  (apps/client/src/renderer/styles.css and popover.css, then the prototype's additions). Icons are inline
+  SVGs drawn after Lucide's, so nothing but Google Fonts is fetched. All data is fake; every action is a stub.
+  Try: the chips under the Session header; right-click a tab (or its ⋯) for Move to bottom / right; the +
+  on either tab bar; drag the right area's left edge (each panel keeps its own width); ⤢ on Changes or on the
+  Merge request's Diff tab, then Esc; narrow the window below 1100px (or use the pill) for the drawer.
+  The pill at the bottom left is not part of the design: theme, window mode, reset, and the live state.
+  Decisions (docs/adr/0009-one-panel-model.md): sizes are per panel kind (every Terminal shares one), the composer
+  spans only the conversation, review mode hides the Side area, and tabs that don't fit drop to icon and badge,
+  then go into the ⌄ menu.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom side panels prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Geist:wght@400;500;600;700&family=Atkinson+Hyperlegible:wght@400;700&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Geist+Mono:wght@400;500&family=Fira+Code:wght@400;500&family=Source+Code+Pro:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ===== verbatim: apps/client/src/renderer/styles.css ===== */
+/* Copied from docs/prototypes/ui-layout.html, the settled layout. Keep the
+   copied blocks verbatim so the two can be compared; Loom's own additions are
+   at the end. The theme and fonts are Loom's settings (shared/appearance.ts),
+   put on <html> as data-theme, --font and --mono by renderer/appearance.ts. */
+
+:root {
+  /* The default fonts, until the settings arrive. */
+  --font: Inter, system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 8px;
+}
+/* ---- themes ---- */
+[data-theme="midnight"] { --bg:#0f1117; --panel:#161922; --panel2:#1e2230; --hover:#232838; --line:#272c3b; --text:#e6e8ef; --muted:#8a92a6; --accent:#8b9dff; --accent-text:#0f1117;
+  --wait:#f2b863; --work:#5fd3f3; --ok:#7ddc8f; --err:#ff7a90; --user:#26304d; --user-line:#34406a; --code:#0b0d12; --sel:#1f2740; --shadow:#000a; }
+[data-theme="paper"] { --bg:#f6f3ec; --panel:#fbf9f4; --panel2:#efebe1; --hover:#ebe6da; --line:#ddd6c6; --text:#2a2823; --muted:#7a7465; --accent:#b4532a; --accent-text:#fff;
+  --wait:#b7791f; --work:#2b6cb0; --ok:#2f855a; --err:#c53030; --user:#efe2d2; --user-line:#e0cdb4; --code:#f1ede3; --sel:#f0e3d4; --shadow:#0003; }
+[data-theme="nord"] { --bg:#2e3440; --panel:#323945; --panel2:#3b4252; --hover:#434c5e; --line:#434c5e; --text:#eceff4; --muted:#a3adbf; --accent:#88c0d0; --accent-text:#2e3440;
+  --wait:#ebcb8b; --work:#81a1c1; --ok:#a3be8c; --err:#bf616a; --user:#3d4a5f; --user-line:#4c5a72; --code:#272c36; --sel:#3e4a5e; --shadow:#0008; }
+[data-theme="mocha"] { --bg:#1e1e2e; --panel:#232336; --panel2:#2a2a40; --hover:#313149; --line:#363650; --text:#cdd6f4; --muted:#9399b2; --accent:#cba6f7; --accent-text:#1e1e2e;
+  --wait:#f9e2af; --work:#89dceb; --ok:#a6e3a1; --err:#f38ba8; --user:#353457; --user-line:#45436e; --code:#181825; --sel:#33334d; --shadow:#000a; }
+[data-theme="daylight"] { --bg:#ffffff; --panel:#f6f8fc; --panel2:#eaf1fb; --hover:#e8eaed; --line:#e3e6ea; --text:#1f1f1f; --muted:#5f6368; --accent:#0b57d0; --accent-text:#fff;
+  --wait:#b06000; --work:#0b57d0; --ok:#137333; --err:#b3261e; --user:#d3e3fd; --user-line:#c2d6f8; --code:#f6f8fc; --sel:#d3e3fd; --shadow:#0002; }
+/* project identity = categorical slots 1-3 (validated per surface, see dataviz validator) */
+[data-theme="midnight"], [data-theme="nord"], [data-theme="mocha"] { --p1:#3987e5; --p2:#d95926; --p3:#199e70; }
+[data-theme="paper"], [data-theme="daylight"] { --p1:#2a78d6; --p2:#eb6834; --p3:#1baf7a; }
+
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.5 var(--font); }
+button, select, input, textarea { font: inherit; color: inherit; }
+button { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+button:hover { background: var(--hover); }
+.icon-btn { background: none; border: 0; width: 30px; height: 30px; padding: 0; justify-content: center; border-radius: 50%; color: var(--muted); }
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+.icon-btn.sm { width: 26px; height: 26px; }
+.icon-btn.xs { width: 18px; height: 18px; } .icon-btn.xs svg { width: 12px; height: 12px; }
+.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.primary:hover { background: var(--accent); filter: brightness(1.08); }
+svg.lucide { width: 16px; height: 16px; stroke-width: 2; flex: none; }
+.sm svg.lucide, svg.lucide.sm { width: 14px; height: 14px; }
+code, pre { font-family: var(--mono); font-size: 12.5px; }
+code { background: var(--code); border: 1px solid var(--line); padding: 0 4px; border-radius: 4px; }
+pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow: auto; margin: 8px 0; }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 6px; align-items: center; }
+.grow { flex: 1; min-width: 0; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spin { display: inline-flex; animation: spin 1.4s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.st-waiting-question { color: var(--wait); } .st-waiting-finished { color: var(--ok); } .st-waiting-stuck { color: var(--err); }
+.st-working { color: var(--work); } .st-archived { color: var(--muted); }
+.proj-tag { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; padding: 1px 7px 1px 5px; border-radius: 5px; white-space: nowrap; }
+.proj-avatar { display: grid; place-items: center; border-radius: 8px; font-weight: 700; color: #fff; flex: none; }
+.tech { font-family: var(--mono); font-size: .9em; letter-spacing: -.01em; }
+.chip { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; padding: 1px 7px; border-radius: 10px; background: var(--panel2); color: var(--muted); white-space: nowrap; }
+
+/* ---- layout ---- */
+.app { display: grid; grid-template-columns: 360px 1fr auto; height: 100%; }
+.side { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.side-top { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; }
+.search { display: flex; align-items: center; gap: 8px; background: var(--panel2); border-radius: 22px; padding: 8px 14px; color: var(--muted); cursor: text; }
+.search kbd { margin-left: auto; }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--muted); background: var(--panel); }
+.compose { align-self: flex-start; padding: 10px 18px; border-radius: 14px; font-weight: 600; }
+.side-list { flex: 1; overflow: auto; }
+.side-foot { border-top: 1px solid var(--line); padding: 6px 8px; display: flex; gap: 2px; }
+
+/* inbox rows (shared) */
+.item { position: relative; cursor: pointer; border-bottom: 1px solid var(--line); }
+.item:hover { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
+.item.sel { background: var(--sel); }
+.item .hover-actions { display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: inherit; gap: 0; }
+.item:hover .hover-actions, .item.menu-open .hover-actions, .item:focus-within .hover-actions { display: flex; background: var(--hover); }
+.item:hover .time { visibility: hidden; }
+.unread .title { font-weight: 700; }
+.unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.elapsed { font-family: var(--mono); font-size: 12px; color: var(--work); white-space: nowrap; text-transform: none; letter-spacing: 0; }
+.time { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.unread .time { color: var(--text); font-weight: 600; }
+.snippet { color: var(--muted); font-size: 13px; }
+
+/* Variant B: grouped by project */
+.B-group-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 6px; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.B-group-head b { font-size: 13px; }
+.B-item { padding: 7px 12px 7px 46px; border-bottom: 0; }
+.B-item .l1 { display: flex; align-items: center; gap: 8px; }
+.B-item .l2 { display: flex; gap: 8px; margin-top: 1px; color: var(--muted); font-size: 12px; }
+.section-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; color: var(--muted); cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; border-top: 1px solid var(--line); }
+.section-head:hover { color: var(--text); }
+.mini { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 16px; cursor: pointer; font-size: 13px; }
+.mini:hover { background: var(--hover); } .mini.sel { background: var(--sel); }
+
+/* ---- main ---- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.main-head { padding: 10px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+.crumb { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.main-head h1 { font-size: 16px; margin: 0; font-weight: 650; }
+.meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.chat { flex: 1; overflow: auto; padding: 20px 28px; }
+.msg { display: flex; gap: 12px; margin: 16px 0; }
+.msg.user { justify-content: flex-end; }
+.msg .who { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none; background: var(--panel2); color: var(--accent); }
+.msg .body { min-width: 0; }
+.msg.agent .body, .msg.user .body { flex: 1; }
+.msg.user .bubble { max-width: 85%; background: var(--user); border: 1px solid var(--user-line); padding: 8px 14px; border-radius: 16px 16px 4px 16px; }
+.msg.agent .bubble { background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; border-radius: 4px 16px 16px 16px; }
+.msg .name { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.tools { margin-left: 42px; }
+.tool { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 6px 0; overflow: hidden; }
+.tool-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+.tool-head .name { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.tool-body { border-top: 1px solid var(--line); padding: 8px 10px; }
+.fold > .tool-head { width: 100%; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; }
+.fold > .tool-head:hover { background: var(--hover); }
+.fold > .tool-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fold .chev { color: var(--muted); flex: none; transition: transform .15s; } .fold .chev.open { transform: rotate(90deg); }
+.tool.thinking { background: transparent; border-style: dashed; color: var(--muted); }
+.thinking-text { white-space: pre-wrap; font-size: 13px; font-style: italic; color: var(--muted); }
+.tool-status { display: inline-flex; flex: none; } .tool-status.running { color: var(--work); } .tool-status.completed { color: var(--ok); } .tool-status.failed { color: var(--err); }
+.tool.tool-call.failed { border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+.tool-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-label { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 4px 0; }
+.tool-output { margin: 0 0 8px; max-height: 320px; overflow: auto; background: var(--code); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; }
+.tool.question { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent); }
+.tool.question .name { color: var(--wait); }
+.opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tool.ask .tool-head { cursor: default; }
+.ask-message { margin: 0 0 8px; white-space: pre-wrap; }
+.ask-hint { font-size: 12px; margin: 4px 0 0; }
+.approval-detail { margin: 0 0 4px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; background: var(--panel2); border-radius: 4px; }
+.approval-message { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+.ask-step input[type='number']:focus-visible, .ask-choice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-choices { display: grid; gap: 6px; }
+.ask-choice { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); cursor: pointer; }
+.ask-choice:hover { background: var(--hover); }
+.ask-choice.checked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel2)); }
+.ask-choice input { margin: 3px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+.ask-choice-text { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.ask-choice-label { font-weight: 600; }
+/* the asked question's panel, docked on the composer */
+.composer.docked { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent), 0 2px 12px var(--shadow); }
+.ask-panel { padding: 10px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; max-height: 45vh; overflow: auto; }
+.ask-panel-head { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--wait); }
+.ask-panel-head .ask-message { margin: 0; color: var(--text); font-weight: 600; }
+.ask-step-title { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.ask-problem { margin: 0; font-size: 12.5px; color: var(--err); }
+.ask-own { display: flex; gap: 4px; align-items: center; }
+.ask-own .icon-btn { width: 22px; height: 22px; }
+.ask-step input[type='number'] { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; width: 12ch; }
+.ask-answer { margin: 0; display: grid; gap: 2px; font-size: 13px; }
+.ask-answer > div { display: flex; gap: 8px; } .ask-answer dt { color: var(--muted); } .ask-answer dd { margin: 0; white-space: pre-wrap; }
+
+/* composer */
+.composer-wrap { padding: 8px 28px 18px; }
+.composer { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 2px 12px var(--shadow); }
+.composer:focus-within { border-color: var(--accent); }
+.attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px 0; }
+.att { display: inline-flex; align-items: center; gap: 6px; background: var(--panel2); border-radius: 8px; padding: 4px 6px 4px 8px; font-size: 12px; }
+.composer textarea { width: 100%; border: 0; outline: none; background: none; resize: none; padding: 12px 14px 4px; min-height: 52px; max-height: 200px; }
+.ctoolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; }
+.pick { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 8px; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.pick:hover { background: var(--hover); color: var(--text); }
+.settings-fields { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; }
+.field-row { display: grid; grid-template-columns: 160px minmax(170px, 260px); align-items: center; gap: 12px; }
+.approval-row { grid-template-columns: minmax(260px, 420px) 120px; }
+.approval-description { display: block; font-size: 12px; }
+.pick b { color: var(--text); font-weight: 500; }
+.pick input.branch { border: 0; background: transparent; color: var(--text); outline: none; width: 22ch; padding: 0; }
+.sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg span { padding: 2px 9px; font-size: 12px; cursor: pointer; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+.seg span.on { background: var(--panel2); color: var(--text); }
+.seg button { padding: 2px 9px; font-size: 12px; color: var(--muted); background: none; border: 0; border-radius: 0; }
+.seg button.on { background: var(--panel2); color: var(--text); }
+.gauge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); padding: 0 6px; }
+.send { border-radius: 10px; padding: 6px 12px; }
+.hint { font-size: 11.5px; color: var(--muted); padding: 6px 4px 0; display: flex; gap: 12px; }
+
+/* diff */
+.diff { width: min(44vw, 640px); border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.diff header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.diff .scroll { flex: 1; overflow: auto; padding: 0 12px; }
+.diff-file { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; overflow: hidden; }
+.diff-file h4 { margin: 0; padding: 6px 10px; background: var(--panel2); font: 500 12px var(--mono); display: flex; gap: 8px; align-items: center; }
+.file-diff {
+  --diffs-font-family: var(--mono); --diffs-header-font-family: var(--font); --diffs-font-size: 12px;
+  --diffs-bg: var(--panel); background-color: var(--panel);
+  --diffs-bg-context-override: var(--panel); --diffs-bg-context-gutter-override: var(--panel);
+  --diffs-bg-separator-override: var(--panel2); --diffs-bg-buffer-override: var(--panel2);
+  --diffs-fg-number-override: var(--muted);
+  --diffs-addition-color-override: var(--ok); --diffs-deletion-color-override: var(--err); --diffs-modified-color-override: var(--accent);
+}
+.diff-stat { display: inline-flex; align-items: baseline; gap: 6px; font: 600 12px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.diff-stat .files { color: var(--text); }
+.diff-stat .add, .diff-counts .add { color: var(--ok); } .diff-stat .del, .diff-counts .del { color: var(--err); }
+.diff-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: transparent; border: 0; cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+.diff-toggle .knob { width: 24px; height: 14px; border-radius: 7px; background: var(--panel2); border: 1px solid var(--line); position: relative; }
+.diff-toggle .knob::after { content: ''; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: left .12s; }
+.diff-toggle[aria-pressed='true'] { color: var(--text); }
+.diff-toggle[aria-pressed='true'] .knob { background: color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
+.diff-toggle[aria-pressed='true'] .knob::after { left: 11px; background: var(--accent); }
+.diff-search { flex: 1; min-width: 0; box-sizing: border-box; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: 12px var(--font); }
+.diff-tree { flex: 0 0 min(280px, 45%); box-sizing: border-box; align-self: flex-start; max-height: calc(100% - 10px); overflow: auto; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 0; }
+.diff-tree ul { list-style: none; margin: 0; padding: 0; }
+.diff-tree-row { width: 100%; display: flex; align-items: center; gap: 6px; padding: 2px 8px; border: 0; background: transparent; color: var(--text); font: 12px var(--mono); cursor: pointer; text-align: left; }
+.diff-tree-row:hover { background: var(--panel2); }
+.diff-tree-row:disabled { cursor: default; background: transparent; color: var(--text); }
+.diff-tree-row svg, .diff-file-toggle svg { width: 13px; height: 13px; flex: none; color: var(--muted); }
+.diff-tree-row .name, .diff-file-toggle .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-file-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; padding: 0; text-align: left; }
+.diff-status { font: 500 10.5px var(--ui, inherit); padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.diff-status.modified { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.diff-status.untracked { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+/* Just a dot in the narrow file list: the word stays for screen readers, and in each file's header. */
+.diff-tree .diff-status { flex: none; font-size: 0; padding: 0; width: 7px; height: 7px; border: 0; background: currentColor; }
+.diff-counts { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+.diff-note { padding: 8px 10px; font-size: 12px; color: var(--muted); }
+/* The note on a line or range, drawn by the diff library under its last line. */
+.diff-comment { margin: 6px 10px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); font: 13px var(--font); display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+.diff-comment textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; outline: none; }
+.diff-comment textarea:focus { border-color: var(--accent); }
+.diff-comment .row { gap: 6px; font-size: 12px; }
+.diff-loading { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; }
+
+/* dashboard (also the layout of other full pages, like Settings) */
+.dash { overflow: auto; padding: 20px 28px 90px; min-width: 0; }
+.dash h1 { font-size: 20px; margin: 0; }
+.dash-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 18px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.tile .k { color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+.tile .v { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.tile .d { font-size: 12px; color: var(--muted); }
+.legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--muted); }
+.legend.wrap { flex-wrap: wrap; gap: 6px 14px; }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart text { fill: var(--muted); font: 8.5px var(--mono); }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .hit:hover { fill: color-mix(in srgb, var(--text) 6%, transparent); }
+.hbars { list-style: none; margin: 0; padding: 0; }
+.hbar { display: grid; grid-template-columns: minmax(0, 170px) 1fr 64px; gap: 10px; align-items: center; padding: 5px 0; font-size: 13px; }
+.hbar .track { height: 12px; display: block; }
+.hbar .fill { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbar .val { text-align: right; font-family: var(--mono); font-size: 12px; }
+.share { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; margin: 8px 0 10px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.card.wide { grid-column: 1 / -1; }
+.card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.card-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.data td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+table.data td.n, table.data th.n { text-align: right; font-family: var(--mono); font-size: 12px; }
+table.data tr.click { cursor: pointer; } table.data tr.click:hover td { background: var(--hover); }
+
+/* ---- Loom additions (not in the prototype) ---- */
+#root { height: 100%; }
+/* Section heads are buttons here, for keyboard access. */
+button.section-head { width: 100%; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+button.section-head:hover { background: none; }
+button.search { border: 0; width: 100%; text-align: left; }
+.side-foot .icon-btn[aria-current="page"] { color: var(--accent); }
+/* Empty states, styled like the prototype's diff loading line. */
+.empty { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; align-items: center; }
+.st-connected { color: var(--ok); } .st-starting { color: var(--work); } .st-unresponsive { color: var(--wait); }
+.st-disconnected, .st-failed { color: var(--err); }
+.err { color: var(--err); font-size: 12px; }
+.warn { color: var(--wait); font-size: 12px; max-width: 46ch; margin-top: 2px; }
+.ag-ready { color: var(--ok); } .ag-checking { color: var(--work); } .ag-signed-out, .ag-unsupported { color: var(--wait); }
+.ag-missing, .ag-error { color: var(--err); } .ag-unknown { color: var(--muted); }
+.fg-available { color: var(--ok); } .fg-checking { color: var(--work); } .fg-off { color: var(--wait); } .fg-unknown { color: var(--muted); }
+input.prefix { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; width: 16ch; }
+.pick .issue-title { max-width: 28ch; }
+.popover.issue-popover { width: 360px; gap: 4px; }
+/* Sidebar rows and status are buttons here. */
+button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-align: left; }
+.st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }
+.st-waiting-approval, .st-waiting-feedback, .st-waiting-unsaved-work { color: var(--wait); }
+.bubble { overflow-wrap: anywhere; }
+.tool.failed { border-color: var(--err); } .tool.failed .name { color: var(--err); }
+.composer-wrap button.send:disabled { opacity: .5; cursor: default; filter: none; }
+/* Inbox rows open their Session from a button, beside the hover actions. */
+.B-item { padding: 0; }
+.B-item > button.open { display: block; width: 100%; background: none; border: 0; border-radius: 0; padding: 7px 12px 7px 46px; text-align: left; }
+.B-item > button.open:hover { background: none; }
+.B-item .row-error { padding: 0 12px 7px 46px; }
+.scrim { position: fixed; inset: 0; background: var(--shadow); display: grid; place-items: center; z-index: 50; }
+.modal { width: min(440px, calc(100vw - 32px)); box-shadow: 0 12px 40px var(--shadow); }
+.modal p { margin: 0 0 12px; color: var(--muted); }
+.modal-actions { justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.danger { background: var(--err); color: var(--bg); border-color: var(--err); }
+.warn-icon, .flag-missing { color: var(--err); }
+
+.database-problem { max-width: 720px; margin: 60px auto; padding: 0 24px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.database-problem h1 { display: flex; gap: 8px; align-items: center; font-size: 18px; color: var(--err); }
+.database-problem ul { margin: 0; padding-left: 20px; }
+.database-problem code { word-break: break-all; }
+.database-problem .error { color: var(--err); }
+.popover.search-popover { width: max-content; min-width: 360px; gap: 4px; }
+.diff-base { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0 0; font-size: 12px; }
+
+/* the queue, above the composer, and where the user interrupted a run */
+.queue { list-style: none; margin: 0 8px 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.queue li { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); }
+.queue li .grow { color: var(--text); min-width: 0; }
+.queue li button:not(.icon-btn) { border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
+.interruption { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 4px 0; font-size: 12.5px; color: var(--muted); }
+
+/* Markdown in chat messages; highlighting takes the theme's own colours */
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md table, .md .code-block, .md .quote-block { margin: 6px 0; }
+.md ul, .md ol { padding-left: 22px; }
+.md li > p { margin: 2px 0; }
+.md .contains-task-list { list-style: none; padding-left: 4px; }
+.md .task-list-item > input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: -1px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 12px 0 6px; line-height: 1.3; font-weight: 650; }
+.md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.08em; } .md h4, .md h5, .md h6 { font-size: 1em; }
+.md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md :not(pre) > code { font-size: .9em; }
+.md table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
+.md th { background: var(--panel2); font-weight: 600; }
+.md .code-block { border: 1px solid var(--line); border-radius: 6px; background: var(--code); overflow: hidden; }
+.md .code-block figcaption { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
+/* the figure is the block's frame: its pre and code take none of the global code styles */
+.md .code-block pre { margin: 0; padding: 8px 10px; border: 0; border-radius: 0; background: none; overflow-x: auto; white-space: pre; overflow-wrap: normal; color: var(--text); }
+.md .code-block pre code { background: none; border: 0; padding: 0; border-radius: 0; }
+.md .quote-block { position: relative; }
+.md blockquote { margin: 0; padding: 2px 64px 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.md .quote-block > .copy-btn { position: absolute; top: 0; right: 0; }
+.copy-btn { padding: 1px 6px; font-size: 11.5px; background: transparent; border-color: transparent; color: var(--muted); }
+.copy-btn:hover { background: var(--hover); color: var(--text); }
+.copy-btn.failed { color: var(--err); }
+.hljs-comment, .hljs-quote { color: var(--muted); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-doctag, .hljs-meta .hljs-keyword { color: var(--accent); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute, .hljs-template-tag, .hljs-template-variable { color: var(--ok); }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet, .hljs-variable.constant_ { color: var(--wait); }
+.hljs-title, .hljs-section, .hljs-function .hljs-title, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--work); }
+.hljs-type, .hljs-class .hljs-title, .hljs-params, .hljs-attr, .hljs-property { color: var(--text); }
+.hljs-deletion, .hljs-meta { color: var(--err); }
+.hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
+
+/* The composer's attachments, and the files and images a sent message has. */
+.attachments { list-style: none; margin: 0; padding: 8px 12px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.bubble .attachments { padding: 6px 0 0; }
+.attachments .chip { max-width: 260px; gap: 5px; }
+.attachments .icon-btn.sm { padding: 0; width: 16px; height: 16px; }
+/* What `/` and `@` offer, over the prompt. */
+.composer-menu { margin: 6px 6px 0; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--line); padding: 2px 0 6px; }
+/* Rows keep their height: they don't shrink to fit the list. */
+.composer-menu [role="option"] { flex-shrink: 0; display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; line-height: 1.4; white-space: nowrap; overflow: hidden; }
+.composer-menu [role="option"] > svg { flex-shrink: 0; color: var(--muted); }
+.composer-menu [role="option"][aria-selected="true"] > svg { color: var(--accent); }
+.composer-menu .cmd-name { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.composer-menu .cmd-name .muted { font-weight: 400; margin-right: 1px; }
+.composer-menu .cmd-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12.5px; }
+.composer-menu .chip { flex-shrink: 0; padding: 2px 8px; border: 1px solid var(--line); background: var(--panel); }
+.composer-menu [role="option"][aria-selected="true"] { background: var(--sel); }
+.composer-menu-empty { padding: 6px 10px; font-size: 13px; }
+/* Merge request: the timeline card's Open, the Link popover. */
+.merge-request .link, .info .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.merge-request .link:hover, .info .link:hover { text-decoration: underline; }
+.info .link { display: inline-flex; align-items: center; gap: 4px; }
+.icon-btn.mr-btn { width: auto; gap: 4px; padding: 0 10px; border-radius: 15px; font-size: 12px; }
+.link-mr form { display: flex; flex-direction: column; gap: 8px; padding: 10px; width: 280px; }
+.link-mr label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.link-mr .primary { align-self: flex-end; }
+/* The open Session's right sidebar: its views' tabs, and its left edge to resize it by. */
+.sidebar { position: relative; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.sidebar > header { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.sidebar-tabs { display: flex; gap: 2px; }
+.sidebar-tabs [role="tab"][aria-selected="true"] { background: var(--sel); color: var(--text); }
+.sidebar-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sidebar-view .scroll { flex: 1; overflow: auto; padding: 0 12px; }
+.sidebar-edge { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
+.sidebar-edge:hover, .sidebar-edge:focus-visible { background: color-mix(in srgb, var(--accent) 40%, transparent); outline: none; }
+body.resizing { cursor: col-resize; user-select: none; }
+
+/* ---- the open Session's bottom dock ---- */
+.dock { position: relative; flex: none; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); background: var(--panel); }
+.dock > header { padding: 4px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.dock-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; }
+.dock-tab { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 8px; border-radius: 6px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.dock-tab:hover { background: var(--hover); }
+.dock-tab.sel { background: var(--sel); color: var(--text); }
+.dock-tab > [role="tab"] { border: 0; background: none; color: inherit; font: inherit; padding: 3px 0; cursor: pointer; }
+.dock-tab > [role="tab"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dock-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--code); }
+.dock-error { margin: 8px 12px; color: var(--err); font-size: 13px; }
+.terminal-host { flex: 1; min-height: 0; padding: 4px 0 0 8px; }
+.terminal-screen { height: 100%; }
+.dock-edge { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; z-index: 2; }
+.dock-edge:hover, .dock-edge:focus-visible { background: color-mix(in srgb, var(--accent) 40%, transparent); outline: none; }
+body.resizing-rows { cursor: row-resize; user-select: none; }
+.sidebar-view .diff-panes { display: flex; flex-direction: column; overflow: hidden; }
+.diff-files { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.diff-files-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0; }
+.diff-files-bar .icon-btn { flex: none; }
+.diff-files-bar .icon-btn[aria-pressed='true'] { color: var(--accent); }
+.state-toggle .on-hover, .state-toggle:hover .at-rest, .state-toggle:focus-visible .at-rest { display: none; }
+.state-toggle:hover .on-hover, .state-toggle:focus-visible .on-hover { display: block; }
+.diff-files-body { flex: 1; min-height: 0; display: flex; gap: 10px; }
+.diff-sections { flex: 1; min-width: 0; overflow: auto; }
+.diff-sections .diff-file { margin: 0 0 10px; }
+.changes-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+/* Session info: four groups of facts, each with its actions at the end. */
+.info { flex: 1; overflow: auto; padding: 4px 14px 16px; }
+.info-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.info-group h3 { margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.info-group dl { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.fact { display: grid; grid-template-columns: 112px 1fr; gap: 8px; align-items: center; min-height: 28px; font-size: 13px; }
+.fact dt { color: var(--muted); }
+.fact dd { margin: 0; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fact .value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fact .path { word-break: break-all; }
+.fact-actions { display: flex; gap: 0; flex: none; }
+.fact-actions .icon-btn:disabled { opacity: .4; cursor: default; }
+.fact-actions .icon-btn:disabled:hover { background: none; color: var(--muted); }
+.info .diff-stat { font-weight: 600; }
+.chip.stale { color: var(--wait); }
+.tone-passed { color: var(--ok); } .tone-pending { color: var(--wait); } .tone-failed { color: var(--err); } .tone-accent { color: var(--accent); }
+.popover.ci-checks { width: 340px; padding: 10px 12px; gap: 4px; }
+.ci-checks h4 { margin: 0; font-size: 14px; outline: none; }
+.ci-checks p { margin: 0 0 4px; font-size: 12px; }
+.ci-checks p.checked { margin: 6px 0 0; }
+.ci-checks ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ci-checks li { display: grid; grid-template-columns: auto 1fr 56px 48px; gap: 8px; align-items: center; font-size: 13px; }
+.ci-checks .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-checks .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: right; }
+.ci-checks .link:hover { text-decoration: underline; }
+.feedback-items { margin: 0 0 8px; padding: 0 0 0 16px; }
+.feedback-items .feedback-items { margin: 4px 0 0; }
+.feedback-items li { margin-bottom: 4px; }
+.feedback-link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.feedback-link:hover { text-decoration: underline; }
+.feedback-excerpt { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.context { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.context .bar { display: block; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
+.context .bar > span { display: block; height: 100%; background: var(--accent); }
+.info-foot { padding-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
+.removed-tag { margin-left: 6px; font-size: 11px; padding: 0 6px; vertical-align: 1px; }
+
+/* ===== verbatim: apps/client/src/renderer/popover.css ===== */
+/* Popovers (menus, pickers, selects): fixed to the viewport, themed by the app's variables only. */
+.popover { position: fixed; z-index: 50; min-width: 220px; max-width: calc(100vw - 16px); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); }
+.popover [role="option"], .popover [role="menuitem"] { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text); background: none; border: 0; border-radius: 6px; padding: 6px 10px; font-weight: 400; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.popover [role="option"]:hover, .popover [role="menuitem"]:hover, .popover [role="option"]:focus-visible, .popover [role="menuitem"]:focus-visible { background: var(--hover); outline: none; }
+.popover [role="option"][aria-selected="true"] { color: var(--accent); }
+.popover input { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; outline: none; }
+.popover input:focus { border-color: var(--accent); }
+.popover [role="listbox"] { display: flex; flex-direction: column; gap: 2px; }
+button.pick { background: none; border: 0; border-radius: 8px; }
+button.pick:hover { background: var(--hover); }
+button.pick .chev { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
+button.pick:hover .chev, button.pick[aria-expanded="true"] .chev { color: var(--text); }
+button.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.pick:disabled { opacity: .5; cursor: default; }
+button.pick:disabled:hover { background: none; }
+button.pick:disabled .chev { color: var(--muted); }
+/* The field look: a bordered control, value left, chevron right. */
+button.select-field { justify-content: space-between; min-width: 170px; padding: 5px 10px; color: var(--text); background: var(--panel2); border: 1px solid var(--line); cursor: pointer; }
+button.select-field:hover { background: var(--hover); border-color: var(--muted); }
+button.select-field[aria-expanded="true"] { border-color: var(--accent); }
+button.select-field:focus-visible { border-color: var(--accent); }
+/* A popover centred on the window over the app's `.scrim`: the Project picker. */
+.popover.picker-modal { position: relative; width: min(520px, calc(100vw - 32px)); max-height: 60vh; padding: 6px; gap: 6px; overflow: hidden; }
+.picker-modal input { flex-shrink: 0; padding: 8px 10px; font-size: 14px; }
+.picker-modal [role="listbox"] { overflow-y: auto; }
+.picker-modal [role="option"] { gap: 10px; padding: 6px 8px; cursor: pointer; }
+.picker-modal [role="option"]:hover { background: none; }
+.picker-modal [role="option"][aria-selected="true"] { color: var(--text); background: var(--sel); }
+.picker-text { display: flex; flex-direction: column; min-width: 0; }
+.picker-name { font-weight: 600; }
+.picker-path { font-size: 12px; }
+.picker-empty { padding: 6px 8px; }
+/* The Ctrl+K palette: near the top of the window, over the app's `.scrim`. */
+.scrim.palette-scrim { place-items: start center; padding-top: 12vh; }
+.popover.palette { position: relative; width: min(640px, calc(100vw - 32px)); max-height: 70vh; padding: 0; gap: 0; overflow: hidden; border-radius: 14px; box-shadow: 0 20px 60px var(--shadow); }
+.palette-in { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.popover.palette .palette-in input { flex: 1; border: 0; background: none; padding: 0; font-size: 15px; }
+.palette-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.palette-filters button { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); background: none; color: var(--muted); }
+.palette-filters button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.palette-results { overflow-y: auto; padding: 6px; }
+.palette-group { padding: 8px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.palette [role="option"] { gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.palette [role="option"]:hover { background: none; }
+.palette [role="option"][aria-selected="true"] { color: var(--text); background: var(--sel); }
+.palette [role="option"] kbd { margin-left: auto; }
+.palette-project { max-width: 30%; font-size: 12px; }
+.palette-empty { padding: 16px; text-align: center; }
+.palette-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+/* The Ctrl+? list of shortcuts. */
+.shortcut-table { width: 100%; border-collapse: collapse; }
+.shortcut-table th { text-align: left; }
+.shortcut-table td { padding: 6px 10px; }
+.shortcut-table td:last-child { text-align: right; white-space: nowrap; }
+
+/* The custom snooze: until a date and time, or for a duration. */
+.popover.snooze-custom { padding: 8px; }
+.snooze-form { display: flex; flex-direction: column; gap: 8px; }
+.snooze-form .row { display: flex; align-items: center; gap: 6px; }
+.snooze-form input[type="number"] { width: 64px; }
+.snooze-form .primary { align-self: flex-end; }
+.snooze-modes { display: flex; gap: 2px; padding: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.snooze-modes label { flex: 1; text-align: center; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; color: var(--muted); }
+.snooze-modes label.on { background: var(--sel); color: var(--text); }
+.snooze-modes input { position: absolute; opacity: 0; pointer-events: none; }
+
+/* Right-click menus: placed against the point clicked. */
+.context-point { position: fixed; width: 0; height: 0; pointer-events: none; }
+.popover.context-menu { min-width: 200px; }
+.popover [role="menuitem"]:disabled { color: var(--muted); opacity: .6; cursor: default; }
+.popover [role="menuitem"]:disabled:hover { background: none; }
+.menu-separator { height: 1px; margin: 3px 4px; background: var(--line); flex-shrink: 0; }
+.menu-icon-space { width: 14px; flex-shrink: 0; }
+/* A note on a passage of the conversation, from its right-click menu. */
+.popover.conversation-comment { width: 340px; padding: 8px; gap: 6px; }
+.conversation-comment blockquote { margin: 0; padding: 2px 8px; border-left: 2px solid var(--line); font-size: 12px; }
+.conversation-comment textarea { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; font: inherit; outline: none; }
+.conversation-comment textarea:focus { border-color: var(--accent); }
+.conversation-comment .row { display: flex; align-items: center; gap: 6px; }
+.popover.rename-session { padding: 8px; }
+.rename-session form { display: flex; gap: 6px; }
+.rename-session input { min-width: 240px; }
+
+
+/* ===== prototype additions ===== */
+.app { grid-template-columns: 300px 1fr; }
+.main { position: relative; }
+.main-head { padding: 10px 16px 10px 20px; border-bottom: 0; align-items: center; gap: 8px; container-type: inline-size; container-name: head; }
+.head-line { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.head-line h1 { flex: 0 1 auto; min-width: 0; }
+.head-line .proj-tag, .head-line .chip { flex: none; }
+@container head (max-width: 520px) { .head-line .proj-tag { display: none; } }
+.side-top .search { white-space: nowrap; } .side-top .search span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; } .side-top .search kbd { flex: none; white-space: nowrap; }
+.B-item > button.open { padding: 7px 12px; }
+.side-list { min-height: 0; }
+.side-bottom { flex: none; max-height: 48%; overflow: auto; border-top: 1px solid var(--line); }
+.side-bottom .section-head:first-child { border-top: 0; }
+button.section-head { color: var(--muted); }
+.B-item .l2 .proj { font-weight: 600; font-size: 12px; white-space: nowrap; }
+.g-chip .branch { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; }
+.main-head h1.title-btn { cursor: pointer; border-radius: 6px; padding: 0 4px; margin-left: -4px; }
+.main-head h1.title-btn:hover { background: var(--hover); }
+.icon-btn[aria-pressed="true"] { color: var(--accent); }
+
+/* A: the glance strip */
+.glance { display: flex; align-items: center; gap: 6px; padding: 0 16px 8px 20px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; flex: none; }
+.g-chip { display: inline-flex; align-items: stretch; height: 26px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 12.5px; overflow: hidden; flex: none; }
+.g-chip > button { border: 0; border-radius: 0; background: none; padding: 0 9px; gap: 5px; color: var(--text); white-space: nowrap; }
+.g-chip > button:hover, .g-chip > button[aria-expanded="true"] { background: var(--hover); }
+.g-chip > button + button { border-left: 1px solid var(--line); }
+.g-chip > button:first-child { padding-left: 10px; } .g-chip > button:last-child { padding-right: 10px; }
+.g-chip .bad { color: var(--err); } .g-chip .warn-t { color: var(--wait); }
+.g-chip.link-issue > button { color: var(--muted); }
+.meter { display: inline-block; width: 44px; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--accent); }
+.g-sep { flex: 1; }
+
+/* B: the body, the right area, the Dock */
+.body-row { flex: 1; min-height: 0; display: flex; position: relative; }
+.convo { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.area { position: relative; background: var(--panel); display: flex; flex-direction: column; min-height: 0; min-width: 0; flex: none; }
+.area.right { border-left: 1px solid var(--line); }
+.area.drawer { position: absolute; right: 0; top: 0; bottom: 0; z-index: 20; box-shadow: -14px 0 36px var(--shadow); }
+.drawer-scrim { position: absolute; inset: 0; z-index: 19; background: color-mix(in srgb, #000 28%, transparent); }
+.area.bottom { border-top: 1px solid var(--line); }
+.tabs-bar { display: flex; align-items: flex-end; gap: 4px; padding: 4px 6px 0 6px; border-bottom: 1px solid var(--line); background: var(--bg); min-height: 37px; flex: none; }
+.tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ptab { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--muted); font-size: 12.5px; white-space: nowrap; cursor: pointer; position: relative; top: 1px; user-select: none; }
+.ptab:hover { color: var(--text); background: var(--hover); }
+.ptab.on { color: var(--text); background: var(--panel); border-color: var(--line); }
+.ptab .x { visibility: hidden; width: 20px; height: 20px; }
+.ptab:hover .x, .ptab.on .x { visibility: visible; }
+.ptab .tech { color: inherit; }
+.badge { font: 600 10.5px/16px var(--mono); padding: 0 5px; border-radius: 8px; background: var(--panel2); color: var(--muted); min-width: 16px; text-align: center; }
+.badge.bad { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--err); flex: none; }
+.area-tools { margin-left: auto; display: flex; align-items: center; padding-bottom: 4px; flex: none; }
+.area-view { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
+.area-empty { flex: 1; display: grid; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 20px; }
+.edge-x { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; }
+.edge-y { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; z-index: 3; }
+.edge-x:hover, .edge-y:hover { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+.size-tag { display: none; font: 11px var(--mono); color: var(--accent); padding: 0 6px; }
+body.resizing .area.right .size-tag, body.resizing-rows .area.bottom .size-tag { display: inline; }
+.ptab { flex-shrink: 0; } .ptab > svg, .ptab .badge, .ptab .dot, .ptab .x, .ptab .tech { flex-shrink: 0; }
+.ptab .lbl { white-space: nowrap; }
+/* Tab overflow: inactive tabs drop to icon and badge, then what still doesn't fit goes into the ⌄ menu. */
+.tabs.compact .ptab:not(.on) .lbl, .tabs.compact .ptab:not(.on) .tech { display: none; }
+.tabs.compact .ptab:not(.on) { padding-left: 8px; }
+.overflow-btn[hidden] { display: none; }
+.overflow-btn { margin-bottom: 4px; gap: 2px; width: auto; padding: 0 4px; font: 600 11px var(--mono); }
+.ctoolbar .pick { min-width: 0; } .ctoolbar .pick b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 26ch; }
+.reviewing .ctoolbar .agent-pick { display: none; } .reviewing .ctoolbar .pick b { max-width: 16ch; }
+.ctoolbar .send, .ctoolbar .agent-pick { flex: none; }
+.popover.ci-checks .acts button { white-space: nowrap; }
+.note-h b { white-space: nowrap; } .note-h .when { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .note-h .chip { flex: none; }
+.mr-foot button, .mr-foot .warn-t { white-space: nowrap; }
+@container (max-width: 440px) { .mr-foot .warn-t > span { display: none; } }
+
+/* C: review mode */
+.body-row.reviewing .convo { flex: 0 0 380px; border-right: 1px solid var(--line); }
+.reviewing .chat { padding: 12px 14px; }
+.reviewing .msg.user .bubble { max-width: 100%; }
+.reviewing .composer-wrap { padding: 8px 12px 12px; }
+.review-surface { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--panel); }
+.review-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg); font-size: 13px; }
+.review-head b { font-weight: 600; }
+
+/* Changes */
+.ch-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
+.seg button .n { font: 11px var(--mono); color: var(--muted); }
+.seg button.on .n { color: var(--text); }
+.base-pick { font-size: 12.5px; }
+.ch-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ch-tree { flex: none; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.tree-head { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; color: var(--muted); background: none; border: 0; border-radius: 0; width: 100%; text-align: left; }
+.tree-head:hover { background: var(--hover); }
+.tree-list { max-height: 170px; overflow: auto; padding: 2px 0 6px; }
+.ch-tree.collapsed .tree-list { display: none; }
+.ch-diffs { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 10px; }
+.trow { display: flex; align-items: center; gap: 6px; width: 100%; padding: 2px 10px; border: 0; border-radius: 0; background: none; font: 12px var(--mono); text-align: left; color: var(--text); }
+.trow:hover { background: var(--panel2); }
+.trow.dir { color: var(--muted); cursor: default; } .trow.dir:hover { background: none; }
+.trow .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow svg { width: 13px; height: 13px; color: var(--muted); }
+.sdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); }
+.sdot.modified { background: var(--accent); } .sdot.untracked { background: var(--ok); }
+.trow .note-n { color: var(--wait); display: inline-flex; gap: 2px; align-items: center; font-size: 11px; }
+@container (min-width: 700px) {
+  .ch-body { flex-direction: row; }
+  .ch-tree { width: 250px; border-bottom: 0; border-right: 1px solid var(--line); }
+  .ch-tree .tree-head { display: none; }
+  .ch-tree.collapsed .tree-list, .tree-list { display: block; max-height: none; flex: 1; }
+}
+.df { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 10px; overflow: hidden; background: var(--panel); }
+.df-h { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: var(--panel2); font: 500 12px var(--mono); min-width: 0; position: sticky; top: -10px; z-index: 1; }
+.df-h .path { flex: 1; min-width: 0; display: flex; overflow: hidden; white-space: nowrap; }
+.df-h .path .dir { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.df-h .path b { font-weight: 600; flex: none; }
+.df-h .icon-btn { width: 20px; height: 20px; }
+.df-h .diff-counts { flex: none; }
+.df-h .diff-status { flex: none; }
+@container (max-width: 420px) { .df-h .diff-status { font-size: 0; padding: 0; width: 7px; height: 7px; border: 0; background: currentColor; } }
+.df-skip { padding: 8px 12px; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.df-skip button { font-size: 12px; padding: 1px 8px; }
+.hunk { color: var(--muted); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); font: 11.5px/22px var(--mono); padding: 0 10px; }
+.dl { display: grid; grid-template-columns: 36px 40px 14px 1fr; font: 12px/1.7 var(--mono); }
+@container (max-width: 420px) { .dl { grid-template-columns: 0 36px 14px 1fr; } .dl .n.o { visibility: hidden; } }
+.dl .n { color: var(--muted); text-align: right; padding-right: 6px; user-select: none; position: relative; opacity: .8; }
+.dl .m { color: var(--muted); user-select: none; }
+.dl .code { white-space: pre-wrap; word-break: break-word; padding-right: 10px; min-width: 0; }
+.dl.add { background: color-mix(in srgb, var(--ok) 12%, transparent); } .dl.add .m { color: var(--ok); }
+.dl.del { background: color-mix(in srgb, var(--err) 12%, transparent); } .dl.del .m { color: var(--err); }
+.dl .addc { display: none; position: absolute; left: 2px; top: 2px; width: 17px; height: 17px; padding: 0; justify-content: center; border-radius: 4px; background: var(--accent); color: var(--accent-text); border: 0; font: 600 13px/1 var(--font); }
+.dl:hover .addc { display: inline-flex; }
+.tk-k { color: var(--accent); } .tk-s { color: var(--ok); } .tk-c { color: var(--muted); font-style: italic; }
+.note { margin: 6px 10px 8px 54px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); font: 13px/1.5 var(--font); }
+@container (max-width: 420px) { .note { margin-left: 10px; } }
+.note.review { border-left: 3px solid var(--wait); }
+.note.draft { border-left: 3px solid var(--accent); border-style: dashed solid dashed solid; }
+.note-h { display: flex; align-items: center; gap: 6px; padding: 6px 10px 0; font-size: 12px; color: var(--muted); }
+.note-h b { color: var(--text); font-weight: 600; }
+.note-b { padding: 2px 10px 8px; white-space: normal; }
+.note-a { display: flex; gap: 6px; padding: 0 10px 8px; }
+.note-a button { font-size: 12px; padding: 2px 8px; }
+.note textarea { width: calc(100% - 20px); margin: 8px 10px 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; outline: none; font: 13px var(--font); }
+.note textarea:focus { border-color: var(--accent); }
+.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0%, 30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+
+/* Merge request */
+.mr { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.mr-scroll { flex: 1; min-height: 0; overflow: auto; }
+.mr-head { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.mr-head h2 { margin: 0; font-size: 15px; font-weight: 650; line-height: 1.35; }
+.mr-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--muted); align-items: center; }
+.mr-meta .row { gap: 4px; }
+.state-open { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.switches { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+@container (max-width: 360px) { .switches { grid-template-columns: 1fr; } }
+.switch { display: flex; align-items: flex-start; gap: 9px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); text-align: left; cursor: pointer; }
+.switch:hover { background: var(--hover); }
+.switch .knob { flex: none; margin-top: 3px; width: 28px; height: 16px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line); position: relative; }
+.switch .knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: left .12s; }
+.switch[aria-checked="true"] .knob { background: color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
+.switch[aria-checked="true"] .knob::after { left: 14px; background: var(--accent); }
+.switch .t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.switch .t b { font-size: 13px; font-weight: 600; }
+.switch .t span { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+.mr-tabs { display: flex; gap: 2px; padding: 6px 14px 0; border-bottom: 1px solid var(--line); }
+.mr-tabs button { border: 0; border-radius: 0; background: none; color: var(--muted); padding: 5px 8px 7px; font-size: 13px; border-bottom: 2px solid transparent; }
+.mr-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.sec { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.sec h3 { margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.sec h3 .grow { text-transform: none; letter-spacing: 0; }
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.checks li { display: grid; grid-template-columns: 16px 1fr auto auto; gap: 8px; align-items: center; font-size: 13px; }
+.checks li .why { grid-column: 2 / -1; font: 11.5px var(--mono); color: var(--err); margin-top: -2px; overflow-wrap: anywhere; }
+.checks .link, .mr .link, .popover .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px; }
+.checks .link:hover, .mr .link:hover, .popover .link:hover { text-decoration: underline; }
+.review-card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); margin: 0 0 8px; }
+.review-card .rh { display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; font-size: 12.5px; }
+.review-card .rb { padding: 3px 10px 8px; font-size: 13px; }
+.review-card .quote { margin: 0 10px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); overflow: hidden; }
+.review-card .quote .qh { font: 11.5px var(--mono); padding: 3px 8px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; align-items: center; }
+.review-card .quote .qc { font: 12px/1.6 var(--mono); padding: 2px 8px; white-space: pre-wrap; background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.review-card .quote .qt { padding: 6px 8px; font-size: 13px; }
+.avatar { width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font: 700 9.5px var(--font); color: #fff; flex: none; }
+.tag-changes { color: var(--wait); background: color-mix(in srgb, var(--wait) 15%, transparent); }
+.desc h4 { margin: 10px 0 4px; font-size: 13.5px; } .desc h4:first-child { margin-top: 0; }
+.desc p, .desc ul { margin: 4px 0; font-size: 13px; } .desc ul { padding-left: 20px; }
+.diagram { border: 1px solid var(--line); border-radius: 8px; background: var(--code); padding: 10px; margin: 8px 0; }
+.diagram svg { width: 100%; height: auto; display: block; }
+.diagram rect { fill: var(--panel2); stroke: var(--line); } .diagram text { fill: var(--text); font: 11px var(--mono); }
+.diagram path { stroke: var(--muted); fill: none; } .diagram .head { fill: var(--muted); stroke: none; }
+.diagram .cap { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.mr-foot { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); flex: none; }
+.mr-foot .warn-t { color: var(--wait); font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+
+/* Issue, Terminal */
+.issue { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.issue h2 { margin: 0; font-size: 15px; }
+.issue p { margin: 0; font-size: 13px; }
+.term { flex: 1; margin: 0; border: 0; border-radius: 0; background: var(--code); padding: 8px 12px; overflow: auto; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; }
+.term .p { color: var(--ok); } .term .e { color: var(--err); } .term .m { color: var(--muted); }
+
+/* conversation extras */
+.tool.feedback { border-color: var(--wait); }
+.tool.feedback .tool-head { cursor: default; }
+.tool.feedback .name { color: var(--wait); }
+.tool.feedback .tool-body { font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.convo .composer .attachments .chip { border: 1px solid var(--line); }
+
+/* popovers */
+.popover.details { width: 430px; padding: 10px 12px; gap: 0; }
+.popover.details h4 { margin: 0 0 4px; font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.popover.details .fact { grid-template-columns: 104px 1fr; min-height: 26px; font-size: 12.5px; }
+.popover.details .fact .tech { overflow-wrap: anywhere; }
+.popover.details .group { padding: 6px 0; border-top: 1px solid var(--line); }
+.popover.details .group:first-of-type { border-top: 0; }
+.popover.details .icon-btn { width: 24px; height: 24px; }
+.popover.ci-checks li { grid-template-columns: auto 1fr 56px 40px; }
+.popover.ci-checks .acts { display: flex; gap: 6px; margin-top: 8px; }
+.popover.ci-checks .acts button { font-size: 12px; }
+.popover .menu-head { padding: 4px 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.popover [role="menuitem"] .k { margin-left: auto; padding-left: 16px; color: var(--muted); font-size: 11.5px; }
+.popover [role="menuitem"].danger-item { color: var(--err); }
+.popover [role="menuitem"] .later { margin-left: auto; padding-left: 16px; font-size: 11px; color: var(--muted); }
+.popover.base { width: 340px; }
+.popover.base [role="option"] { flex-direction: column; align-items: flex-start; white-space: normal; gap: 1px; }
+.popover.base [role="option"] small { color: var(--muted); font-size: 11.5px; }
+.card.modal { background: var(--panel); }
+.modal h3 { margin: 0 0 10px; font-size: 15px; }
+.modal input { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: 12.5px var(--mono); }
+.modal .warnline { color: var(--wait); font-size: 12.5px; display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+
+#tip { position: fixed; pointer-events: none; z-index: 120; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px var(--shadow); padding: 7px 10px; font-size: 12.5px; display: none; max-width: 320px; }
+#toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 7px 14px; border-radius: 8px; z-index: 130; display: none; font-size: 13px; }
+
+/* the prototype pill (not part of the design) */
+#pill { position: fixed; left: 96px; bottom: 7px; z-index: 110; background: #fff; color: #111; border-radius: 12px; box-shadow: 0 6px 24px #0007; display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; font: 600 12px system-ui, sans-serif; max-width: 520px; }
+#pill .r { flex-wrap: nowrap; white-space: nowrap; }
+#pill:not(:hover):not(:focus-within) .ctl { display: none !important; }
+#pill { flex-direction: column-reverse; }
+#pill .r { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; } #pill .ctl:not(pre) { display: inline-flex; gap: 6px; }
+#pill select, #pill button { font: 12px system-ui; color: #111; background: #eee; border: 0; border-radius: 6px; padding: 3px 6px; }
+#pill pre { margin: 0; padding: 6px; background: #f3f3f3; color: #333; border: 0; border-radius: 6px; font: 10.5px/1.45 ui-monospace, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+</style>
+</head>
+<body>
+<div id="root" style="height:100%"></div>
+<div id="pill"></div>
+<div id="tip"></div>
+<div id="toast"></div>
+<script>
+// ---------- icons (paths after Lucide, inline so nothing is fetched) ----------
+const I = {
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+  'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+  'git-branch': '<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  'git-pull-request': '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/>',
+  'git-merge': '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>',
+  'git-commit': '<circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/>',
+  'file-diff': '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/>',
+  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  'circle-dot': '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/>',
+  'square-terminal': '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
+  'maximize-2': '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>',
+  'minimize-2': '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" x2="21" y1="10" y2="3"/><line x1="3" x2="10" y1="21" y2="14"/>',
+  ellipsis: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  'trash-2': '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  'external-link': '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  'circle-x': '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+  'circle-check': '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  'arrow-up': '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  'panel-right': '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
+  'panel-bottom': '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 15h18"/>',
+  'message-square': '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  'code-xml': '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  waypoints: '<circle cx="12" cy="4.5" r="2.5"/><circle cx="4.5" cy="12" r="2.5"/><circle cx="19.5" cy="12" r="2.5"/><circle cx="12" cy="19.5" r="2.5"/><path d="m10.2 6.3-3.9 3.9M13.8 6.3l3.9 3.9M10.2 17.7l-3.9-3.9M13.8 17.7l3.9-3.9"/>',
+  loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  paperclip: '<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+  'circle-help': '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  'refresh-cw': '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17v4M17 19h4"/>',
+  'list-tree': '<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>',
+  cpu: '<rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/>',
+  monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+  'triangle-alert': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  'file-search': '<path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M4.27 21.7A2 2 0 0 0 6 22h12a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v3"/><circle cx="5" cy="14" r="3"/><path d="m9 18-1.5-1.5"/>',
+  'file-pen': '<path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M13.4 18.4a2 2 0 1 0-2.8-2.8L5 21.2V24h2.8z"/>',
+  'text-search': '<path d="M21 6H3"/><path d="M10 12H3"/><path d="M10 18H3"/><circle cx="17" cy="15" r="3"/><path d="m21 19-1.9-1.9"/>',
+  'link': '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  'chart-column': '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  'folder-git': '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><circle cx="12" cy="13" r="2"/>',
+  'message-circle-question': '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  'alarm-clock': '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/>',
+  user: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+};
+const ic = (n, cls = '') => `<svg class="lucide ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n] || ''}</svg>`;
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Break long technical names only at their separators, never mid-word.
+const breakable = s => esc(s).replace(/([/\-_.])/g, '$1<wbr>');
+
+// ---------- fake data ----------
+const THEMES = { midnight: { label: 'Midnight', font: 'Inter', mono: 'IBM Plex Mono' }, paper: { label: 'Paper', font: 'IBM Plex Sans', mono: 'IBM Plex Mono' },
+  nord: { label: 'Nord', font: 'Geist', mono: 'Geist Mono' }, mocha: { label: 'Mocha', font: 'Atkinson Hyperlegible', mono: 'Fira Code' },
+  daylight: { label: 'Daylight', font: 'Figtree', mono: 'Source Code Pro' } };
+const SESSION = {
+  title: 'Fix the currency on invoices', project: 'billing-api', repo: 'acme/billing-api', branch: 'loom/12-invoices-show-the-wrong-currency',
+  path: '~/.loom/worktrees/billing-api/12-invoices-show-the-wrong-currency', env: 'Native (Linux)', agent: 'OpenCode',
+  agentSession: 'ses_8f3a2c71d04e9b5a6c', model: 'anthropic/claude-sonnet-5-5', effort: 'default',
+  tokens: 84100, window: 200000, cost: 0.61, time: '23 min', queued: 0,
+};
+const ctxPct = Math.round(SESSION.tokens / SESSION.window * 100);
+const lock = [
+  "  '@vitest/coverage-v8@2.1.4':", '    resolution: {integrity: sha512-FPKQuJfR6VTfcNMcGpqInmtJuVXFSCd9HQltYncfR01AzXhLucMEtQ5SinPdZOsjRzW1cY3sjDKk2i0LmXzCjw==}',
+  '    peerDependencies:', "      '@vitest/browser': 2.1.4", '      vitest: 2.1.4', '    peerDependenciesMeta:', "      '@vitest/browser':", '        optional: true', '',
+  "  '@ampproject/remapping@2.3.0':", '    resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}', "    engines: {node: '>=6.0.0'}", '',
+  "  'istanbul-lib-coverage@3.2.2':", '    resolution: {integrity: sha512-O8dpsF+r0WV/8MNRKfnmrtCWhuKjxrq2w+jpzBL5UZKTi2LeVWnWOmWRxFlesJONmc+wLAGvKQZEOanko0LFTg==}', "    engines: {node: '>=8'}", '',
+  "  'istanbul-reports@3.1.7':", '    resolution: {integrity: sha512-BewmUXImeuRk2YY0PVbxgKAysvhRPUQE0h5QRM++nVWyubKGV0l8qQ5op8+B2DOmwSe63Jivj0BjkPQVf8fP5g==}', "    engines: {node: '>=8'}", '',
+  "  'magicast@0.3.5':", '    resolution: {integrity: sha512-L0WhttDl+2BOsybvEOLK7fW3UA0OQ0IQ2d6Zl2x/a6vVRs3bAY0ECOSHHeL5jD+SbOpOCUEi0y1DgHEn9Qn1Yw==}', '',
+];
+const FILES = [
+  { path: 'src/currency.ts', status: 'committed', hunks: [{ o: 1, n: 1, lines: [
+    [' ', "import type { Account } from './accounts';"], [' ', ''],
+    ['-', "export const DEFAULT_CURRENCY = 'EUR';"], ['+', "export const FALLBACK_CURRENCY = 'EUR';"], ['+', ''],
+    ['+', '/** The currency an account is billed in: its own, or the fallback. */'],
+    ['+', 'export function currencyFor(account: Account | undefined): string {'], ['+', '  return account?.billingCurrency ?? FALLBACK_CURRENCY;'], ['+', '}'],
+    [' ', ''], ['-', 'export function symbol(): string {'], ['-', "  return '€';"],
+    ['+', 'export function symbol(currency: string): string {'], ['+', "  const symbols: Record<string, string> = { EUR: '€', GBP: '£', USD: '$' };"], ['+', '  return symbols[currency] ?? currency;'],
+    [' ', '}']] }] },
+  { path: 'src/invoices/format.ts', status: 'modified', hunks: [{ o: 1, n: 1, lines: [
+    [' ', "import { symbol } from '../currency';"], [' ', ''], [' ', 'export function formatAmount(cents: number, currency: string): string {'],
+    ['-', '  return `${symbol()}${(cents / 100).toFixed(2)}`;'],
+    ['+', "  const amount = new Intl.NumberFormat('en-GB', {"], ['+', "    style: 'currency',"], ['+', '    currency,'], ['+', '  }).format(cents / 100);'],
+    ['+', "  // symbol() stays for the PDF renderer, which can't use Intl."], ['+', '  return amount;'], [' ', '}']] }] },
+  { path: 'src/invoices/show.ts', status: 'committed', hunks: [{ o: 8, n: 8, lines: [
+    [' ', "import { formatAmount } from './format';"], ['-', "import { DEFAULT_CURRENCY } from '../currency';"], ['+', "import { currencyFor } from '../currency';"], [' ', ''],
+    [' ', 'export async function showInvoice(id: string, db: Db): Promise<InvoiceView> {'], [' ', '  const invoice = await db.invoices.get(id);'],
+    ['+', '  const account = await db.accounts.get(invoice.accountId);'], ['+', '  const currency = currencyFor(account);'],
+    [' ', '  return {'], [' ', '    number: invoice.number,'],
+    ['-', '    total: formatAmount(invoice.total, DEFAULT_CURRENCY),'], ['+', '    total: formatAmount(invoice.total, currency),'], ['+', '    currency,'],
+    [' ', '    lines: invoice.lines.map((line) => ({'], [' ', '      label: line.label,'],
+    ['-', '      amount: formatAmount(line.amount, DEFAULT_CURRENCY),'], ['+', '      amount: formatAmount(line.amount, currency),'],
+    [' ', '    })),'], [' ', '  };'], [' ', '}']] }] },
+  { path: 'test/currency.test.ts', status: 'committed', hunks: [{ o: 0, n: 1, lines: [
+    "import { describe, expect, it } from 'vitest';", "import { currencyFor, symbol } from '../src/currency';", '',
+    "describe('currencyFor', () => {", "  it(\"uses the account's billing currency\", () => {", "    expect(currencyFor({ id: 'a1', billingCurrency: 'GBP' })).toBe('GBP');", '  });', '',
+    "  it('falls back to EUR without an account', () => {", "    expect(currencyFor(undefined)).toBe('EUR');", '  });', '',
+    "  it('falls back to EUR when the account has none', () => {", "    expect(currencyFor({ id: 'a2' })).toBe('EUR');", '  });', '});', '',
+    "describe('symbol', () => {", "  it('knows the pound', () => {", "    expect(symbol('GBP')).toBe('£');", '  });', '',
+    "  it('shows the code for unknown currencies', () => {", "    expect(symbol('CHF')).toBe('CHF');"].map(l => ['+', l]) }] },
+  { path: 'test/invoices/show.test.ts', status: 'modified', hunks: [{ o: 20, n: 20, lines: [
+    [' ', "  it('shows the total', async () => {"], [' ', '    const db = fakeDb({ invoices: [invoice] });'], ['+', '    db.accounts.add(ukAccount);'],
+    [' ', "    const view = await showInvoice('inv_1', db);"], ['-', "    expect(view.total).toBe('€120.00');"], ['+', "    expect(view.total).toBe('£120.00');"], ['+', "    expect(view.currency).toBe('GBP');"],
+    [' ', '  });']] }] },
+  { path: 'package.json', status: 'committed', hunks: [{ o: 18, n: 18, lines: [
+    [' ', '  "devDependencies": {'], [' ', '    "typescript": "^5.6.3",'], ['+', '    "@vitest/coverage-v8": "^2.1.4",'], [' ', '    "vitest": "^2.1.4"']] }] },
+  { path: 'pnpm-lock.yaml', status: 'committed', generated: true, hunks: [{ o: 412, n: 412, lines: lock.map(l => ['+', l]) }] },
+];
+FILES.forEach(f => {
+  f.add = 0; f.del = 0;
+  f.hunks.forEach(h => {
+    let o = h.o, n = h.n;
+    h.rows = h.lines.map(([t, text]) => { const r = { t, text }; if (t === ' ') { r.o = o++; r.n = n++; } else if (t === '-') { r.o = o++; f.del++; } else { r.n = n++; f.add++; } return r; });
+    const oc = h.rows.filter(r => r.o).length, nc = h.rows.filter(r => r.n).length;
+    h.head = `@@ -${h.o},${oc} +${h.n},${nc} @@`;
+  });
+});
+const TOTAL = { files: FILES.length, add: FILES.reduce((a, f) => a + f.add, 0), del: FILES.reduce((a, f) => a + f.del, 0) };
+const MR = { number: 40, title: "Show invoices in the customer's currency", target: 'main', commits: 3,
+  squash: "fix(invoices): Show invoices in the customer's currency (#40)",
+  checks: [
+    { name: 'lint', st: 'passed', dur: '38s' }, { name: 'typecheck', st: 'passed', dur: '51s' },
+    { name: 'test (node 20)', st: 'failed', dur: '1m 12s', why: "test/invoices/list.test.ts › totals: expected '€120.00', received '£120.00'" },
+    { name: 'build', st: 'passed', dur: '1m 40s' }] };
+const REVIEWERS = { mlefevre: { name: 'Marie Lefèvre', color: '#b4532a' }, ghbot: { name: 'github-actions', color: '#5f6368' }, you: { name: 'You', color: '#3987e5' } };
+const NOTES = [{ file: 'src/currency.ts', line: 3, who: 'mlefevre', when: '25 min ago', text: "Is EUR right as the fallback? Accounts created before 2024 have no <code>billingCurrency</code>, and most of them are billed in GBP." }];
+const MSGS = [
+  { who: 'user', text: 'Invoices for UK customers show € instead of £ (issue <span class="tech">#12</span>). Fix it and add tests.' },
+  { tool: 'grep', icon: 'text-search', input: 'DEFAULT_CURRENCY' },
+  { tool: 'read', icon: 'file-search', input: 'src/invoices/show.ts' },
+  { tool: 'edit', icon: 'file-pen', input: 'src/currency.ts, src/invoices/show.ts, test/currency.test.ts' },
+  { tool: 'bash', icon: 'square-terminal', input: 'pnpm test' },
+  { who: 'agent', text: "Invoices now use the account's billing currency, with EUR as the fallback, and <code>symbol()</code> knows £ and $. I added tests for both, committed, and opened Merge request <b class=\"tech\">#40</b>." },
+  { feedback: true },
+  { who: 'user', text: 'Format amounts with <code>Intl.NumberFormat</code> instead of building the string by hand.' },
+  { tool: 'edit', icon: 'file-pen', input: 'src/invoices/format.ts, test/invoices/show.test.ts' },
+  { who: 'agent', text: "Done: <code>formatAmount</code> uses <code>Intl.NumberFormat</code> now. These edits aren't committed yet; tell me when to commit and push." },
+];
+
+// ---------- the panel registry ----------
+// Each kind registers once: label, icon, badge, the area it opens in, its preferred and minimum size.
+const KINDS = {
+  changes: { label: 'Changes', icon: 'file-diff', area: 'right', w: 640, min: 340, h: 340, review: () => true,
+    badge: () => `<span class="badge">${TOTAL.files}</span>` },
+  mr: { label: 'Merge request', tech: '#40', icon: 'git-pull-request', area: 'right', w: 400, min: 320, h: 320, review: () => S.mr.tab === 'diff',
+    badge: () => `<span class="dot" title="CI failed"></span><span class="badge" title="1 review">1</span>` },
+  issue: { label: 'Issue', tech: '#12', icon: 'circle-dot', area: 'right', w: 380, min: 300, h: 260 },
+  terminal: { label: 'Terminal', icon: 'square-terminal', area: 'bottom', w: 520, min: 320, h: 220 },
+  files: { label: 'Files', icon: 'folder', later: true },
+  preview: { label: 'Preview', icon: 'globe', later: true },
+};
+const kindOf = id => id.startsWith('term') ? 'terminal' : id;
+const labelOf = id => kindOf(id) === 'terminal' ? `Terminal ${id.slice(4)}` : KINDS[id].label;
+
+const INITIAL = () => ({
+  theme: new URLSearchParams(location.search).get('theme') || 'midnight',
+  winMode: 'auto',
+  right: { tabs: ['changes', 'mr'], active: 'changes', open: true },
+  bottom: { tabs: ['term1'], active: 'term1', open: false },
+  size: { changes: 640, mr: 400, issue: 380, terminal: 520 },
+  height: { terminal: 220, changes: 340, mr: 320, issue: 260 },
+  drawer: false, review: null, pop: null, dialog: null,
+  ch: { seg: 'all', base: 'origin/main', tree: true, expanded: {} },
+  mr: { watch: true, auto: false, tab: 'overview' },
+  drafting: null,
+  drafts: [{ file: 'src/invoices/show.ts', line: 13, text: 'This adds a query per invoice, and the invoice list calls showInvoice in a loop. Can we load the accounts in one go?' }],
+  sections: { snoozed: true, working: true, archived: false },
+  sent: [], terms: 1, stateOpen: false, pendingScroll: null,
+});
+let S = INITIAL();
+
+const innerW = () => window.innerWidth;
+const isNarrow = () => S.winMode === 'narrow' || (S.winMode === 'auto' && innerW() < 1100);
+const mainW = () => innerW() - 300;
+const where = id => S.right.tabs.includes(id) ? 'right' : S.bottom.tabs.includes(id) ? 'bottom' : null;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function widthOf(id) {
+  const k = KINDS[kindOf(id)];
+  const max = isNarrow() ? Math.floor(mainW() * .94) : mainW() - 340;
+  return clamp(S.size[kindOf(id)] ?? k.w, Math.min(k.min, max), max);
+}
+const heightOf = id => clamp(S.height[kindOf(id)] ?? KINDS[kindOf(id)].h, 120, Math.floor(window.innerHeight * .6));
+
+function openPanel(id, area) {
+  if (S.review && S.review !== id) S.review = null;
+  if (S.review === id) return;
+  let a = where(id);
+  if (!a) { a = area || KINDS[kindOf(id)].area; S[a].tabs.push(id); }
+  S[a].active = id; S[a].open = true;
+  if (a === 'right' && isNarrow()) S.drawer = true;
+}
+function closePanel(id) {
+  const a = where(id); if (!a) return;
+  const A = S[a], i = A.tabs.indexOf(id);
+  A.tabs.splice(i, 1);
+  if (A.active === id) A.active = A.tabs[Math.min(i, A.tabs.length - 1)] || null;
+  if (!A.tabs.length) { A.open = false; if (a === 'right') S.drawer = false; }
+  if (S.review === id) S.review = null;
+}
+function movePanel(id) {
+  const from = where(id), to = from === 'right' ? 'bottom' : 'right';
+  closePanel(id); S[to].tabs.push(id); S[to].active = id; S[to].open = true;
+  if (to === 'right' && isNarrow()) S.drawer = true;
+  toast(`${labelOf(id)} moved to the ${to === 'right' ? 'Side area' : 'Dock'}`, false);
+}
+function toggleRight() {
+  if (isNarrow()) S.drawer = !S.drawer; else S.right.open = !S.right.open;
+  if ((S.drawer || S.right.open) && !S.right.active && S.right.tabs.length) S.right.active = S.right.tabs[0];
+  if (isNarrow() && S.drawer) S.right.open = true;
+}
+
+// ---------- rendering: inbox ----------
+const avatar = (txt, color, size = 26) => `<span class="proj-avatar" style="width:${size}px;height:${size}px;background:${color};font-size:${size * .38}px">${txt}</span>`;
+function Inbox() {
+  const item = (icon, cls, title, l2, sel, time, unread) => `<div class="item B-item ${sel ? 'sel' : ''} ${unread ? 'unread' : ''}" ${sel ? 'data-ctx="session"' : ''}><button class="open" ${sel ? '' : 'data-act="stub" data-v="Open another Session"'}>
+    <div class="l1"><span class="${cls}">${ic(icon)}</span><span class="title grow ellipsis">${title}</span>${unread ? '<span class="unread-dot"></span>' : ''}<span class="time">${time}</span></div>
+    <div class="l2">${l2}</div></button></div>`;
+  const refs = (issue, mr, branch) => `${issue ? `<span class="row">${ic('circle-dot', 'sm')}<span class="tech">${issue}</span></span>` : ''}${mr ? `<span class="row">${ic('git-pull-request', 'sm')}<span class="tech">${mr}</span></span>` : ''}<span class="row ellipsis">${ic('git-branch', 'sm')}<span class="tech ellipsis">${branch}</span></span>`;
+  const projLine = (name, color) => `<span class="proj" style="color:${color}">${name}</span>`;
+  const section = (key, icon, label, cards, count) => `<button class="section-head" data-act="section" data-v="${key}" aria-expanded="${!!S.sections[key]}">${ic(S.sections[key] ? 'chevron-down' : 'chevron-right', 'sm')}${ic(icon, 'sm')}${label}<span class="grow"></span>${count ?? cards.length}</button>${S.sections[key] ? cards.join('') : ''}`;
+  return `<aside class="side">
+    <div class="side-top"><div class="brand">${ic('waypoints')} Loom<span class="grow"></span><button class="icon-btn" title="New Session" data-act="stub" data-v="New Session">${ic('plus')}</button></div>
+      <div class="search" title="Search Sessions and actions">${ic('search')}<span>Search…</span><kbd>Ctrl K</kbd></div></div>
+    <div class="side-list">
+      <div class="section-head" style="border-top:0;cursor:default">${ic('inbox', 'sm')} Inbox<span class="grow"></span>3</div>
+      <div class="B-group-head">${avatar('BI', 'var(--p1)')}<b>billing-api</b><span class="grow"></span><span class="chip">2</span></div>
+      ${item('circle-check', 'st-waiting-finished', esc(SESSION.title), refs('#12', '#40', SESSION.branch), true, '4m')}
+      ${item('message-circle-question', 'st-waiting-question', 'Add the VAT number to the PDF footer', refs('#17', '', 'loom/17-vat-number-on-pdf'), false, '1h', true)}
+      <div class="B-group-head">${avatar('LO', 'var(--p2)')}<b>loom</b><span class="grow"></span><span class="chip">1</span></div>
+      ${item('triangle-alert', 'st-waiting-stuck', 'Snooze from the Inbox card', refs('#127', '#134', 'loom/127-snooze'), false, '3h')}
+    </div>
+    <div class="side-bottom">
+      ${section('snoozed', 'alarm-clock', 'Snoozed', [
+        item('alarm-clock', 'muted', 'Bump the PDF renderer to v4', projLine('billing-api', 'var(--p1)') + refs('#21', '#38', 'loom/21-pdf-renderer-v4'), false, 'until 16:00')])}
+      ${section('working', 'loader', 'Working', [
+        item('loader', 'st-working spin', 'Paginate the invoice list', projLine('billing-api', 'var(--p1)') + refs('#19', '', 'loom/19-paginate-invoices'), false, '<span class="elapsed">4m</span>'),
+        item('loader', 'st-working spin', 'Right-click menu on Dock tabs', projLine('loom', 'var(--p2)') + refs('#140', '', 'loom/140-dock-tab-menu'), false, '<span class="elapsed">12m</span>')])}
+      ${section('archived', 'archive', 'Archived', [], 14)}
+    </div>
+    <div class="side-foot"><button class="icon-btn" title="Projects">${ic('folder-git')}</button><button class="icon-btn" title="Dashboard">${ic('chart-column')}</button><span class="grow"></span><button class="icon-btn" title="Settings">${ic('settings')}</button></div>
+  </aside>`;
+}
+
+// ---------- rendering: header and glance strip (layer A) ----------
+const isPop = (kind, anchor) => S.pop && S.pop.kind === kind && (!anchor || S.pop.anchor === anchor);
+function Head() {
+  const rightShown = isNarrow() ? S.drawer : S.right.open && S.right.tabs.length;
+  return `<div class="main-head" data-ctx="session">
+    <div class="head-line"><h1 class="ellipsis title-btn" data-act="pop" data-kind="details" data-anchor="title" title="${esc(SESSION.title)} · Session details">${esc(SESSION.title)}</h1>
+      <span class="proj-tag" style="color:var(--p1);background:color-mix(in srgb, var(--p1) 16%, transparent)" title="Project">${SESSION.project}</span>
+      <span class="st-waiting-finished chip" role="status">${ic('circle-check', 'sm')}Finished</span></div>
+    <button class="icon-btn" title="${rightShown ? 'Hide' : 'Show'} the Side area${isNarrow() ? ' (drawer)' : ''}" aria-pressed="${!!rightShown}" data-act="toggle-right">${ic('panel-right')}</button>
+    <button class="icon-btn" title="${S.bottom.open ? 'Hide' : 'Show'} the Dock" aria-pressed="${S.bottom.open}" data-act="toggle-bottom">${ic('panel-bottom')}</button>
+    <button class="icon-btn" title="More" data-act="pop" data-kind="session-menu" data-anchor="more" aria-expanded="${isPop('session-menu', 'more')}">${ic('ellipsis')}</button>
+  </div>`;
+}
+function Glance() {
+  const ex = (k, a) => `aria-expanded="${isPop(k, a)}"`;
+  return `<div class="glance" role="toolbar" aria-label="Session at a glance">
+    <span class="g-chip"><button data-act="pop" data-kind="details" data-anchor="branch" ${ex('details', 'branch')} title="${esc(SESSION.branch)}">${ic('git-branch', 'sm')}<span class="tech branch">${esc(SESSION.branch)}</span></button></span>
+    <span class="g-chip">
+      <button data-act="open" data-id="mr" title="Open the Merge request panel">${ic('git-pull-request', 'sm')}<span class="tech">#40</span></button>
+      <button data-act="pop" data-kind="checks" data-anchor="ci" ${ex('checks', 'ci')} title="Checks"><span class="bad row" style="gap:4px">${ic('circle-x', 'sm')}CI failed</span></button>
+      <button data-act="open-reviews" title="Reviews and comments"><span class="warn-t row" style="gap:4px">${ic('message-square', 'sm')}1 review</span></button>
+    </span>
+    <span class="g-chip"><button data-act="open" data-id="changes" title="Open Changes"><span class="diff-stat">${ic('file-diff', 'sm')}<span class="files">${TOTAL.files} files</span><span class="add">+${TOTAL.add}</span><span class="del">−${TOTAL.del}</span></span></button></span>
+    <span class="g-chip"><button data-act="pop" data-kind="details" data-anchor="ctx" ${ex('details', 'ctx')} data-tip="<b>Context ${ctxPct}%</b><br>${(SESSION.tokens / 1000).toFixed(1)}k of ${SESSION.window / 1000}k tokens<br>$${SESSION.cost.toFixed(2)} so far · ${SESSION.time}">${ic('gauge', 'sm')}<span class="meter"><span style="width:${ctxPct}%"></span></span><span class="tech">${ctxPct}%</span></button></span>
+    <span class="g-chip"><button data-act="open" data-id="issue" title="Open the issue">${ic('circle-dot', 'sm')}<span class="tech">#12</span></button></span>
+  </div>`;
+}
+
+// ---------- rendering: conversation ----------
+function Convo() {
+  const msgs = [...MSGS, ...S.sent].map(m => {
+    if (m.tool) return `<div class="tools"><div class="tool"><div class="tool-head">${ic(m.icon, 'sm')}<span class="name">${m.tool}</span><span class="grow ellipsis muted">${esc(m.input)}</span><span class="tool-status completed">${ic('check', 'sm')}</span></div></div></div>`;
+    if (m.feedback) return `<div class="tools"><div class="tool feedback"><div class="tool-head">${ic('eye', 'sm')}<span class="name">babysit</span><span class="grow ellipsis muted">New feedback on Merge request <span class="tech">#40</span></span></div>
+      <div class="tool-body"><span class="row"><span class="tone-failed">${ic('circle-x', 'sm')}</span>CI failed: <span class="tech">test (node 20)</span></span>
+      <span class="row"><span class="tone-pending">${ic('message-square', 'sm')}</span>Marie Lefèvre requested changes: 1 comment on <button class="link tech" style="background:none;border:0;padding:0;color:var(--accent)" data-act="goto-note">src/currency.ts:3</button></span></div></div></div>`;
+    if (m.who === 'user') return `<div class="msg user"><div class="body" style="display:flex;justify-content:flex-end"><div class="bubble">${m.text}</div></div></div>`;
+    return `<div class="msg agent"><div class="who">${ic('bot')}</div><div class="body"><div class="name">OpenCode · <span class="tech">${SESSION.model}</span></div><div class="bubble">${m.text}</div></div></div>`;
+  }).join('');
+  const drafts = S.drafts.length ? `<div class="attachments">${S.drafts.map((d, i) => `<span class="chip">${ic('message-square', 'sm')}<span class="tech ellipsis">${d.file.split('/').pop()}:${d.line}</span><button class="icon-btn sm" title="Remove the comment" data-act="rm-draft" data-i="${i}">${ic('x', 'sm')}</button></span>`).join('')}</div>` : '';
+  return `<div class="convo">
+    <div class="chat" data-scroll="chat">${msgs}</div>
+    <div class="composer-wrap"><div class="composer">${drafts}
+      <textarea id="msg" rows="2" placeholder="Reply to OpenCode… @ to mention a file, / for commands${S.drafts.length ? `. Your ${S.drafts.length} diff comment${S.drafts.length > 1 ? 's go' : ' goes'} with it.` : ''}"></textarea>
+      <div class="ctoolbar"><button class="icon-btn sm" title="Attach">${ic('paperclip')}</button><span class="sep"></span>
+        <span class="pick agent-pick">${ic('bot', 'sm')}<b>OpenCode</b></span><span class="pick">${ic('cpu', 'sm')}<b class="tech">${SESSION.model}</b>${ic('chevron-down', 'sm')}</span>
+        <span class="grow"></span><button class="primary send" data-act="send">${ic('arrow-up')}Send</button></div></div>
+</div>
+  </div>`;
+}
+
+// ---------- rendering: panel areas (layer B) ----------
+function Tab(id, area) {
+  const k = KINDS[kindOf(id)], on = S[area].active === id;
+  return `<div class="ptab ${on ? 'on' : ''}" role="tab" aria-selected="${on}" data-act="tab" data-id="${id}" data-area="${area}" data-ctx="tab" title="${labelOf(id)} · right-click for more">
+    ${ic(k.icon, 'sm')}<span class="lbl">${labelOf(id)}</span>${k.tech ? `<span class="tech">${k.tech}</span>` : ''}${k.badge ? k.badge() : ''}
+    <button class="icon-btn x" title="Close ${labelOf(id)}" data-act="close" data-id="${id}">${ic('x', 'sm')}</button></div>`;
+}
+function Area(area) {
+  const A = S[area], id = A.active, drawer = area === 'right' && isNarrow();
+  const k = id && KINDS[kindOf(id)];
+  const style = area === 'right' ? `width:${id ? widthOf(id) : 360}px` : `height:${id ? heightOf(id) : 160}px`;
+  const tools = `<div class="area-tools">
+    ${id ? `<span class="size-tag" title="Each panel keeps its own ${area === 'right' ? 'width' : 'height'}">${area === 'right' ? widthOf(id) : heightOf(id)}px</span>` : ''}
+    ${k && k.review && k.review() ? `<button class="icon-btn sm" title="Review mode: give ${labelOf(id)} the main area (Esc to come back)" data-act="review" data-id="${id}">${ic('maximize-2', 'sm')}</button>` : ''}
+    ${id ? `<button class="icon-btn sm" title="Panel menu" data-act="pop" data-kind="tabmenu" data-anchor="tm-${area}" data-id="${id}">${ic('ellipsis', 'sm')}</button>` : ''}
+    <button class="icon-btn sm" title="Hide the ${area === 'right' ? 'Side area' : 'Dock'}" data-act="${area === 'right' ? 'toggle-right' : 'toggle-bottom'}">${ic(area === 'right' ? 'chevron-right' : 'chevron-down', 'sm')}</button></div>`;
+  return `${drawer ? '<div class="drawer-scrim" data-act="toggle-right"></div>' : ''}
+  <section class="area ${area} ${drawer ? 'drawer' : ''}" style="${style}" aria-label="${area === 'right' ? 'Side area' : 'Dock'}">
+    <div class="${area === 'right' ? 'edge-x' : 'edge-y'}" data-edge="${area}" title="Drag to resize ${id ? labelOf(id) : ''}"></div>
+    <div class="tabs-bar"><div class="tabs" role="tablist">${A.tabs.map(t => Tab(t, area)).join('')}</div>
+      <button class="icon-btn sm overflow-btn" hidden data-overflow title="More tabs" data-act="pop" data-kind="overflow" data-anchor="ov-${area}" data-area="${area}">${ic('chevron-down', 'sm')}<span class="n"></span></button>
+      <button class="icon-btn sm" style="margin-bottom:4px" title="Add a panel" data-act="pop" data-kind="plus" data-anchor="plus-${area}" data-area="${area}">${ic('plus', 'sm')}</button>${tools}</div>
+    <div class="area-view">${id ? Body(id, area) : `<div class="area-empty">No panels here.<br>Add one with +, or move a tab here from its menu.</div>`}</div>
+  </section>`;
+}
+function Body(id, ctx) {
+  switch (kindOf(id)) {
+    case 'changes': return Changes(ctx);
+    case 'mr': return MRPanel(ctx);
+    case 'issue': return Issue();
+    case 'terminal': return Terminal(id);
+  }
+}
+
+// ---------- Changes ----------
+const STATUS_WORD = { committed: 'committed', modified: 'modified', untracked: 'untracked' };
+const BASES = {
+  'origin/main': ['origin/main', 'The merge base with origin/main: what the Merge request shows, plus the edits not committed yet.'],
+  main: ['main (local)', 'Your local main, which may be behind origin.'],
+  turn: ['Start of the last turn', 'Only what the agent changed in its last turn.'],
+};
+function filtered(seg) { return FILES.filter(f => seg === 'all' || (seg === 'committed' ? f.status === 'committed' : f.status !== 'committed')); }
+function Changes(ctx) {
+  const c = S.ch, list = filtered(c.seg);
+  const n = s => filtered(s).length;
+  return `<div class="ch-bar">
+      <span class="seg" role="radiogroup" aria-label="Which changes">${['all', 'committed', 'uncommitted'].map(s => `<button class="${c.seg === s ? 'on' : ''}" role="radio" aria-checked="${c.seg === s}" data-act="seg" data-v="${s}">${s[0].toUpperCase() + s.slice(1)} <span class="n">${n(s)}</span></button>`).join('')}</span>
+      <button class="pick base-pick" data-act="pop" data-kind="base" data-anchor="base-${ctx}" aria-expanded="${isPop('base', 'base-' + ctx)}">${ic('git-branch', 'sm')}<span class="muted">vs</span><b class="tech">${c.base === 'turn' ? 'last turn' : c.base}</b>${ic('chevron-down', 'sm chev')}</button>
+      <span class="muted" style="display:inline-flex;cursor:help" data-tip="<b>Compared with ${esc(BASES[c.base][0])}</b><br>${esc(BASES[c.base][1])}">${ic('circle-help', 'sm')}</span>
+      <span class="grow"></span>
+      <button class="icon-btn sm" title="Refresh" data-act="stub" data-v="Refresh">${ic('refresh-cw', 'sm')}</button>
+    </div>
+    <div class="ch-body">${Tree(ctx, list)}<div class="ch-diffs" data-scroll="diffs-${ctx}">${list.map(f => FileDiff(ctx, f)).join('') || '<div class="empty">Nothing here.</div>'}</div></div>`;
+}
+function Tree(ctx, list) {
+  // folders, then files, recursively
+  const root = {};
+  list.forEach(f => { const parts = f.path.split('/'); let node = root; parts.slice(0, -1).forEach(p => node = node[p] = node[p] || {}); (node.__files = node.__files || []).push(f); });
+  const notesIn = f => NOTES.filter(x => x.file === f.path).length + S.drafts.filter(x => x.file === f.path).length;
+  const walk = (node, depth) => Object.keys(node).filter(k => k !== '__files').sort().map(d =>
+    `<div class="trow dir" style="padding-left:${10 + depth * 14}px">${ic('folder')}<span class="name">${d}/</span></div>${walk(node[d], depth + 1)}`).join('')
+    + (node.__files || []).map(f => `<button class="trow" style="padding-left:${10 + depth * 14}px" data-act="goto" data-ctx="${ctx}" data-f="${f.path}" title="${f.path} · ${STATUS_WORD[f.status]}">
+      <span class="sdot ${f.status}"></span><span class="name">${f.path.split('/').pop()}</span>${notesIn(f) ? `<span class="note-n">${ic('message-square', 'sm')}${notesIn(f)}</span>` : ''}<span class="diff-counts"><span class="add">+${f.add}</span> <span class="del">−${f.del}</span></span></button>`).join('');
+  return `<div class="ch-tree ${S.ch.tree ? '' : 'collapsed'}"><button class="tree-head" data-act="tree">${ic(S.ch.tree ? 'chevron-down' : 'chevron-right', 'sm')}${ic('list-tree', 'sm')}${list.length} files<span class="grow"></span><span class="diff-counts"><span class="add">+${list.reduce((a, f) => a + f.add, 0)}</span> <span class="del">−${list.reduce((a, f) => a + f.del, 0)}</span></span></button>
+    <div class="tree-list">${walk(root, 0)}</div></div>`;
+}
+const fid = (ctx, p) => `${ctx}-f-${p.replace(/[^a-z0-9]/gi, '_')}`;
+function hl(text) {
+  return text.split(/('(?:[^'\\]|\\.)*'|`[^`]*`|"(?:[^"\\]|\\.)*"|\/\/.*$|\/\*\*.*\*\/|\b(?:import|from|export|const|function|return|async|await|type|new|describe|it|expect)\b)/).map((p, i) => {
+    if (i % 2 === 0) return esc(p);
+    if (/^(\/\/|\/\*)/.test(p)) return `<span class="tk-c">${esc(p)}</span>`;
+    if (/^['"`]/.test(p)) return `<span class="tk-s">${esc(p)}</span>`;
+    return `<span class="tk-k">${esc(p)}</span>`;
+  }).join('');
+}
+function FileDiff(ctx, f) {
+  const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/') + 1) : '';
+  const shut = f.generated && !S.ch.expanded[f.path];
+  const rows = shut ? `<div class="df-skip">${ic('info', 'sm')}Generated file, ${f.add} lines added. <button data-act="expand" data-f="${f.path}">Show</button></div>`
+    : f.hunks.map(h => `<div class="hunk">${h.head}</div>` + h.rows.map(r => {
+      const notes = r.n ? NOTES.filter(x => x.file === f.path && x.line === r.n).map(x => Note(x)).join('') + S.drafts.map((d, i) => d.file === f.path && d.line === r.n ? Draft(d, i) : '').join('') : '';
+      const drafting = S.drafting && S.drafting.file === f.path && S.drafting.line === r.n && S.drafting.ctx === ctx ? Drafting() : '';
+      return `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}" id="${ctx}-l-${f.path.replace(/[^a-z0-9]/gi, '_')}-${r.n || 'o' + r.o}"><span class="n o">${r.o ?? ''}</span><span class="n">${r.n ?? ''}${r.n ? `<button class="addc" title="Comment on line ${r.n}" data-act="comment" data-ctx="${ctx}" data-f="${f.path}" data-l="${r.n}">+</button>` : ''}</span><span class="m">${r.t === ' ' ? '' : r.t === '-' ? '−' : '+'}</span><span class="code">${hl(r.text)}</span></div>${notes}${drafting}`;
+    }).join('')).join('');
+  return `<div class="df" id="${fid(ctx, f.path)}"><div class="df-h"><span class="path" title="${f.path}"><span class="dir">${dir}</span><b>${f.path.split('/').pop()}</b></span>
+    <span class="diff-status ${f.status}">${STATUS_WORD[f.status]}</span><span class="diff-counts"><span class="add">+${f.add}</span> <span class="del">−${f.del}</span></span></div>${rows}</div>`;
+}
+function Note(x) {
+  const r = REVIEWERS[x.who];
+  return `<div class="note review" data-note="${x.file}:${x.line}"><div class="note-h"><span class="avatar" style="background:${r.color}">ML</span><b>${r.name}</b><span class="when">on the Merge request · ${x.when}</span><span class="grow"></span><span class="chip tag-changes">Changes requested</span></div>
+    <div class="note-b">${x.text}</div><div class="note-a"><button data-act="ask-agent" data-v="src/currency.ts:3">${ic('bot', 'sm')}Ask the agent</button><button data-act="stub" data-v="Reply on GitHub">Reply</button><button data-act="stub" data-v="Resolve thread">Resolve</button></div></div>`;
+}
+const Draft = (d, i) => `<div class="note draft"><div class="note-h"><span class="avatar" style="background:${REVIEWERS.you.color}">${ic('user', 'sm')}</span><b>Your comment</b><span class="when">draft · goes with your next message</span><span class="grow"></span><button class="icon-btn xs" title="Remove" data-act="rm-draft" data-i="${i}">${ic('x')}</button></div><div class="note-b">${esc(d.text)}</div></div>`;
+const Drafting = () => `<div class="note draft"><textarea id="draft" rows="2" placeholder="Comment on line ${S.drafting.line}: it goes to the agent with your next message"></textarea><div class="note-a"><button class="primary" data-act="add-draft">Add comment</button><button data-act="cancel-draft">Cancel</button></div></div>`;
+
+// ---------- Merge request (#131) ----------
+function MRPanel(ctx) {
+  const m = S.mr, failed = MR.checks.filter(c => c.st === 'failed').length, committed = FILES.filter(f => f.status === 'committed');
+  const sw = (key, label, desc) => `<button class="switch" role="switch" aria-checked="${m[key]}" data-act="switch" data-v="${key}"><span class="knob"></span><span class="t"><b>${label}</b><span>${desc}</span></span></button>`;
+  const head = `<div class="mr-head">
+      <div class="mr-meta"><span class="chip state-open">${ic('git-pull-request', 'sm')}Open</span><span class="tech">#40</span><span class="row">${ic('git-branch', 'sm')}<span class="tech">${breakable(SESSION.branch)}</span> → <span class="tech">main</span></span></div>
+      <h2>${esc(MR.title)}</h2>
+      <div class="mr-meta"><span class="row">${ic('user', 'sm')}by you</span><span class="row">Reviewer <span class="avatar" style="background:${REVIEWERS.mlefevre.color}">ML</span>Marie Lefèvre</span>
+        <span class="row">${ic('git-commit', 'sm')}${MR.commits} commits</span><span class="diff-stat"><span class="add">+${committed.reduce((a, f) => a + f.add, 0)}</span><span class="del">−${committed.reduce((a, f) => a + f.del, 0)}</span></span></div></div>
+    <div class="switches">${sw('watch', 'Watch', 'New reviews, failed checks and conflicts put the Session in the Inbox.')}${sw('auto', 'Auto-prompt', 'Send new feedback straight to the agent, up to 3 times in a row.')}</div>
+    <div class="mr-tabs" role="tablist"><button class="${m.tab === 'overview' ? 'on' : ''}" data-act="mrtab" data-v="overview">Overview</button><button class="${m.tab === 'diff' ? 'on' : ''}" data-act="mrtab" data-v="diff">Diff <span class="badge">${committed.length}</span></button></div>`;
+  const overview = `
+    <div class="sec"><h3>Checks<span class="grow"></span><span class="tone-failed" style="text-transform:none;letter-spacing:0;font-weight:500">${failed} failed</span>, <span style="text-transform:none;letter-spacing:0;font-weight:500">${MR.checks.length - failed} passed</span></h3>
+      <ul class="checks">${MR.checks.map(c => `<li><span class="tone-${c.st}">${ic(c.st === 'failed' ? 'circle-x' : 'circle-check', 'sm')}</span><span class="ellipsis">${c.name}</span><span class="muted tech" style="font-size:12px">${c.dur}</span><button class="link" data-act="stub" data-v="Open the ${c.name} logs">Logs</button>${c.why ? `<span class="why">${esc(c.why)}</span>` : ''}</li>`).join('')}</ul>
+      <div class="row" style="margin-top:8px"><button data-act="ask-agent" data-v="the failing check" style="font-size:12.5px">${ic('bot', 'sm')}Ask the agent to fix it</button><span class="muted" style="font-size:12px">Checked 2 min ago</span></div></div>
+    <div class="sec" id="${ctx}-reviews"><h3>Reviews and comments<span class="grow"></span></h3>
+      <div class="review-card"><div class="rh"><span class="avatar" style="background:${REVIEWERS.mlefevre.color}">ML</span><b>Marie Lefèvre</b><span class="chip tag-changes">Changes requested</span><span class="grow"></span><span class="muted" style="font-size:12px">25 min ago</span></div>
+        <div class="rb">Looks good overall. One question on the fallback before I approve.</div>
+        <div class="quote"><div class="qh">${ic('file', 'sm')}<button class="link tech" data-act="goto-note">src/currency.ts:3</button><span class="grow"></span><span class="muted">1 comment</span></div>
+          <div class="qc">export const FALLBACK_CURRENCY = 'EUR';</div><div class="qt">${NOTES[0].text}</div></div></div>
+      <div class="review-card"><div class="rh"><span class="avatar" style="background:${REVIEWERS.ghbot.color}">GH</span><b>github-actions</b><span class="grow"></span><span class="muted" style="font-size:12px">31 min ago</span></div>
+        <div class="rb">Coverage 91.2% (<span class="tone-passed">+0.4%</span>) · 2 files changed coverage.</div></div></div>
+    <div class="sec desc"><h3>Description</h3>
+      <h4>What</h4><p>Invoices showed every amount in euros, whatever the account is billed in. Closes <span class="tech">#12</span>.</p>
+      <h4>How</h4><ul><li><code>currencyFor(account)</code> picks the account's billing currency, with EUR as the fallback.</li><li><code>formatAmount</code> takes the currency; <code>symbol()</code> knows GBP and USD.</li></ul>
+      <div class="diagram"><svg viewBox="0 0 360 64" role="img" aria-label="showInvoice calls currencyFor, then formatAmount">
+        <rect x="2" y="18" width="96" height="28" rx="6"/><text x="50" y="36" text-anchor="middle">showInvoice</text>
+        <path d="M98 32h30"/><path class="head" d="M128 28l6 4-6 4z"/>
+        <rect x="134" y="18" width="96" height="28" rx="6"/><text x="182" y="36" text-anchor="middle">currencyFor</text>
+        <path d="M230 32h30"/><path class="head" d="M260 28l6 4-6 4z"/>
+        <rect x="266" y="18" width="92" height="28" rx="6"/><text x="312" y="36" text-anchor="middle">formatAmount</text></svg>
+        <div class="cap">mermaid, rendered (with Pele in the real panel)</div></div>
+      <h4>Tests</h4><ul><li><span class="tech">test/currency.test.ts</span> for the fallback and the symbols.</li></ul></div>`;
+  const diff = `<div class="area-view" style="flex:none;overflow:visible">${committed.map(f => FileDiff(ctx + '-mr', f)).join('')}</div>`;
+  return `<div class="mr"><div class="mr-scroll" data-scroll="mr-${ctx}">${head}${m.tab === 'overview' ? overview : `<div style="padding:10px">${diff}</div>`}</div>
+    <div class="mr-foot"><button class="primary" data-act="merge">${ic('git-merge', 'sm')}Squash and merge</button><button data-act="stub" data-v="Open #40 on GitHub">${ic('external-link', 'sm')}Open on GitHub</button>
+      <span class="grow"></span>${failed ? `<span class="warn-t" title="CI failed">${ic('triangle-alert', 'sm')}<span>CI failed</span></span>` : ''}</div></div>`;
+}
+
+// ---------- Issue, Terminal ----------
+const Issue = () => `<div class="issue"><div class="mr-meta"><span class="chip state-open">${ic('circle-dot', 'sm')}Open</span><span class="tech">acme/billing-api#12</span><span class="chip">bug</span></div>
+  <h2>Invoices show the wrong currency</h2><div class="mr-meta"><span class="row">${ic('user', 'sm')}Opened by aduval · 3 days ago</span><span class="row">${ic('message-square', 'sm')}2 comments</span></div>
+  <p>UK customers see € on their invoices and on the PDF, although they are billed in GBP. Reported by three customers this week.</p>
+  <p class="muted">Steps: open any invoice of an account billed in GBP, e.g. <span class="tech">inv_2291</span>.</p>
+  <div class="row" style="margin-top:4px"><button data-act="stub" data-v="Open #12 on GitHub">${ic('external-link', 'sm')}Open on GitHub</button><button data-act="stub" data-v="Unlink the issue">${ic('link', 'sm')}Unlink</button></div></div>`;
+const Terminal = id => `<pre class="term"><span class="m">~/.loom/worktrees/billing-api/12-invoices-show-the-wrong-currency</span>
+<span class="p">$</span> pnpm test --run test/invoices
+ <span class="p">✓</span> test/invoices/show.test.ts (4)
+ <span class="e">✗</span> test/invoices/list.test.ts (3)
+   <span class="e">× totals: expected '€120.00', received '£120.00'</span>
+
+ Test Files  <span class="e">1 failed</span> | <span class="p">1 passed</span> (2)
+<span class="p">$</span> <span style="background:var(--text)"> </span></pre>`;
+
+// ---------- popovers, menus, dialogs ----------
+function Pop() {
+  const p = S.pop; if (!p) return '';
+  const item = (act, icon, label, extra = '', cls = '') => `<button role="menuitem" class="${cls}" data-act="${act}" ${extra}>${icon ? ic(icon, 'sm') : '<span class="menu-icon-space"></span>'}${label}</button>`;
+  const sep = '<div class="menu-separator"></div>';
+  if (p.kind === 'session-menu') return `<div class="popover context-menu" role="menu" id="pop">
+    ${item('details', 'info', 'Session details…')}${item('stub', 'code-xml', 'Open in editor', 'data-v="Open in editor"')}${item('stub', 'square-terminal', 'Open in terminal', 'data-v="Open in terminal"')}${item('stub', 'copy', 'Copy branch name', 'data-v="Copied loom/12-invoices-show-the-wrong-currency"')}
+    ${sep}${item('stub', 'alarm-clock', 'Snooze…', 'data-v="Snooze"')}${item('dialog', 'archive', 'Archive', 'data-v="archive"')}${item('dialog', 'trash-2', 'Delete…', 'data-v="delete"', 'danger-item')}</div>`;
+  if (p.kind === 'tabmenu') {
+    const a = where(p.id), k = KINDS[kindOf(p.id)];
+    return `<div class="popover context-menu" role="menu" id="pop"><div class="menu-head">${labelOf(p.id)}</div>
+      ${item('move', a === 'right' ? 'panel-bottom' : 'panel-right', a === 'right' ? 'Move to the Dock' : 'Move to the Side area', `data-id="${p.id}"`)}
+      ${k.review && k.review() ? item('review', 'maximize-2', 'Review mode', `data-id="${p.id}"`) : ''}
+      ${sep}${item('close', 'x', 'Close', `data-id="${p.id}"`)}</div>`;
+  }
+  if (p.kind === 'overflow') return `<div class="popover context-menu" role="menu" id="pop"><div class="menu-head">More tabs</div>
+    ${(p.ids || '').split(',').filter(Boolean).map(t => { const k = KINDS[kindOf(t)]; return item('tab', k.icon, `${labelOf(t)}${k.tech ? ` <span class="tech muted">${k.tech}</span>` : ''}`, `data-id="${t}" data-area="${p.area}"`); }).join('')}</div>`;
+  if (p.kind === 'plus') return `<div class="popover context-menu" role="menu" id="pop"><div class="menu-head">Add to the ${p.area === 'right' ? 'Side area' : 'Dock'}</div>
+    ${Object.entries(KINDS).map(([kid, k]) => {
+      if (k.later) return `<button role="menuitem" disabled>${ic(k.icon, 'sm')}${k.label}<span class="later">later</span></button>`;
+      if (kid === 'terminal') return item('add', k.icon, 'New Terminal', `data-id="term" data-area="${p.area}"`);
+      const w = where(kid);
+      return item('add', k.icon, `${k.label}${k.tech ? ` <span class="tech muted">${k.tech}</span>` : ''}${w ? `<span class="k">${ic('check', 'sm')}${w === 'right' ? 'Side area' : 'Dock'}</span>` : ''}`, `data-id="${kid}" data-area="${p.area}"`);
+    }).join('')}</div>`;
+  if (p.kind === 'base') return `<div class="popover base" role="listbox" id="pop">${Object.entries(BASES).map(([k, [l, d]]) => `<button role="option" aria-selected="${S.ch.base === k}" data-act="base" data-v="${k}"><span class="tech">${l}</span><small>${d}</small></button>`).join('')}</div>`;
+  if (p.kind === 'checks') return `<div class="popover ci-checks" id="pop"><h4>Checks on <span class="tech">#40</span></h4><p class="muted">1 failed, 3 passed · checked 2 min ago</p>
+    <ul>${MR.checks.map(c => `<li><span class="tone-${c.st}">${ic(c.st === 'failed' ? 'circle-x' : 'circle-check', 'sm')}</span><span class="name">${c.name}</span><span class="muted tech" style="font-size:12px">${c.dur}</span><button class="link" data-act="stub" data-v="Open the ${c.name} logs">Logs</button></li>`).join('')}</ul>
+    <div class="acts"><button data-act="ask-agent" data-v="the failing check">${ic('bot', 'sm')}Ask the agent to fix</button><button data-act="open" data-id="mr">Open #40</button></div></div>`;
+  if (p.kind === 'details') {
+    const s = SESSION, fact = (l, v, acts = '') => `<div class="fact"><dt>${l}</dt><dd><span class="value">${v}</span>${acts ? `<span class="fact-actions">${acts}</span>` : ''}</dd></div>`;
+    const b = (icon, t) => `<button class="icon-btn" title="${t}" data-act="stub" data-v="${t}">${ic(icon, 'sm')}</button>`;
+    return `<div class="popover details" id="pop"><h4>${ic('info', 'sm')}Session details</h4>
+      <dl class="group">${fact('Project', `${s.project} <span class="tech muted">${s.repo}</span>`)}${fact('Environment', s.env)}
+        ${fact('Working copy', '<span class="chip">worktree</span>', b('code-xml', 'Open in editor') + b('square-terminal', 'Open in terminal'))}
+        ${fact('Path', `<span class="tech">${breakable(s.path)}</span>`, b('copy', 'Copy path'))}
+        ${fact('Branch', `<span class="tech">${breakable(s.branch)}</span>`, b('copy', 'Copy branch name'))}</dl>
+      <dl class="group">${fact('Agent', s.agent)}${fact('Model', `<span class="tech">${s.model}</span>`)}${fact('Effort', `<span class="tech">${s.effort}</span>`)}
+        ${fact('Agent session', `<span class="tech">${s.agentSession}</span>`, b('copy', 'Copy agent session id'))}</dl>
+      <dl class="group">${fact('Context', `<span class="context"><span class="bar"><span style="width:${ctxPct}%"></span></span><span class="muted" style="font-size:12px">${ctxPct}% · ${(s.tokens / 1000).toFixed(1)}k of ${s.window / 1000}k tokens</span></span>`)}
+        ${fact('Usage', `$${s.cost.toFixed(2)} · ${s.time} of agent time`)}</dl></div>`;
+  }
+  return '';
+}
+function Dialog() {
+  const d = S.dialog; if (!d) return '';
+  if (d === 'merge') return `<div class="scrim" data-act="dialog-close"><div class="card modal" data-stop><h3>Squash and merge <span class="tech">#40</span>?</h3>
+    <p>${MR.commits} commits will be squashed into one commit on <span class="tech">main</span>:</p><input value="${esc(MR.squash)}">
+    <div class="warnline">${ic('triangle-alert', 'sm')}CI failed on <span class="tech">test (node 20)</span>. Merge anyway?</div>
+    <div class="row modal-actions"><button data-act="dialog-close">Cancel</button><button class="primary" data-act="merged">${ic('git-merge', 'sm')}Squash and merge</button></div></div></div>`;
+  const del = d === 'delete';
+  return `<div class="scrim" data-act="dialog-close"><div class="card modal" data-stop><h3>${del ? 'Delete' : 'Archive'} “${esc(SESSION.title)}”?</h3>
+    <p>${del ? "Its conversation, queue and Attachments go for good, and its worktree is removed (the local branch stays). This can't be undone; Archive keeps it." : 'The Session closes and is kept for history; its worktree is removed and its branch kept. A new message reopens it.'}</p>
+    <div class="row modal-actions"><button data-act="dialog-close">Cancel</button><button class="${del ? 'danger' : 'primary'}" data-act="dialog-ok" data-v="${d}">${del ? 'Delete' : 'Archive'}</button></div></div></div>`;
+}
+
+// ---------- the prototype pill ----------
+function Pill() {
+  const nar = isNarrow();
+  const st = [
+    `window   ${innerW()}px → ${nar ? 'narrow: right area is a drawer' : 'wide'}${S.winMode !== 'auto' ? ' (forced)' : ''}`,
+    `right    [${S.right.tabs.map(t => t === S.right.active ? t + '*' : t).join(', ')}] ${nar ? (S.drawer ? 'drawer open' : 'drawer closed') : S.right.open ? 'open' : 'hidden'}`,
+    `dock     [${S.bottom.tabs.map(t => t === S.bottom.active ? t + '*' : t).join(', ')}] ${S.bottom.open ? 'open' : 'hidden'}`,
+    `widths   ${Object.entries(S.size).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
+    `heights  ${Object.entries(S.height).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
+    `review   ${S.review || 'off'}`,
+    `changes  ${S.ch.seg} vs ${S.ch.base} · tree ${S.ch.tree ? 'open' : 'closed'} · drafts ${S.drafts.length}`,
+    `mr       watch ${S.mr.watch ? 'on' : 'off'} · auto-prompt ${S.mr.auto ? 'on' : 'off'} · ${S.mr.tab}`,
+    `popover  ${S.pop ? S.pop.kind : '-'}`,
+  ].join('\n');
+  return `<div class="r">PROTOTYPE ▴<span class="ctl"><select data-pill="theme" title="Theme">${Object.entries(THEMES).map(([k, t]) => `<option value="${k}" ${k === S.theme ? 'selected' : ''}>${t.label}</option>`).join('')}</select>
+    <select data-pill="win" title="Window mode"><option value="auto" ${S.winMode === 'auto' ? 'selected' : ''}>Auto width (drawer &lt;1100px)</option><option value="narrow" ${S.winMode === 'narrow' ? 'selected' : ''}>Narrow</option><option value="wide" ${S.winMode === 'wide' ? 'selected' : ''}>Wide</option></select>
+    <button data-act="reset">Reset</button><button data-act="state">${S.stateOpen ? 'Hide' : 'Show'} state</button></span></div>
+    ${S.stateOpen ? `<pre id="state" class="ctl">${esc(st)}</pre>` : ''}`;
+}
+
+// ---------- render ----------
+function render() {
+  const keep = {}; document.querySelectorAll('[data-scroll]').forEach(el => keep[el.dataset.scroll] = el.scrollTop);
+  const draft = document.getElementById('draft')?.value, msg = document.getElementById('msg')?.value;
+  const root = document.documentElement;
+  root.dataset.theme = S.theme;
+  root.style.setProperty('--font', `"${THEMES[S.theme].font}", system-ui, sans-serif`);
+  root.style.setProperty('--mono', `"${THEMES[S.theme].mono}", ui-monospace, monospace`);
+  const nar = isNarrow();
+  let bodyRow;
+  if (S.review) {
+    bodyRow = `<div class="body-row reviewing">${Convo()}<section class="review-surface" aria-label="Review">
+      <div class="review-head"><button class="icon-btn sm" title="Back to the layout (Esc)" data-act="unreview">${ic('minimize-2', 'sm')}</button>${ic(KINDS[kindOf(S.review)].icon, 'sm')}<b>${labelOf(S.review)}</b>${KINDS[kindOf(S.review)].tech ? `<span class="tech">${KINDS[kindOf(S.review)].tech}</span>` : ''}<span class="muted">in review mode</span><span class="grow"></span><span class="muted" style="font-size:12px"><kbd>Esc</kbd> back to the layout</span></div>
+      <div class="area-view">${Body(S.review, 'review')}</div></section></div>`;
+  } else {
+    const showRight = S.right.tabs.length || S.right.open ? (nar ? S.drawer : S.right.open) : false;
+    bodyRow = `<div class="body-row">${Convo()}${showRight ? Area('right') : ''}</div>`;
+  }
+  const dock = S.bottom.open ? Area('bottom') : '';
+  document.getElementById('root').innerHTML = `<div class="app">${Inbox()}<main class="main">${Head()}${Glance()}${bodyRow}${dock}</main></div>${Pop()}${Dialog()}`;
+  document.getElementById('pill').innerHTML = Pill();
+  document.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll] != null) el.scrollTop = keep[el.dataset.scroll]; else if (el.dataset.scroll === 'chat') el.scrollTop = el.scrollHeight; });
+  if (msg) document.getElementById('msg').value = msg;
+  const d = document.getElementById('draft'); if (d) { if (draft) d.value = draft; d.focus(); }
+  fitTabs();
+  place();
+  if (S.pendingScroll) { const el = document.querySelector(S.pendingScroll); S.pendingScroll = null; if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); } }
+}
+// Tab overflow: first the inactive tabs drop to icon and badge; the ones that still don't fit, last first,
+// go into the ⌄ menu. The active tab always keeps its label.
+function fitTabs() {
+  document.querySelectorAll('section.area').forEach(sec => {
+    const bar = sec.querySelector('.tabs'); if (!bar) return;
+    const fits = () => bar.scrollWidth <= bar.clientWidth + 1;
+    if (fits()) return;
+    bar.classList.add('compact');
+    const inactive = [...bar.querySelectorAll('.ptab:not(.on)')], hidden = [];
+    while (!fits() && inactive.length) { const t = inactive.pop(); t.style.display = 'none'; hidden.unshift(t.dataset.id); }
+    if (!hidden.length) return;
+    const more = sec.querySelector('[data-overflow]');
+    more.hidden = false; more.dataset.ids = hidden.join(','); more.querySelector('.n').textContent = hidden.length;
+    if (S.pop && S.pop.kind === 'overflow' && S.pop.anchor === more.dataset.anchor) S.pop.ids = more.dataset.ids;
+  });
+}
+function place() {
+  const pop = document.getElementById('pop'); if (!pop) return;
+  let x, y, below;
+  if (S.pop.x != null) { x = S.pop.x; y = S.pop.y; below = y; }
+  else {
+    const a = document.querySelector(`[data-anchor="${S.pop.anchor}"]`);
+    if (!a) { S.pop = null; pop.remove(); return; }
+    const r = a.getBoundingClientRect(); x = r.left; y = r.bottom + 4; below = r.top - 4;
+    if (S.pop.anchor.startsWith('tm-') || S.pop.anchor === 'more' || S.pop.anchor.startsWith('plus-')) x = r.right - pop.offsetWidth;
+  }
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  x = clamp(x, 8, innerWidth - w - 8);
+  if (y + h > innerHeight - 8) y = Math.max(8, (S.pop.x != null ? y : below) - h);
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+}
+let toastT;
+function toast(msg, stub = true) { const t = document.getElementById('toast'); t.textContent = msg + (stub ? ' (stub)' : ''); t.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', 1600); }
+function gotoNote() { S.ch.seg = 'all'; openPanel('changes'); const ctx = S.review === 'changes' ? 'review' : where('changes'); S.pendingScroll = `[id="${ctx}-l-src_currency_ts-3"] + .note`; }
+function send() {
+  const v = document.getElementById('msg').value.trim();
+  if (!v && !S.drafts.length) return toast('Nothing to send', false);
+  const notes = S.drafts.map(d => `<div class="muted" style="font-size:12px;margin-top:4px">${ic('message-square', 'sm')} <span class="tech">${d.file}:${d.line}</span>: ${esc(d.text)}</div>`).join('');
+  S.sent.push({ who: 'user', text: esc(v || 'See my comments.') + notes });
+  S.drafts = []; document.getElementById('msg').value = '';
+  toast('Sent to the agent');
+}
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  const inPop = e.target.closest('#pop');
+  const was = S.pop;
+  if (!inPop && S.pop) S.pop = null;
+  const el = e.target.closest('[data-act]');
+  if (!el) { if (was) render(); return; }
+  if (el.dataset.act === 'dialog-close' && e.target.closest('[data-stop]') && !e.target.closest('button')) return;
+  const { act, id, v, area, kind, anchor } = el.dataset;
+  if (inPop && !['base'].includes(act)) S.pop = null;
+  switch (act) {
+    case 'pop': if (!(was && was.kind === kind && was.anchor === anchor)) S.pop = { kind, anchor, id, area, ids: el.dataset.ids }; break;
+    case 'details': S.pop = { kind: 'details', anchor: document.querySelector('[data-anchor="title"]') ? 'title' : 'more' }; break;
+    case 'open': openPanel(id); break;
+    case 'open-reviews': S.mr.tab = 'overview'; openPanel('mr'); S.pendingScroll = `[id="${S.review === 'mr' ? 'review' : where('mr')}-reviews"]`; break;
+    case 'goto-note': gotoNote(); break;
+    case 'toggle-right': if (!S.right.tabs.length && !isNarrow()) { S.right.open = !S.right.open; break; } toggleRight(); break;
+    case 'toggle-bottom': S.bottom.open = !S.bottom.open; if (S.bottom.open && !S.bottom.active) S.bottom.active = S.bottom.tabs[0] || null; break;
+    case 'tab': S[area].active = id; break;
+    case 'section': S.sections[v] = !S.sections[v]; break;
+    case 'close': closePanel(id); break;
+    case 'move': movePanel(id); break;
+    case 'add': if (id === 'term') { const t = 'term' + (++S.terms); S[area].tabs.push(t); S[area].active = t; S[area].open = true; } else openPanel(id, area); break;
+    case 'review': S.review = id; S.drawer = false; break;
+    case 'unreview': S.review = null; break;
+    case 'seg': S.ch.seg = v; break;
+    case 'base': S.ch.base = v; S.pop = null; break;
+    case 'tree': S.ch.tree = !S.ch.tree; break;
+    case 'expand': S.ch.expanded[el.dataset.f] = true; break;
+    case 'goto': { const f = FILES.find(x => x.path === el.dataset.f); if (f.generated) S.ch.expanded[f.path] = true; S.pendingScroll = `#${fid(el.dataset.ctx, f.path)}`; break; }
+    case 'comment': S.drafting = { ctx: el.dataset.ctx, file: el.dataset.f, line: +el.dataset.l }; break;
+    case 'add-draft': { const t = document.getElementById('draft').value.trim(); if (t) S.drafts.push({ file: S.drafting.file, line: S.drafting.line, text: t }); S.drafting = null; break; }
+    case 'cancel-draft': S.drafting = null; break;
+    case 'rm-draft': S.drafts.splice(+el.dataset.i, 1); break;
+    case 'switch': S.mr[v] = !S.mr[v]; toast(`${v === 'watch' ? 'Watch' : 'Auto-prompt'} ${S.mr[v] ? 'on' : 'off'}`, false); break;
+    case 'mrtab': S.mr.tab = v; if (v === 'overview' && S.review === 'mr') S.review = null; break;
+    case 'merge': S.dialog = 'merge'; break;
+    case 'merged': S.dialog = null; toast('Squashed and merged #40'); break;
+    case 'dialog': S.dialog = v; break;
+    case 'dialog-close': S.dialog = null; break;
+    case 'dialog-ok': S.dialog = null; toast(v === 'delete' ? 'Session deleted' : 'Session archived'); break;
+    case 'ask-agent': document.getElementById('msg').value = `Please address ${v}.`; toast('Put in the composer', false); return;
+    case 'send': send(); break;
+    case 'reset': { const t = S.theme; S = INITIAL(); S.theme = t; break; }
+    case 'state': S.stateOpen = !S.stateOpen; break;
+    case 'stub': e.preventDefault(); toast(v); break;
+    default: return;
+  }
+  render();
+});
+document.addEventListener('contextmenu', e => {
+  const el = e.target.closest('[data-ctx]'); if (!el) return;
+  e.preventDefault();
+  if (el.dataset.ctx === 'tab') S.pop = { kind: 'tabmenu', id: el.dataset.id, x: e.clientX, y: e.clientY };
+  else S.pop = { kind: 'session-menu', x: e.clientX, y: e.clientY };
+  render();
+});
+document.addEventListener('change', e => {
+  if (e.target.dataset.pill === 'theme') { S.theme = e.target.value; history.replaceState(null, '', '?theme=' + S.theme); render(); }
+  if (e.target.dataset.pill === 'win') { S.winMode = e.target.value; if (!isNarrow()) S.drawer = false; render(); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (S.pop) S.pop = null; else if (S.dialog) S.dialog = null; else if (S.drafting) S.drafting = null;
+    else if (S.review) S.review = null; else if (isNarrow() && S.drawer) S.drawer = false; else return;
+    return render();
+  }
+  if (e.target.id === 'msg' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); render(); }
+});
+document.addEventListener('mousemove', e => {
+  const tip = document.getElementById('tip'), el = e.target.closest('[data-tip]');
+  if (!el) { tip.style.display = 'none'; return; }
+  tip.innerHTML = el.dataset.tip; tip.style.display = 'block';
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - r.width - 8) + 'px';
+  tip.style.top = Math.min(e.clientY + 16, innerHeight - r.height - 8) + 'px';
+});
+// Drag an area's edge: the width (or height) belongs to the kind of panel shown (all Terminals share one), not to the area.
+document.addEventListener('pointerdown', e => {
+  const edge = e.target.closest('[data-edge]'); if (!edge) return;
+  const areaName = edge.dataset.edge, A = S[areaName], id = A.active; if (!id) return;
+  const box = edge.parentElement, x0 = e.clientX, y0 = e.clientY;
+  const w0 = box.offsetWidth, h0 = box.offsetHeight, tag = box.querySelector('.size-tag');
+  e.preventDefault(); document.body.classList.add(areaName === 'right' ? 'resizing' : 'resizing-rows');
+  let last = areaName === 'right' ? w0 : h0;
+  const move = ev => {
+    if (areaName === 'right') { const max = isNarrow() ? Math.floor(mainW() * .94) : mainW() - 340; last = clamp(w0 + (x0 - ev.clientX), KINDS[kindOf(id)].min, max); box.style.width = last + 'px'; }
+    else { last = clamp(h0 + (y0 - ev.clientY), 120, Math.floor(innerHeight * .6)); box.style.height = last + 'px'; }
+    if (tag) tag.textContent = last + 'px';
+  };
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); document.body.classList.remove('resizing', 'resizing-rows'); (areaName === 'right' ? S.size : S.height)[kindOf(id)] = last; render(); };
+  addEventListener('pointermove', move); addEventListener('pointerup', up);
+});
+let wasNarrow = isNarrow();
+addEventListener('resize', () => { const n = isNarrow(); if (n !== wasNarrow) { S.drawer = false; wasNarrow = n; } render(); });
+render();
+</script>
+</body>
+</html>
