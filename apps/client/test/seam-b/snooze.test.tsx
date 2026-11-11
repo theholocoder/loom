@@ -8,6 +8,8 @@ import { FakeMain } from './fake-main';
 // Wednesday 2026-11-11, 10:42 local time.
 const NOW = new Date(2026, 10, 11, 10, 42).getTime();
 const HOUR = 3_600_000;
+/** A time of day as the runner's locale writes it: 09:00, or 09:00 AM. */
+const clock = (hours: number, minutes: number) => new Date(2026, 0, 1, hours, minutes).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 beforeEach(() => vi.useFakeTimers({ toFake: ['Date'], now: NOW }));
 afterEach(() => {
@@ -142,7 +144,7 @@ describe('a snoozed Session', () => {
     const list = within(inbox()).getByRole('list', { name: 'Snoozed' });
     expect(within(list).getAllByRole('listitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Later', 'Next week']);
     const later = within(row('Later'));
-    expect(later.getByRole('time').textContent).toBe('Tomorrow 09:00');
+    expect(later.getByRole('time').textContent).toBe(`Tomorrow ${clock(9, 0)}`);
     expect(later.getByTitle('Branch').textContent).toBe('loom/later');
   });
 
@@ -169,7 +171,7 @@ describe('a snoozed Session', () => {
     fireEvent.click(within(inbox()).getByRole('button', { name: 'Snoozed' }));
     fireEvent.click(within(inbox()).getByRole('button', { name: 'Later' }));
     const header = within(screen.getByRole('region', { name: 'Session header' }));
-    expect(header.getByRole('status', { name: 'Snoozed' }).textContent).toBe('Snoozed until 11:42');
+    expect(header.getByRole('status', { name: 'Snoozed' }).textContent).toBe(`Snoozed until ${clock(11, 42)}`);
     fireEvent.click(header.getByRole('button', { name: 'Wake' }));
     await waitFor(() => expect(snoozes(main)).toEqual([{ id: later.id, until: null }]));
   });
@@ -180,9 +182,9 @@ describe('a snoozed Session', () => {
     fireEvent.click(within(inbox()).getByRole('button', { name: 'Snoozed' }));
     fireEvent.click(within(inbox()).getByRole('button', { name: 'Later' }));
     const status = () => within(screen.getByRole('region', { name: 'Session header' })).getByRole('status', { name: 'Snoozed' }).textContent;
-    expect(status()).toBe('Snoozed until Tomorrow 09:00');
+    expect(status()).toBe(`Snoozed until Tomorrow ${clock(9, 0)}`);
     act(() => vi.advanceTimersByTime(14 * HOUR));
-    expect(status()).toBe('Snoozed until 09:00');
+    expect(status()).toBe(`Snoozed until ${clock(9, 0)}`);
   });
 });
 
