@@ -4,6 +4,7 @@ import { Coins, DatabaseZap, GitMerge, MessagesSquare, Receipt, Timer, type Luci
 import { useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { RemovedTag } from './Archive';
 
 /** Series colours, the prototype's categorical slots, in order. */
 const SERIES = ['var(--p1)', 'var(--p2)', 'var(--p3)', 'var(--accent)', 'var(--wait)', 'var(--work)'];
@@ -109,10 +110,11 @@ function Content({
           <div className="card-head">
             <h3 id="dash-per-day">Tokens per day</h3>
             <div className="legend">
-              {data.perProject.map(({ projectId, project }) => (
+              {data.perProject.map(({ projectId, project, removed }) => (
                 <span key={projectId}>
                   <span className="sw" style={{ background: colorOf(projectId) }} />
                   {project}
+                  {removed && <RemovedTag />}
                 </span>
               ))}
             </div>
@@ -123,7 +125,7 @@ function Content({
           <div className="card-head">
             <h3 id="dash-per-project">Tokens per Project</h3>
           </div>
-          <Bars label="Tokens per Project" rows={data.perProject.map((p) => ({ key: String(p.projectId), label: p.project, value: p.tokens, color: colorOf(p.projectId) }))} format={formatTokens} />
+          <Bars label="Tokens per Project" rows={data.perProject.map((p) => ({ key: String(p.projectId), label: p.project, removed: p.removed, value: p.tokens, color: colorOf(p.projectId) }))} format={formatTokens} />
         </section>
         <section className="card" aria-labelledby="dash-per-model">
           <div className="card-head">
@@ -193,7 +195,10 @@ function Content({
                       onKeyDown={found ? (e) => e.key === 'Enter' && onOpenSession(found) : undefined}
                     >
                       <td>{top.title}</td>
-                      <td>{top.project}</td>
+                      <td>
+                        {top.project}
+                        {top.projectRemoved && <RemovedTag />}
+                      </td>
                       <td>{references(top, projects)}</td>
                       <td>
                         <span className="tech">{top.model}</span>
@@ -256,7 +261,7 @@ function Tile({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: s
   );
 }
 
-function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: string; label: string; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
+function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: string; label: string; removed?: boolean; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
   if (!rows.length) return <div className="empty">Nothing yet.</div>;
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
@@ -265,6 +270,7 @@ function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: stri
         <li key={row.key ?? row.label} className="hbar">
           <span className={row.tech ? 'ellipsis tech' : 'ellipsis'} title={row.label}>
             {row.label}
+            {row.removed && <RemovedTag />}
           </span>
           <span className="track" aria-hidden>
             <span className="fill" style={{ width: `${(row.value / max) * 100}%`, background: row.color }} />

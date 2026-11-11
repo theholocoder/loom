@@ -13,7 +13,7 @@ import { Sidebar, type SidebarControl } from './Sidebar';
 import { Dock, type DockState } from './Dock';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
-import { useArchive, WorktreeMissing } from './Archive';
+import { ProjectRemoved, useArchive, useRemovedProject, WorktreeMissing } from './Archive';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
@@ -344,6 +344,9 @@ export function SessionView({
   const commands = useAgentCommands(session.projectId, session.agentCommands);
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
+  const removedProject = useRemovedProject(session.projectId);
+  // An archived Session takes a message, which reopens it, while its Project is there.
+  const readOnly = session.status === 'archived' && !project;
   const [error, setError] = useState<string>();
   /** Whether Session info's Link Merge request popover is open. */
   const [linking, setLinking] = useState(false);
@@ -366,7 +369,7 @@ export function SessionView({
   const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust' || i.kind === 'approval') && i.state === 'asked') : undefined;
   const asked = firstAsked !== undefined;
   // Between runs only: not while the agent works, or waits on an answer.
-  const pickersDisabled = working || asked || session.status === 'archived' || !!session.worktreeMissing;
+  const pickersDisabled = working || asked || readOnly || !!session.worktreeMissing;
   const { agentConfig } = session;
   // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
   const checkoutModels = useCheckoutModels(agentConfig ? undefined : session.projectId);
@@ -435,7 +438,7 @@ export function SessionView({
     if (freeAnswer) return freeAnswer.placeholder;
     if (firstAsked?.kind === 'approval') return 'Approve or deny the request above to go on.';
     if (asked) return 'Answer the question above to go on.';
-    if (session.status === 'archived') return 'This Session is archived.';
+    if (readOnly) return removedProject ? "This Session's Project was removed." : 'This Session is archived.';
     if (session.worktreeMissing) return "This Session's worktree is missing; it can only be archived.";
     return `Reply to ${session.agent}…`;
   };
@@ -469,7 +472,12 @@ export function SessionView({
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="crumb">
               {project && <span>{project.name}</span>}
-              {project && session.branch && <span aria-hidden="true">·</span>}
+              {removedProject && (
+                <span className="row">
+                  {removedProject.name} <ProjectRemoved />
+                </span>
+              )}
+              {(project || removedProject) && session.branch && <span aria-hidden="true">·</span>}
               {session.branch && (
                 <>
                   <GitBranch className="sm" />
@@ -600,13 +608,13 @@ export function SessionView({
         <Composer
           agent={session.agent}
           placeholder={composerPlaceholder()}
-          disabled={(session.status !== 'waiting' && !working) || (asked && !freeAnswer) || !!session.worktreeMissing}
+          disabled={readOnly || (asked && !freeAnswer) || !!session.worktreeMissing}
           dock={panel}
           clearKey={stepKey}
           focusRequest={replyRequest}
           onSend={send}
           canAttach={!freeAnswer}
-          loadFiles={session.status === 'archived' || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
+          loadFiles={readOnly || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
           commands={commands}
           // Not with an answer to a question: they wait for the next message.
           comments={freeAnswer ? undefined : comments}

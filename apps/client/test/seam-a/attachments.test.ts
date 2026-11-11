@@ -139,9 +139,10 @@ describe('attachments', () => {
     const { main, project } = await withProject(machine, checkout, userDataDir);
     const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Hi' });
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
-    await main.api.invoke('sessions.archive', { id });
+    // Archived with its Project removed, it can't be reopened.
+    await main.api.invoke('projects.remove', { id: project.id });
 
-    await expect(main.api.invoke('sessions.send', { id, prompt: 'More', attachments: [{ name: 'late.txt', data: bytes('late') }] })).rejects.toThrow('archived');
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'More', attachments: [{ name: 'late.txt', data: bytes('late') }] })).rejects.toThrow("can't be reopened");
 
     expect(existsSync(join(userDataDir, 'attachments', String(id)))).toBe(false);
   });

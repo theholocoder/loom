@@ -232,7 +232,7 @@ describe('Session status for the Inbox', () => {
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.branch === 'loom/32-other'));
   });
 
-  it('archives a checkout Session: read, its agent stopped, no more messages, and kept after a restart', async () => {
+  it('archives a checkout Session: read, its agent stopped, and kept after a restart', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
     const userDataDir = tempDir('loom-sessions-');
     const { main, project } = await withProject(machine, checkout, userDataDir);
@@ -243,7 +243,6 @@ describe('Session status for the Inbox', () => {
 
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'archived' && s.waitingReason === undefined && !s.unread));
     await processEnded(machine.acpMessages()[0]!.pid);
-    await expect(main.api.invoke('sessions.send', { id, prompt: 'More' })).rejects.toThrow('This Session is archived.');
     await main.close();
     const again = await started(machine, userDataDir);
     expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived', unread: false });

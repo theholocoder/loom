@@ -5,6 +5,7 @@
 import { CircleDot, GitPullRequest, Search, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { mergeRequestRef, type Project, type Session } from '../shared/api';
+import { ProjectRemoved, useRemovedProjectIds } from './Archive';
 import { stepIndex } from './Popover';
 import { ProjectAvatar } from './ProjectAvatar';
 import { SearchDialog } from './SearchDialog';
@@ -41,6 +42,7 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
   const text = parsed.words.join(' ');
   const shownActions = parsed.filters.length ? [] : actions.filter((action) => action.label.toLowerCase().includes(text));
   const found = searchSessions(sessions, projects, parsed);
+  const removed = useRemovedProjectIds();
   const results = shownActions.length + found.length;
   const highlighted = results ? stepIndex(active, results) : -1;
   const optionId = (index: number) => `${id}-option-${index}`;
@@ -152,6 +154,7 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
                     </span>
                   )}
                   {project && <span className="muted ellipsis palette-project">{project.name}</span>}
+                  {!project && removed.has(session.projectId) && <ProjectRemoved />}
                 </>,
               );
             })}

@@ -203,6 +203,29 @@ export interface Project {
   forge: ForgeStatus;
 }
 
+/** A Project the user removed: hidden, its Sessions archived, its history kept. */
+export interface RemovedProject {
+  id: number;
+  name: string;
+}
+
+/** A removed Project a checkout being added could restore, with how many Sessions it would bring back. */
+export interface RestorableProject {
+  id: number;
+  name: string;
+  sessions: number;
+}
+
+/** What `projects.remove` did: removed, or held back by the unsaved work of some of its Sessions. */
+export type RemoveProjectResult = { removed: true } | { removed: false; unsaved: UnsavedSession[] };
+
+/** A Session whose worktree has unsaved work, holding back its Project's removal. */
+export interface UnsavedSession {
+  sessionId: number;
+  title: string;
+  unsavedWork: UnsavedWork;
+}
+
 /** The branch prefix a new Project gets. */
 export const DEFAULT_BRANCH_PREFIX = 'loom';
 
@@ -905,6 +928,8 @@ export interface TopSession {
   projectId: number;
   /** Its Project's name, as it was when its usage was last recorded. */
   project: string;
+  /** Whether the user has removed its Project. */
+  projectRemoved?: true;
   issue?: ForgeLink;
   mergeRequest?: ForgeLink;
   /** The model it used the most tokens with in the range. */
@@ -936,7 +961,7 @@ export interface UsageDashboard {
   /** The median wait for the user (on a question or Approval request, or finished and unanswered, while Loom ran), in ms; absent with none. */
   medianWaitMs?: number;
   /** By tokens, most first; `project` is its name as its usage was last recorded. */
-  perProject: Array<{ projectId: number; project: string; tokens: number }>;
+  perProject: Array<{ projectId: number; project: string; tokens: number; removed?: true }>;
   perModel: Array<{ model: string; tokens: number }>;
   mix: TokenCounts;
   /** Cache reads out of all prompt tokens (input, cache read and cache write), 0 to 1; absent with none. */
@@ -1010,10 +1035,25 @@ export interface Commands {
   /**
    * Adds the git checkout containing `path` as a Project, in the given
    * Environment (the native one by default). Rejects a folder that isn't in a
-   * git repository, and a checkout that is already a Project. Resolves once
-   * its Forge has been checked.
+   * git repository, and a checkout that is already a Project. With
+   * `restore`, brings back that removed Project instead (see
+   * `projects.restorable`), with its name, branch prefix, trust and Sessions.
+   * Resolves once its Forge has been checked.
    */
-  'projects.link': { params: { path: string; environmentId?: string }; result: Project };
+  'projects.link': { params: { path: string; environmentId?: string; restore?: number }; result: Project };
+  /**
+   * The removed Project that the checkout containing `path` would restore:
+   * the one removed last whose identity (its origin's host and repository, or
+   * else its Environment and path) matches; null with none.
+   */
+  'projects.restorable': { params: { path: string; environmentId?: string }; result: RestorableProject | null };
+  /**
+   * Removes a Project: archives its Sessions as `sessions.archive` would,
+   * then hides it, keeping its Sessions and usage as history. Its checkout is
+   * left on disk. Held back, touching nothing, when a Session's worktree has
+   * unsaved work, unless `discard`.
+   */
+  'projects.remove': { params: { id: number; discard?: boolean }; result: RemoveProjectResult };
   /**
    * Sets what the Project's branch names start with. Rejects a prefix git
    * would not accept at the start of a branch name.
@@ -1330,6 +1370,8 @@ export interface Topics {
   environments: EnvironmentStatus[];
   /** Every Project, by name. */
   projects: Project[];
+  /** Every removed Project, by name. */
+  removedProjects: RemovedProject[];
   settings: Settings;
   /** Every Session, newest first. */
   sessions: Session[];

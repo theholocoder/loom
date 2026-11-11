@@ -26,11 +26,12 @@ export function emptyDashboard(days: UsageRange): UsageDashboard {
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
-type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'settings' | 'sessions' | 'database'>;
+type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database'>;
 
 const EMPTY: { [T in TopicName]: Topics[T] } = {
   environments: [],
   projects: [],
+  removedProjects: [],
   settings: DEFAULT_SETTINGS,
   sessions: [],
   transcript: [],
@@ -59,6 +60,8 @@ export class FakeMain implements LoomApi {
       'projects.link': () => {
         throw new Error('projects.link is not scripted');
       },
+      'projects.restorable': () => null,
+      'projects.remove': () => ({ removed: true }),
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       'projects.issues': () => [],
       'projects.branches': () => ({ defaultBranch: 'main', remote: ['main'], existing: [], worktrees: [] }),

@@ -101,7 +101,7 @@ function escapeRegExp(text: string): string {
  * network remote: `https://host/owner/repo.git`, `ssh://git@host:22/owner/repo`
  * or scp-like `git@host:owner/repo.git`. Local paths and `file://` give none.
  */
-function parseRemote(url: string): { host: string; repository: string } | undefined {
+export function parseRemote(url: string): { host: string; repository: string } | undefined {
   let host: string;
   let path: string;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {

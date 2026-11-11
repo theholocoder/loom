@@ -5,7 +5,7 @@ import { Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch,
 import { useEffect, useState } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
-import { useArchive, WorktreeMissing } from './Archive';
+import { ProjectRemoved, useArchive, useRemovedProjectIds, WorktreeMissing } from './Archive';
 import { ProjectAvatar } from './ProjectAvatar';
 import { StatusIcon } from './Sessions';
 
@@ -244,10 +244,12 @@ function Section({ label, icon: Icon, ...list }: { label: string; icon: LucideIc
 
 /** Sessions as one-line rows: status and title. */
 function SessionRows({ sessions, selectedId, onSelect }: SessionListProps) {
+  const removed = useRemovedProjectIds();
   return sessions.map((session) => (
     <button key={session.id} type="button" className={`mini${session.id === selectedId ? ' sel' : ''}`} aria-label={session.title} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => onSelect(session)}>
       <StatusIcon session={session} />
       <span className="grow ellipsis">{session.title}</span>
+      {removed.has(session.projectId) && <ProjectRemoved />}
       {session.unread && <UnreadDot />}
     </button>
   ));

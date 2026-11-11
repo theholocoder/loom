@@ -227,7 +227,6 @@ describe("a Working Session's queue", () => {
     const [archived] = (await main.api.invoke('sessions.list')).filter((s) => s.id === id);
     expect(archived).toMatchObject({ status: 'archived' });
     expect(archived!.queue).toBeUndefined();
-    await expect(main.api.invoke('sessions.send', { id, prompt: 'More' })).rejects.toThrow('This Session is archived.');
   });
 
   it("can't be steered on OpenCode, whose queued messages are sent with Send now", async () => {

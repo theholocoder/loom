@@ -16,6 +16,14 @@ export interface ProjectsTable {
   trusted: number | null;
   /** Clock time the Project was added. */
   created_at: number;
+  /** Clock time the user removed the Project, which then has no checkout; null while it is in use. */
+  removed_at: number | null;
+  /**
+   * What a checkout added later is matched against to restore the removed
+   * Project: `<host>/<repository>` of its origin, or else `<environment>:<path>`.
+   * Null while it is in use.
+   */
+  identity: string | null;
 }
 
 /** Where a Project's checkout is: one per Project. */

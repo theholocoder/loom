@@ -102,6 +102,8 @@ test('the composer pickers open inside the window, themed', async () => {
   }, repo);
   await window.getByRole('button', { name: 'New' }).click();
   await window.getByRole('menuitem', { name: 'Add Project from existing clone…' }).click();
+  // Linked once Projects lists it; New Session only asks for a Project when there is one.
+  await expect(window.getByRole('row', { name: /picker-repo/ })).toBeVisible();
   await window.getByRole('button', { name: 'New' }).click();
   await window.getByRole('menuitem', { name: 'New Session' }).click();
   const picker = window.getByRole('dialog', { name: 'Pick a Project' });

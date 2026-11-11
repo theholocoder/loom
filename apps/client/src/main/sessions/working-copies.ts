@@ -35,6 +35,8 @@ export interface NewWorktree extends WorktreePlace {
    * to check out as-is.
    */
   branch: { new: string; base?: string } | { existing: ExistingBranch };
+  /** Where to make it, for an existing branch, instead of a free folder under the root: a reopened Session's old place. */
+  at?: string;
 }
 
 const FETCH_TIMEOUT_MS = 120_000;
@@ -82,7 +84,7 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
     }
     const holder = (await worktreesOf(environment, checkout)).find((listed) => listed.branch === name);
     if (holder) throw new Error(`"${name}" is checked out in ${holder.path}; work there instead`);
-    path = await freeFolder(environment, place, name);
+    path = worktree.at ?? (await freeFolder(environment, place, name));
     const add = local ? [path, name] : ['--track', '-b', name, path, `origin/${name}`];
     await gitOrThrow(environment, ['-C', checkout, 'worktree', 'add', '--quiet', ...add], "Couldn't create the worktree");
     created = !local;

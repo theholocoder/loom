@@ -1,7 +1,8 @@
-import { CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderMinus, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project } from '../shared/api';
+import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { unsavedWorkSummary } from './Archive';
 
 const FORGE_NAME: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
 
@@ -10,27 +11,78 @@ export interface ExistingCloneLinker {
   linking: boolean;
   /** Why the last attempt failed. */
   error?: string;
-  /** Asks for a folder and links its checkout; does nothing if the user cancels. */
+  /**
+   * Asks for a folder and links its checkout; does nothing if the user
+   * cancels. A checkout of a removed Project first asks whether to restore it.
+   */
   link(): Promise<void>;
+  /** The offer to restore a removed Project, while one is open; render it anywhere. */
+  dialog: ReactNode;
 }
 
 export function useExistingCloneLinker(): ExistingCloneLinker {
   const api = useApi();
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string>();
-  const link = async () => {
+  const [offer, setOffer] = useState<{ path: string; project: RestorableProject }>();
+  const run = async (action: () => Promise<void>) => {
     setError(undefined);
     setLinking(true);
     try {
-      const path = await api.invoke('dialogs.chooseFolder');
-      if (path) await api.invoke('projects.link', { path });
+      await action();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLinking(false);
     }
   };
-  return { linking, error, link };
+  const link = () =>
+    run(async () => {
+      const path = await api.invoke('dialogs.chooseFolder');
+      if (!path) return;
+      const project = await api.invoke('projects.restorable', { path });
+      if (project) setOffer({ path, project });
+      else await api.invoke('projects.link', { path });
+    });
+  const answer = (restore: boolean) => {
+    if (!offer) return;
+    setOffer(undefined);
+    void run(async () => {
+      await api.invoke('projects.link', restore ? { path: offer.path, restore: offer.project.id } : { path: offer.path });
+    });
+  };
+  const dialog = offer && <RestoreOffer project={offer.project} onRestore={() => answer(true)} onNew={() => answer(false)} onCancel={() => setOffer(undefined)} />;
+  return { linking, error, link, dialog };
+}
+
+function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: RestorableProject; onRestore: () => void; onNew: () => void; onCancel: () => void }) {
+  const restore = useRef<HTMLButtonElement>(null);
+  useEffect(() => restore.current?.focus(), []);
+  const sessions = project.sessions === 1 ? '1 archived Session' : `${project.sessions} archived Sessions`;
+  return (
+    <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && onCancel()}>
+      <div className="card modal" role="alertdialog" aria-modal="true" aria-labelledby="restore-title" aria-describedby="restore-text">
+        <div className="card-head">
+          <ArchiveRestore className="sm" />
+          <h3 id="restore-title">Restore {project.name}?</h3>
+        </div>
+        <p id="restore-text">
+          This checkout is of a Project you removed. Restore {project.name} with its {sessions} and usage history, or start a new Project?
+        </p>
+        <div className="row modal-actions">
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" onClick={onNew}>
+            New Project
+          </button>
+          <button ref={restore} type="button" className="primary" onClick={onRestore}>
+            Restore
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Laid out like Settings: a .dash page with a card holding a data table. The
@@ -55,6 +107,7 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
           Use existing clone…
         </button>
       </div>
+      {linker.dialog}
       {linker.error && (
         <div className="err" role="alert" style={{ marginTop: 8 }}>
           {linker.error}
@@ -76,6 +129,7 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
                 <th>Environment</th>
                 <th>Forge</th>
                 <th>Branch prefix</th>
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
@@ -110,7 +164,90 @@ function ProjectRow({ project, environmentLabel }: { project: Project; environme
       <td>
         <BranchPrefix project={project} />
       </td>
+      <td>
+        <RemoveProject project={project} />
+      </td>
     </tr>
+  );
+}
+
+/** The row's Remove button, and the dialogs it opens: Remove? then, with unsaved work, Discard and remove? */
+function RemoveProject({ project }: { project: Project }) {
+  const api = useApi();
+  const sessions = (useTopic('sessions') ?? []).filter((s) => s.projectId === project.id);
+  const [step, setStep] = useState<{ unsaved?: UnsavedSession[] }>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancelButton.current?.focus(), [step]);
+  const close = () => {
+    setStep(undefined);
+    setError(undefined);
+  };
+  const remove = (discard: boolean) => {
+    setError(undefined);
+    setBusy(true);
+    api
+      .invoke('projects.remove', discard ? { id: project.id, discard } : { id: project.id })
+      .then((result) => (result.removed ? close() : setStep({ unsaved: result.unsaved })))
+      .catch((e: unknown) => setError((e as Error).message))
+      .finally(() => setBusy(false));
+  };
+  const open = sessions.filter((s) => s.status !== 'archived').length;
+  const count = sessions.length === 1 ? '1 Session' : `${sessions.length} Sessions`;
+  const unsaved = step?.unsaved;
+  return (
+    <>
+      <button className="icon-btn sm" type="button" title={`Remove ${project.name}`} aria-label={`Remove ${project.name}`} onClick={() => setStep({})}>
+        <FolderMinus />
+      </button>
+      {step && (
+        <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && close()}>
+          <div className="card modal" role="alertdialog" aria-modal="true" aria-labelledby={`remove-${project.id}-title`} aria-describedby={`remove-${project.id}-text`}>
+            <div className="card-head">
+              <TriangleAlert className="sm warn-icon" />
+              <h3 id={`remove-${project.id}-title`}>{unsaved ? `Remove ${project.name} with unsaved work?` : `Remove ${project.name}?`}</h3>
+            </div>
+            {unsaved ? (
+              <div id={`remove-${project.id}-text`}>
+                <p>These Sessions' worktrees have unsaved work. Removing the Project removes the worktrees and discards their changes; commits stay on their local branches.</p>
+                <ul>
+                  {unsaved.map((u) => (
+                    <li key={u.sessionId}>
+                      <b>{u.title}</b>: {unsavedWorkSummary(u.unsavedWork)}
+                      {u.unsavedWork.detached && u.unsavedWork.unpushedCommits > 0 && ', on no branch, so those commits will be lost'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p id={`remove-${project.id}-text`}>
+                Loom forgets this Project; the folder at <span className="tech">{project.checkout.path}</span> stays on disk.{' '}
+                {sessions.length > 0 && (
+                  <>
+                    Its {count} {open > 0 && `(${open} still Working or Waiting, which are archived first) `}stay in the Archive, read-only.{' '}
+                  </>
+                )}
+                Adding a checkout of it again offers to restore it.
+              </p>
+            )}
+            {error && (
+              <div className="err" role="alert">
+                {error}
+              </div>
+            )}
+            <div className="row modal-actions">
+              <button ref={cancelButton} type="button" onClick={close}>
+                Cancel
+              </button>
+              <button type="button" className="danger" disabled={busy} onClick={() => remove(!!unsaved)}>
+                {unsaved ? 'Discard and remove' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

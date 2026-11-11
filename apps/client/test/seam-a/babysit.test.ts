@@ -20,9 +20,13 @@ type Extras = Pick<ForgeCliScript, 'viewer' | 'offline'>;
 
 /** Main with one Session whose Merge request 12 is linked and has had its baseline poll, over `initial` activity. */
 /** With `worktree`, the Session works in a worktree of the branch, with all of it pushed to a second remote. */
-async function babysat(cli: ForgeCli, initial: Activity = {}, { turns = [], userDataDir, worktree = false }: { turns?: AcpTurn[]; userDataDir?: string; worktree?: boolean } = {}) {
+async function babysat(
+  cli: ForgeCli,
+  initial: Activity = {},
+  { turns = [], resumedTurns, userDataDir, worktree = false }: { turns?: AcpTurn[]; resumedTurns?: AcpTurn[]; userDataDir?: string; worktree?: boolean } = {},
+) {
   const machine = tempMachine();
-  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns } });
+  machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns, ...(resumedTurns ? { resumedTurns } : {}) } });
   const host = cli === 'gh' ? 'github.com' : 'gitlab.example.org';
   const base: ForgeCliScript = { signedInHosts: [host] };
   if (cli === 'glab') base.repoView = { stdout: { path_with_namespace: 'acme/loom', web_url: 'https://gitlab.example.org/acme/loom' } };
@@ -322,6 +326,31 @@ describe('a Merge request no longer open', () => {
     await main.elapse(10 * MINUTE);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(graphql(machine)).toHaveLength(before);
+  });
+
+  it('leaves alone a Session reopened after its Merge request merged while it was archived', async () => {
+    const userDataDir = tempDir('loom-babysit-');
+    const { machine, main, id, forge } = await babysat('gh', {}, { turns: [{ chunks: ['Done.'] }], resumedTurns: [{ chunks: ['Back at it.'] }], userDataDir });
+    await main.api.invoke('sessions.archive', { id });
+    forge({ state: 'merged' });
+
+    await main.api.invoke('sessions.send', { id, prompt: 'One more thing' });
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).status === 'waiting');
+    await pollEnded(main);
+    await main.elapse(10 * MINUTE);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(sessionOf(await main.api.invoke('sessions.list'), id)).toMatchObject({ status: 'waiting', mergeRequestState: 'merged' });
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit).toBeUndefined();
+
+    // Nor once main starts again.
+    await main.close();
+    const again = await startMain({ machine, userDataDir });
+    await waitFor(again.api, 'environments', ready);
+    await again.elapse(10 * MINUTE);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(sessionOf(await again.api.invoke('sessions.list'), id)).toMatchObject({ status: 'waiting' });
+    expect(sessionOf(await again.api.invoke('sessions.list'), id).babysit).toBeUndefined();
   });
 
   it('archives the Session once closed without merging, leaving it unread for the user to notice', async () => {

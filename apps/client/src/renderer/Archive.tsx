@@ -2,9 +2,9 @@
 // palette and the `e` shortcut: archives a Session, warning first (Discard / Cancel) when its
 // worktree has uncommitted changes or unpushed commits.
 import { FolderX, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Session, UnsavedWork } from '../shared/api';
-import { useApi } from './api';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { RemovedProject, Session, UnsavedWork } from '../shared/api';
+import { useApi, useTopic } from './api';
 
 export interface Archiver {
   /** Archives the Session, or opens the warning; rejects with what went wrong. */
@@ -42,6 +42,31 @@ export function WorktreeMissing() {
       Worktree missing
     </span>
   );
+}
+
+/** The removed Project `projectId` is, if the user removed it. */
+export function useRemovedProject(projectId: number): RemovedProject | undefined {
+  return useTopic('removedProjects')?.find((p) => p.id === projectId);
+}
+
+/** Which Projects the user removed, by id. */
+export function useRemovedProjectIds(): Set<number> {
+  const removed = useTopic('removedProjects');
+  return useMemo(() => new Set((removed ?? []).map((p) => p.id)), [removed]);
+}
+
+/** The flag on an archived Session whose Project the user removed. */
+export function ProjectRemoved() {
+  return (
+    <span className="chip" role="status">
+      Project removed
+    </span>
+  );
+}
+
+/** The muted tag on a removed Project's name, where its history shows. */
+export function RemovedTag() {
+  return <span className="chip removed-tag">removed</span>;
 }
 
 /** What a worktree has unsaved: "uncommitted changes and 2 unpushed commits". */

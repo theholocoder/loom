@@ -315,7 +315,9 @@ describe('a Session', () => {
 
     act(() => main.publish('sessions', [{ ...inWorktree, status: 'archived', waitingReason: undefined }]));
     expect(within(info()).queryByRole('button', { name: 'Archive' })).toBeNull();
-    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('This Session is archived.');
+    // Its Project is still there, so a new message reopens it.
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Reply to OpenCode…');
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false);
   });
 
   it('can only be archived when its worktree is missing', () => {

@@ -2,7 +2,7 @@
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, Project, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
@@ -130,13 +130,16 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   environments.set([native.status]);
 
   const projects = new Topic<Project[]>([]);
+  const removedProjects = new Topic<RemovedProject[]>([]);
   const projectService = await Projects.load({
     db,
     clock: options.clock,
     environment: (id) => (id === native.status.id ? { label: native.status.label, connected: () => native.status.state === 'connected', request: (...args) => native.request(...args) } : undefined),
     onChange: (list) => projects.set(list),
+    onRemovedChange: (list) => removedProjects.set(list),
   });
   projects.set(projectService.list());
+  removedProjects.set(projectService.listRemoved());
 
   const settingsService = await Settings.load(db, (value) => settings.set(value));
   const settings = new Topic<SettingsValues>(settingsService.value);
@@ -224,7 +227,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     });
   };
 
-  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, settings, sessions, database };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
     terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
@@ -247,6 +250,10 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'dialogs.chooseFolder': () => (options.chooseFolder ? options.chooseFolder() : null),
     'projects.list': () => projects.value,
     'projects.link': (params) => projectService.link(params),
+    'projects.restorable': (params) => projectService.restorable(params),
+    'projects.remove': async ({ id, discard }) => {
+      return sessionService.removeProject(id, discard ?? false, () => projectService.remove(id));
+    },
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
     'projects.branches': ({ id }) => sessionService.branches(id),

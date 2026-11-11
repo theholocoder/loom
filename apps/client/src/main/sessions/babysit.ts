@@ -84,6 +84,8 @@ export class Babysit {
       const link = session.status === 'archived' ? undefined : session.mergeRequest;
       if (!link) continue;
       const known = saved.get(session.id);
+      // One that ended with no watch kept, as on a reopened Session, is watched no more; one with a watch kept has its end to finish.
+      if (!known && session.mergeRequestState !== undefined && session.mergeRequestState !== 'open') continue;
       const record = known?.url === link.url ? known : newRecord(link);
       babysit.records.set(session.id, record);
       if (session.babysitOff) {

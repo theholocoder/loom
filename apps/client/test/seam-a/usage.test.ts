@@ -265,6 +265,19 @@ describe('usage per Project', () => {
     ]);
     expect(dashboard.perDay.at(-1)!.byProject).toEqual({ [first.id]: 100, [second.id]: 200 });
   });
+
+  it('keeps a removed Project’s usage, marked removed', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'], tokens: { inputTokens: 100, outputTokens: 0 } }]);
+    const { main, project } = await start(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(main, id);
+    await main.api.invoke('projects.remove', { id: project.id });
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 100, removed: true }]);
+    expect(dashboard.topSessions).toMatchObject([{ sessionId: id, title: 'Fix the login bug', project: 'loom', projectRemoved: true }]);
+  });
 });
 
 describe('reported cost', () => {
