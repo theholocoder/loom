@@ -163,6 +163,8 @@ describe('Session details', () => {
     expect(value(where, 'Environment')).toBe('Native (Linux)');
     expect(value(where, 'Working copy')).toBe('worktree');
     expect(value(where, 'Path')).toBe('/home/dev/loom/worktrees/billing-api/fix-login');
+    // Long paths and branches wrap between their parts, not mid-word.
+    expect(fact(where, 'Path').querySelectorAll('wbr').length).toBe(8);
     fireEvent.click(within(fact(where, 'Path')).getByRole('button', { name: 'Copy path' }));
     expect(writeText).toHaveBeenCalledWith('/home/dev/loom/worktrees/billing-api/fix-login');
     expect(await within(fact(where, 'Path')).findByRole('button', { name: 'Copied' })).toBeTruthy();

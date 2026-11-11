@@ -117,7 +117,7 @@ describe("the Glance strip's Merge request", () => {
     if (!screen.queryByRole('dialog', { name: 'Merge request' })) fireEvent.click(within(glance()).getByRole('button', { name: 'Merge request #12' }));
     return screen.getByRole('dialog', { name: 'Merge request' });
   };
-  const watch = () => within(popover()).queryByRole('switch', { name: 'Watch' }) as HTMLButtonElement | null;
+  const watch = () => within(popover()).queryByRole('switch', { name: 'Babysit' }) as HTMLButtonElement | null;
   const autoPrompt = () => within(popover()).queryByRole('switch', { name: 'Auto-prompt' }) as HTMLButtonElement | null;
 
   it('shows how CI is going beside the number, its checks saying when they were last polled', () => {
@@ -205,7 +205,7 @@ describe("the Glance strip's Merge request", () => {
     expect(glance().textContent).not.toContain('CI');
   });
 
-  it('switches the watch with a labelled Watch switch, saying what it means', async () => {
+  it('switches the watch with a labelled Babysit switch, saying what it means', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
     expect(watch()!.getAttribute('aria-checked')).toBe('true');
@@ -220,7 +220,7 @@ describe("the Glance strip's Merge request", () => {
     await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }, { id: 1, on: true }]));
   });
 
-  it('has no Watch switch for what cannot be watched', () => {
+  it('has no Babysit switch for what cannot be watched', () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
     expect(watch()).not.toBeNull();

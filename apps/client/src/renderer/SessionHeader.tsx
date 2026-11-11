@@ -30,15 +30,16 @@ import {
   SquareTerminal,
 } from 'lucide-react';
 import { useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
-import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type MergeRequestState, type Project, type RemovedProject, type Session } from '../shared/api';
+import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type ForgeLink, type MergeRequestState, type Project, type RemovedProject, type Session } from '../shared/api';
 import { useApi } from './api';
 import { ProjectRemoved, WorktreeMissing } from './Archive';
 import { copyable, copyText, MenuButtonMenu, type ContextMenuSection } from './ContextMenu';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
 import { IssueSearch } from './IssuePicker';
+import { contextPercent } from './ModelPicker';
 import { Popover } from './Popover';
 import { projectColor } from './ProjectAvatar';
-import { contextPercent, SessionDetails, workingMs } from './SessionDetails';
+import { attempt, openable, SessionDetails, workingMs } from './SessionDetails';
 import type { SessionMenu } from './SessionMenu';
 
 /** Where Session details opens from: the title, the branch chip, the context meter or the ⋯ menu. */
@@ -51,6 +52,11 @@ export type HeaderPopover =
   | { kind: 'checks' }
   | { kind: 'issue' }
   | { kind: 'menu' };
+
+/** Whether the Session can act on its Project's Forge: not archived, its worktree there, the Forge on. */
+function canActOnForge(session: Session, project: Project | undefined): boolean {
+  return session.status !== 'archived' && !session.worktreeMissing && project?.forge.state === 'available';
+}
 
 /** What the header shows of the Session's status: in words, as an icon and its class. */
 export interface StatusLook {
@@ -105,17 +111,13 @@ export function SessionHeader({
   const close = () => onPopover(undefined);
   const details = popover?.kind === 'details' ? popover.from : undefined;
   const toggleDetails = (from: DetailsAnchor) => onPopover(details === from ? undefined : { kind: 'details', from });
-  // A missing worktree has no folder to open.
-  const openable = session.status !== 'archived' && !session.worktreeMissing;
-  const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal') => {
-    onError(undefined);
-    api.invoke(command, { id: session.id }).catch((e: unknown) => onError((e as Error).message));
-  };
+  const canOpen = openable(session);
+  const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal') => attempt(onError, () => api.invoke(command, { id: session.id }));
   const menuSections = (): ContextMenuSection[] => [
     [
       { label: 'Session details…', icon: Info, run: () => onPopover({ kind: 'details', from: 'menu' }) },
-      { label: 'Open in editor', icon: CodeXml, disabled: !openable, run: () => run('sessions.openInEditor') },
-      { label: 'Open in terminal', icon: SquareTerminal, disabled: !openable, run: () => run('sessions.openInTerminal') },
+      { label: 'Open in editor', icon: CodeXml, disabled: !canOpen, run: () => run('sessions.openInEditor') },
+      { label: 'Open in terminal', icon: SquareTerminal, disabled: !canOpen, run: () => run('sessions.openInTerminal') },
       { label: 'Copy branch name', icon: Copy, disabled: !session.branch, run: () => session.branch && copyText(session.branch) },
     ],
     ...menu.sections(),
@@ -271,18 +273,15 @@ function IssueChip({ session, project, open, onPopover, onError }: { session: Se
   if (issue) {
     return (
       <span className="g-chip">
-        <button type="button" title={`Open issue #${issue.number}`} onClick={() => void api.invoke('links.open', { url: issue.url }).catch((e: unknown) => onError((e as Error).message))}>
+        <button type="button" title={`Open issue #${issue.number}`} onClick={() => attempt(onError, () => api.invoke('links.open', { url: issue.url }))}>
           <CircleDot className="sm" />
           <span className="tech">#{issue.number}</span>
         </button>
       </span>
     );
   }
-  if (!project || project.forge.state !== 'available' || session.status === 'archived') return null;
-  const link = (picked: { number: number; url: string }) => {
-    onError(undefined);
-    api.invoke('sessions.linkIssue', { id: session.id, issue: { number: picked.number, url: picked.url } }).catch((e: unknown) => onError((e as Error).message));
-  };
+  if (!project || !canActOnForge(session, project)) return null;
+  const link = ({ number, url }: ForgeLink) => attempt(onError, () => api.invoke('sessions.linkIssue', { id: session.id, issue: { number, url } }));
   return (
     <span className="g-chip quiet">
       <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => onPopover(open ? undefined : { kind: 'issue' })}>
@@ -337,8 +336,7 @@ function MergeRequestChip({ session, project, popover, onPopover, onError }: { s
   const mrTrigger = useRef<HTMLButtonElement>(null);
   const ciTrigger = useRef<HTMLButtonElement>(null);
   const { mergeRequest, mergeRequestState: state } = session;
-  const canAct = session.status !== 'archived' && !session.worktreeMissing && project?.forge.state === 'available';
-  if (!mergeRequest && !canAct) return null;
+  if (!mergeRequest && !canActOnForge(session, project)) return null;
   const ref = mergeRequest && mergeRequestRef(project?.forge.kind, mergeRequest.number);
   const ended = state === 'merged' || state === 'closed' ? ENDED_LOOKS[state] : undefined;
   const { ci, checks = [] } = session.babysit ?? {};
@@ -377,7 +375,7 @@ function MergeRequestChip({ session, project, popover, onPopover, onError }: { s
 
 /**
  * The Merge request, until its own Panel (#131): open it on the Forge, and,
- * where the Session can act on its Forge, the Watch and Auto-prompt
+ * where the Session can act on its Forge, the Babysit and Auto-prompt
  * switches, asking the agent to create or update it, and linking one by hand.
  */
 function MergeRequestPopover({
@@ -400,15 +398,11 @@ function MergeRequestPopover({
   const api = useApi();
   const { mergeRequest, mergeRequestState: state } = session;
   const ref = mergeRequest && mergeRequestRef(project?.forge.kind, mergeRequest.number);
-  const forgeOn = project?.forge.state === 'available';
-  const canAct = session.status !== 'archived' && !session.worktreeMissing && forgeOn;
+  const canAct = canActOnForge(session, project);
   // Only an open one can be watched.
-  const watchable = session.status !== 'archived' && forgeOn && state === 'open';
+  const watchable = session.status !== 'archived' && project?.forge.state === 'available' && state === 'open';
   const watching = !session.babysitOff;
-  const invoke = (run: () => Promise<unknown>) => {
-    onError(undefined);
-    run().catch((e: unknown) => onError((e as Error).message));
-  };
+  const invoke = (run: () => Promise<unknown>) => attempt(onError, run);
   const ask = () => {
     onClose();
     invoke(() => api.invoke('sessions.requestMergeRequest', { id: session.id }));
@@ -438,7 +432,7 @@ function MergeRequestPopover({
       )}
       {(watchable || canAct) && (
         <div className="switches">
-          {watchable && <Switch label="Watch" icon={<Eye className="sm" />} on={watching} hint={watching ? `Babysit watches ${ref} for new feedback.` : `Loom isn't watching ${ref}.`} onSwitch={(on) => invoke(() => api.invoke('sessions.setBabysitting', { id: session.id, on }))} />}
+          {watchable && <Switch label="Babysit" icon={<Eye className="sm" />} on={watching} hint={watching ? `Babysit watches ${ref} for new feedback.` : `Loom isn't watching ${ref}.`} onSwitch={(on) => invoke(() => api.invoke('sessions.setBabysitting', { id: session.id, on }))} />}
           {canAct && (
             <Switch
               label="Auto-prompt"
@@ -525,10 +519,7 @@ function ChecksPopover({ session, anchor, onClose, onError }: { session: Session
   const { ci, checks = [], lastPollAt } = session.babysit ?? {};
   const heading = ci ? CI_HEADINGS[ci] : 'No CI checks';
   const empty = session.babysitOff ? "Loom isn't watching this Merge request, so it can't say how its CI is going." : "Loom hasn't seen any checks on this Merge request.";
-  const open = (url: string) => {
-    onError(undefined);
-    api.invoke('links.open', { url }).catch((e: unknown) => onError((e as Error).message));
-  };
+  const open = (url: string) => attempt(onError, () => api.invoke('links.open', { url }));
   return (
     <Popover anchor={anchor} role="dialog" label="CI checks" className="ci-checks" onClose={onClose}>
       <h4 tabIndex={-1} data-autofocus>

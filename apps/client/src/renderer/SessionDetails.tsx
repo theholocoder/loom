@@ -9,6 +9,7 @@ import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
 import { baseName, copyable } from './ContextMenu';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
+import { contextPercent } from './ModelPicker';
 import { Popover } from './Popover';
 
 /** Session details show whole, room allowing, rather than scroll like a menu. */
@@ -17,9 +18,20 @@ const DETAILS_MAX_HEIGHT = 640;
 /** Whole numbers with thousands separators: 12,345. */
 const wholeNumber = new Intl.NumberFormat('en');
 
-/** How much of its context the Session has used, as a whole percentage. */
-export function contextPercent(context: { used: number; size: number }): number {
-  return context.size > 0 ? Math.min(100, Math.round((context.used / context.size) * 100)) : 0;
+/** Runs an action of the header's, clearing the last error first and reporting what goes wrong to `onError`. */
+export function attempt(onError: (message: string | undefined) => void, run: () => Promise<unknown>): void {
+  onError(undefined);
+  run().catch((e: unknown) => onError((e as Error).message));
+}
+
+/** Whether the Session's working copy can be opened in the editor or a terminal: not archived, its worktree there. */
+export function openable(session: Session): boolean {
+  return session.status !== 'archived' && !session.worktreeMissing;
+}
+
+/** Break points after the `/ - _ .` of a path, branch or id, so that it wraps between its parts rather than mid-word. */
+export function breakable(text: string): ReactNode {
+  return text.split(/(?<=[/\-_.])/).flatMap((part, at) => (at === 0 ? [part] : [<wbr key={at} />, part]));
 }
 
 /**
@@ -32,12 +44,7 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
   const api = useApi();
   const environment = useTopic('environments')?.find((e) => e.id === project?.checkout.environmentId);
   const removedProject = useRemovedProject(session.projectId);
-  // A missing worktree has no folder to open.
-  const openable = session.status !== 'archived' && !session.worktreeMissing;
-  const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal') => {
-    onError(undefined);
-    api.invoke(command, { id: session.id }).catch((e: unknown) => onError((e as Error).message));
-  };
+  const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal') => attempt(onError, () => api.invoke(command, { id: session.id }));
   const model = session.model ?? session.agentConfig?.model;
   const effort = session.effort ?? session.agentConfig?.effort;
   const { workingCopy } = session;
@@ -58,7 +65,7 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
         <Fact
           label="Working copy"
           actions={
-            openable && (
+            openable(session) && (
               <>
                 <IconAction label="Open in editor" icon={<CodeXml />} onClick={() => run('sessions.openInEditor')} />
                 <IconAction label="Open in terminal" icon={<SquareTerminal />} onClick={() => run('sessions.openInTerminal')} />
@@ -70,13 +77,13 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
         </Fact>
         <Fact label="Path" actions={<CopyAction text={workingCopy.path} label="Copy path" />}>
           <span className="tech path" {...copyable(workingCopy.kind === 'worktree' ? 'worktree path' : 'path', workingCopy.path)}>
-            {workingCopy.kind === 'worktree' ? <span {...copyable('worktree name', baseName(workingCopy.path))}>{workingCopy.path}</span> : workingCopy.path}
+            {workingCopy.kind === 'worktree' ? <span {...copyable('worktree name', baseName(workingCopy.path))}>{breakable(workingCopy.path)}</span> : breakable(workingCopy.path)}
           </span>
         </Fact>
         <Fact label="Branch" actions={session.branch && <CopyAction text={session.branch} label="Copy branch name" />}>
           {session.branch ? (
             <span className="tech path" {...copyable('branch name', session.branch)}>
-              {session.branch}
+              {breakable(session.branch)}
             </span>
           ) : (
             <span className="muted">Not known yet</span>
@@ -88,7 +95,7 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
         <Fact label="Model">{model ? <span className="tech">{model}</span> : <span className="muted">The agent's default</span>}</Fact>
         <Fact label="Effort">{effort ? <span className="tech">{effort}</span> : <span className="muted">Default</span>}</Fact>
         <Fact label="Agent session" actions={session.agentSessionId && <CopyAction text={session.agentSessionId} label="Copy agent session id" />}>
-          {session.agentSessionId ? <span className="tech path">{session.agentSessionId}</span> : <span className="muted">Not started yet</span>}
+          {session.agentSessionId ? <span className="tech path">{breakable(session.agentSessionId)}</span> : <span className="muted">Not started yet</span>}
         </Fact>
       </Group>
       <Group label="Usage">

@@ -107,7 +107,7 @@ describe("the Session's Merge request", () => {
     expect(within(glance()).getByRole('button', { name: 'Merge request !12' }).textContent).toBe('!12Merged');
     const popover = mergeRequestPopover();
 
-    for (const name of ['Update Merge request', 'Link Merge request…', 'Watch', 'Auto-prompt']) expect(within(popover).queryByRole('button', { name })).toBeNull();
+    for (const name of ['Update Merge request', 'Link Merge request…', 'Babysit', 'Auto-prompt']) expect(within(popover).queryByRole('button', { name })).toBeNull();
     expect(within(popover).queryAllByRole('switch')).toEqual([]);
     fireEvent.click(within(popover).getByRole('button', { name: 'Open !12' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));

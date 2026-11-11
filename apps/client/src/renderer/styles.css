@@ -449,7 +449,7 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .fact dt { color: var(--muted); }
 .fact dd { margin: 0; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .fact .value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.fact .path { overflow-wrap: anywhere; }
+.fact .path { overflow-wrap: break-word; min-width: 0; }
 .fact-actions { display: flex; gap: 0; flex: none; }
 /* The Merge request, until its own Panel: labelled switches and actions. */
 .popover.mr-popover { width: 320px; padding: 10px 12px; gap: 6px; }

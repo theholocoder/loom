@@ -1428,7 +1428,6 @@ export class Sessions {
   linkIssue({ id, issue }: Commands['sessions.linkIssue']['params']): void {
     const session = this.get(id);
     if (!this.options.project(session.projectId)) throw new Error("This Session's Project was removed, so it can't be linked to an issue.");
-    if (typeof issue !== 'object' || issue === null) throw new Error('An issue needs a number and an http(s) link.');
     checkIssue(issue);
     const link = { number: issue.number, url: issue.url };
     this.update(id, { issue: link });
@@ -2353,7 +2352,7 @@ function messageOf({ text, attachments }: Message): Message {
 
 /** Rejects an issue Loom couldn't link to, or open in the browser. */
 function checkIssue(issue: ForgeLink): void {
-  if (!Number.isInteger(issue.number) || issue.number <= 0 || !/^https?:\/\//i.test(issue.url ?? '')) {
+  if (typeof issue !== 'object' || issue === null || !Number.isInteger(issue.number) || issue.number <= 0 || !/^https?:\/\//i.test(issue.url ?? '')) {
     throw new Error('An issue needs a number and an http(s) link.');
   }
 }
