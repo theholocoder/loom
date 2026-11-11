@@ -464,3 +464,31 @@ function savedAgentText(userDataDir: string, sessionId: number): string {
     db.close();
   }
 }
+
+describe('renaming a Session', () => {
+  it('gives it the title, trimmed, which a restart keeps, whatever its status', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-rename-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+
+    await main.api.invoke('sessions.rename', { id: created.id, title: '  Login 500s  ' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.title === 'Login 500s'));
+    expect(await main.api.invoke('sessions.archive', { id: created.id })).toEqual({ archived: true });
+    await main.api.invoke('sessions.rename', { id: created.id, title: 'Login 500s, fixed' });
+
+    await main.close();
+    const again = await started(machine, userDataDir);
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === created.id)).toMatchObject({ title: 'Login 500s, fixed', status: 'archived' });
+  });
+
+  it('refuses an empty title, keeping the one it had', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+
+    await expect(main.api.invoke('sessions.rename', { id: created.id, title: '   ' })).rejects.toThrow('A Session needs a title.');
+    expect((await main.api.invoke('sessions.list'))[0]!.title).toBe('Fix the login bug');
+  });
+});

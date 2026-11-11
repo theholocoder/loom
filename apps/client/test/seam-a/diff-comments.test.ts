@@ -85,3 +85,44 @@ describe('diff comments sent with a prompt', () => {
     await expect(main.api.invoke('sessions.send', { id, prompt: 'Look', comments: [{ ...comments[0]!, note: '  ' }] })).rejects.toThrow('A diff comment needs a note.');
   });
 });
+
+describe('comments on the conversation sent with a prompt', () => {
+  it('go to the agent after the text, with diff comments, in the order given: the passage quoted, then the note', async () => {
+    const { machine, main, id } = await waitingSession([{ chunks: ['On it.'] }, { chunks: ['Done.'] }]);
+
+    await main.api.invoke('sessions.send', {
+      id,
+      prompt: 'Two things:',
+      comments: [{ quote: 'The login form posts to /session.\n\nIt retries twice.', note: 'Why twice?' }, comments[1]!],
+    });
+
+    await waitFor(main.api, 'sessions', (sessions) => waiting(id)(sessions) && promptTexts(machine).length === 2);
+    expect(promptTexts(machine)[1]).toBe(
+      [
+        'Two things:',
+        '',
+        'Comment on this part of the conversation:',
+        '',
+        '> The login form posts to /session.',
+        '>',
+        '> It retries twice.',
+        '',
+        'Why twice?',
+        '',
+        'Comment on `README.md:7`:',
+        '',
+        '```diff',
+        ' Run it with `pnpm dev`.',
+        '```',
+        '',
+        'Say which Node version.',
+      ].join('\n'),
+    );
+  });
+
+  it('turns down one with nothing quoted, or no note', async () => {
+    const { main, id } = await waitingSession([{ chunks: ['On it.'] }]);
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'Look', comments: [{ quote: 'Some text', note: ' ' }] })).rejects.toThrow('A comment needs a note.');
+    await expect(main.api.invoke('sessions.send', { id, prompt: 'Look', comments: [{ quote: ' ', note: 'Why?' }] })).rejects.toThrow('A comment on the conversation needs what it quotes.');
+  });
+});

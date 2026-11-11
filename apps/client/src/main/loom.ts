@@ -295,6 +295,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.setBabysitting': (params) => sessionService.setBabysitting(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.snooze': (params) => sessionService.snooze(params),
+    'sessions.rename': (params) => sessionService.rename(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
     'terminals.open': (params) => terminals.open(params),

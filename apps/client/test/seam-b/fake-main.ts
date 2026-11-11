@@ -143,6 +143,7 @@ export class FakeMain implements LoomApi {
       'sessions.setBabysitting': () => {},
       'sessions.setUnread': () => {},
       'sessions.snooze': () => {},
+      'sessions.rename': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
       'terminals.open': () => {

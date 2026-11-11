@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type DiffComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -168,8 +168,8 @@ export class Sessions {
   private shuttingDown = false;
   /** Worktrees being made, by Project, one after another so names can't race. */
   private creatingWorktree = new Map<number, Promise<unknown>>();
-  /** Existing worktrees a starting Session has taken, until its record exists. */
-  private claimed = new Set<string>();
+  /** Existing worktrees Sessions are starting in, by path, with how many, until their records exist: archiving another Session leaves them be. */
+  private claimed = new Map<string, number>();
   /**
    * How each Session's Merge request was linked: on which branch, and whether
    * by hand (the user or the agent's tool) rather than found on the branch.
@@ -283,7 +283,7 @@ export class Sessions {
 
   /**
    * What a worktree Session on the Project can start from, once `origin` is
-   * fetched, leaving out the worktrees Sessions that aren't archived work in.
+   * fetched; a worktree other Sessions work in is listed too, to share.
    */
   async branches(projectId: number): Promise<Branches> {
     const project = this.options.project(projectId);
@@ -291,12 +291,20 @@ export class Sessions {
     const environment = this.environmentOf({ projectId });
     await environment.ready();
     const branches = await listBranches(environment, project.checkout.path);
-    return { ...branches, worktrees: branches.worktrees.filter((worktree) => !this.claimed.has(worktree.path) && !this.sessionIn(worktree.path)) };
+    return branches;
   }
 
-  /** The Session that isn't archived working in the worktree at `path`, if any. */
-  private sessionIn(path: string): Session | undefined {
-    return [...this.sessions.values()].find((session) => session.status !== 'archived' && session.workingCopy.kind === 'worktree' && session.workingCopy.path === path);
+  /**
+   * Whether another Session than `id` works in the Session's worktree, or
+   * is starting in it: archiving the Session then leaves the worktree be.
+   */
+  private worktreeShared(id: number): boolean {
+    const { workingCopy } = this.get(id);
+    if (workingCopy.kind !== 'worktree') return false;
+    if (this.claimed.has(workingCopy.path)) return true;
+    // An archived Session being reopened is about to work in it again.
+    const inUse = (other: Session) => other.status !== 'archived' || this.reopening.has(other.id);
+    return [...this.sessions.values()].some((other) => other.id !== id && inUse(other) && other.workingCopy.kind === 'worktree' && other.workingCopy.path === workingCopy.path);
   }
 
   /** The files in the Session's working copy, for @-mentions. */
@@ -355,11 +363,8 @@ export class Sessions {
     if (existing && 'worktree' in existing) {
       const found = await this.oneAtATime(projectId, async () => {
         const worktree = await findWorktree(this.environmentOf({ projectId }), project.checkout.path, existing.worktree, project.name);
-        if (this.claimed.has(worktree.path)) throw new Error(`Another Session is starting in ${worktree.path}.`);
-        const user = this.sessionIn(worktree.path);
-        if (user) throw new Error(`The Session "${user.title}" works in ${worktree.path}; archive it first, or reply to it there.`);
-        // Claimed until this Session's record exists, so a second start can't take it meanwhile.
-        this.claimed.add(worktree.path);
+        // Claimed until this Session's record exists, so archiving a Session sharing it can't remove it meanwhile.
+        this.claimed.set(worktree.path, (this.claimed.get(worktree.path) ?? 0) + 1);
         return worktree;
       });
       path = found.path;
@@ -424,7 +429,7 @@ export class Sessions {
       this.spans.set(id, { kind: 'run', since: now });
       this.reportedCosts.set(id, 0);
     } finally {
-      this.claimed.delete(path);
+      if (existing && 'worktree' in existing) this.unclaim(path);
     }
     let attachments: Attachment[] | undefined;
     try {
@@ -448,6 +453,13 @@ export class Sessions {
     void this.lookUpBranch(id);
     void this.run(id, message);
     return this.sessions.get(id)!;
+  }
+
+  /** Lets go of one claim on an existing worktree a Session was starting in. */
+  private unclaim(path: string): void {
+    const left = (this.claimed.get(path) ?? 1) - 1;
+    if (left > 0) this.claimed.set(path, left);
+    else this.claimed.delete(path);
   }
 
   /** Removes a worktree made for a Session that couldn't start, and the branch made with it, if any. */
@@ -546,7 +558,13 @@ export class Sessions {
       if (await pathExists(environment, path)) {
         // Left over from an archive that didn't finish, it is used as it is, if it is the Session's.
         const head = await exec(environment.request, 'git', ['-C', path, 'rev-parse', '--abbrev-ref', 'HEAD'], GIT_TIMEOUT_MS).catch(() => undefined);
-        if (!name || head?.exitCode !== 0 || head.stdout.trim() !== name) throw new Error(`${path} isn't this Session's worktree on "${name ?? 'its branch'}"; move it away to reopen the Session.`);
+        const now = head?.exitCode === 0 ? head.stdout.trim() : undefined;
+        if (!name || now !== name) {
+          // Another Session works in it: moving it away would take it from that Session too.
+          const sharer = [...this.sessions.values()].find((other) => other.id !== id && other.status !== 'archived' && other.workingCopy.kind === 'worktree' && other.workingCopy.path === path);
+          if (sharer && name && now) throw new Error(`The Session "${sharer.title}" works in ${path}, now on "${now}"; switch it back to "${name}", or archive that Session, to reopen this one.`);
+          throw new Error(`${path} isn't this Session's worktree on "${name ?? 'its branch'}"; move it away to reopen the Session.`);
+        }
       } else {
         if (!name) throw new Error("This Session's worktree was on no branch, so it can't be reopened.");
         await this.oneAtATime(project.id, () =>
@@ -1107,8 +1125,11 @@ export class Sessions {
     const open = () => this.list().filter((s) => s.projectId === projectId && s.status !== 'archived');
     if (!discard) {
       const unsaved: UnsavedSession[] = [];
+      // A worktree Sessions share is reported once, as the first of them.
+      const looked = new Set<string>();
       for (const session of open()) {
-        if (session.workingCopy.kind !== 'worktree' || !(await this.worktreeLeftOver(session))) continue;
+        if (session.workingCopy.kind !== 'worktree' || looked.has(session.workingCopy.path) || !(await this.worktreeLeftOver(session))) continue;
+        looked.add(session.workingCopy.path);
         const work = await unsavedWork(this.environmentOf(session), session.workingCopy.path);
         if (work) unsaved.push({ sessionId: session.id, title: session.title, unsavedWork: work });
       }
@@ -1148,7 +1169,8 @@ export class Sessions {
     const worktree = session.workingCopy.kind === 'worktree' ? session.workingCopy.path : undefined;
     // An archived Session is only retried while its worktree is still on disk; never fail on one.
     if (session.status === 'archived' && !(await this.worktreeLeftOver(session))) return { archived: true };
-    const environment = worktree === undefined ? undefined : this.environmentOf(session);
+    // Another Session works in its worktree, which stays theirs: archived as a checkout Session is.
+    const environment = worktree === undefined || this.worktreeShared(id) ? undefined : this.environmentOf(session);
     if (!environment || worktree === undefined) {
       // Archiving counts as Deny: the agent hears it before it stops.
       this.denyApprovals(id);
@@ -1175,7 +1197,16 @@ export class Sessions {
     }
     const checkout = this.options.project(session.projectId)!.checkout.path;
     try {
-      await removeWorktree(environment, { checkout, path: worktree, force: discard });
+      // Along with Sessions starting in existing worktrees, so none can take this one while it goes; one that did meanwhile keeps it.
+      const removed = await this.oneAtATime(session.projectId, async () => {
+        if (this.worktreeShared(id)) return false;
+        await removeWorktree(environment, { checkout, path: worktree, force: discard });
+        return true;
+      });
+      if (!removed) {
+        this.markArchived(id);
+        return { archived: true };
+      }
     } catch (error) {
       const message = `The worktree at ${worktree} is still there, so the Session isn't archived. ${(error as Error).message}`;
       this.fail(id, `Loom stopped the agent to archive this Session. ${message}`, { evenIfWaiting });
@@ -1381,6 +1412,16 @@ export class Sessions {
     this.get(id);
     this.update(id, { unread });
     this.save(id, { unread: unread ? 1 : 0 });
+  }
+
+  /** Gives the Session a title of the user's, whatever its status, while its Project is there. */
+  rename({ id, title }: Commands['sessions.rename']['params']): void {
+    const session = this.get(id);
+    if (!this.options.project(session.projectId)) throw new Error("This Session's Project was removed, so it can't be renamed.");
+    const trimmed = typeof title === 'string' ? title.trim() : '';
+    if (!trimmed) throw new Error('A Session needs a title.');
+    this.update(id, { title: trimmed });
+    this.save(id, { title: trimmed });
   }
 
   /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */
@@ -2287,7 +2328,7 @@ function spanOf(status: SessionStatus, waitingReason: WaitingReason | undefined)
 }
 
 /** The prompt's text, trimmed; it may be empty only with files attached. */
-function promptText(prompt: string, { attached = false, comments }: { attached?: boolean; comments?: DiffComment[] } = {}): string {
+function promptText(prompt: string, { attached = false, comments }: { attached?: boolean; comments?: MessageComment[] } = {}): string {
   if (typeof prompt !== 'string') throw new Error('A prompt must be text.');
   const text = [prompt.trim(), ...diffCommentBlocks(comments)].filter(Boolean).join('\n\n');
   if (!text && !attached) throw new Error('A prompt needs some text.');

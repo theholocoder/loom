@@ -45,7 +45,7 @@ export function placePopover(trigger: Rect, viewport: { width: number; height: n
   };
 }
 
-const ITEMS = '[role="option"], [role="menuitem"]';
+const ITEMS = '[role="option"], [role="menuitem"]:not(:disabled)';
 
 /** The item an arrow key lands on: popovers stop at the first and last item rather than wrapping. */
 export function stepIndex(index: number, length: number): number {
@@ -55,6 +55,8 @@ export function stepIndex(index: number, length: number): number {
 /** Arrow keys, Home/End move between items (and from an input into the list); Enter/Space pick the focused item. */
 function navigate(event: KeyboardEvent<HTMLElement>) {
   const target = event.target as HTMLElement;
+  // A text area's keys move its caret and type in it.
+  if (target.tagName === 'TEXTAREA') return;
   const inInput = target.tagName === 'INPUT';
   const items = [...event.currentTarget.querySelectorAll<HTMLElement>(ITEMS)];
   const at = items.indexOf(target);

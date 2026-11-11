@@ -10,6 +10,8 @@ import { ProjectRemoved, useArchive, useRemovedProjectIds, WorktreeMissing } fro
 import { ProjectAvatar } from './ProjectAvatar';
 import { StatusIcon } from './Sessions';
 import { isSnoozed, SnoozeButton, wakeTime } from './Snooze';
+import { useSessionMenu } from './SessionMenu';
+import { copyable } from './ContextMenu';
 
 export interface InboxProps {
   sessions: Session[];
@@ -146,6 +148,7 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
   const { issue, mergeRequest, branch } = session;
   const mergeRequestNumber = mergeRequest && mergeRequestRef(project.forge.kind, mergeRequest.number);
   const archiver = useArchive();
+  const menu = useSessionMenu(session, setError);
   const [snoozing, setSnoozing] = useState(false);
   /** A click handler running a row action, saying in the row why it failed. */
   const withRowError = (action: () => Promise<void>) => () => {
@@ -153,7 +156,7 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
     action().catch((e: unknown) => setError((e as Error).message));
   };
   return (
-    <div role="listitem" aria-label={session.title} className={`item B-item${session.unread ? ' unread' : ''}${selected ? ' sel' : ''}${snoozing ? ' menu-open' : ''}`}>
+    <div role="listitem" aria-label={session.title} className={`item B-item${session.unread ? ' unread' : ''}${selected ? ' sel' : ''}${snoozing ? ' menu-open' : ''}`} onContextMenu={menu.onContextMenu}>
       <button type="button" className="open" aria-label={session.title} aria-current={selected ? 'true' : undefined} onClick={() => onSelect(session)}>
         <div className="l1">
           <StatusIcon session={session} />
@@ -169,7 +172,7 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
           <div className="l2">
             {issue && <Ref title="Issue" icon={CircleDot} text={`#${issue.number}`} />}
             {mergeRequestNumber && <Ref title="Merge request" icon={GitPullRequest} text={mergeRequestNumber} />}
-            {branch && <Ref title="Branch" icon={GitBranch} text={branch} />}
+            {branch && <Ref title="Branch" icon={GitBranch} text={branch} copy={copyable('branch name', branch)} />}
           </div>
         )}
       </button>
@@ -195,14 +198,15 @@ function InboxRow({ session, project, now, selected, onSelect, onReply }: InboxR
         {!session.worktreeMissing && !session.unread && <Action label="Mark unread" icon={Mail} onClick={withRowError(() => api.invoke('sessions.setUnread', { id: session.id, unread: true }))} />}
       </div>
       {archiver.dialog}
+      {menu.dialogs}
     </div>
   );
 }
 
 /** One of a row's issue, Merge request and branch. */
-function Ref({ title, icon: Icon, text }: { title: string; icon: LucideIcon; text: string }) {
+function Ref({ title, icon: Icon, text, copy }: { title: string; icon: LucideIcon; text: string; copy?: ReturnType<typeof copyable> }) {
   return (
-    <span className="row ellipsis" title={title}>
+    <span className="row ellipsis" title={title} {...copy}>
       <Icon className="sm" />
       <span className="tech ellipsis">{text}</span>
     </span>
@@ -283,12 +287,28 @@ function Section({ label, icon: Icon, sessions, children }: { label: string; ico
 /** Sessions as one-line rows: status and title. */
 function SessionRows({ sessions, selectedId, onSelect }: SessionListProps) {
   const removed = useRemovedProjectIds();
-  return sessions.map((session) => (
-    <button key={session.id} type="button" className={`mini${session.id === selectedId ? ' sel' : ''}`} aria-label={session.title} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => onSelect(session)}>
-      <StatusIcon session={session} />
-      <span className="grow ellipsis">{session.title}</span>
-      {removed.has(session.projectId) && <ProjectRemoved />}
-      {session.unread && <UnreadDot />}
-    </button>
-  ));
+  return sessions.map((session) => <SessionRow key={session.id} session={session} selected={session.id === selectedId} removed={removed.has(session.projectId)} onSelect={onSelect} />);
+}
+
+/** A one-line row, with the Session's right-click menu. */
+function SessionRow({ session, selected, removed, onSelect }: { session: Session; selected: boolean; removed: boolean; onSelect: (session: Session) => void }) {
+  const [error, setError] = useState<string>();
+  useEffect(() => setError(undefined), [session.updatedAt]);
+  const menu = useSessionMenu(session, setError);
+  return (
+    <>
+      <button type="button" className={`mini${selected ? ' sel' : ''}`} aria-label={session.title} aria-current={selected ? 'true' : undefined} onClick={() => onSelect(session)} onContextMenu={menu.onContextMenu}>
+        <StatusIcon session={session} />
+        <span className="grow ellipsis">{session.title}</span>
+        {removed && <ProjectRemoved />}
+        {session.unread && <UnreadDot />}
+      </button>
+      {error && (
+        <div className="err row-error" role="alert">
+          {error}
+        </div>
+      )}
+      {menu.dialogs}
+    </>
+  );
 }

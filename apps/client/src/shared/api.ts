@@ -342,7 +342,7 @@ export interface Branches {
   /**
    * The worktrees a Session can work in, in `git worktree list` order: the
    * checkout's linked worktrees but the Project's own, leaving out bare,
-   * missing and locked ones, and those a Session that isn't archived works in.
+   * missing and locked ones; those Sessions work in too, to share.
    */
   worktrees: ExistingWorktree[];
 }
@@ -531,6 +531,25 @@ export interface DiffComment {
   /** The lines, as the diff shows them: each starts with ` `, `-` or `+`. */
   lines: string[];
   note: string;
+}
+
+/**
+ * The user's note on a passage of a Session's conversation, sent with a
+ * prompt as a block: the passage quoted, then the note. Like a DiffComment,
+ * it is kept nowhere but in the text of the message it goes with.
+ */
+export interface ConversationComment {
+  /** The text the user selected in the conversation, as it reads there. */
+  quote: string;
+  note: string;
+}
+
+/** A comment going with a prompt: on the diff, or on the conversation. */
+export type MessageComment = DiffComment | ConversationComment;
+
+/** Whether a comment is on the conversation rather than the diff. */
+export function isConversationComment(comment: MessageComment): comment is ConversationComment {
+  return 'quote' in comment;
 }
 
 /** How a diff comment's range is written: `path:start-end`, or `path:start` for one line. */
@@ -1172,9 +1191,9 @@ export interface Commands {
    *   branch checked out in another worktree, naming it.
    * - `{ worktree }`, the path of a worktree Branches lists, works in it as
    *   it is, on whatever it has checked out; nothing is fetched or copied.
-   *   It rejects a locked worktree, and one a Session that isn't archived
-   *   works in. Archiving the Session removes the worktree, as for any
-   *   worktree Session.
+   *   It rejects a locked worktree. Other Sessions may work in it too:
+   *   archiving the last of them removes the worktree, as for any worktree
+   *   Session.
    *
    * Started from an `issue`, the Session is linked to it, its first prompt
    * starts with the issue's number, title, URL and body (`prompt` may then be
@@ -1209,11 +1228,12 @@ export interface Commands {
    * the prompt may then be empty. Rejects more than MAX_ATTACHMENTS, one
    * over MAX_ATTACHMENT_BYTES, and one with no name.
    *
-   * `comments` follow the prompt's text as blocks, each the comment's
-   * `path:start-end`, its quoted lines and its note; the prompt may then be
-   * empty. Rejects a comment with no note.
+   * `comments` follow the prompt's text as blocks, in order: a diff
+   * comment's `path:start-end`, its quoted lines and its note; a
+   * conversation comment's passage, quoted, and its note. The prompt may
+   * then be empty. Rejects a comment with no note, or nothing quoted.
    */
-  'sessions.send': { params: { id: number; prompt: string; attachments?: NewAttachment[]; comments?: DiffComment[] }; result: void };
+  'sessions.send': { params: { id: number; prompt: string; attachments?: NewAttachment[]; comments?: MessageComment[] }; result: void };
   /**
    * The files in the Session's working copy, for @-mentions: tracked and
    * untracked ones git doesn't ignore, as paths relative to it with `/`, by
@@ -1254,6 +1274,8 @@ export interface Commands {
    * removed, keeping its local branch and never touching the remote; if the
    * worktree has uncommitted changes or commits on no remote branch, it
    * resolves with that unsaved work and archives nothing, unless `discard`.
+   * A worktree another Session that isn't archived works in is left to it,
+   * as a checkout is.
    * A Session whose worktree is missing archives as it is.
    */
   'sessions.archive': { params: CloseSessionParams; result: ArchiveResult };
@@ -1379,6 +1401,11 @@ export interface Commands {
   'terminals.ack': { params: { id: number; bytes: number }; result: void };
   /** Closes the terminal, killing its shell and everything it started. */
   'terminals.close': { params: { id: number }; result: void };
+  /**
+   * Renames a Session, whatever its status: `title`, trimmed, from now on.
+   * Rejects an empty title.
+   */
+  'sessions.rename': { params: { id: number; title: string }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
   /**

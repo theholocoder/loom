@@ -43,7 +43,9 @@ import { Popover } from './Popover';
 import { ProjectPicker } from './ProjectPicker';
 import { Dashboard } from './Dashboard';
 import { Projects, useExistingCloneLinker } from './Projects';
-import { NewSession, SessionView, type SessionCommand } from './Sessions';
+import { NewSession, SessionView, type NewSessionWorkingCopy, type SessionCommand } from './Sessions';
+import { NewSessionContext } from './SessionMenu';
+import { ContextMenuHost } from './ContextMenu';
 import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
 import { useSidebar, type SidebarControl } from './Sidebar';
@@ -91,7 +93,7 @@ function Workspace() {
   /** Whether the open Session's last prompt failed, so it can be sent again. */
   const [retryable, setRetryable] = useState(false);
   /** The Project picked for the New Session view; each pick starts it afresh. */
-  const [newSession, setNewSession] = useState<{ projectId?: number; fromIssue?: boolean; generation: number }>({ generation: 0 });
+  const [newSession, setNewSession] = useState<{ projectId?: number; fromIssue?: boolean; workingCopy?: NewSessionWorkingCopy; generation: number }>({ generation: 0 });
   const [picking, setPicking] = useState<Picking>();
   /** The palette, while open, and where focus was before it. */
   const [palette, setPalette] = useState<{ returnFocus: HTMLElement | null }>();
@@ -110,6 +112,11 @@ function Workspace() {
   };
   const startNewSession = (project: Project | undefined, fromIssue = false) => {
     setNewSession((n) => ({ projectId: project?.id, fromIssue, generation: n.generation + 1 }));
+    setView('new-session');
+  };
+  /** New Session on a Project's working copy, from another Session's menu. */
+  const startNewSessionOn = (projectId: number, workingCopy: NewSessionWorkingCopy) => {
+    setNewSession((n) => ({ projectId, workingCopy, generation: n.generation + 1 }));
     setView('new-session');
   };
   /** New Session asks for the Project first, when there is one to pick. */
@@ -201,87 +208,90 @@ function Workspace() {
   }, []);
 
   return (
-    <div className="app">
-      <aside className="side" aria-label="Inbox">
-        <div className="side-top">
-          <div className="brand">
-            <Waypoints /> Loom<span className="grow" />
-            <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddExistingClone={addExistingClone} />
+    <NewSessionContext.Provider value={startNewSessionOn}>
+      <div className="app">
+        <ContextMenuHost />
+        <aside className="side" aria-label="Inbox">
+          <div className="side-top">
+            <div className="brand">
+              <Waypoints /> Loom<span className="grow" />
+              <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddExistingClone={addExistingClone} />
+            </div>
+            <button className="search" type="button" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
+              <Search />
+              <span>Search Sessions and actions</span>
+              <kbd>Ctrl K</kbd>
+            </button>
           </div>
-          <button className="search" type="button" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
-            <Search />
-            <span>Search Sessions and actions</span>
-            <kbd>Ctrl K</kbd>
-          </button>
-        </div>
-        <div className="side-list">
-          <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
-        </div>
-        <nav className="side-foot">
-          <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => setView('projects')} />
-          <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => setView('dashboard')} />
-          <span className="grow" />
-          <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => setView('settings')} />
-        </nav>
-      </aside>
-      {view === 'settings' ? (
-        <Settings />
-      ) : view === 'dashboard' ? (
-        <Dashboard onOpenSession={select} />
-      ) : view === 'projects' ? (
-        <Projects linker={linker} />
-      ) : view === 'new-session' ? (
-        <NewSession key={newSession.generation} initialProjectId={newSession.projectId} pickIssue={newSession.fromIssue} onStarted={select} />
-      ) : selected ? (
-        <SessionView
-          key={selected.id}
-          session={selected}
-          replyRequest={replyRequest}
-          command={command}
-          onCommandDone={() => setCommand(undefined)}
-          onRetryableChange={setRetryable}
-          sidebar={sidebar}
-          dock={docks.of(selected.id)}
-          onDockChange={(change) => docks.change(selected.id, change)}
-        />
-      ) : (
-        <main className="main" aria-label="Session">
-          <div className="empty">No Session selected.</div>
-        </main>
-      )}
-      {picking && (
-        <ProjectPicker
-          projects={picking.fromIssue ? forgeProjects : projects}
-          onClose={() => {
-            setPicking(undefined);
-            picking.returnFocus?.focus();
-          }}
-          onPick={(project) => {
-            setPicking(undefined);
-            startNewSession(project, picking.fromIssue);
-          }}
-        />
-      )}
-      {help && <ShortcutHelp onClose={closeHelp} />}
-      {palette && (
-        <CommandPalette
-          actions={actions}
-          sessions={sessions}
-          projects={projects}
-          onClose={closePalette}
-          onOpenSession={(session) => {
-            setPalette(undefined);
-            select(session);
-          }}
-          onRun={(action) => {
-            // Back where it was, unless the action opens something taking it.
-            palette.returnFocus?.focus();
-            setPalette(undefined);
-            action.run(palette.returnFocus);
-          }}
-        />
-      )}
-    </div>
+          <div className="side-list">
+            <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
+          </div>
+          <nav className="side-foot">
+            <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => setView('projects')} />
+            <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => setView('dashboard')} />
+            <span className="grow" />
+            <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => setView('settings')} />
+          </nav>
+        </aside>
+        {view === 'settings' ? (
+          <Settings />
+        ) : view === 'dashboard' ? (
+          <Dashboard onOpenSession={select} />
+        ) : view === 'projects' ? (
+          <Projects linker={linker} />
+        ) : view === 'new-session' ? (
+          <NewSession key={newSession.generation} initialProjectId={newSession.projectId} pickIssue={newSession.fromIssue} initialWorkingCopy={newSession.workingCopy} onStarted={select} />
+        ) : selected ? (
+          <SessionView
+            key={selected.id}
+            session={selected}
+            replyRequest={replyRequest}
+            command={command}
+            onCommandDone={() => setCommand(undefined)}
+            onRetryableChange={setRetryable}
+            sidebar={sidebar}
+            dock={docks.of(selected.id)}
+            onDockChange={(change) => docks.change(selected.id, change)}
+          />
+        ) : (
+          <main className="main" aria-label="Session">
+            <div className="empty">No Session selected.</div>
+          </main>
+        )}
+        {picking && (
+          <ProjectPicker
+            projects={picking.fromIssue ? forgeProjects : projects}
+            onClose={() => {
+              setPicking(undefined);
+              picking.returnFocus?.focus();
+            }}
+            onPick={(project) => {
+              setPicking(undefined);
+              startNewSession(project, picking.fromIssue);
+            }}
+          />
+        )}
+        {help && <ShortcutHelp onClose={closeHelp} />}
+        {palette && (
+          <CommandPalette
+            actions={actions}
+            sessions={sessions}
+            projects={projects}
+            onClose={closePalette}
+            onOpenSession={(session) => {
+              setPalette(undefined);
+              select(session);
+            }}
+            onRun={(action) => {
+              // Back where it was, unless the action opens something taking it.
+              palette.returnFocus?.focus();
+              setPalette(undefined);
+              action.run(palette.returnFocus);
+            }}
+          />
+        )}
+      </div>
+    </NewSessionContext.Provider>
   );
 }
 

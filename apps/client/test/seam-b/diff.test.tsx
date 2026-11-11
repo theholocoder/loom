@@ -557,7 +557,7 @@ describe("the diff's base", () => {
 describe('commenting on the diff', () => {
   const loginTs = 'src/auth/login.ts';
   const composer = () => within(screen.getByRole('form', { name: 'Composer' }));
-  const chips = () => composer().queryByRole('list', { name: 'Diff comments' });
+  const chips = () => composer().queryByRole('list', { name: 'Comments' });
   /** Opens the Changes view with login.ts's diff drawn, and hands back what the library calls on its "+". */
   const open = async (main = fakeMain()) => {
     renderOpen(main);

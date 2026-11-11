@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { unsavedWorkSummary } from './Archive';
+import { copyable } from './ContextMenu';
 
 const FORGE_NAME: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
 
@@ -150,7 +151,9 @@ function ProjectRow({ project, environmentLabel }: { project: Project; environme
     <tr>
       <td>{project.name}</td>
       <td>
-        <span className="tech">{project.checkout.path}</span>
+        <span className="tech" {...copyable('path', project.checkout.path)}>
+          {project.checkout.path}
+        </span>
       </td>
       <td>{environmentLabel}</td>
       <td>
