@@ -18,6 +18,7 @@ import {
   Keyboard,
   Link,
   Mail,
+  Maximize2,
   MessageSquarePlus,
   Palette,
   PanelLeftClose,
@@ -415,6 +416,7 @@ function paletteActions(app: {
     // The Side area is the open Session's: with none, there is none to toggle.
     session && shortcutAction('toggleSideArea', PanelRight, () => app.command('toggleSideArea')),
     session && shortcutAction('toggleDiff', FileDiff, () => app.command('toggleChanges')),
+    session && shortcutAction('reviewChanges', Maximize2, () => app.command('reviewChanges')),
     session && shortcutAction('sessionDetails', Info, () => app.command('sessionDetails')),
     active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
     open && shortcutAction('archive', Archive, () => app.command('archive')),

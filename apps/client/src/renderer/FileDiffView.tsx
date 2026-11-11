@@ -7,7 +7,7 @@ import { PatchDiff } from '@pierre/diffs/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DiffViewSettings } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
-import type { LinePoint, LineRange } from './diff-comments';
+import type { LinePoint, LineRange, Side } from './diff-comments';
 
 /** The Shiki theme that colours code in each Loom theme. */
 const SHIKI_THEMES: Record<Theme, string> = {
@@ -18,13 +18,20 @@ const SHIKI_THEMES: Record<Theme, string> = {
   daylight: 'github-light',
 };
 
-/** Commenting on the diff: the "+" by each line, and what it was last pressed for. */
+/** Commenting on the diff: the "+" by each line, what it was last pressed for, and the comments added. */
 export interface Commenting {
   /** Starts a comment on the line, or the range dragged over or selected, the "+" was pressed for. */
   onStartComment: (range: LineRange) => void;
   /** The comment being written, if any: its range, kept selected, and its form, under its last line. */
   draft?: { range: LineRange; at: Required<LinePoint>; form: ReactNode };
+  /** The comments added and not sent yet, each under its last line: `key` tells them apart. */
+  notes?: Array<{ key: string; at: Required<LinePoint>; note: ReactNode }>;
 }
+
+/** A note or form under a line of the diff; its `metadata` says which: a note's key, or DRAFT. */
+type Annotation = { side: Side; lineNumber: number; metadata: string };
+/** The `metadata` of the comment being written's form. */
+const DRAFT = 'draft';
 
 /** Draws a patch for one file. It must have a hunk: the library throws on text that holds no file diff. */
 export function FileDiffView({
@@ -73,13 +80,21 @@ export function FileDiffView({
   useEffect(() => {
     if (!drafting) setSelection(null);
   }, [drafting]);
-  const annotations = useMemo(() => (draft ? [{ side: draft.at.side, lineNumber: draft.at.lineNumber }] : undefined), [draft?.at.side, draft?.at.lineNumber]);
+  const notes = commenting?.notes ?? [];
+  const wanted: Annotation[] = [
+    ...notes.map(({ key, at }) => ({ side: at.side, lineNumber: at.lineNumber, metadata: key })),
+    ...(draft ? [{ side: draft.at.side, lineNumber: draft.at.lineNumber, metadata: DRAFT }] : []),
+  ];
+  // The same list while it says the same, so that the library isn't handed a new one each render.
+  const signature = JSON.stringify(wanted);
+  const annotations = useMemo(() => wanted, [signature]);
+  const render = ({ metadata }: Annotation) => (metadata === DRAFT ? draft?.form : notes.find((n) => n.key === metadata)?.note);
   return (
-    <PatchDiff
+    <PatchDiff<string>
       className="file-diff"
       patch={patch}
       options={options}
-      {...(commentable ? { selectedLines: draft?.range ?? selection, lineAnnotations: annotations, renderAnnotation: () => draft?.form } : {})}
+      {...(commentable ? { selectedLines: draft?.range ?? selection, lineAnnotations: annotations, renderAnnotation: render } : {})}
     />
   );
 }

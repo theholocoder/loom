@@ -11,9 +11,9 @@ import { FakeMain, HIDDEN_PANELS } from './fake-main';
 type DiffProps = {
   patch: string;
   options: { onGutterUtilityClick?: (range: SelectedLineRange) => void } & Record<string, unknown>;
-  lineAnnotations?: Array<{ side: string; lineNumber: number }>;
+  lineAnnotations?: Array<{ side: string; lineNumber: number; metadata?: string }>;
   selectedLines?: SelectedLineRange | null;
-  renderAnnotation?: (annotation: { side: string; lineNumber: number }) => ReactNode;
+  renderAnnotation?: (annotation: { side: string; lineNumber: number; metadata?: string }) => ReactNode;
 };
 /** What each patch was last drawn with, by its text. */
 const drawn = vi.hoisted(() => new Map<string, DiffProps>());
@@ -28,7 +28,7 @@ vi.mock('@pierre/diffs/react', () => ({
         <pre data-testid="patch-diff" data-options={JSON.stringify(props.options)} data-selected={JSON.stringify(props.selectedLines ?? null)}>
           {props.patch}
         </pre>
-        {props.lineAnnotations?.map((a) => <div key={`${a.side}:${a.lineNumber}`}>{props.renderAnnotation?.(a)}</div>)}
+        {props.lineAnnotations?.map((a) => <div key={`${a.side}:${a.lineNumber}:${a.metadata}`}>{props.renderAnnotation?.(a)}</div>)}
       </div>
     );
   },
@@ -693,6 +693,8 @@ describe('commenting on the diff', () => {
   const loginTs = 'src/auth/login.ts';
   const composer = () => within(screen.getByRole('form', { name: 'Composer' }));
   const chips = () => composer().queryByRole('list', { name: 'Comments' });
+  /** What each chip is on, in order. */
+  const chipNames = () => composer().queryAllByRole('button', { name: /^Edit comment on / }).map((b) => b.getAttribute('aria-label')!.slice('Edit comment on '.length));
   /** Opens the Changes view with login.ts's diff drawn, and hands back what the library calls on its "+". */
   const open = async (main = fakeMain()) => {
     renderOpen(main);
@@ -714,12 +716,13 @@ describe('commenting on the diff', () => {
     expect(options).toMatchObject({ enableGutterUtility: true, enableLineSelection: true });
   });
 
-  it('asks for a note under the range, keeps it selected meanwhile, and adds a chip to the composer', async () => {
+  it('asks for a note under the range, the focus in it, keeps it selected meanwhile, and adds a chip to the composer and a note on the line', async () => {
     await open();
     pressPlus({ start: 1, side: 'additions', end: 2, endSide: 'additions' });
     const note = await within(panel()).findByRole('textbox', { name: `Comment on ${loginTs}:1-2` });
+    await waitFor(() => expect(document.activeElement).toBe(note));
     expect(JSON.parse(within(within(panel()).getByRole('region', { name: loginTs })).getByTestId('patch-diff').dataset.selected!)).toEqual({ start: 1, side: 'additions', end: 2, endSide: 'additions' });
-    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([{ side: 'additions', lineNumber: 2 }]);
+    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([{ side: 'additions', lineNumber: 2, metadata: 'draft' }]);
     // No note, nothing to add.
     expect(within(panel()).getByRole('button', { name: 'Add comment' }).hasAttribute('disabled')).toBe(true);
 
@@ -727,10 +730,86 @@ describe('commenting on the diff', () => {
     fireEvent.click(within(panel()).getByRole('button', { name: 'Add comment' }));
 
     expect(within(panel()).queryByRole('textbox', { name: /^Comment on/ })).toBeNull();
-    expect(drawn.get(text(loginTs))!.lineAnnotations ?? []).toEqual([]);
+    // The comment stays on its last line, as a note, until it's sent.
+    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([{ side: 'additions', lineNumber: 2, metadata: '0' }]);
+    expect(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:1-2` }).textContent).toContain('Keep the old name.');
+    expect(JSON.parse(within(within(panel()).getByRole('region', { name: loginTs })).getByTestId('patch-diff').dataset.selected!)).toBeNull();
+    // Its chip says what it's on and its note.
     const chip = within(chips()!).getByRole('listitem');
-    expect(chip.textContent).toContain(`${loginTs}:1-2`);
-    expect(chip.getAttribute('title')).toContain('Keep the old name.');
+    expect(chip.textContent).toBe(`${loginTs}:1-2Keep the old name.`);
+    expect(composer().getByRole('button', { name: `Edit comment on ${loginTs}:1-2` }).getAttribute('title')).toContain('Keep the old name.');
+  });
+
+  it('keeps each comment as a note on its line until sent, removable from there too', async () => {
+    const main = await open();
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    await comment({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' }, 'Why drop this?');
+    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([
+      { side: 'additions', lineNumber: 1, metadata: '0' },
+      { side: 'deletions', lineNumber: 2, metadata: '1' },
+    ]);
+
+    fireEvent.click(within(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:1` })).getByRole('button', { name: `Remove comment on ${loginTs}:1` }));
+    expect(within(panel()).queryByRole('note', { name: `Your comment on ${loginTs}:1` })).toBeNull();
+    expect(chipNames()).toEqual([`${loginTs}:2`]);
+
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(chips()).toBeNull());
+    expect(within(panel()).queryAllByRole('note')).toEqual([]);
+    expect(diffCalls(main, 'sessions.send')).toHaveLength(1);
+  });
+
+  it("doesn't show a note on a diff that no longer holds the lines it quotes, keeping its chip", async () => {
+    let patch = text(loginTs);
+    const main = await open(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        { 'sessions.diff': () => ({ ...summary, files: [files[0]!] }), 'sessions.diffFile': () => ({ text: patch, truncated: false }) },
+      ),
+    );
+    await comment({ start: 2, side: 'additions', end: 2, endSide: 'additions' }, 'Rename it.');
+    expect(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:2` })).toBeTruthy();
+
+    patch = patch.replace('+new line', '+newer line');
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Refresh changes' }));
+    await waitFor(() => expect(drawn.has(patch)).toBe(true));
+    expect(within(panel()).queryByRole('note')).toBeNull();
+    expect(chipNames()).toEqual([`${loginTs}:2`]);
+    expect(diffCalls(main, 'sessions.diffFile').length).toBeGreaterThan(1);
+  });
+
+  it("edits a comment's note from its chip, in the chip, the note in the diff and what is sent", async () => {
+    const main = await open();
+    await comment({ start: 1, side: 'additions', end: 2, endSide: 'additions' }, 'Keep the old name.');
+    fireEvent.click(composer().getByRole('button', { name: `Edit comment on ${loginTs}:1-2` }));
+    const dialog = screen.getByRole('dialog', { name: `Edit comment on ${loginTs}:1-2` });
+    const field = within(dialog).getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
+    expect(field.value).toBe('Keep the old name.');
+    expect(document.activeElement).toBe(field);
+    // An empty note isn't one.
+    fireEvent.change(field, { target: { value: '  ' } });
+    expect(within(dialog).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
+
+    fireEvent.change(field, { target: { value: 'Keep the old name, it is public.' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('dialog', { name: /^Edit comment/ })).toBeNull();
+    expect(within(chips()!).getByRole('listitem').textContent).toBe(`${loginTs}:1-2Keep the old name, it is public.`);
+    expect(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:1-2` }).textContent).toContain('Keep the old name, it is public.');
+
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(chips()).toBeNull());
+    expect((diffCalls(main, 'sessions.send')[0]!.params as { comments: Array<{ note: string }> }).comments.map((c) => c.note)).toEqual(['Keep the old name, it is public.']);
+  });
+
+  it('leaves the note as it was when its edit is cancelled', async () => {
+    await open();
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    fireEvent.click(composer().getByRole('button', { name: `Edit comment on ${loginTs}:1` }));
+    const dialog = screen.getByRole('dialog', { name: `Edit comment on ${loginTs}:1` });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: 'Something else' } });
+    fireEvent.keyDown(within(dialog).getByRole('textbox', { name: 'Comment' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /^Edit comment/ })).toBeNull();
+    expect(within(chips()!).getByRole('listitem').textContent).toBe(`${loginTs}:1Typo?`);
   });
 
   it('drops the note on Cancel, adding nothing', async () => {
@@ -747,7 +826,7 @@ describe('commenting on the diff', () => {
     await within(within(panel()).getByRole('region', { name: 'src/auth/session.ts' })).findByTestId('patch-diff');
     await comment({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' }, 'Why drop this?', 'src/auth/session.ts');
     await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
-    expect(within(chips()!).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`${loginTs}:1-2`, 'src/auth/session.ts:2', `${loginTs}:1`]);
+    expect(chipNames()).toEqual([`${loginTs}:1-2`, 'src/auth/session.ts:2', `${loginTs}:1`]);
 
     fireEvent.click(composer().getByRole('button', { name: `Remove comment on ${loginTs}:1` }));
     expect(within(chips()!).getAllByRole('listitem')).toHaveLength(2);
@@ -798,7 +877,7 @@ describe('commenting on the diff', () => {
     };
     await add({ start: 50, side: 'deletions', end: 46, endSide: 'additions' }, `${loginTs}:45-46`);
     await add({ start: 50, side: 'deletions', end: 51, endSide: 'deletions' }, `${loginTs}:50-51`);
-    expect(within(chips()!).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`${loginTs}:45-46`, `${loginTs}:50-51`]);
+    expect(chipNames()).toEqual([`${loginTs}:45-46`, `${loginTs}:50-51`]);
   });
 
   it('keeps a note being written when a turn end reloads the diff with the same lines', async () => {
