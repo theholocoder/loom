@@ -1424,6 +1424,17 @@ export class Sessions {
     this.save(id, { title: trimmed });
   }
 
+  /** Links the Session to `issue`, in place of any it had, while its Project is there. */
+  linkIssue({ id, issue }: Commands['sessions.linkIssue']['params']): void {
+    const session = this.get(id);
+    if (!this.options.project(session.projectId)) throw new Error("This Session's Project was removed, so it can't be linked to an issue.");
+    if (typeof issue !== 'object' || issue === null) throw new Error('An issue needs a number and an http(s) link.');
+    checkIssue(issue);
+    const link = { number: issue.number, url: issue.url };
+    this.update(id, { issue: link });
+    this.save(id, { issue_number: link.number, issue_url: link.url });
+  }
+
   /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */
   snooze({ id, until }: Commands['sessions.snooze']['params']): void {
     const session = this.get(id);
@@ -1802,7 +1813,7 @@ export class Sessions {
     this.save(id, { branch });
   }
 
-  /** Works out the Session's diff, and Session info's diff stat with it. */
+  /** Works out the Session's diff, and the Glance strip's diff stat with it. */
   async diff(id: number, uncommittedOnly = false): Promise<DiffSummary> {
     const diff = await this.diffOf(id);
     if (!diff) return { available: false, reason: 'No diff available' };
@@ -1866,7 +1877,7 @@ export class Sessions {
     return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }, this.options.maxUntrackedCounted) : undefined;
   }
 
-  /** Records Session info's diff stat; keeps the last one known if git can't say. */
+  /** Records the Glance strip's diff stat; keeps the last one known if git can't say. */
   private async lookUpDiffStat(id: number): Promise<void> {
     try {
       const session = this.get(id);
@@ -2341,7 +2352,7 @@ function messageOf({ text, attachments }: Message): Message {
 }
 
 /** Rejects an issue Loom couldn't link to, or open in the browser. */
-function checkIssue(issue: Issue): void {
+function checkIssue(issue: ForgeLink): void {
   if (!Number.isInteger(issue.number) || issue.number <= 0 || !/^https?:\/\//i.test(issue.url ?? '')) {
     throw new Error('An issue needs a number and an http(s) link.');
   }

@@ -109,29 +109,34 @@ describe('info cards', () => {
   });
 });
 
-describe('Session info', () => {
-  const row = () => {
-    if (!screen.queryByRole('tabpanel', { name: 'Session info' })) fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
-    const git = within(screen.getByRole('tabpanel', { name: 'Session info' })).getByRole('region', { name: 'Git' });
-    return within(git).getAllByRole('term').find((t) => t.textContent === 'Merge request')!.nextElementSibling as HTMLElement;
+describe("the Glance strip's Merge request", () => {
+  const glance = () => screen.getByRole('group', { name: 'Session at a glance' });
+  const ciButton = (name: string) => within(glance()).getByRole('button', { name });
+  /** The Merge request popover, opened from its chip if it isn't open. */
+  const popover = () => {
+    if (!screen.queryByRole('dialog', { name: 'Merge request' })) fireEvent.click(within(glance()).getByRole('button', { name: 'Merge request #12' }));
+    return screen.getByRole('dialog', { name: 'Merge request' });
   };
+  const watch = () => within(popover()).queryByRole('switch', { name: 'Watch' }) as HTMLButtonElement | null;
+  const autoPrompt = () => within(popover()).queryByRole('switch', { name: 'Auto-prompt' }) as HTMLButtonElement | null;
 
-  it('shows the CI status and when it was last polled on the Merge request row', () => {
+  it('shows how CI is going beside the number, its checks saying when they were last polled', () => {
     const at = new Date(2026, 10, 10, 14, 32).getTime();
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'pending', lastPollAt: at, stale: false } })] }));
 
-    expect(within(row()).getByRole('button', { name: 'Merge request open, CI pending' })).toBeTruthy();
+    expect(ciButton('CI running').textContent).toBe('CI running');
     const checked = `Checked ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    expect(row().textContent).not.toContain('Checked');
-    fireEvent.click(within(row()).getByRole('button', { name: 'Merge request open, CI pending' }));
+    expect(glance().textContent).not.toContain('Checked');
+    fireEvent.click(ciButton('CI running'));
     expect(screen.getByRole('dialog', { name: 'CI checks' }).textContent).toContain(checked);
-    expect(row().textContent).not.toContain('Stale');
+    expect(glance().textContent).not.toContain('Stale');
   });
 
-  it('shows a stale badge after a failed poll', () => {
+  it('says when it may be out of date, after a failed poll', () => {
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'passed', lastPollAt: 1, stale: true } })] }));
 
-    expect(row().textContent).toContain('Stale');
+    expect(ciButton('CI passed').title).toBe('CI passed (may be out of date)');
+    expect(within(popover()).getByRole('heading').textContent).toContain('Stale');
   });
 
   const checks: NonNullable<NonNullable<Session['babysit']>['checks']> = [
@@ -140,27 +145,37 @@ describe('Session info', () => {
     { name: 'e2e', state: 'pending' },
     { name: 'old', state: 'not-run' },
   ];
-  const status = (name: string) => within(row()).getByRole('button', { name }) as HTMLElement;
-  const iconOf = (button: HTMLElement) => [...button.querySelector('svg')!.classList].find((c) => c.startsWith('lucide-'));
+  const iconOf = (element: Element) => [...element.querySelector('svg')!.classList].find((c) => c.startsWith('lucide-'));
 
   it.each([
-    ['open', 'passed', 'Merge request open, CI passed', 'lucide-circle-check'],
-    ['open', 'failed', 'Merge request open, CI failed', 'lucide-circle-x'],
-    ['merged', 'passed', 'Merge request merged', 'lucide-git-merge'],
-  ] as const)('sums up a Merge request %s with CI %s in one icon', (mergeRequestState, ci, name, icon) => {
-    open(new FakeMain({ projects: [project], sessions: [session({ mergeRequestState, babysit: { ci, stale: false } })] }));
+    ['passed', 'CI passed', 'lucide-circle-check', 'tone-passed'],
+    ['failed', 'CI failed', 'lucide-circle-x', 'tone-failed'],
+    ['pending', 'CI running', 'lucide-clock', 'tone-pending'],
+  ] as const)('labels CI %s, in its colour', (ci, name, icon, tone) => {
+    open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci, stale: false } })] }));
 
-    expect(iconOf(status(name))).toBe(icon);
-    expect(row().textContent).not.toContain('CI ');
-    expect(row().textContent).not.toContain(mergeRequestState);
+    expect(iconOf(ciButton(name))).toBe(icon);
+    expect(ciButton(name).querySelector(`.${tone}`)).not.toBeNull();
   });
 
-  it('lists the checks in a dropdown, each opening its details', async () => {
+  it("shows a merged or closed one's state in place of its CI", () => {
+    const main = new FakeMain({ projects: [project], sessions: [session({ mergeRequestState: 'merged', babysit: { ci: 'passed', stale: false } })] });
+    open(main);
+    const number = within(glance()).getByRole('button', { name: 'Merge request #12' });
+    expect(number.textContent).toBe('#12Merged');
+    expect(iconOf(number)).toBe('lucide-git-merge');
+    expect(within(glance()).queryByRole('button', { name: 'CI passed' })).toBeNull();
+
+    act(() => main.publish('sessions', [session({ mergeRequestState: 'closed' })]));
+    expect(within(glance()).getByRole('button', { name: 'Merge request #12' }).textContent).toBe('#12Closed');
+  });
+
+  it('lists the checks in a popover, each opening its details', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'failed', checks, stale: false } })] });
     open(main);
     expect(screen.queryByRole('dialog', { name: 'CI checks' })).toBeNull();
 
-    fireEvent.click(status('Merge request open, CI failed'));
+    fireEvent.click(ciButton('CI failed'));
     const list = screen.getByRole('dialog', { name: 'CI checks' });
     expect(list.textContent).toContain('Some checks failed');
     expect(list.textContent).toContain('1 failed, 1 passed, 1 pending, 1 not run');
@@ -169,112 +184,86 @@ describe('Session info', () => {
     fireEvent.click(within(within(list).getAllByRole('listitem')[1]!).getByRole('button', { name: 'Details' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url: 'https://ci/2' }]));
 
-    fireEvent.click(status('Merge request open, CI failed'));
+    fireEvent.click(ciButton('CI failed'));
     expect(screen.queryByRole('dialog', { name: 'CI checks' })).toBeNull();
   });
 
   it.each([
-    [{ ci: 'passed', checks: [{ name: 'lint', state: 'passed' }], stale: false }, 'Merge request open, CI passed', 'All checks have passed'],
-    [{ ci: 'pending', checks: [{ name: 'lint', state: 'pending' }], stale: false }, 'Merge request open, CI pending', 'Checks are running'],
-    [{ checks: [], stale: false }, 'Merge request open', 'No CI checks'],
-  ] as const)('heads the dropdown for what CI is doing', (babysit, name, heading) => {
+    [{ ci: 'passed', checks: [{ name: 'lint', state: 'passed' }], stale: false }, 'CI passed', 'All checks have passed'],
+    [{ ci: 'pending', checks: [{ name: 'lint', state: 'pending' }], stale: false }, 'CI running', 'Checks are running'],
+    [{ checks: [{ name: 'old', state: 'not-run' }], stale: false }, 'Checks', 'No CI checks'],
+  ] as const)('heads the checks for what CI is doing', (babysit, name, heading) => {
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: babysit as never })] }));
-    fireEvent.click(status(name));
+    fireEvent.click(ciButton(name));
 
     expect(screen.getByRole('dialog', { name: 'CI checks' }).textContent).toContain(heading);
   });
 
-  it('says why there are no checks when the Merge request is not watched', () => {
-    open(new FakeMain({ projects: [project], sessions: [session({ babysitOff: true })] }));
-    fireEvent.click(status('Merge request open'));
-
-    expect(screen.getByRole('dialog', { name: 'CI checks' }).textContent).toContain("isn't watching");
+  it('shows no CI before Babysit has seen any', () => {
+    open(new FakeMain({ projects: [project], sessions: [session()] }));
+    expect(within(glance()).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).not.toContain('Checks');
+    expect(glance().textContent).not.toContain('CI');
   });
 
-  const eye = (name: RegExp) => within(row()).queryByRole('button', { name });
-
-  it('shows the watch as an eye by the number, and clicking it switches the watch', async () => {
+  it('switches the watch with a labelled Watch switch, saying what it means', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
-    fireEvent.click(eye(/^Watching #12/)!);
+    expect(watch()!.getAttribute('aria-checked')).toBe('true');
+    expect(watch()!.getAttribute('aria-description')).toBe('Babysit watches #12 for new feedback.');
+    fireEvent.click(watch()!);
     await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }]));
 
     act(() => main.publish('sessions', [session({ babysitOff: true })]));
-    fireEvent.click(eye(/^Not watching #12/)!);
+    expect(watch()!.getAttribute('aria-checked')).toBe('false');
+    expect(watch()!.getAttribute('aria-description')).toBe("Loom isn't watching #12.");
+    fireEvent.click(watch()!);
     await waitFor(() => expect(calls(main, 'sessions.setBabysitting')).toEqual([{ id: 1, on: false }, { id: 1, on: true }]));
   });
 
-  const icon = (button: HTMLElement) => (button.querySelector('svg')!.classList.contains('lucide-eye-off') ? 'struck' : 'open');
-
-  it('previews what a click will do while the eye is hovered, until it is clicked', async () => {
+  it('has no Watch switch for what cannot be watched', () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
-    const button = eye(/^Watching #12/)!;
-    expect(icon(button)).toBe('open');
-
-    fireEvent.mouseEnter(button);
-    expect(icon(button)).toBe('struck');
-    fireEvent.mouseLeave(button);
-    expect(icon(button)).toBe('open');
-
-    fireEvent.mouseEnter(button);
-    fireEvent.click(button);
-    act(() => main.publish('sessions', [session({ babysitOff: true })]));
-    expect(icon(eye(/^Not watching #12/)!)).toBe('struck');
-
-    fireEvent.mouseLeave(eye(/^Not watching #12/)!);
-    fireEvent.mouseEnter(eye(/^Not watching #12/)!);
-    expect(icon(eye(/^Not watching #12/)!)).toBe('open');
-  });
-
-  it('has no eye for what is not being or cannot be watched', () => {
-    const main = new FakeMain({ projects: [project], sessions: [session()] });
-    open(main);
-    expect(eye(/atching #12/)).not.toBeNull();
+    expect(watch()).not.toBeNull();
 
     act(() => main.publish('sessions', [session({ mergeRequestState: 'merged' })]));
-    expect(eye(/atching #12/)).toBeNull();
+    expect(watch()).toBeNull();
     act(() => main.publish('sessions', [session({ status: 'archived', waitingReason: undefined })]));
-    expect(eye(/atching #12/)).toBeNull();
+    expect(watch()).toBeNull();
   });
 
-  it('greys out auto-prompt while the Merge request is not watched', () => {
+  it('greys out Auto-prompt while the Merge request is not watched', () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
-    expect(toggle()!.disabled).toBe(false);
+    expect(autoPrompt()!.disabled).toBe(false);
 
     act(() => main.publish('sessions', [session({ babysitOff: true })]));
-    expect(toggle()!.disabled).toBe(true);
-    fireEvent.mouseEnter(toggle()!);
-    expect(iconOf(toggle()!)).toBe('lucide-bot-off');
+    expect(autoPrompt()!.disabled).toBe(true);
+    expect(autoPrompt()!.getAttribute('aria-description')).toBe('Auto-prompt needs this Merge request to be watched.');
   });
 
-  const toggle = (name = /^Auto-prompt/) => within(row()).queryByRole('button', { name }) as HTMLButtonElement | null;
-
-  it('turns auto-prompt on and off for the Session, showing what it is', async () => {
+  it('turns Auto-prompt on and off for the Session, showing what it is', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
-    expect(iconOf(toggle(/^Auto-prompt off/)!)).toBe('lucide-bot-off');
-    expect(row().textContent).not.toContain('Auto-prompt');
+    expect(autoPrompt()!.getAttribute('aria-checked')).toBe('false');
+    expect(autoPrompt()!.getAttribute('aria-description')).toBe('Feedback waits for you.');
 
-    fireEvent.click(toggle()!);
+    fireEvent.click(autoPrompt()!);
     await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }]));
 
     act(() => main.publish('sessions', [session({ autoPrompt: true })]));
-    expect(iconOf(toggle(/^Auto-prompt on/)!)).toBe('lucide-bot');
-    fireEvent.mouseEnter(toggle()!);
-    expect(iconOf(toggle()!)).toBe('lucide-bot-off');
-    fireEvent.click(toggle()!);
+    expect(autoPrompt()!.getAttribute('aria-checked')).toBe('true');
+    expect(autoPrompt()!.getAttribute('aria-description')).toBe('Feedback goes straight to the agent.');
+    fireEvent.click(autoPrompt()!);
     await waitFor(() => expect(calls(main, 'sessions.setAutoPrompt')).toEqual([{ id: 1, on: true }, { id: 1, on: false }]));
   });
 
-  it('has no auto-prompt toggle on an archived Session', () => {
+  it('has no Auto-prompt switch on an archived Session', () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     open(main);
-    expect(toggle()).not.toBeNull();
+    expect(autoPrompt()).not.toBeNull();
 
     act(() => main.publish('sessions', [session({ status: 'archived', waitingReason: undefined })]));
-    expect(toggle()).toBeNull();
+    expect(autoPrompt()).toBeNull();
   });
 });
 

@@ -119,7 +119,7 @@ describe('palette actions', () => {
       'Toggle the Inbox',
       'Toggle the Side area',
       'Toggle diff',
-      'Toggle Session info',
+      'Show Session details',
       'Mark this Session unread',
       'Archive this Session',
       'Delete this Session…',

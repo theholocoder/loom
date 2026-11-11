@@ -77,6 +77,7 @@ export class FakeMain implements LoomApi {
       'projects.files': () => [],
       'sessions.files': () => [],
       'sessions.check': () => {},
+      'sessions.linkIssue': () => {},
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
         const settings = { ...this.value('settings'), worktreeRoot };
         this.publish('settings', settings);

@@ -1,4 +1,4 @@
-// The delete command, shared by Session info and the palette: deletes a
+// The delete command, shared by the Session menus and the palette: deletes a
 // Session for good, asking first, then warning (Discard and delete / Cancel)
 // when its worktree has uncommitted changes or unpushed commits.
 import { Trash2, TriangleAlert } from 'lucide-react';

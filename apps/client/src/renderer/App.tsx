@@ -415,7 +415,7 @@ function paletteActions(app: {
     // The Side area is the open Session's: with none, there is none to toggle.
     session && shortcutAction('toggleSideArea', PanelRight, () => app.command('toggleSideArea')),
     session && shortcutAction('toggleDiff', FileDiff, () => app.command('toggleChanges')),
-    session && shortcutAction('toggleInfo', Info, () => app.command('toggleInfo')),
+    session && shortcutAction('sessionDetails', Info, () => app.command('sessionDetails')),
     active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
     open && shortcutAction('archive', Archive, () => app.command('archive')),
     session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },

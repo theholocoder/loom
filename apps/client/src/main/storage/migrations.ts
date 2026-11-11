@@ -182,4 +182,43 @@ export const migrations: Migration[] = [
     }
     await db.deleteFrom('settings').where('key', '=', 'sidebar').execute();
   },
+  async (db) => {
+    // Session info is no longer a Panel: the Glance strip and Session details took its place.
+    // A Side area or Dock left with none is hidden; one that showed it shows its first Panel.
+    const rows = (await db.selectFrom('session_panels').selectAll().execute()) as Array<{ session_id: number; state: string }>;
+    for (const row of rows) {
+      let state: unknown;
+      try {
+        state = JSON.parse(row.state);
+      } catch {
+        continue; // Unreadable: dropped for the default when loaded.
+      }
+      if (typeof state !== 'object' || state === null) continue;
+      let changed = false;
+      for (const area of Object.values(state as Record<string, unknown>)) {
+        if (typeof area !== 'object' || area === null) continue;
+        const panels = (area as Record<string, unknown>).panels;
+        if (!Array.isArray(panels) || !panels.includes('info')) continue;
+        const kept = panels.filter((panel) => panel !== 'info');
+        const at = area as Record<string, unknown>;
+        at.panels = kept;
+        if (at.shown === 'info') at.shown = kept[0] ?? null;
+        if (kept.length === 0) at.open = false;
+        changed = true;
+      }
+      if (changed) await db.updateTable('session_panels').set({ state: JSON.stringify(state) }).where('session_id', '=', row.session_id).execute();
+    }
+    const layout = (await db.selectFrom('settings').select('value').where('key', '=', 'layout').executeTakeFirst()) as { value: string } | undefined;
+    if (!layout) return;
+    try {
+      const sizes: unknown = JSON.parse(layout.value);
+      if (typeof sizes !== 'object' || sizes === null) return;
+      for (const dimension of Object.values(sizes as Record<string, unknown>)) {
+        if (typeof dimension === 'object' && dimension !== null) delete (dimension as Record<string, unknown>).info;
+      }
+      await db.updateTable('settings').set({ value: JSON.stringify(sizes) }).where('key', '=', 'layout').execute();
+    } catch {
+      // Unreadable: the Layout reads it as unset.
+    }
+  },
 ];

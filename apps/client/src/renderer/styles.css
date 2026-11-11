@@ -367,7 +367,7 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .merge-request .link:hover, .info .link:hover { text-decoration: underline; }
 .info .link { display: inline-flex; align-items: center; gap: 4px; }
 .icon-btn.mr-btn { width: auto; gap: 4px; padding: 0 10px; border-radius: 15px; font-size: 12px; }
-.link-mr form { display: flex; flex-direction: column; gap: 8px; padding: 10px; width: 280px; }
+.link-mr { display: flex; flex-direction: column; gap: 8px; }
 .link-mr label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .link-mr .primary { align-self: flex-end; }
 /* The open Session's Panel areas (the Side area, the Dock): labelled tabs with badges, and the edge facing the conversation to resize the Panel shown. */
@@ -416,20 +416,54 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .diff-sections { flex: 1; min-width: 0; overflow: auto; }
 .diff-sections .diff-file { margin: 0 0 10px; }
 .changes-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
-/* Session info: four groups of facts, each with its actions at the end. */
-.info { flex: 1; overflow: auto; padding: 4px 14px 16px; }
-.info-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
-.info-group h3 { margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
-.info-group dl { margin: 0; display: flex; flex-direction: column; gap: 2px; }
-.fact { display: grid; grid-template-columns: 112px 1fr; gap: 8px; align-items: center; min-height: 28px; font-size: 13px; }
+/* The open Session: its one-line header and the Glance strip over the conversation and the
+   Side area beside it, the Dock under both (ADR 0009). */
+.session-body { flex: 1; min-height: 0; display: flex; position: relative; }
+.convo { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.session-head { padding: 10px 16px 10px 20px; border-bottom: 0; gap: 8px; container-type: inline-size; }
+.head-line { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.head-line h1 { flex: 0 1 auto; min-width: 0; margin-left: -4px; }
+.head-line > :not(h1) { flex: none; }
+.title-btn { display: block; max-width: 100%; border: 0; background: none; color: inherit; font: inherit; padding: 0 4px; border-radius: 6px; cursor: pointer; text-align: left; }
+.title-btn:hover, .title-btn[aria-expanded="true"] { background: var(--hover); }
+/* The title gives way first; then, on a narrow header, the Project's badge goes. */
+@container (max-width: 520px) { .head-line .proj-tag { display: none; } }
+.glance { display: flex; align-items: center; gap: 6px; padding: 0 16px 8px 20px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; flex: none; }
+.g-chip { display: inline-flex; align-items: stretch; height: 26px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 12.5px; overflow: hidden; flex: none; }
+.g-chip > button { display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; padding: 0 9px; gap: 5px; color: var(--text); white-space: nowrap; cursor: pointer; font: inherit; }
+.g-chip > button:hover, .g-chip > button[aria-expanded="true"] { background: var(--hover); }
+.g-chip > button + button { border-left: 1px solid var(--line); }
+.g-chip > button:first-child { padding-left: 10px; } .g-chip > button:last-child { padding-right: 10px; }
+.g-chip.quiet > button { color: var(--muted); }
+.g-chip .branch { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; }
+.g-chip .diff-stat { align-items: center; }
+.meter { display: inline-block; width: 44px; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--accent); }
+/* Session details: three groups of facts, each with its actions at the end. */
+.popover.details { width: 430px; padding: 10px 12px; gap: 0; }
+.popover.details h4, .mr-popover h4 { margin: 0 0 4px; font-size: 13px; display: flex; gap: 6px; align-items: center; outline: none; }
+.details-group { padding: 6px 0; border-top: 1px solid var(--line); }
+.details-group:first-of-type { border-top: 0; }
+.details-group dl { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.fact { display: grid; grid-template-columns: 104px 1fr; gap: 8px; align-items: center; min-height: 26px; font-size: 12.5px; }
 .fact dt { color: var(--muted); }
 .fact dd { margin: 0; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .fact .value { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.fact .path { word-break: break-all; }
+.fact .path { overflow-wrap: anywhere; }
 .fact-actions { display: flex; gap: 0; flex: none; }
-.fact-actions .icon-btn:disabled { opacity: .4; cursor: default; }
-.fact-actions .icon-btn:disabled:hover { background: none; color: var(--muted); }
-.info .diff-stat { font-weight: 600; }
+/* The Merge request, until its own Panel: labelled switches and actions. */
+.popover.mr-popover { width: 320px; padding: 10px 12px; gap: 6px; }
+.mr-popover > button, .mr-popover .acts button { align-self: flex-start; font-size: 12.5px; }
+.mr-popover .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.mr-popover .switches { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.switch { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; color: var(--text); padding: 5px 4px; border-radius: 6px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.switch:hover { background: var(--hover); }
+.switch:disabled { opacity: .5; cursor: default; }
+.switch:disabled:hover { background: none; }
+.switch .track { width: 26px; height: 14px; border-radius: 7px; background: var(--line); position: relative; flex: none; }
+.switch .track > span { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: left .12s; }
+.switch[aria-checked="true"] .track { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.switch[aria-checked="true"] .track > span { left: 14px; background: var(--accent); }
 .chip.stale { color: var(--wait); }
 .tone-passed { color: var(--ok); } .tone-pending { color: var(--wait); } .tone-failed { color: var(--err); } .tone-accent { color: var(--accent); }
 .popover.ci-checks { width: 340px; padding: 10px 12px; gap: 4px; }
@@ -450,7 +484,6 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .context { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .context .bar { display: block; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
 .context .bar > span { display: block; height: 100%; background: var(--accent); }
-.info-foot { padding-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
 .removed-tag { margin-left: 6px; font-size: 11px; padding: 0 6px; vertical-align: 1px; }
 
 /* The window's panes give way rather than scroll it sideways: the Inbox takes
@@ -466,7 +499,7 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .rail-foot .icon-btn[aria-current="page"] { color: var(--accent); }
 /* In a narrow window the Side area is a drawer over the conversation, with a scrim over the rest of it. */
 .panel-area.side.drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; box-shadow: -14px 0 36px var(--shadow); }
-.drawer-scrim { position: absolute; top: 0; right: 0; bottom: 0; left: var(--inbox-width, 0); z-index: 19; background: color-mix(in srgb, #000 28%, transparent); }
+.drawer-scrim { position: absolute; inset: 0; z-index: 19; background: color-mix(in srgb, #000 28%, transparent); }
 /* The composer's tools shrink, their names cut short, before its buttons do. */
 .ctoolbar .pick { min-width: 0; }
 .ctoolbar .pick b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

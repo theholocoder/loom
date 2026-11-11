@@ -63,7 +63,7 @@ export const SHORTCUTS = {
   toggleInbox: { label: 'Toggle the Inbox', shortcut: { key: 'b', ctrl: true, shift: true } },
   toggleSideArea: { label: 'Toggle the Side area', shortcut: { key: 'b', ctrl: true } },
   toggleDiff: { label: 'Toggle diff', shortcut: { key: 'd' } },
-  toggleInfo: { label: 'Toggle Session info', shortcut: { key: 'i', ctrl: true } },
+  sessionDetails: { label: 'Show Session details', shortcut: { key: 'i', ctrl: true } },
   markUnread: { label: 'Mark this Session unread', shortcut: { key: 'u' } },
   archive: { label: 'Archive this Session', shortcut: { key: 'e' } },
   settings: { label: 'Open Settings', shortcut: { key: ',', ctrl: true } },
