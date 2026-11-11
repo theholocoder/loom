@@ -3,8 +3,9 @@
 // the conversation and the Dock under it. Which Panels a Session has open,
 // the one shown and whether each area is shown are the Session's own, kept
 // in the database; each kind's size is the Layout's, the same for every
-// Session. An area takes the size of the Panel it shows.
-import { ChevronDown, FileDiff, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
+// Session. An area takes the size of the Panel it shows. A Panel with a large
+// work surface can take the Session's main area instead, in Review mode.
+import { ChevronDown, FileDiff, Maximize2, Minimize2, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { Session, TerminalInfo } from '../shared/api';
 import {
@@ -31,6 +32,7 @@ import {
 import { useApi, useTopic } from './api';
 import { Popover } from './Popover';
 import { ResizeEdge } from './ResizeEdge';
+import { SHORTCUTS, shortcutLabel } from './shortcuts';
 import { useWindowLayout } from './WindowLayout';
 
 /** What a tab shows beside its label: a count, with what it counts for a screen reader and the tooltip. */
@@ -44,6 +46,8 @@ export interface PanelKindView extends PanelKindSpec {
   label: string;
   icon: LucideIcon;
   badge?: (session: Session) => PanelBadge | undefined;
+  /** Whether it can take the Session's main area, in Review mode: a large work surface. */
+  reviewable?: boolean;
 }
 
 /** The Panel registry: every kind of Panel, once. */
@@ -52,6 +56,7 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
     ...PANEL_SPECS.changes,
     label: 'Changes',
     icon: FileDiff,
+    reviewable: true,
     badge: ({ diffStat }) => (diffStat?.files ? { text: String(diffStat.files), description: `${diffStat.files} ${diffStat.files === 1 ? 'file' : 'files'} changed` } : undefined),
   },
   terminal: { ...PANEL_SPECS.terminal, label: 'Terminal', icon: SquareTerminal },
@@ -74,8 +79,14 @@ export interface PanelsControl {
   state: SessionPanels;
   /** Whether the Side area is a drawer over the conversation, the window being narrow. */
   drawer: boolean;
-  /** Whether the Side area shows: beside the conversation, or, as a drawer, open over it. */
+  /** Whether the Side area shows: beside the conversation, or, as a drawer, open over it. Never in Review mode. */
   sideShown: boolean;
+  /** The Panel in Review mode, if any: it takes the Session's main area, beside a narrowed conversation, and the Side area is hidden. */
+  review?: PanelId;
+  /** Puts `panel` in Review mode, or takes it out when it is in it already. */
+  toggleReview(panel: PanelId): void;
+  /** Leaves Review mode: the Side area comes back as it was. */
+  leaveReview(): void;
   /** Closes the drawer, leaving the Session's Panels as they are. */
   closeDrawer(): void;
   /** Why the last Terminal couldn't open, shown in the Dock. */
@@ -85,13 +96,13 @@ export interface PanelsControl {
   onFocused(): void;
   /** The size of a Panel of `kind` across its area, as the Layout has it (or the user is dragging it to). */
   size(kind: PanelKind, dimension: PanelDimension): number;
-  /** Shows `panel` in its area, opening it there first if it isn't open. */
+  /** Shows `panel` in its area, opening it there first if it isn't open; one in Review mode stays there. */
   show(panel: PanelId): void;
   /** Closes `panel`; a Terminal ends with it. An area left with no Panel is hidden. */
   close(panel: PanelId): void;
-  /** Shows or hides `area`; an empty Dock shown starts a Terminal. */
+  /** Shows or hides `area`; an empty Dock shown starts a Terminal. Showing the Side area leaves Review mode. */
   toggleArea(area: PanelAreaName): void;
-  /** `d`: shows `panel`, or hides its area when that is what it shows. */
+  /** `d`: shows `panel`, or hides its area when that is what it shows; leaves Review mode when it is in it. */
   toggle(panel: PanelId): void;
   /** Starts a Terminal in the Session and shows it in the Dock, with the focus in it. */
   newTerminal(): void;
@@ -114,6 +125,11 @@ export interface PanelsControl {
  * shown in it or the area is toggled, and closed again when the window
  * crosses the breakpoint or the area is left with no Panel. Whether it is open is not kept: the Session's
  * Panels say whether the area shows in a wide window.
+ *
+ * Review mode isn't kept either: it lasts while the Session stays open. It
+ * hides the Side area without changing the Session's Panels, so leaving it
+ * brings the area back as it was. Showing another Panel of the Side area, or
+ * the area itself, leaves it.
  */
 export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefined): PanelsControl {
   const { narrow } = useWindowLayout();
@@ -128,6 +144,10 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   const [focus, setFocus] = useState<PanelId>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   useEffect(() => setDrawerOpen(false), [narrow]);
+  const [review, setReview] = useState<PanelId>();
+  const reviewing = useRef(review);
+  reviewing.current = review;
+  useEffect(() => setReview(undefined), [sessionId]);
   /** Terminals just opened that `terminals` doesn't list yet. */
   const starting = useRef(new Set<number>());
   const opening = useRef(false);
@@ -164,6 +184,9 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   }, [ended]);
 
   const show = (panel: PanelId) => {
+    if (reviewing.current === panel) return;
+    // Another of the Side area's Panels brings the area back.
+    if (reviewing.current && (areaOf(latest.current, panel) ?? PANEL_SPECS[kindOf(panel)].area) === 'side') setReview(undefined);
     const next = update((state) => showing(state, panel));
     if (narrow && next?.side.panels.includes(panel)) setDrawerOpen(true);
   };
@@ -188,6 +211,12 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   };
   const toggleArea = (area: PanelAreaName) => {
     const state = latest.current[area];
+    if (area === 'side' && reviewing.current) {
+      setReview(undefined);
+      if (narrow) setDrawerOpen(true);
+      if (!state.open) update((all) => ({ ...all, side: { ...all.side, open: true } }));
+      return;
+    }
     if (area === 'side' && narrow) {
       if (drawerOpen && state.open) return setDrawerOpen(false);
       setDrawerOpen(true);
@@ -199,7 +228,7 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     update((all) => ({ ...all, [area]: { ...all[area], open: true } }));
   };
 
-  const sideShown = sideShownIn(current);
+  const sideShown = !review && sideShownIn(current);
   useEffect(() => {
     if (!current.side.open) setDrawerOpen(false);
   }, [current.side.open]);
@@ -209,6 +238,14 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     drawer: narrow,
     sideShown,
     closeDrawer: () => setDrawerOpen(false),
+    review,
+    toggleReview: (panel) => {
+      // It takes the Side area's place: not a Panel the Dock shows.
+      if (areaOf(latest.current, panel) === 'dock') return;
+      setDrawerOpen(false);
+      setReview(reviewing.current === panel ? undefined : panel);
+    },
+    leaveReview: () => setReview(undefined),
     error,
     focus,
     onFocused: () => setFocus(undefined),
@@ -219,9 +256,11 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
       // A Terminal ends first: its Panel goes once main no longer lists it.
       if (terminal !== undefined) api.invoke('terminals.close', { id: terminal }).catch((e: unknown) => setError((e as Error).message));
       else update((state) => closing(state, panel));
+      if (reviewing.current === panel) setReview(undefined);
     },
     toggleArea,
     toggle: (panel) => {
+      if (reviewing.current === panel) return setReview(undefined);
       const area = areaOf(latest.current, panel);
       const shown = area === 'side' ? sideShownIn(latest.current) : area && latest.current[area].open;
       if (area && shown && latest.current[area].shown === panel) toggleArea(area);
@@ -349,6 +388,10 @@ function choicesFor(area: PanelAreaName, control: PanelsControl): PanelChoice[] 
  * The tabs are one Tab stop, the arrow keys moving between them. When they
  * don't fit, the inactive ones drop to their icon and badge, then those that
  * still don't fit go into a ⌄ menu, last first; the active one keeps its label.
+ *
+ * In Review mode, the Side area's place holds the Panel in review instead,
+ * under a head that leaves it: the same element, so that the Panel isn't
+ * drawn anew, and keeps its state, going in and out.
  */
 export function PanelArea({
   area,
@@ -368,12 +411,13 @@ export function PanelArea({
   const tab = (panel: PanelId) => tabOf(panel, session, terminals);
   const label = AREA_LABELS[area];
   const dimension = dimensionOf(area);
+  const reviewing = area === 'side' ? control.review : undefined;
   const kind = state.shown ? kindOf(state.shown) : undefined;
   const largest = useLargest(area);
   const min = kind ? PANEL_SPECS[kind][dimension].min : 0;
   const max = Math.max(min, largest);
   const size = kind ? Math.min(Math.max(control.size(kind, dimension), min), max) : area === 'side' ? Math.min(EMPTY_WIDTH, largest) : undefined;
-  const drawer = area === 'side' && control.drawer;
+  const drawer = area === 'side' && control.drawer && !reviewing;
   const id = `session-${area}`;
   const tabId = (panel: PanelId) => `${area}-tab-${panel.replace(':', '-')}`;
   const tabs = useRef<HTMLDivElement>(null);
@@ -391,12 +435,23 @@ export function PanelArea({
   };
   const element = useRef<HTMLElement>(null);
   useDrawer(drawer, element, control.closeDrawer);
+  useReview(!!reviewing, element, control.leaveReview);
   const Element = area === 'side' ? 'aside' : 'section';
+  // Review mode takes the Side area's place: a Panel in the Dock stays there.
+  const reviewable = area === 'side' && !reviewing && state.shown && PANELS[kindOf(state.shown)].reviewable ? state.shown : undefined;
+  const reviewShortcut = shortcutLabel(SHORTCUTS.reviewChanges.shortcut);
   return (
     <>
     {drawer && <div className="drawer-scrim" aria-hidden="true" />}
-    <Element ref={element} className={drawer ? `panel-area ${area} drawer` : `panel-area ${area}`} id={id} aria-label={label} style={size === undefined ? undefined : { [dimension]: size }}>
-      {kind && size !== undefined && (
+    <Element
+      ref={element}
+      className={reviewing ? `panel-area ${area} review` : drawer ? `panel-area ${area} drawer` : `panel-area ${area}`}
+      id={id}
+      role={reviewing ? 'region' : undefined}
+      aria-label={reviewing ? 'Review mode' : label}
+      style={size === undefined || reviewing ? undefined : { [dimension]: size }}
+    >
+      {kind && size !== undefined && !reviewing && (
         <ResizeEdge
           side={area === 'side' ? 'left' : 'top'}
           label={`Resize the ${label}`}
@@ -408,6 +463,9 @@ export function PanelArea({
           onResize={(to, done) => control.resize(kind, dimension, to, done)}
         />
       )}
+      {reviewing ? (
+        <ReviewHead tab={tab(reviewing)} onLeave={control.leaveReview} />
+      ) : (
       <header className="panel-tabs-bar">
         <div ref={tabs} role="tablist" aria-label={`${label} Panels`} className={fit.compact ? 'panel-tabs compact' : 'panel-tabs'} onKeyDown={step}>
           {state.panels.map((panel) => {
@@ -445,21 +503,99 @@ export function PanelArea({
         {fit.hidden.length > 0 && <OverflowMenu hidden={fit.hidden as PanelId[]} tabOf={tab} onShow={control.show} />}
         <AddMenu area={label} choices={choicesFor(area, control)} />
         <span className="grow" />
+        {reviewable && (
+          <button
+            className="icon-btn sm"
+            type="button"
+            data-review-toggle
+            title={`Review mode: give ${tab(reviewable).label} the main area (${reviewShortcut}, Esc to come back)`}
+            aria-label={`Review ${tab(reviewable).label}`}
+            aria-keyshortcuts={reviewShortcut.replaceAll(' ', '+')}
+            onClick={() => control.toggleReview(reviewable)}
+          >
+            <Maximize2 />
+          </button>
+        )}
         <button className="icon-btn sm" type="button" title={`Hide the ${label}`} aria-label={`Hide the ${label}`} aria-controls={id} onClick={() => control.toggleArea(area)}>
           <X />
         </button>
       </header>
-      <div className="panel-view" role="tabpanel" id={`${id}-view`} aria-labelledby={state.shown ? tabId(state.shown) : undefined} aria-label={state.shown ? undefined : label}>
+      )}
+      <div
+        className="panel-view"
+        role={reviewing ? undefined : 'tabpanel'}
+        id={`${id}-view`}
+        aria-labelledby={!reviewing && state.shown ? tabId(state.shown) : undefined}
+        aria-label={reviewing || state.shown ? undefined : label}
+      >
         {area === 'dock' && control.error && (
           <p className="panel-error" role="alert">
             {control.error}
           </p>
         )}
-        {state.shown ? render(state.shown) : area === 'side' && <div className="panel-empty">No Panels here. Add one with +.</div>}
+        {reviewing ? render(reviewing) : state.shown ? render(state.shown) : area === 'side' && <div className="panel-empty">No Panels here. Add one with +.</div>}
       </div>
     </Element>
     </>
   );
+}
+
+/** The head of the Panel in Review mode: what it is, and the way out. */
+function ReviewHead({ tab: { label, icon: Icon, badge }, onLeave }: { tab: PanelTab; onLeave: () => void }) {
+  return (
+    <header className="panel-tabs-bar review-head">
+      <button className="icon-btn sm" type="button" data-review-toggle title="Leave Review mode (Esc)" aria-label="Leave Review mode" aria-keyshortcuts="Escape" onClick={onLeave}>
+        <Minimize2 />
+      </button>
+      <Icon className="sm" />
+      <b>{label}</b>
+      {badge && (
+        <span className="badge" title={badge.description}>
+          {badge.text}
+        </span>
+      )}
+      <span className="muted">in Review mode</span>
+      <span className="grow" />
+      <span className="muted review-hint">
+        <kbd>Esc</kbd> to leave
+      </span>
+    </header>
+  );
+}
+
+/**
+ * In Review mode: Esc leaves it, unless something took the key first (a
+ * comment being written, a filter, a menu), a Terminal has the focus, or a
+ * dialog or menu is open over the window. Going in or out, the focus lost
+ * with the button pressed goes to the one that undoes it; leaving for a
+ * hidden Side area, to the composer.
+ */
+function useReview(reviewing: boolean, element: RefObject<HTMLElement | null>, leave: () => void) {
+  const leaving = useRef(leave);
+  leaving.current = leave;
+  const first = useRef(true);
+  const wasReviewing = useRef(reviewing);
+  wasReviewing.current = reviewing;
+  useEffect(
+    () => () => {
+      if (wasReviewing.current && (!document.activeElement || document.activeElement === document.body)) document.querySelector<HTMLElement>('.main .composer textarea')?.focus();
+    },
+    [],
+  );
+  useEffect(() => {
+    if (first.current) first.current = false;
+    else if (!document.activeElement || document.activeElement === document.body) element.current?.querySelector<HTMLElement>('[data-review-toggle]')?.focus();
+    if (!reviewing) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest('.terminal-screen')) return;
+      if (document.querySelector('[aria-modal="true"], .popover')) return;
+      event.preventDefault();
+      leaving.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [reviewing]);
 }
 
 /**

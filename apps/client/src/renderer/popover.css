@@ -71,12 +71,12 @@ button.select-field:focus-visible { border-color: var(--accent); }
 .popover [role="menuitem"]:disabled:hover { background: none; }
 .menu-separator { height: 1px; margin: 3px 4px; background: var(--line); flex-shrink: 0; }
 .menu-icon-space { width: 14px; flex-shrink: 0; }
-/* A note on a passage of the conversation, from its right-click menu. */
-.popover.conversation-comment { width: 340px; padding: 8px; gap: 6px; }
-.conversation-comment blockquote { margin: 0; padding: 2px 8px; border-left: 2px solid var(--line); font-size: 12px; }
-.conversation-comment textarea { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; font: inherit; outline: none; }
-.conversation-comment textarea:focus { border-color: var(--accent); }
-.conversation-comment .row { display: flex; align-items: center; gap: 6px; }
+/* The note on a comment: on a passage of the conversation, from its right-click menu, or edited from its chip in the composer. */
+.popover.comment-note { width: 340px; padding: 8px; gap: 6px; }
+.comment-note blockquote { margin: 0; padding: 2px 8px; border-left: 2px solid var(--line); font-size: 12px; }
+.comment-note textarea { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; font: inherit; outline: none; }
+.comment-note textarea:focus { border-color: var(--accent); }
+.comment-note .row { display: flex; align-items: center; gap: 6px; }
 .popover.rename-session { padding: 8px; }
 .rename-session form { display: flex; gap: 6px; }
 .rename-session input { min-width: 240px; }

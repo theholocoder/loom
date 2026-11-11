@@ -3,10 +3,10 @@
 // it, @-mentions of the working copy's files, and `/` for the agent's skills
 // and commands.
 import { ArrowUp, Box, ClipboardPaste, Copy, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, MessageSquareQuote, Paperclip, Scissors, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { diffCommentRange, isConversationComment, isImage, type AgentCommand, type Attachment, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
 import { addToContextMenu, copyText } from './ContextMenu';
-import { stepIndex } from './Popover';
+import { Popover, stepIndex } from './Popover';
 
 /** The most files an @-mention suggests at once. */
 const MAX_SUGGESTED = 50;
@@ -35,6 +35,7 @@ export function Composer({
   commands = [],
   comments = [],
   onRemoveComment,
+  onEditComment,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -69,6 +70,8 @@ export function Composer({
   /** The comments on the diff or the conversation that go with what is sent, shown as chips; whoever gives them clears them once sent. */
   comments?: MessageComment[];
   onRemoveComment?: (index: number) => void;
+  /** Given, a click on a comment's chip edits its note. */
+  onEditComment?: (index: number, note: string) => void;
 }) {
   const id = useId();
   const [draft, setDraftState] = useState('');
@@ -226,22 +229,14 @@ export function Composer({
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
         {comments.length > 0 && (
           <ul className="attachments" aria-label="Comments">
-            {comments.map((comment, index) => {
-              const quoted = isConversationComment(comment);
-              const what = quoted ? `“${quoteSummary(comment.quote)}”` : diffCommentRange(comment);
-              const Icon = quoted ? MessageSquareQuote : MessageSquareCode;
-              return (
-                <li key={`${index}:${what}`} className="chip" title={`${quoted ? comment.quote : what}\n\n${comment.note}`}>
-                  <Icon className="sm" />
-                  <span className={`${quoted ? '' : 'tech '}ellipsis`}>{what}</span>
-                  {onRemoveComment && (
-                    <button className="icon-btn sm" type="button" aria-label={`Remove comment on ${what}`} title="Remove" onClick={() => onRemoveComment(index)}>
-                      <X className="sm" />
-                    </button>
-                  )}
-                </li>
-              );
-            })}
+            {comments.map((comment, index) => (
+              <CommentChip
+                key={`${index}:${commentTarget(comment)}`}
+                comment={comment}
+                onRemove={onRemoveComment && (() => onRemoveComment(index))}
+                onEdit={onEditComment && ((note) => onEditComment(index, note))}
+              />
+            ))}
           </ul>
         )}
         {attached.length > 0 && (
@@ -541,6 +536,119 @@ async function clipboardImages(): Promise<File[]> {
     return type ? [{ item, type }] : [];
   });
   return Promise.all(images.map(async ({ item, type }) => new File([await item.getType(type)], `Pasted image.${type.slice('image/'.length).split('+')[0]}`, { type })));
+}
+
+/** What a comment is on, as its chip names it: the range of the diff, or the passage quoted. */
+function commentTarget(comment: MessageComment): string {
+  return isConversationComment(comment) ? `“${quoteSummary(comment.quote)}”` : diffCommentRange(comment);
+}
+
+/** A comment going with the message: what it's on and its note, which a click edits. */
+function CommentChip({ comment, onRemove, onEdit }: { comment: MessageComment; onRemove?: () => void; onEdit?: (note: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const quoted = isConversationComment(comment);
+  const what = commentTarget(comment);
+  const Icon = quoted ? MessageSquareQuote : MessageSquareCode;
+  // On what shows it rather than the chip, so that it doesn't show over the form.
+  const title = `${quoted ? comment.quote : what}\n\n${comment.note}`;
+  const content = (
+    <>
+      <Icon className="sm" />
+      <span className={`${quoted ? '' : 'tech '}what ellipsis`}>{what}</span>
+      <span className="note ellipsis">{comment.note}</span>
+    </>
+  );
+  return (
+    <li className="chip comment-chip">
+      {onEdit ? (
+        <button ref={trigger} className="chip-edit" type="button" title={title} aria-label={`Edit comment on ${what}`} aria-haspopup="dialog" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+          {content}
+        </button>
+      ) : (
+        <span className="chip-edit" title={title}>
+          {content}
+        </span>
+      )}
+      {onRemove && (
+        <button className="icon-btn sm" type="button" aria-label={`Remove comment on ${what}`} title="Remove" onClick={onRemove}>
+          <X className="sm" />
+        </button>
+      )}
+      {editing && onEdit && (
+        <CommentNoteForm
+          anchor={trigger}
+          label={`Edit comment on ${what}`}
+          quote={quoted ? comment.quote : what}
+          initial={comment.note}
+          save="Save"
+          onClose={() => setEditing(false)}
+          onSave={(note) => {
+            setEditing(false);
+            onEdit(note);
+            trigger.current?.focus();
+          }}
+        />
+      )}
+    </li>
+  );
+}
+
+/**
+ * The note on a comment, in a popover beside `anchor`, what it is on quoted
+ * at its top: to add one, or to edit it. Ctrl+Enter saves it.
+ */
+export function CommentNoteForm({
+  anchor,
+  label,
+  quote,
+  initial = '',
+  save = 'Add comment',
+  onSave,
+  onClose,
+}: {
+  anchor: RefObject<HTMLElement | null>;
+  label: string;
+  /** What the comment is on: the passage of the conversation, or the range of the diff. */
+  quote: string;
+  initial?: string;
+  /** The save button's label. */
+  save?: string;
+  onSave: (note: string) => void;
+  onClose: () => void;
+}) {
+  const [note, setNote] = useState(initial);
+  const done = () => note.trim() && onSave(note.trim());
+  return (
+    <Popover anchor={anchor} role="dialog" label={label} className="comment-note" onClose={onClose}>
+      <blockquote className="muted ellipsis" title={quote}>
+        {quoteSummary(quote)}
+      </blockquote>
+      <textarea
+        data-autofocus
+        aria-label="Comment"
+        rows={3}
+        placeholder="Note for the agent…"
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            done();
+          }
+        }}
+      />
+      <div className="row">
+        <span className="grow" />
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="primary" type="button" disabled={!note.trim()} onClick={done}>
+          {save}
+        </button>
+      </div>
+    </Popover>
+  );
 }
 
 /** How long a quote's chip lets it get. */

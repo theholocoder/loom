@@ -2,8 +2,9 @@
 // what isn't committed yet, as a file tree (above the diffs in a narrow
 // Panel, beside them in a wide one) and unified per-file diffs loaded as they
 // are expanded or scrolled to, each line or range of which can be commented
-// on. It follows the working copy as it changes, whoever changes it.
-import { ArrowRightToLine, ChevronDown, ChevronRight, CircleHelp, Columns2, Folder, GitBranch, ListTree, RefreshCw, Rows2, SquarePen, WrapText, type LucideIcon } from 'lucide-react';
+// on: a comment shows as a note on its lines until it is sent. It follows the
+// working copy as it changes, whoever changes it.
+import { ArrowRightToLine, ChevronDown, ChevronRight, CircleHelp, Columns2, Folder, GitBranch, ListTree, MessageSquareCode, RefreshCw, Rows2, SquarePen, WrapText, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, DIFF_SCOPES, diffCommentRange, type DiffBaseSource, type DiffComment, type DiffCounts, type DiffFile, type DiffScope, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
@@ -29,18 +30,26 @@ const NOTHING_IN: Record<DiffScope, (base: string) => string> = {
   uncommitted: () => 'Nothing changed since the last commit.',
 };
 
+/** The comments on the diff waiting to go with the next message, and what adds and removes them. */
+export interface DiffComments {
+  /** Each with its place among all the comments going with the message, and the range it was picked as. */
+  pending: Array<{ index: number; comment: DiffComment; range: LineRange }>;
+  add(comment: DiffComment, range: LineRange): void;
+  remove(index: number): void;
+}
+
 /**
  * The Session's changes, worked out when the Panel is shown: on first show,
  * on each show after, at each turn end while shown, whenever the working copy
  * changes while shown, and on Refresh.
  */
-export function ChangesView({ session, onComment }: { session: Session; onComment?: (comment: DiffComment) => void }) {
-  return <SessionDiff key={session.id} session={session} onComment={onComment} />;
+export function ChangesView({ session, comments }: { session: Session; comments?: DiffComments }) {
+  return <SessionDiff key={session.id} session={session} comments={comments} />;
 }
 
 type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; summary: DiffSummary };
 
-function SessionDiff({ session, onComment }: { session: Session; onComment?: (comment: DiffComment) => void }) {
+function SessionDiff({ session, comments }: { session: Session; comments?: DiffComments }) {
   const api = useApi();
   const settings = useTopic('settings');
   const [view, changeView] = useDiffView(settings?.diffView);
@@ -112,7 +121,7 @@ function SessionDiff({ session, onComment }: { session: Session; onComment?: (co
           session={session}
           files={loaded.summary.files}
           readOnly={readOnly}
-          onComment={readOnly ? undefined : onComment}
+          comments={readOnly ? undefined : comments}
           scope={scope}
           wide={wide}
           patterns={settings?.diffCollapsedPatterns ?? []}
@@ -221,7 +230,7 @@ function DiffFiles(props: {
   session: Session;
   files: DiffFile[];
   readOnly: boolean;
-  onComment: ((comment: DiffComment) => void) | undefined;
+  comments: DiffComments | undefined;
   scope: DiffScope;
   wide: boolean;
   patterns: string[];
@@ -398,7 +407,7 @@ function FileSection({
   file,
   hidden,
   readOnly,
-  onComment,
+  comments,
   scope,
   expanded,
   onToggle,
@@ -411,7 +420,7 @@ function FileSection({
   hidden: boolean;
   readOnly: boolean;
   /** Absent when the diff can't be commented on. */
-  onComment: ((comment: DiffComment) => void) | undefined;
+  comments: DiffComments | undefined;
   scope: DiffScope;
   expanded: boolean;
   onToggle: () => void;
@@ -444,7 +453,7 @@ function FileSection({
     // `file` is compared by what identifies its diff.
   }, [api, session.id, file.path, file.oldPath, file.status, file.added, file.removed, file.change, scope, expanded, visible, version]);
 
-  const commenting = useCommenting(file.path, text.state === 'done' ? text.text : undefined, onComment);
+  const commenting = useCommenting(file.path, text.state === 'done' ? text.text : undefined, comments);
 
   const openInEditor = () => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error));
   return (
@@ -485,32 +494,40 @@ function FileSection({
 
 /**
  * Commenting on the file at `path`, whose diff is `patch`, while it can be:
- * the comment being written, and its form. A diff loaded again keeps the
- * comment being written while it still holds the same lines there.
+ * the comment being written and its form, and the comments added, as notes
+ * under their last line while the diff still holds the lines they quote. A
+ * diff loaded again keeps the comment being written while it still holds the
+ * same lines there.
  */
-function useCommenting(path: string, patch: string | undefined, onComment: ((comment: DiffComment) => void) | undefined): Commenting | undefined {
+function useCommenting(path: string, patch: string | undefined, comments: DiffComments | undefined): Commenting | undefined {
   /** The comment being written: what its range quotes, and its range as picked. */
   const [draft, setDraft] = useState<{ quote: Quote; range: LineRange }>();
   useEffect(() => {
     setDraft((was) => {
       if (!was || patch === undefined) return undefined;
       const quote = quoteRange(path, patch, was.range);
-      return quote && quote.lines.join('\n') === was.quote.lines.join('\n') ? { quote, range: was.range } : undefined;
+      return quote && sameLines(quote, was.quote) ? { quote, range: was.range } : undefined;
     });
   }, [patch]);
-  if (!onComment || patch === undefined) return undefined;
+  if (!comments || patch === undefined) return undefined;
+  const notes = comments.pending.flatMap(({ index, comment, range }) => {
+    if (comment.path !== path) return [];
+    const quote = quoteRange(path, patch, range);
+    return quote && sameLines(quote, comment) ? [{ key: String(index), at: quote.last, note: <CommentNote comment={comment} onRemove={() => comments.remove(index)} /> }] : [];
+  });
   const onStartComment = (range: LineRange) => {
     const quote = quoteRange(path, patch, range);
     if (quote) setDraft({ quote, range });
   };
-  if (!draft) return { onStartComment };
+  if (!draft) return { onStartComment, notes };
   const add = (note: string) => {
     const { last: _, ...quoted } = draft.quote;
-    onComment({ ...quoted, note });
+    comments.add({ ...quoted, note }, draft.range);
     setDraft(undefined);
   };
   return {
     onStartComment,
+    notes,
     draft: {
       range: draft.range,
       at: draft.quote.last,
@@ -519,10 +536,39 @@ function useCommenting(path: string, patch: string | undefined, onComment: ((com
   };
 }
 
-/** The note on a line or range of a diff, under its last line: added as a chip in the composer. */
+/** Whether two quotes of a diff hold the same lines. */
+function sameLines(a: Pick<DiffComment, 'lines'>, b: Pick<DiffComment, 'lines'>): boolean {
+  return a.lines.join('\n') === b.lines.join('\n');
+}
+
+/** A comment added, under its last line until it is sent: its note, and a way to remove it. */
+function CommentNote({ comment, onRemove }: { comment: DiffComment; onRemove: () => void }) {
+  const range = diffCommentRange(comment);
+  return (
+    <div className="diff-comment note" role="note" aria-label={`Your comment on ${range}`}>
+      <div className="row">
+        <MessageSquareCode className="sm" />
+        <b>Your comment</b>
+        <span className="muted ellipsis grow">goes with your next message</span>
+        <button className="icon-btn xs" type="button" title="Remove" aria-label={`Remove comment on ${range}`} onClick={onRemove}>
+          <X />
+        </button>
+      </div>
+      <div className="note-text">{comment.note}</div>
+    </div>
+  );
+}
+
+/**
+ * The note on a line or range of a diff, under its last line: added as a
+ * chip in the composer. The focus goes into it as it opens: once the diff
+ * has drawn it, which may be a frame or two after it is made.
+ */
 function CommentForm({ quote, onAdd, onCancel }: { quote: Quote; onAdd: (note: string) => void; onCancel: () => void }) {
   const [note, setNote] = useState('');
   const range = diffCommentRange(quote);
+  const field = useRef<HTMLTextAreaElement>(null);
+  useFocusOnceShown(field);
   const add = () => note.trim() && onAdd(note.trim());
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
@@ -535,7 +581,7 @@ function CommentForm({ quote, onAdd, onCancel }: { quote: Quote; onAdd: (note: s
   };
   return (
     <div className="diff-comment" role="group" aria-label={`Comment on ${range}`}>
-      <textarea aria-label={`Comment on ${range}`} rows={3} placeholder="Note for the agent…" autoFocus value={note} onChange={(event) => setNote(event.target.value)} onKeyDown={onKeyDown} />
+      <textarea ref={field} aria-label={`Comment on ${range}`} rows={3} placeholder="Note for the agent…" value={note} onChange={(event) => setNote(event.target.value)} onKeyDown={onKeyDown} />
       <div className="row">
         <span className="tech muted ellipsis grow">{range}</span>
         <button type="button" onClick={onCancel}>
@@ -547,6 +593,30 @@ function CommentForm({ quote, onAdd, onCancel }: { quote: Quote; onAdd: (note: s
       </div>
     </div>
   );
+}
+
+/** How many frames a field waits to be shown before it gives up on taking the focus. */
+const FOCUS_FRAMES = 10;
+
+/**
+ * Puts the focus in `field` as it mounts. The diff library shows what it is
+ * given only once it has made a place for it in its shadow DOM, after React
+ * mounts it: until then the field can't take the focus, so it is tried again
+ * each frame until it does.
+ */
+function useFocusOnceShown(field: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    let frame = 0;
+    let tries = 0;
+    const attempt = () => {
+      const el = field.current;
+      if (!el) return;
+      el.focus();
+      if (document.activeElement !== el && ++tries < FOCUS_FRAMES) frame = requestAnimationFrame(attempt);
+    };
+    attempt();
+    return () => cancelAnimationFrame(frame);
+  }, [field]);
 }
 
 /** Whether a patch changes any lines: one that only renames a file or changes its mode doesn't. */
