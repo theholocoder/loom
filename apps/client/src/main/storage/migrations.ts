@@ -149,4 +149,7 @@ export const migrations: Migration[] = [
     await db.schema.alterTable('projects').addColumn('removed_at', 'integer').execute();
     await db.schema.alterTable('projects').addColumn('identity', 'text').execute();
   },
+  async (db) => {
+    await db.schema.alterTable('sessions').addColumn('snoozed_until', 'integer').execute();
+  },
 ];

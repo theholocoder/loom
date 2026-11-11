@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type DiffComment, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
@@ -20,6 +20,8 @@ import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 import { useAgentCommands, useCheckoutModels } from './checkout';
+import { isSnoozed, wakeTime } from './Snooze';
+import { useNow } from './now';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
 import { AttachmentList, Composer } from './Composer';
 
@@ -497,6 +499,7 @@ export function SessionView({
                 {status.label}
               </span>
               {session.worktreeMissing && <WorktreeMissing />}
+              {isSnoozed(session) && <Snoozed session={session} onError={setError} />}
             </div>
           </div>
           <button
@@ -788,5 +791,32 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry?: () => void
         </div>
       </div>
     </div>
+  );
+}
+
+/** A Snoozed Session's mark in its header: until when, and Wake, to bring it back now. */
+function Snoozed({ session, onError }: { session: Session; onError: (message: string | undefined) => void }) {
+  const api = useApi();
+  const now = useNow();
+  const until = session.snoozedUntil!;
+  return (
+    <>
+      <span className="chip" role="status" aria-label="Snoozed" title={new Date(until).toLocaleString()}>
+        <AlarmClock className="sm" />
+        Snoozed until {wakeTime(until, now)}
+      </span>
+      <button
+        className="icon-btn sm"
+        type="button"
+        title="Wake"
+        aria-label="Wake"
+        onClick={() => {
+          onError(undefined);
+          api.invoke('sessions.snooze', { id: session.id, until: null }).catch((e: unknown) => onError((e as Error).message));
+        }}
+      >
+        <AlarmClockOff />
+      </button>
+    </>
   );
 }

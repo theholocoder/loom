@@ -502,6 +502,7 @@ describe('archiving a worktree Session', () => {
     main.api.subscribe('transcript', () => {}, { sessionId: id })();
     await waitFor(main.api, 'sessions', session(id, (s) => s.worktreeMissing === true));
     await expect(main.api.invoke('sessions.send', { id, prompt: 'More' })).rejects.toThrow("This Session's worktree is missing; it can only be archived.");
+    await expect(main.api.invoke('sessions.snooze', { id, until: main.clock.now() + 3_600_000 })).rejects.toThrow("This Session's worktree is missing; it can only be archived.");
 
     expect(await main.api.invoke('sessions.archive', { id })).toEqual({ archived: true });
     const archived = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!;

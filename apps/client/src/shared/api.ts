@@ -476,6 +476,12 @@ export interface Session {
    * Waiting, cleared when the user opens or replies to it.
    */
   unread: boolean;
+  /**
+   * Clock time a Snoozed Session comes back to the Inbox, unread; absent
+   * when it isn't Snoozed. Only a Waiting Session is Snoozed: any change of
+   * status ends it.
+   */
+  snoozedUntil?: number;
   /** Clock time the Session was started. */
   createdAt: number;
   /** Clock time its status last changed. */
@@ -1375,6 +1381,13 @@ export interface Commands {
   'terminals.close': { params: { id: number }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
+  /**
+   * Snoozes a Waiting Session until `until`, a clock time to come: it leaves
+   * the Inbox and comes back unread then, or as soon as its status changes.
+   * `null` ends the snooze now. Rejects a Session that isn't Waiting or
+   * whose worktree is missing, and a time that isn't to come.
+   */
+  'sessions.snooze': { params: { id: number; until: number | null }; result: void };
   /** The usage dashboard over the last `days` days (see UsageDashboard). Rejects a range not in USAGE_RANGES. */
   'usage.dashboard': { params: { days: UsageRange }; result: UsageDashboard };
   /**

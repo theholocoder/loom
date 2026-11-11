@@ -142,6 +142,7 @@ export class FakeMain implements LoomApi {
       'sessions.setAutoPrompt': () => {},
       'sessions.setBabysitting': () => {},
       'sessions.setUnread': () => {},
+      'sessions.snooze': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
       'terminals.open': () => {
