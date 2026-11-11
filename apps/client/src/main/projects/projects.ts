@@ -118,6 +118,8 @@ export class Projects {
 
   /** The removed Project a link of the checkout containing `path` would restore, if any. */
   async restorable({ path, environmentId = 'native' }: { path: string; environmentId?: string }): Promise<RestorableProject | null> {
+    // Nothing removed, nothing to ask git.
+    if (this.removed.size === 0) return null;
     const environment = this.environment(environmentId);
     return this.restorableAt(environment, environmentId, await topLevelOf(environment, path));
   }
