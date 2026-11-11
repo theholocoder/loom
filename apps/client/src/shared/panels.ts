@@ -1,6 +1,6 @@
 // The Panel model (ADR 0009): Panels sit as tabs in two Panel areas, the Side
 // area and the Dock. What main keeps of them is split by who it belongs to:
-// the Layout (each Panel kind's size) is app-wide, in settings; which Panels
+// the Layout (the area each Panel kind sits in, and its size) is app-wide, in settings; which Panels
 // are open, the one shown and whether each area is shown belong to each
 // Session, in the database.
 
@@ -58,31 +58,52 @@ export function clampPanelSize(kind: PanelKind, dimension: PanelDimension, size:
   return Math.min(PANEL_MAX_SIZE[dimension], Math.max(PANEL_SPECS[kind][dimension].min, Math.round(size)));
 }
 
+/** The Panel area that isn't `area`: where a Panel in it is moved to. */
+export function otherArea(area: PanelArea): PanelArea {
+  return area === 'side' ? 'dock' : 'side';
+}
+
+/** Whether `value` names one of the two Panel areas. */
+export function isPanelArea(value: unknown): value is PanelArea {
+  return typeof value === 'string' && (PANEL_AREAS as readonly string[]).includes(value);
+}
+
 /** Whether `value` names a Panel kind Loom has. */
 export function isPanelKind(value: unknown): value is PanelKind {
   return typeof value === 'string' && (PANEL_KINDS as readonly string[]).includes(value);
 }
 
-/** The Layout: each Panel kind's size, as the user left it, the same for every Session. */
+/** The Layout: the area each Panel kind sits in and its size, as the user left them, the same for every Session. */
 export interface LayoutSettings {
+  /** The area each kind sits in, for those the user moved; the others sit in the one their kind opens in. */
+  area: Partial<Record<PanelKind, PanelArea>>;
   /** Each kind's width in the Side area, for those the user resized. */
   width: Partial<Record<PanelKind, number>>;
   /** Each kind's height in the Dock, for those the user resized. */
   height: Partial<Record<PanelKind, number>>;
 }
 
-/** The Layout until the user resizes a Panel: each kind at its preferred size. */
-export const DEFAULT_LAYOUT: LayoutSettings = { width: {}, height: {} };
+/** The Layout until the user moves or resizes a Panel: each kind in the area it opens in, at its preferred size. */
+export const DEFAULT_LAYOUT: LayoutSettings = { area: {}, width: {}, height: {} };
+
+/** The area Panels of `kind` sit in, in the Layout: where the user moved them, or the one the kind opens in. */
+export function panelArea(layout: LayoutSettings, kind: PanelKind): PanelArea {
+  return layout.area[kind] ?? PANEL_SPECS[kind].area;
+}
 
 /** The size of a Panel of `kind` in the Layout: the user's, or the kind's preferred one. */
 export function panelSize(layout: LayoutSettings, kind: PanelKind, dimension: PanelDimension): number {
   return layout[dimension][kind] ?? PANEL_SPECS[kind][dimension].preferred;
 }
 
-/** The sizes of `stored` Loom still takes: a number for a kind it has, kept within bounds. */
+/** What of `stored` Loom still takes: an area it has for a kind it has, and a number for a kind's size, kept within bounds. */
 export function readLayout(stored: unknown): LayoutSettings {
-  const layout: LayoutSettings = { width: {}, height: {} };
+  const layout: LayoutSettings = { area: {}, width: {}, height: {} };
   if (typeof stored !== 'object' || stored === null) return layout;
+  const areas = (stored as Record<string, unknown>).area;
+  if (typeof areas === 'object' && areas !== null) {
+    for (const [kind, area] of Object.entries(areas)) if (isPanelKind(kind) && isPanelArea(area)) layout.area[kind] = area;
+  }
   for (const dimension of PANEL_DIMENSIONS) {
     const sizes = (stored as Record<string, unknown>)[dimension];
     if (typeof sizes !== 'object' || sizes === null) continue;
@@ -172,4 +193,36 @@ export function withoutTerminals(panels: SessionPanels): SessionPanels {
     areas[area] = { panels: kept, shown: state.shown && kept.includes(state.shown) ? state.shown : (kept[0] ?? null), open: state.open && !emptied };
   }
   return areas;
+}
+
+/** The area `panel` is open in, if it is. */
+export function areaOf(panels: SessionPanels, panel: PanelId): PanelArea | undefined {
+  return PANEL_AREAS.find((area) => panels[area].panels.includes(panel));
+}
+
+/**
+ * `panels` with each Panel in the area its kind sits in, in `layout`: one in
+ * another area goes to the end of its own, its old area showing its
+ * neighbour in its place, or hidden when left with none. One that was shown
+ * in a shown area is shown in its new one, and the new one is shown.
+ */
+export function inLayout(panels: SessionPanels, layout: LayoutSettings): SessionPanels {
+  let next = panels;
+  for (const from of PANEL_AREAS) {
+    for (const panel of panels[from].panels) {
+      const to = panelArea(layout, kindOf(panel));
+      if (to === from) continue;
+      const source = next[from];
+      const shown = source.open && source.shown === panel;
+      const at = source.panels.indexOf(panel);
+      const left = source.panels.filter((p) => p !== panel);
+      const target = next[to];
+      next = {
+        ...next,
+        [from]: { panels: left, shown: source.shown === panel ? (left[Math.min(at, left.length - 1)] ?? null) : source.shown, open: source.open && left.length > 0 },
+        [to]: { panels: [...target.panels, panel], shown: shown ? panel : (target.shown ?? panel), open: target.open || shown },
+      };
+    }
+  }
+  return next;
 }

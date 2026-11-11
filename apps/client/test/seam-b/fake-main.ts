@@ -125,6 +125,12 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setPanelArea': ({ kind, area }) => {
+        const current = this.value('settings');
+        const settings = { ...current, layout: { ...current.layout, area: { ...current.layout.area, [kind]: area } } };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setInbox': ({ width, open }) => {
         const current = this.value('settings');
         const settings = { ...current, inbox: { width: width === undefined ? current.inbox.width : clampInboxWidth(width), open: open ?? current.inbox.open } };

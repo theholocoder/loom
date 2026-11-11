@@ -1,6 +1,6 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
 import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, type ApprovalCategory, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues } from '../shared/api';
-import { clampPanelSize, isPanelDimension, isPanelKind, readLayout, type PanelDimension, type PanelKind } from '../shared/panels';
+import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, readLayout, type PanelArea, type PanelDimension, type PanelKind } from '../shared/panels';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
@@ -32,7 +32,7 @@ export class Settings {
       for (const [category, setting] of Object.entries(stored.approvals)) if (isApprovalCategory(category) && isApprovalSetting(setting)) approvals[category] = setting;
       current.approvals = approvals;
     }
-    // Each Panel kind's size stands alone: one Loom no longer has is dropped, one never set takes its preferred size.
+    // Each Panel kind's area and size stand alone: one Loom no longer has is dropped, one never set takes its kind's own.
     current.layout = readLayout(stored.layout);
     current.inbox = readInbox(stored.inbox);
     // Each part of the Changes view's layout stands alone: one Loom no longer takes falls back to its default.
@@ -110,6 +110,14 @@ export class Settings {
     if (typeof size !== 'number' || !Number.isFinite(size)) throw new Error("A Panel's size must be a number of pixels.");
     const { layout } = this.current;
     return this.set('layout', { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } });
+  }
+
+  /** Sets the area a Panel kind sits in, in the Layout: the Side area or the Dock. */
+  async setPanelArea(kind: PanelKind, area: PanelArea): Promise<SettingsValues> {
+    if (!isPanelKind(kind)) throw new Error(`"${String(kind)}" is not a Panel.`);
+    if (!isPanelArea(area)) throw new Error(`A Panel sits in the Side area or the Dock, not "${String(area)}".`);
+    const { layout } = this.current;
+    return this.set('layout', { ...layout, area: { ...layout.area, [kind]: area } });
   }
 
   /** Sets the Inbox's width, kept within its least and most, whether it is shown, or both. */
