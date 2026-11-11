@@ -8,6 +8,7 @@ import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
 import { Popover } from './Popover';
+import { baseName, copyable } from './ContextMenu';
 
 /** A diff stat's file count: "1 file", "4 files". */
 function filesText(stat: DiffStat): string {
@@ -94,11 +95,13 @@ export function SessionInfo({
           <span className="chip">{session.workingCopy.kind}</span>
         </Fact>
         <Fact label="Path" actions={<CopyAction text={session.workingCopy.path} label="Copy path" />}>
-          <span className="tech path">{session.workingCopy.path}</span>
+          <span className="tech path" {...copyable(session.workingCopy.kind === 'worktree' ? 'worktree path' : 'path', session.workingCopy.path)}>
+            {session.workingCopy.kind === 'worktree' ? <span {...copyable('worktree name', baseName(session.workingCopy.path))}>{session.workingCopy.path}</span> : session.workingCopy.path}
+          </span>
         </Fact>
       </Group>
       <Group label="Git">
-        <Fact label="Branch">{session.branch ? <span className="tech">{session.branch}</span> : <span className="muted">Not known yet</span>}</Fact>
+        <Fact label="Branch">{session.branch ? <span className="tech" {...copyable('branch name', session.branch)}>{session.branch}</span> : <span className="muted">Not known yet</span>}</Fact>
         <Fact label="Issue">
           {session.issue ? (
             <button type="button" className="link tech" title={`Open issue #${session.issue.number}`} onClick={() => open(session.issue!.url)}>

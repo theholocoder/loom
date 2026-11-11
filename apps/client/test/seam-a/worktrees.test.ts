@@ -193,13 +193,13 @@ describe('the branches a worktree Session can start from', () => {
     });
   });
 
-  it("leaves out the worktrees of Sessions that aren't archived", async () => {
+  it("lists the worktrees of Sessions that aren't archived, to share", async () => {
     const { machine, checkout } = machineWithClone();
     const { main, project } = await withProject(machine, checkout);
     const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix it' });
     await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
 
-    expect((await main.api.invoke('projects.branches', { id: project.id })).worktrees).toEqual([]);
+    expect((await main.api.invoke('projects.branches', { id: project.id })).worktrees).toEqual([{ path: created.workingCopy.path, branch: 'loom/fix-it' }]);
   });
 
   it('leaves out the main checkout for a Project linked from one of its worktrees', async () => {
@@ -338,16 +338,54 @@ describe('a worktree Session in an existing worktree', () => {
 });
 
 describe('a worktree Session in a worktree another Session works in', () => {
-  it("is refused while that Session isn't archived", async () => {
+  /** Two Sessions in one worktree: the first made it, the second joined it. */
+  async function sharing() {
     const { machine, checkout } = machineWithClone();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['ok'] }, { chunks: ['ok'] }, { chunks: ['ok'] }] } });
     const { main, project } = await withProject(machine, checkout);
     const first = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix it' });
     await waitFor(main.api, 'sessions', session(first.id, (s) => s.status === 'waiting'));
+    const path = first.workingCopy.path;
+    expect((await main.api.invoke('projects.branches', { id: project.id })).worktrees.map((w) => w.path)).toContain(path);
+    const second = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { worktree: path }, prompt: 'Also this' });
+    await waitFor(main.api, 'sessions', session(second.id, (s) => s.status === 'waiting'));
+    return { machine, checkout, main, first, second, path };
+  }
 
-    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { worktree: first.workingCopy.path }, prompt: 'Go' })).rejects.toThrow(
-      `The Session "Fix it" works in ${first.workingCopy.path}`,
-    );
-    expect((await main.api.invoke('sessions.list')).map((s) => s.id)).toEqual([first.id]);
+  it('works in it alongside, on its branch', async () => {
+    const { first, second, path } = await sharing();
+    expect(second).toMatchObject({ workingCopy: { kind: 'worktree', path }, branch: first.branch });
+  });
+
+  it('keeps the worktree, unsaved work and all, while another Session works in it; the last one archived removes it', async () => {
+    const { main, first, second, path } = await sharing();
+    writeFileSync(join(path, 'notes.txt'), 'half done\n');
+
+    expect(await main.api.invoke('sessions.archive', { id: first.id })).toEqual({ archived: true });
+    expect(readFileSync(join(path, 'notes.txt'), 'utf8')).toBe('half done\n');
+
+    expect(await main.api.invoke('sessions.archive', { id: second.id })).toMatchObject({ archived: false, unsavedWork: { uncommitted: true } });
+    expect(await main.api.invoke('sessions.archive', { id: second.id, discard: true })).toEqual({ archived: true });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('keeps the worktree when one of them is deleted', async () => {
+    const { main, first, second, path } = await sharing();
+
+    expect(await main.api.invoke('sessions.delete', { id: second.id })).toEqual({ deleted: true });
+    expect(existsSync(path)).toBe(true);
+    expect(await main.api.invoke('sessions.list')).toMatchObject([{ id: first.id, status: 'waiting' }]);
+  });
+
+  it('reopens an archived one in the worktree the other still works in', async () => {
+    const { main, first, second, path } = await sharing();
+    expect(await main.api.invoke('sessions.archive', { id: first.id })).toEqual({ archived: true });
+
+    await main.api.invoke('sessions.send', { id: first.id, prompt: 'Back to it' });
+
+    await waitFor(main.api, 'sessions', session(first.id, (s) => s.status === 'waiting'));
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === second.id)).toMatchObject({ status: 'waiting', workingCopy: { path } });
+    expect(existsSync(path)).toBe(true);
   });
 });
 

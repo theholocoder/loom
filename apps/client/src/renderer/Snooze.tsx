@@ -1,7 +1,7 @@
 // Snoozing a Waiting Session: the menu of times its Inbox row offers, and
 // how a snooze's end is written.
 import { AlarmClock } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { Session } from '../shared/api';
 import { useApi } from './api';
@@ -52,47 +52,51 @@ export function wakeTime(until: number, now: number): string {
  * a snooze failed.
  */
 export function SnoozeButton({ session, onOpenChange, onError }: { session: Session; onOpenChange: (open: boolean) => void; onError: (message: string) => void }) {
-  const api = useApi();
   const trigger = useRef<HTMLButtonElement>(null);
-  const [menu, setMenu] = useState<'presets' | 'custom'>();
-  const show = (next: typeof menu) => {
-    setMenu(next);
-    onOpenChange(next !== undefined);
+  const [open, setOpen] = useState(false);
+  const show = (next: boolean) => {
+    setOpen(next);
+    onOpenChange(next);
   };
-  const snooze = (until: number) => {
-    show(undefined);
-    api.invoke('sessions.snooze', { id: session.id, until }).catch((e: unknown) => onError((e as Error).message));
-  };
-  const now = Date.now();
   return (
     <>
-      <button ref={trigger} className="icon-btn sm" type="button" title="Snooze" aria-label="Snooze" aria-haspopup="menu" aria-expanded={menu !== undefined} onClick={() => show(menu ? undefined : 'presets')}>
+      <button ref={trigger} className="icon-btn sm" type="button" title="Snooze" aria-label="Snooze" aria-haspopup="menu" aria-expanded={open} onClick={() => show(!open)}>
         <AlarmClock />
       </button>
       {/* On the body: a fixed popover inside the row's actions would be placed against them, as they are transformed. */}
-      {menu === 'presets' &&
-        createPortal(
-          <Popover anchor={trigger} role="menu" label="Snooze" onClose={() => show(undefined)}>
-            {snoozePresets(now).map(({ label, until }) => (
-              <button key={label} type="button" role="menuitem" aria-label={label} onClick={() => snooze(until)}>
-                <span className="grow">{label}</span>
-                <span className="muted">{wakeTime(until, now)}</span>
-              </button>
-            ))}
-            <button type="button" role="menuitem" aria-label="Custom…" onClick={() => show('custom')}>
-              Custom…
-            </button>
-          </Popover>,
-          document.body,
-        )}
-      {menu === 'custom' &&
-        createPortal(
-          <Popover anchor={trigger} role="dialog" label="Snooze" className="snooze-custom" onClose={() => show(undefined)}>
-            <CustomSnooze now={now} onSnooze={snooze} />
-          </Popover>,
-          document.body,
-        )}
+      {open && createPortal(<SnoozeMenu anchor={trigger} session={session} onClose={() => show(false)} onError={onError} />, document.body)}
     </>
+  );
+}
+
+/**
+ * The menu of snooze times beside `anchor`, then the custom one's form if
+ * picked; `onClose` once snoozed or let be, `onError` with why a snooze failed.
+ */
+export function SnoozeMenu({ anchor, session, onClose, onError }: { anchor: RefObject<HTMLElement | null>; session: Session; onClose: () => void; onError: (message: string) => void }) {
+  const api = useApi();
+  const [custom, setCustom] = useState(false);
+  const snooze = (until: number) => {
+    onClose();
+    api.invoke('sessions.snooze', { id: session.id, until }).catch((e: unknown) => onError((e as Error).message));
+  };
+  const now = Date.now();
+  return custom ? (
+    <Popover anchor={anchor} role="dialog" label="Snooze" className="snooze-custom" onClose={onClose}>
+      <CustomSnooze now={now} onSnooze={snooze} />
+    </Popover>
+  ) : (
+    <Popover anchor={anchor} role="menu" label="Snooze" onClose={onClose}>
+      {snoozePresets(now).map(({ label, until }) => (
+        <button key={label} type="button" role="menuitem" aria-label={label} onClick={() => snooze(until)}>
+          <span className="grow">{label}</span>
+          <span className="muted">{wakeTime(until, now)}</span>
+        </button>
+      ))}
+      <button type="button" role="menuitem" aria-label="Custom…" onClick={() => setCustom(true)}>
+        Custom…
+      </button>
+    </Popover>
   );
 }
 

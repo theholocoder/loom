@@ -1,8 +1,8 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type DiffComment, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
+import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type MessageComment, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -11,7 +11,7 @@ import { ChangesView } from './Changes';
 import { SessionInfo } from './SessionInfo';
 import { Sidebar, type SidebarControl } from './Sidebar';
 import { Dock, type DockState } from './Dock';
-import { Select } from './Popover';
+import { Popover, Select } from './Popover';
 import { Markdown } from './Markdown';
 import { ProjectRemoved, useArchive, useRemovedProject, WorktreeMissing } from './Archive';
 import { useDelete } from './Delete';
@@ -23,7 +23,9 @@ import { useAgentCommands, useCheckoutModels } from './checkout';
 import { isSnoozed, wakeTime } from './Snooze';
 import { useNow } from './now';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
-import { AttachmentList, Composer } from './Composer';
+import { AttachmentList, Composer, quoteSummary } from './Composer';
+import { useSessionMenu } from './SessionMenu';
+import { addToContextMenu, copyable, selectedText } from './ContextMenu';
 
 /** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
 const WAITING: Record<Exclude<WaitingReason, 'unsaved-work'>, { label: string; icon: LucideIcon }> = {
@@ -65,7 +67,10 @@ type WorkingCopyChoice = 'worktree' | 'existing' | 'checkout';
  * What the Existing worktree picker picked: a worktree to work in as it is,
  * or a branch no worktree has, which gets a new worktree of its own.
  */
-type ExistingPick = { worktree: ExistingWorktree } | { branch: ExistingBranch };
+export type ExistingPick = { worktree: ExistingWorktree } | { branch: ExistingBranch };
+
+/** The working copy a New Session starts on, when it is started from another Session: its checkout, or its worktree or branch. */
+export type NewSessionWorkingCopy = { workingCopy: 'checkout' } | { workingCopy: 'existing'; existing: ExistingPick };
 
 /** How a branch reads: `origin/<name>` for one on `origin`. */
 function branchLabel(branch: ExistingBranch): string {
@@ -121,16 +126,26 @@ function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: Ex
 }
 
 /** Starting a Session: which Project, which working copy, and the first prompt. */
-/** `pickIssue` opens the issue picker at once, for starting from an issue. */
-export function NewSession({ initialProjectId, pickIssue, onStarted }: { initialProjectId?: number; pickIssue?: boolean; onStarted: (session: Session) => void }) {
+/** `pickIssue` opens the issue picker at once, for starting from an issue; `initialWorkingCopy` picks the working copy. */
+export function NewSession({
+  initialProjectId,
+  pickIssue,
+  initialWorkingCopy,
+  onStarted,
+}: {
+  initialProjectId?: number;
+  pickIssue?: boolean;
+  initialWorkingCopy?: NewSessionWorkingCopy;
+  onStarted: (session: Session) => void;
+}) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
   const [projectId, setProjectId] = useState(initialProjectId);
   const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
-  const [workingCopy, setWorkingCopy] = useState<WorkingCopyChoice>('worktree');
+  const [workingCopy, setWorkingCopy] = useState<WorkingCopyChoice>(initialWorkingCopy?.workingCopy ?? 'worktree');
   // The `origin` branch picked to branch from; until then, origin's default.
   const [pickedBase, setPickedBase] = useState<string>();
-  const [existing, setExisting] = useState<ExistingPick>();
+  const [existing, setExisting] = useState<ExistingPick | undefined>(initialWorkingCopy?.workingCopy === 'existing' ? initialWorkingCopy.existing : undefined);
   const { listed, refresh } = useBranches(workingCopy === 'checkout' ? undefined : chosen?.id);
   const defaultBranch = listed && 'value' in listed ? listed.value.defaultBranch : undefined;
   const base = pickedBase ?? defaultBranch;
@@ -359,6 +374,7 @@ export function SessionView({
   }, [infoShown]);
   const archiver = useArchive();
   const deleter = useDelete();
+  const menu = useSessionMenu(session, setError);
   const status = statusOf(session);
   const working = session.status === 'working';
   // The conversation lives only while the Client runs; the error is stored.
@@ -423,7 +439,7 @@ export function SessionView({
   }, [session.id, session.updatedAt]);
 
   /** The comments on the diff to go with the next message, as chips in the composer. */
-  const [comments, setComments] = useState<DiffComment[]>([]);
+  const [comments, setComments] = useState<MessageComment[]>([]);
   const send = async (prompt: string, attachments: NewAttachment[]) => {
     setError(undefined);
     try {
@@ -465,6 +481,34 @@ export function SessionView({
   // Only a Session that can still work has terminals: not archived, its worktree there.
   const dockable = dock && session.status !== 'archived' && !session.worktreeMissing ? dock : undefined;
 
+  // Comments can go with the next message: not while the composer takes none, nor with an answer to a question.
+  const composerDisabled = readOnly || (asked && !freeAnswer) || !!session.worktreeMissing;
+  /** Comment…, on a right-click of text selected in the conversation: the passage and a note go to the composer as a chip. */
+  const commentOnSelection = (event: ReactMouseEvent<HTMLElement>) => {
+    const quote = selectedText().trim();
+    const selection = window.getSelection();
+    const inside = selection && selection.rangeCount > 0 && event.currentTarget.contains(selection.getRangeAt(0).commonAncestorContainer);
+    if (!quote || !inside) return;
+    addToContextMenu(event, [
+      {
+        label: 'Comment…',
+        icon: MessageSquareQuote,
+        disabled: composerDisabled || !!freeAnswer,
+        open: (anchor, close) => (
+          <ConversationCommentForm
+            anchor={anchor}
+            quote={quote}
+            onClose={close}
+            onAdd={(note) => {
+              close();
+              setComments((list) => [...list, { quote, note }]);
+            }}
+          />
+        ),
+      },
+    ]);
+  };
+
   const archive = () => {
     setError(undefined);
     archiver.archive(session).catch((e: unknown) => setError((e as Error).message));
@@ -473,7 +517,7 @@ export function SessionView({
   return (
     <>
       <main className="main" aria-label="Session">
-        <div className="main-head" role="region" aria-label="Session header">
+        <div className="main-head" role="region" aria-label="Session header" onContextMenu={menu.onContextMenu}>
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="crumb">
               {project && <span>{project.name}</span>}
@@ -486,7 +530,7 @@ export function SessionView({
               {session.branch && (
                 <>
                   <GitBranch className="sm" />
-                  <span className="tech ellipsis" title="Branch">
+                  <span className="tech ellipsis" title="Branch" {...copyable('branch name', session.branch)}>
                     {session.branch}
                   </span>
                 </>
@@ -528,8 +572,9 @@ export function SessionView({
           )}
           {archiver.dialog}
           {deleter.dialog}
+          {menu.dialogs}
         </div>
-        <div className="chat" role="log" aria-label="Conversation">
+        <div className="chat" role="log" aria-label="Conversation" onContextMenu={commentOnSelection}>
           {items.map((item) =>
             item.kind === 'user' ? (
               <div key={item.id} className="msg user">
@@ -615,7 +660,7 @@ export function SessionView({
         <Composer
           agent={session.agent}
           placeholder={composerPlaceholder()}
-          disabled={readOnly || (asked && !freeAnswer) || !!session.worktreeMissing}
+          disabled={composerDisabled}
           dock={panel}
           clearKey={stepKey}
           focusRequest={replyRequest}
@@ -676,6 +721,42 @@ export function SessionView({
         </Sidebar>
       )}
     </>
+  );
+}
+
+/** The note on a passage of the conversation, beside `anchor`: added as a chip in the composer. */
+function ConversationCommentForm({ anchor, quote, onAdd, onClose }: { anchor: RefObject<HTMLElement | null>; quote: string; onAdd: (note: string) => void; onClose: () => void }) {
+  const [note, setNote] = useState('');
+  const add = () => note.trim() && onAdd(note.trim());
+  return (
+    <Popover anchor={anchor} role="dialog" label="Comment on the conversation" className="conversation-comment" onClose={onClose}>
+      <blockquote className="muted ellipsis" title={quote}>
+        {quoteSummary(quote)}
+      </blockquote>
+      <textarea
+        data-autofocus
+        aria-label="Comment"
+        rows={3}
+        placeholder="Note for the agent…"
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            add();
+          }
+        }}
+      />
+      <div className="row">
+        <span className="grow" />
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="primary" type="button" disabled={!note.trim()} onClick={add}>
+          Add comment
+        </button>
+      </div>
+    </Popover>
   );
 }
 

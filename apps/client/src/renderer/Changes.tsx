@@ -9,6 +9,7 @@ import { useApi, useTopic } from './api';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
 import { FileDiffView, type Commenting } from './FileDiffView';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
+import { copyable } from './ContextMenu';
 
 /** Files with more changed lines than this start collapsed. */
 export const LARGE_FILE_LINES = 1000;
@@ -237,7 +238,7 @@ function FileTree({ files, searching, hidden, onPick }: { files: DiffFile[]; sea
     nodes.map((node) =>
       node.file ? (
         <li key={node.path}>
-          <button type="button" className="diff-tree-row" style={{ paddingLeft: 8 + depth * 14 }} onClick={() => onPick(node.file!)}>
+          <button type="button" className="diff-tree-row" style={{ paddingLeft: 8 + depth * 14 }} onClick={() => onPick(node.file!)} {...copyable('path', node.file.path)}>
             <span className="name">{node.name}</span>
             <StatusBadge file={node.file} />
             <Counts file={node.file} />
@@ -349,7 +350,9 @@ function FileSection({
       <h4>
         <button type="button" className="diff-file-toggle" aria-expanded={expanded} onClick={onToggle}>
           {expanded ? <ChevronDown /> : <ChevronRight />}
-          <span className="name">{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</span>
+          <span className="name" {...copyable('path', file.path)}>
+            {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+          </span>
         </button>
         <StatusBadge file={file} />
         <Counts file={file} />

@@ -2,9 +2,10 @@
 // files and images attached to the message, comments on the diff going with
 // it, @-mentions of the working copy's files, and `/` for the agent's skills
 // and commands.
-import { ArrowUp, Box, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, Paperclip, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { diffCommentRange, isImage, type AgentCommand, type Attachment, type DiffComment, type NewAttachment, type SkillSource } from '../shared/api';
+import { ArrowUp, Box, ClipboardPaste, Copy, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, MessageSquareQuote, Paperclip, Scissors, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { diffCommentRange, isConversationComment, isImage, type AgentCommand, type Attachment, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
+import { addToContextMenu, copyText } from './ContextMenu';
 import { stepIndex } from './Popover';
 
 /** The most files an @-mention suggests at once. */
@@ -65,8 +66,8 @@ export function Composer({
   loadFiles?: () => Promise<string[]>;
   /** What `/` offers: the agent's skills and commands (see `useAgentCommands`). */
   commands?: AgentCommand[];
-  /** The diff comments that go with what is sent, shown as chips; whoever gives them clears them once sent. */
-  comments?: DiffComment[];
+  /** The comments on the diff or the conversation that go with what is sent, shown as chips; whoever gives them clears them once sent. */
+  comments?: MessageComment[];
   onRemoveComment?: (index: number) => void;
 }) {
   const id = useId();
@@ -162,6 +163,45 @@ export function Composer({
     event.preventDefault();
     attach(event.clipboardData.files);
   };
+  /** Puts `text` in place of the prompt's selection, the caret after it, as typing would. */
+  const replaceSelection = (text: string) => {
+    const box = prompt.current;
+    if (!box) return;
+    box.focus();
+    // As typed: the browser's own undo then takes it back.
+    if (typeof document.execCommand === 'function' && document.execCommand(text ? 'insertText' : 'delete', false, text)) return;
+    const { selectionStart: start, selectionEnd: end } = box;
+    const at = start + text.length;
+    setDraft(draft.slice(0, start) + text + draft.slice(end), at);
+    requestAnimationFrame(() => prompt.current?.setSelectionRange(at, at));
+  };
+  /** Cut, Copy and Paste, on a right-click of the prompt. */
+  const onContextMenu = (event: ReactMouseEvent<HTMLTextAreaElement>) => {
+    const { selectionStart: start, selectionEnd: end } = event.currentTarget;
+    const selected = draft.slice(start, end);
+    addToContextMenu(event, [
+      {
+        label: 'Cut',
+        icon: Scissors,
+        disabled: disabled || !selected,
+        run: () => {
+          copyText(selected);
+          replaceSelection('');
+        },
+      },
+      { label: 'Copy', icon: Copy, disabled: !selected, run: () => copyText(selected) },
+      {
+        label: 'Paste',
+        icon: ClipboardPaste,
+        disabled,
+        run: () =>
+          void navigator.clipboard.readText().then(
+            (text) => text && replaceSelection(text),
+            (error: unknown) => console.error('could not paste:', error),
+          ),
+      },
+    ]);
+  };
   const onDrop = (event: DragEvent<HTMLElement>) => {
     if (!attachable || !event.dataTransfer.files.length) return;
     event.preventDefault();
@@ -177,15 +217,17 @@ export function Composer({
         {dock}
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
         {comments.length > 0 && (
-          <ul className="attachments" aria-label="Diff comments">
+          <ul className="attachments" aria-label="Comments">
             {comments.map((comment, index) => {
-              const range = diffCommentRange(comment);
+              const quoted = isConversationComment(comment);
+              const what = quoted ? `“${quoteSummary(comment.quote)}”` : diffCommentRange(comment);
+              const Icon = quoted ? MessageSquareQuote : MessageSquareCode;
               return (
-                <li key={`${index}:${range}`} className="chip" title={`${range}\n${comment.note}`}>
-                  <MessageSquareCode className="sm" />
-                  <span className="tech ellipsis">{range}</span>
+                <li key={`${index}:${what}`} className="chip" title={`${quoted ? comment.quote : what}\n\n${comment.note}`}>
+                  <Icon className="sm" />
+                  <span className={`${quoted ? '' : 'tech '}ellipsis`}>{what}</span>
                   {onRemoveComment && (
-                    <button className="icon-btn sm" type="button" aria-label={`Remove comment on ${range}`} title="Remove" onClick={() => onRemoveComment(index)}>
+                    <button className="icon-btn sm" type="button" aria-label={`Remove comment on ${what}`} title="Remove" onClick={() => onRemoveComment(index)}>
                       <X className="sm" />
                     </button>
                   )}
@@ -224,6 +266,7 @@ export function Composer({
           onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
+          onContextMenu={onContextMenu}
           onBlur={menu.dismiss}
         />
         <div className="ctoolbar">
@@ -479,6 +522,15 @@ function AttachmentChip({ name, mimeType, size, children }: Pick<Attachment, 'na
       {children}
     </li>
   );
+}
+
+/** How long a quote's chip lets it get. */
+const QUOTE_CHIP_LENGTH = 40;
+
+/** A quoted passage, as its chip says it: on one line, shortened. */
+export function quoteSummary(quote: string): string {
+  const line = quote.trim().replace(/\s+/g, ' ');
+  return line.length > QUOTE_CHIP_LENGTH ? `${line.slice(0, QUOTE_CHIP_LENGTH - 1).trimEnd()}…` : line;
 }
 
 /** A file's name, as shown and sent: a pasted one may have none. */
