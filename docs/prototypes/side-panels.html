@@ -11,6 +11,9 @@
   on either tab bar; drag the right area's left edge (each panel keeps its own width); ⤢ on Changes or on the
   Merge request's Diff tab, then Esc; narrow the window below 1100px (or use the pill) for the drawer.
   The pill at the bottom left is not part of the design: theme, window mode, reset, and the live state.
+  Decisions (docs/adr/0009-one-panel-model.md): sizes are per panel kind (every Terminal shares one), the composer
+  spans only the conversation, review mode hides the Side area, and tabs that don't fit drop to icon and badge,
+  then go into the ⌄ menu.
 -->
 <html lang="en">
 <head>
@@ -614,8 +617,13 @@ button.section-head { color: var(--muted); }
 .edge-x:hover, .edge-y:hover { background: color-mix(in srgb, var(--accent) 40%, transparent); }
 .size-tag { display: none; font: 11px var(--mono); color: var(--accent); padding: 0 6px; }
 body.resizing .area.right .size-tag, body.resizing-rows .area.bottom .size-tag { display: inline; }
-.ptab { flex-shrink: 1; min-width: 0; } .ptab > svg, .ptab .badge, .ptab .dot, .ptab .x, .ptab .tech { flex-shrink: 0; }
-.ptab .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ptab { flex-shrink: 0; } .ptab > svg, .ptab .badge, .ptab .dot, .ptab .x, .ptab .tech { flex-shrink: 0; }
+.ptab .lbl { white-space: nowrap; }
+/* Tab overflow: inactive tabs drop to icon and badge, then what still doesn't fit goes into the ⌄ menu. */
+.tabs.compact .ptab:not(.on) .lbl, .tabs.compact .ptab:not(.on) .tech { display: none; }
+.tabs.compact .ptab:not(.on) { padding-left: 8px; }
+.overflow-btn[hidden] { display: none; }
+.overflow-btn { margin-bottom: 4px; gap: 2px; width: auto; padding: 0 4px; font: 600 11px var(--mono); }
 .ctoolbar .pick { min-width: 0; } .ctoolbar .pick b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 26ch; }
 .reviewing .ctoolbar .agent-pick { display: none; } .reviewing .ctoolbar .pick b { max-width: 16ch; }
 .ctoolbar .send, .ctoolbar .agent-pick { flex: none; }
@@ -972,8 +980,8 @@ const INITIAL = () => ({
   winMode: 'auto',
   right: { tabs: ['changes', 'mr'], active: 'changes', open: true },
   bottom: { tabs: ['term1'], active: 'term1', open: false },
-  size: { changes: 640, mr: 400, issue: 380, term1: 520 },
-  height: { term1: 220, changes: 340, mr: 320, issue: 260 },
+  size: { changes: 640, mr: 400, issue: 380, terminal: 520 },
+  height: { terminal: 220, changes: 340, mr: 320, issue: 260 },
   drawer: false, review: null, pop: null, dialog: null,
   ch: { seg: 'all', base: 'origin/main', tree: true, expanded: {} },
   mr: { watch: true, auto: false, tab: 'overview' },
@@ -992,9 +1000,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 function widthOf(id) {
   const k = KINDS[kindOf(id)];
   const max = isNarrow() ? Math.floor(mainW() * .94) : mainW() - 340;
-  return clamp(S.size[id] ?? k.w, Math.min(k.min, max), max);
+  return clamp(S.size[kindOf(id)] ?? k.w, Math.min(k.min, max), max);
 }
-const heightOf = id => clamp(S.height[id] ?? KINDS[kindOf(id)].h, 120, Math.floor(window.innerHeight * .6));
+const heightOf = id => clamp(S.height[kindOf(id)] ?? KINDS[kindOf(id)].h, 120, Math.floor(window.innerHeight * .6));
 
 function openPanel(id, area) {
   if (S.review && S.review !== id) S.review = null;
@@ -1016,7 +1024,7 @@ function movePanel(id) {
   const from = where(id), to = from === 'right' ? 'bottom' : 'right';
   closePanel(id); S[to].tabs.push(id); S[to].active = id; S[to].open = true;
   if (to === 'right' && isNarrow()) S.drawer = true;
-  toast(`${labelOf(id)} moved to the ${to === 'right' ? 'right' : 'bottom'}`, false);
+  toast(`${labelOf(id)} moved to the ${to === 'right' ? 'Side area' : 'Dock'}`, false);
 }
 function toggleRight() {
   if (isNarrow()) S.drawer = !S.drawer; else S.right.open = !S.right.open;
@@ -1064,7 +1072,7 @@ function Head() {
     <div class="head-line"><h1 class="ellipsis title-btn" data-act="pop" data-kind="details" data-anchor="title" title="${esc(SESSION.title)} · Session details">${esc(SESSION.title)}</h1>
       <span class="proj-tag" style="color:var(--p1);background:color-mix(in srgb, var(--p1) 16%, transparent)" title="Project">${SESSION.project}</span>
       <span class="st-waiting-finished chip" role="status">${ic('circle-check', 'sm')}Finished</span></div>
-    <button class="icon-btn" title="${rightShown ? 'Hide' : 'Show'} the right panels${isNarrow() ? ' (drawer)' : ''}" aria-pressed="${!!rightShown}" data-act="toggle-right">${ic('panel-right')}</button>
+    <button class="icon-btn" title="${rightShown ? 'Hide' : 'Show'} the Side area${isNarrow() ? ' (drawer)' : ''}" aria-pressed="${!!rightShown}" data-act="toggle-right">${ic('panel-right')}</button>
     <button class="icon-btn" title="${S.bottom.open ? 'Hide' : 'Show'} the Dock" aria-pressed="${S.bottom.open}" data-act="toggle-bottom">${ic('panel-bottom')}</button>
     <button class="icon-btn" title="More" data-act="pop" data-kind="session-menu" data-anchor="more" aria-expanded="${isPop('session-menu', 'more')}">${ic('ellipsis')}</button>
   </div>`;
@@ -1121,11 +1129,12 @@ function Area(area) {
     ${id ? `<span class="size-tag" title="Each panel keeps its own ${area === 'right' ? 'width' : 'height'}">${area === 'right' ? widthOf(id) : heightOf(id)}px</span>` : ''}
     ${k && k.review && k.review() ? `<button class="icon-btn sm" title="Review mode: give ${labelOf(id)} the main area (Esc to come back)" data-act="review" data-id="${id}">${ic('maximize-2', 'sm')}</button>` : ''}
     ${id ? `<button class="icon-btn sm" title="Panel menu" data-act="pop" data-kind="tabmenu" data-anchor="tm-${area}" data-id="${id}">${ic('ellipsis', 'sm')}</button>` : ''}
-    <button class="icon-btn sm" title="Hide the ${area === 'right' ? 'right panels' : 'Dock'}" data-act="${area === 'right' ? 'toggle-right' : 'toggle-bottom'}">${ic(area === 'right' ? 'chevron-right' : 'chevron-down', 'sm')}</button></div>`;
+    <button class="icon-btn sm" title="Hide the ${area === 'right' ? 'Side area' : 'Dock'}" data-act="${area === 'right' ? 'toggle-right' : 'toggle-bottom'}">${ic(area === 'right' ? 'chevron-right' : 'chevron-down', 'sm')}</button></div>`;
   return `${drawer ? '<div class="drawer-scrim" data-act="toggle-right"></div>' : ''}
-  <section class="area ${area} ${drawer ? 'drawer' : ''}" style="${style}" aria-label="${area === 'right' ? 'Right panels' : 'Dock'}">
+  <section class="area ${area} ${drawer ? 'drawer' : ''}" style="${style}" aria-label="${area === 'right' ? 'Side area' : 'Dock'}">
     <div class="${area === 'right' ? 'edge-x' : 'edge-y'}" data-edge="${area}" title="Drag to resize ${id ? labelOf(id) : ''}"></div>
     <div class="tabs-bar"><div class="tabs" role="tablist">${A.tabs.map(t => Tab(t, area)).join('')}</div>
+      <button class="icon-btn sm overflow-btn" hidden data-overflow title="More tabs" data-act="pop" data-kind="overflow" data-anchor="ov-${area}" data-area="${area}">${ic('chevron-down', 'sm')}<span class="n"></span></button>
       <button class="icon-btn sm" style="margin-bottom:4px" title="Add a panel" data-act="pop" data-kind="plus" data-anchor="plus-${area}" data-area="${area}">${ic('plus', 'sm')}</button>${tools}</div>
     <div class="area-view">${id ? Body(id, area) : `<div class="area-empty">No panels here.<br>Add one with +, or move a tab here from its menu.</div>`}</div>
   </section>`;
@@ -1265,16 +1274,18 @@ function Pop() {
   if (p.kind === 'tabmenu') {
     const a = where(p.id), k = KINDS[kindOf(p.id)];
     return `<div class="popover context-menu" role="menu" id="pop"><div class="menu-head">${labelOf(p.id)}</div>
-      ${item('move', a === 'right' ? 'panel-bottom' : 'panel-right', a === 'right' ? 'Move to bottom' : 'Move to right', `data-id="${p.id}"`)}
+      ${item('move', a === 'right' ? 'panel-bottom' : 'panel-right', a === 'right' ? 'Move to the Dock' : 'Move to the Side area', `data-id="${p.id}"`)}
       ${k.review && k.review() ? item('review', 'maximize-2', 'Review mode', `data-id="${p.id}"`) : ''}
       ${sep}${item('close', 'x', 'Close', `data-id="${p.id}"`)}</div>`;
   }
-  if (p.kind === 'plus') return `<div class="popover context-menu" role="menu" id="pop"><div class="menu-head">Add to the ${p.area === 'right' ? 'right' : 'Dock'}</div>
+  if (p.kind === 'overflow') return `<div class="popover context-menu" role="menu" id="pop"><div class="menu-head">More tabs</div>
+    ${(p.ids || '').split(',').filter(Boolean).map(t => { const k = KINDS[kindOf(t)]; return item('tab', k.icon, `${labelOf(t)}${k.tech ? ` <span class="tech muted">${k.tech}</span>` : ''}`, `data-id="${t}" data-area="${p.area}"`); }).join('')}</div>`;
+  if (p.kind === 'plus') return `<div class="popover context-menu" role="menu" id="pop"><div class="menu-head">Add to the ${p.area === 'right' ? 'Side area' : 'Dock'}</div>
     ${Object.entries(KINDS).map(([kid, k]) => {
       if (k.later) return `<button role="menuitem" disabled>${ic(k.icon, 'sm')}${k.label}<span class="later">later</span></button>`;
       if (kid === 'terminal') return item('add', k.icon, 'New Terminal', `data-id="term" data-area="${p.area}"`);
       const w = where(kid);
-      return item('add', k.icon, `${k.label}${k.tech ? ` <span class="tech muted">${k.tech}</span>` : ''}${w ? `<span class="k">${ic('check', 'sm')}${w === 'right' ? 'right' : 'Dock'}</span>` : ''}`, `data-id="${kid}" data-area="${p.area}"`);
+      return item('add', k.icon, `${k.label}${k.tech ? ` <span class="tech muted">${k.tech}</span>` : ''}${w ? `<span class="k">${ic('check', 'sm')}${w === 'right' ? 'Side area' : 'Dock'}</span>` : ''}`, `data-id="${kid}" data-area="${p.area}"`);
     }).join('')}</div>`;
   if (p.kind === 'base') return `<div class="popover base" role="listbox" id="pop">${Object.entries(BASES).map(([k, [l, d]]) => `<button role="option" aria-selected="${S.ch.base === k}" data-act="base" data-v="${k}"><span class="tech">${l}</span><small>${d}</small></button>`).join('')}</div>`;
   if (p.kind === 'checks') return `<div class="popover ci-checks" id="pop"><h4>Checks on <span class="tech">#40</span></h4><p class="muted">1 failed, 3 passed · checked 2 min ago</p>
@@ -1351,8 +1362,25 @@ function render() {
   document.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll] != null) el.scrollTop = keep[el.dataset.scroll]; else if (el.dataset.scroll === 'chat') el.scrollTop = el.scrollHeight; });
   if (msg) document.getElementById('msg').value = msg;
   const d = document.getElementById('draft'); if (d) { if (draft) d.value = draft; d.focus(); }
+  fitTabs();
   place();
   if (S.pendingScroll) { const el = document.querySelector(S.pendingScroll); S.pendingScroll = null; if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); } }
+}
+// Tab overflow: first the inactive tabs drop to icon and badge; the ones that still don't fit, last first,
+// go into the ⌄ menu. The active tab always keeps its label.
+function fitTabs() {
+  document.querySelectorAll('section.area').forEach(sec => {
+    const bar = sec.querySelector('.tabs'); if (!bar) return;
+    const fits = () => bar.scrollWidth <= bar.clientWidth + 1;
+    if (fits()) return;
+    bar.classList.add('compact');
+    const inactive = [...bar.querySelectorAll('.ptab:not(.on)')], hidden = [];
+    while (!fits() && inactive.length) { const t = inactive.pop(); t.style.display = 'none'; hidden.unshift(t.dataset.id); }
+    if (!hidden.length) return;
+    const more = sec.querySelector('[data-overflow]');
+    more.hidden = false; more.dataset.ids = hidden.join(','); more.querySelector('.n').textContent = hidden.length;
+    if (S.pop && S.pop.kind === 'overflow' && S.pop.anchor === more.dataset.anchor) S.pop.ids = more.dataset.ids;
+  });
 }
 function place() {
   const pop = document.getElementById('pop'); if (!pop) return;
@@ -1392,7 +1420,7 @@ document.addEventListener('click', e => {
   const { act, id, v, area, kind, anchor } = el.dataset;
   if (inPop && !['base'].includes(act)) S.pop = null;
   switch (act) {
-    case 'pop': if (!(was && was.kind === kind && was.anchor === anchor)) S.pop = { kind, anchor, id, area }; break;
+    case 'pop': if (!(was && was.kind === kind && was.anchor === anchor)) S.pop = { kind, anchor, id, area, ids: el.dataset.ids }; break;
     case 'details': S.pop = { kind: 'details', anchor: document.querySelector('[data-anchor="title"]') ? 'title' : 'more' }; break;
     case 'open': openPanel(id); break;
     case 'open-reviews': S.mr.tab = 'overview'; openPanel('mr'); S.pendingScroll = `[id="${S.review === 'mr' ? 'review' : where('mr')}-reviews"]`; break;
@@ -1403,7 +1431,7 @@ document.addEventListener('click', e => {
     case 'section': S.sections[v] = !S.sections[v]; break;
     case 'close': closePanel(id); break;
     case 'move': movePanel(id); break;
-    case 'add': if (id === 'term') { const t = 'term' + (++S.terms); S.size[t] = 520; S.height[t] = 220; S[area].tabs.push(t); S[area].active = t; S[area].open = true; } else openPanel(id, area); break;
+    case 'add': if (id === 'term') { const t = 'term' + (++S.terms); S[area].tabs.push(t); S[area].active = t; S[area].open = true; } else openPanel(id, area); break;
     case 'review': S.review = id; S.drawer = false; break;
     case 'unreview': S.review = null; break;
     case 'seg': S.ch.seg = v; break;
@@ -1458,7 +1486,7 @@ document.addEventListener('mousemove', e => {
   tip.style.left = Math.min(e.clientX + 14, innerWidth - r.width - 8) + 'px';
   tip.style.top = Math.min(e.clientY + 16, innerHeight - r.height - 8) + 'px';
 });
-// Drag an area's edge: the width (or height) belongs to the panel shown, not to the area.
+// Drag an area's edge: the width (or height) belongs to the kind of panel shown (all Terminals share one), not to the area.
 document.addEventListener('pointerdown', e => {
   const edge = e.target.closest('[data-edge]'); if (!edge) return;
   const areaName = edge.dataset.edge, A = S[areaName], id = A.active; if (!id) return;
@@ -1471,7 +1499,7 @@ document.addEventListener('pointerdown', e => {
     else { last = clamp(h0 + (y0 - ev.clientY), 120, Math.floor(innerHeight * .6)); box.style.height = last + 'px'; }
     if (tag) tag.textContent = last + 'px';
   };
-  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); document.body.classList.remove('resizing', 'resizing-rows'); (areaName === 'right' ? S.size : S.height)[id] = last; render(); };
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); document.body.classList.remove('resizing', 'resizing-rows'); (areaName === 'right' ? S.size : S.height)[kindOf(id)] = last; render(); };
   addEventListener('pointermove', move); addEventListener('pointerup', up);
 });
 let wasNarrow = isNarrow();
