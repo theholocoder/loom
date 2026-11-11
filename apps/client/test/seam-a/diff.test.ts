@@ -71,7 +71,7 @@ describe("a Session's diff", () => {
       { path: 'new file.txt', status: 'untracked', added: 3, removed: 0, binary: false },
     ]);
 
-    const uncommitted = await main.api.invoke('sessions.diff', { id, uncommittedOnly: true });
+    const uncommitted = await main.api.invoke('sessions.diff', { id, scope: 'uncommitted' });
     expect(files(uncommitted).map((f) => [f.path, f.status])).toEqual([
       ['.gitignore', 'untracked'],
       ['app.js', 'modified'],
@@ -83,7 +83,7 @@ describe("a Session's diff", () => {
     const app = await main.api.invoke('sessions.diffFile', { id, path: 'app.js' });
     expect(app.text).toContain('-two\n+2\n');
     expect(app.text).toContain('+four\n');
-    const appUncommitted = await main.api.invoke('sessions.diffFile', { id, path: 'app.js', uncommittedOnly: true });
+    const appUncommitted = await main.api.invoke('sessions.diffFile', { id, path: 'app.js', scope: 'uncommitted' });
     expect(appUncommitted.text).not.toContain('-two');
     expect(appUncommitted.text).toContain('+four\n');
     const added = await main.api.invoke('sessions.diffFile', { id, path: 'new file.txt' });
@@ -142,14 +142,108 @@ describe("a Session's diff", () => {
     const summary = await main.api.invoke('sessions.diff', { id });
     expect(summary).toMatchObject({ available: true, base: 'origin/develop' });
     expect(files(summary).map((f) => f.path)).toEqual(['x.txt']);
-    await expect(main.api.invoke('sessions.diff', { id, uncommittedOnly: true })).resolves.toMatchObject({ available: true });
+    await expect(main.api.invoke('sessions.diff', { id, scope: 'uncommitted' })).resolves.toMatchObject({ available: true });
   });
 
-  it('says clearly when the base ref is missing', async () => {
-    const { checkout, main, id } = await started();
+  it('compares with the local default branch when there is no origin', async () => {
+    const { machine, checkout, main, id, path } = await started();
+    machine.commit(path, 'feature.txt', 'f\n');
+    writeFileSync(join(path, 'draft.txt'), 'd\n');
     git(checkout, 'remote', 'remove', 'origin');
 
-    await expect(main.api.invoke('sessions.diff', { id })).rejects.toThrow(/no local origin\/main/);
+    const summary = await main.api.invoke('sessions.diff', { id });
+
+    expect(summary).toMatchObject({ available: true, base: 'main', baseSource: 'local', counts: { all: 2, committed: 1, uncommitted: 1 } });
+    expect(files(summary).map((f) => [f.path, f.status])).toEqual([
+      ['draft.txt', 'untracked'],
+      ['feature.txt', 'committed'],
+    ]);
+  });
+
+  it('says clearly when there is nothing to compare with, and still shows what is uncommitted', async () => {
+    const { checkout, main, id, path } = await started();
+    git(checkout, 'remote', 'remove', 'origin');
+    git(checkout, 'switch', '--quiet', '--detach');
+    git(checkout, 'branch', '--quiet', '-D', 'main');
+    writeFileSync(join(path, 'draft.txt'), 'd\n');
+
+    await expect(main.api.invoke('sessions.diff', { id })).rejects.toThrow(/nor a local main or master/);
+    const uncommitted = await main.api.invoke('sessions.diff', { id, scope: 'uncommitted' });
+    expect(uncommitted).toMatchObject({ available: true, base: 'HEAD', counts: { uncommitted: 1 } });
+    expect(uncommitted.available && uncommitted.counts).toEqual({ uncommitted: 1 });
+    expect(files(uncommitted).map((f) => f.path)).toEqual(['draft.txt']);
+  });
+
+  it('shows only the commits in the Committed scope, and counts each scope', async () => {
+    const { machine, main, id, path } = await started();
+    machine.commit(path, 'committed.txt', 'c\n');
+    machine.commit(path, 'app.js', 'one\n2\nthree\n');
+    writeFileSync(join(path, 'app.js'), 'one\n2\nthree\nfour\n');
+    writeFileSync(join(path, 'new.txt'), 'n\n');
+
+    const committed = await main.api.invoke('sessions.diff', { id, scope: 'committed' });
+
+    expect(committed).toMatchObject({ available: true, base: 'origin/main', counts: { all: 3, committed: 2, uncommitted: 2 } });
+    expect(files(committed)).toEqual([
+      { path: 'app.js', status: 'committed', added: 1, removed: 1, binary: false },
+      { path: 'committed.txt', status: 'committed', added: 1, removed: 0, binary: false },
+    ]);
+    const app = await main.api.invoke('sessions.diffFile', { id, path: 'app.js', scope: 'committed' });
+    expect(app.text).toContain('-two\n+2\n');
+    expect(app.text).not.toContain('+four');
+    await expect(main.api.invoke('sessions.diff', { id, scope: 'nope' as never })).rejects.toThrow(/isn't a diff scope/);
+  });
+
+  it('marks deleted and renamed files, committed or not', async () => {
+    const { machine, main, id, path } = await started();
+    machine.commit(path, 'gone.txt', 'g\n');
+    git(path, 'push', '--quiet', 'origin', 'HEAD:main');
+    git(path, 'fetch', '--quiet', 'origin');
+    git(path, 'rm', '--quiet', 'gone.txt');
+    git(path, 'mv', 'README.md', 'READ ME.md');
+
+    const summary = await main.api.invoke('sessions.diff', { id });
+
+    if (!summary.available) throw new Error(summary.reason);
+    expect(summary.files.map(({ path, oldPath, change, status }) => ({ path, oldPath, change, status }))).toEqual([
+      { path: 'READ ME.md', oldPath: 'README.md', change: 'renamed', status: 'modified' },
+      { path: 'gone.txt', oldPath: undefined, change: 'deleted', status: 'modified' },
+    ]);
+    expect((await main.api.invoke('sessions.diffFile', { id, path: 'gone.txt' })).text).toContain('-g\n');
+  });
+
+  it("reads diffs whatever the user's git config says of their prefixes", async () => {
+    const { main, id, path } = await started();
+    writeFileSync(join(path, 'app.js'), 'one\ntwo\nthree\nfour\n');
+    writeFileSync(join(path, 'new.txt'), 'n\n');
+
+    for (const config of [['diff.mnemonicPrefix', 'true'], ['diff.noprefix', 'true']]) {
+      git(path, 'config', config[0]!, config[1]!);
+      await main.api.invoke('sessions.diff', { id });
+      expect((await main.api.invoke('sessions.diffFile', { id, path: 'app.js' })).text).toMatch(/^diff --git a\/app\.js b\/app\.js\n/);
+      expect((await main.api.invoke('sessions.diffFile', { id, path: 'new.txt' })).text).toContain('+++ b/new.txt');
+      git(path, 'config', '--unset', config[0]!);
+    }
+  });
+
+  it('has a fingerprint that changes with each edit, even to a file already changed, and with each commit', async () => {
+    const { machine, main, id, path } = await started();
+    const fingerprint = () => main.api.invoke('sessions.diffFingerprint', { id });
+    const first = await fingerprint();
+    expect(await fingerprint()).toBe(first);
+
+    writeFileSync(join(path, 'app.js'), 'one\ntwo\nthree\nfour\n');
+    const edited = await fingerprint();
+    expect(edited).not.toBe(first);
+    writeFileSync(join(path, 'app.js'), 'one\ntwo\nthree\nfour\nfive\n');
+    const editedAgain = await fingerprint();
+    expect(editedAgain).not.toBe(edited);
+    writeFileSync(join(path, 'new.txt'), 'n\n');
+    const added = await fingerprint();
+    expect(added).not.toBe(editedAgain);
+    machine.commit(path, 'new.txt', 'n\n');
+    expect(await fingerprint()).not.toBe(added);
+    expect(git(path, 'status', '--porcelain')).toContain('app.js');
   });
 
   it("shows an archived worktree Session's committed branch read-only, and no diff once its branch is gone", async () => {

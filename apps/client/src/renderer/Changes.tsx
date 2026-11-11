@@ -1,9 +1,11 @@
-// The sidebar's Changes view: what the open Session's branch changed, as a
-// file tree and unified per-file diffs loaded as they are expanded or
-// scrolled to, each line or range of which can be commented on.
-import { ArrowRightToLine, ChevronDown, ChevronRight, Columns2, Folder, GitBranch, PanelLeft, RefreshCw, Rows2, SquarePen, WrapText, type LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, diffCommentRange, type DiffComment, type DiffFile, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
+// The Changes Panel: what the open Session changed, all of it, its commits or
+// what isn't committed yet, as a file tree (above the diffs in a narrow
+// Panel, beside them in a wide one) and unified per-file diffs loaded as they
+// are expanded or scrolled to, each line or range of which can be commented
+// on. It follows the working copy as it changes, whoever changes it.
+import { ArrowRightToLine, ChevronDown, ChevronRight, CircleHelp, Columns2, Folder, GitBranch, ListTree, RefreshCw, Rows2, SquarePen, WrapText, type LucideIcon } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, DIFF_SCOPES, diffCommentRange, type DiffBaseSource, type DiffComment, type DiffCounts, type DiffFile, type DiffScope, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
@@ -13,12 +15,24 @@ import { copyable } from './ContextMenu';
 
 /** Files with more changed lines than this start collapsed. */
 export const LARGE_FILE_LINES = 1000;
+/** From this width on, the Panel shows the file tree beside the diffs rather than above them. */
+export const WIDE_CHANGES_PX = 700;
+/** How often a shown Changes Panel checks whether the working copy changed, in ms. */
+export const WATCH_INTERVAL_MS = 2_000;
 
 const STATUS_LABEL: Record<DiffFile['status'], string> = { committed: 'committed', modified: 'modified', untracked: 'untracked' };
+const SCOPE_LABEL: Record<DiffScope, string> = { all: 'All', committed: 'Committed', uncommitted: 'Uncommitted' };
+/** What a scope with no files says, given what it is against. */
+const NOTHING_IN: Record<DiffScope, (base: string) => string> = {
+  all: (base) => `No changes against ${base}.`,
+  committed: (base) => `No commits on this branch since ${base}.`,
+  uncommitted: () => 'Nothing changed since the last commit.',
+};
 
 /**
- * The Session's changes, worked out when the view is shown: on first show,
- * on each show after, at each turn end while shown, and on Refresh.
+ * The Session's changes, worked out when the Panel is shown: on first show,
+ * on each show after, at each turn end while shown, whenever the working copy
+ * changes while shown, and on Refresh.
  */
 export function ChangesView({ session, onComment }: { session: Session; onComment?: (comment: DiffComment) => void }) {
   return <SessionDiff key={session.id} session={session} onComment={onComment} />;
@@ -30,118 +44,177 @@ function SessionDiff({ session, onComment }: { session: Session; onComment?: (co
   const api = useApi();
   const settings = useTopic('settings');
   const [view, changeView] = useDiffView(settings?.diffView);
-  const [uncommittedOnly, setUncommittedOnly] = useState(false);
+  const live = session.status !== 'archived';
+  const [scope, setScope] = useState<DiffScope>('all');
   const [refreshes, setRefreshes] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
-  // A turn ending refreshes it; so do showing it again and the refresh button.
+  const root = useRef<HTMLDivElement>(null);
+  const wide = useWide(root, WIDE_CHANGES_PX);
+  // A turn ending refreshes it; so do the working copy changing, showing it again and the refresh button.
   const turnEnded = useTurnsEnded(session.status);
+  const changed = useWorkingCopyChanges(session.id, live);
   useEffect(() => {
     let current = true;
     setLoaded((l) => (l.state === 'done' ? l : { state: 'loading' }));
-    api.invoke('sessions.diff', { id: session.id, uncommittedOnly }).then(
+    api.invoke('sessions.diff', { id: session.id, scope }).then(
       (summary) => current && setLoaded({ state: 'done', summary }),
       (error: unknown) => current && setLoaded({ state: 'error', message: (error as Error).message }),
     );
     return () => {
       current = false;
     };
-  }, [api, session.id, uncommittedOnly, refreshes, turnEnded]);
+  }, [api, session.id, scope, refreshes, turnEnded, changed]);
 
   const summary = loaded.state === 'done' ? loaded.summary : undefined;
   const readOnly = !summary?.available || summary.readOnly;
+  const available = summary?.available ? summary : undefined;
+  const refresh = () => setRefreshes((r) => r + 1);
   return (
-    <>
-      <div className="changes-bar">
-        <span className="grow" />
-        {summary?.available && !summary.readOnly ? (
-          <button className="diff-toggle" type="button" aria-pressed={uncommittedOnly} onClick={() => setUncommittedOnly((u) => !u)}>
-            <span className="knob" aria-hidden />
-            Uncommitted only
-          </button>
+    <div className="changes" ref={root}>
+      <div className="changes-bar" role="toolbar" aria-label="Changes">
+        {live ? <ScopeControl scope={scope} counts={available?.counts} onChange={setScope} /> : null}
+        {live && scope === 'uncommitted' ? <Compared base="HEAD" scope={scope} /> : null}
+        {live && available && !available.readOnly && scope !== 'uncommitted' && available.baseSource ? (
+          <>
+            <DiffBase session={session} base={available.base} onChanged={refresh} />
+            <Compared base={available.base} source={available.baseSource} scope={scope} />
+          </>
         ) : null}
-        <button className="icon-btn sm" type="button" title="Refresh" aria-label="Refresh changes" onClick={() => setRefreshes((r) => r + 1)}>
+        <span className="grow" />
+        <StateToggle label="Wrap long lines" pressed={view.wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => changeView({ wrap: !view.wrap })} />
+        <StateToggle label="Side by side" pressed={view.sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => changeView({ sideBySide: !view.sideBySide })} />
+        <button className="icon-btn sm" type="button" title="Refresh" aria-label="Refresh changes" onClick={refresh}>
           <RefreshCw />
         </button>
       </div>
-      <div className={summary?.available && summary.files.length > 0 ? 'scroll diff-panes' : 'scroll'}>
-        {summary?.available && !summary.readOnly && !uncommittedOnly && summary.baseSource && <DiffBase session={session} summary={summary} onChanged={() => setRefreshes((r) => r + 1)} />}
-        {loaded.state === 'loading' ? (
+      {loaded.state === 'loading' ? (
+        <div className="scroll">
           <div className="diff-loading" role="status">
             Working out the changes…
           </div>
-        ) : loaded.state === 'error' ? (
+        </div>
+      ) : loaded.state === 'error' ? (
+        <div className="scroll">
           <div className="empty" role="alert">
             {loaded.message}
           </div>
-        ) : !loaded.summary.available ? (
+        </div>
+      ) : !loaded.summary.available ? (
+        <div className="scroll">
           <div className="empty">{loaded.summary.reason}</div>
-        ) : loaded.summary.files.length === 0 ? (
-          <div className="empty">No changes against {loaded.summary.base}.</div>
-        ) : (
-          <DiffFiles
-            session={session}
-            files={loaded.summary.files}
-            readOnly={readOnly}
-            onComment={readOnly ? undefined : onComment}
-            uncommittedOnly={uncommittedOnly}
-            patterns={settings?.diffCollapsedPatterns ?? []}
-            theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
-            view={view}
-            onViewChange={changeView}
-            version={`${refreshes}:${turnEnded}`}
-          />
-        )}
-      </div>
-    </>
+        </div>
+      ) : loaded.summary.files.length === 0 ? (
+        <div className="scroll">
+          <div className="empty">{NOTHING_IN[scope](loaded.summary.base)}</div>
+        </div>
+      ) : (
+        <DiffFiles
+          session={session}
+          files={loaded.summary.files}
+          readOnly={readOnly}
+          onComment={readOnly ? undefined : onComment}
+          scope={scope}
+          wide={wide}
+          patterns={settings?.diffCollapsedPatterns ?? []}
+          theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
+          view={view}
+          onViewChange={changeView}
+          version={`${refreshes}:${turnEnded}:${changed}`}
+        />
+      )}
+    </div>
+  );
+}
+
+/** All, Committed or Uncommitted, each with how many files it holds when that's known. */
+function ScopeControl({ scope, counts, onChange }: { scope: DiffScope; counts: DiffCounts | undefined; onChange: (scope: DiffScope) => void }) {
+  return (
+    <span className="seg" role="radiogroup" aria-label="Which changes">
+      {DIFF_SCOPES.map((s) => (
+        <button key={s} type="button" role="radio" className={s === scope ? 'on' : undefined} aria-checked={s === scope} onClick={() => onChange(s)}>
+          {SCOPE_LABEL[s]}
+          {counts?.[s] === undefined ? null : <span className="n">{counts[s]}</span>}
+        </button>
+      ))}
+    </span>
   );
 }
 
 /**
- * What a live Session's diff is against, and a picker to set another
- * `origin` branch as its base, kept with the branch. Says when the base is
- * only `origin`'s default, a guess.
+ * A picker to set another `origin` branch as a live Session's base, kept
+ * with the branch.
  */
-function DiffBase({ session, summary, onChanged }: { session: Session; summary: Extract<DiffSummary, { available: true }>; onChanged: () => void }) {
+function DiffBase({ session, base, onChanged }: { session: Session; base: string; onChanged: () => void }) {
   const api = useApi();
   const [bases, setBases] = useState<LoadedList<PickerOption<string>[]>>();
   const [error, setError] = useState<string>();
   const load = () => {
     api.invoke('sessions.diffBases', { id: session.id }).then(
-      (found) => setBases({ value: found.map((base) => ({ key: base, label: base, value: base })) }),
+      (found) => setBases({ value: found.map((b) => ({ key: b, label: b, value: b })) }),
       (e: unknown) => setBases({ error: (e as Error).message }),
     );
   };
-  const choose = async (base: string) => {
+  const choose = async (chosen: string) => {
     setError(undefined);
     try {
-      await api.invoke('sessions.setDiffBase', { id: session.id, base });
+      await api.invoke('sessions.setDiffBase', { id: session.id, base: chosen });
       onChanged();
     } catch (e) {
       setError((e as Error).message);
     }
   };
   return (
-    <div className="diff-base">
-      <span className="muted">Compared with</span>
+    <span className="diff-base">
+      <span className="muted">vs</span>
       <SearchPicker
         label="Compared with"
-        placeholder={summary.base}
+        placeholder={base}
         icon={<GitBranch className="sm" />}
         noun="branches"
         loading="Listing origin's branches…"
         options={bases}
-        selected={{ key: summary.base, label: summary.base }}
+        selected={{ key: base, label: base }}
         onOpen={load}
-        onChange={(base) => void choose(base)}
+        onChange={(chosen) => void choose(chosen)}
       />
-      {summary.baseSource === 'default' && <span className="muted">origin's default branch: where this branch started isn't known, so pick its base if it isn't this one.</span>}
       {error && (
-        <div className="err" role="alert">
+        <span className="err" role="alert">
           {error}
-        </div>
+        </span>
       )}
-    </div>
+    </span>
   );
+}
+
+/** What the diff is against and why, in a tooltip; for uncommitted changes, it says the last commit. */
+function Compared({ base, source, scope }: { base: string; source?: DiffBaseSource; scope: DiffScope }) {
+  const tip = comparedText(base, source, scope);
+  return (
+    <span className="compared muted" role="note" tabIndex={0} title={tip} aria-label={tip}>
+      {scope === 'uncommitted' ? (
+        <>
+          vs <b className="tech">last commit</b>
+        </>
+      ) : null}
+      <CircleHelp className="sm" aria-hidden="true" />
+    </span>
+  );
+}
+
+/** The tooltip on what the diff is against: what the scope compares, then where its base came from. */
+export function comparedText(base: string, source: DiffBaseSource | undefined, scope: DiffScope): string {
+  if (scope === 'uncommitted') return 'Compared with HEAD, the last commit: the edits not committed yet, and the new files.';
+  const what =
+    scope === 'committed'
+      ? `Compared with ${base}: the commits since this branch left it, without the edits not committed yet.`
+      : `Compared with ${base}: the commits since this branch left it, plus the edits not committed yet. This is what its Merge request shows, and more.`;
+  const why: Record<DiffBaseSource, string> = {
+    recorded: 'This base is kept with the branch: Loom made the branch from it, or it was picked here.',
+    'created-from': "The branch's git history says it was created from it.",
+    default: "It's origin's default branch: where this branch started isn't known, so pick its base if it isn't this one.",
+    local: `It's your local ${base}, which may be behind origin's: there's no origin branch to compare with here.`,
+  };
+  return source ? `${what} ${why[source]}` : what;
 }
 
 function DiffFiles(props: {
@@ -149,14 +222,15 @@ function DiffFiles(props: {
   files: DiffFile[];
   readOnly: boolean;
   onComment: ((comment: DiffComment) => void) | undefined;
-  uncommittedOnly: boolean;
+  scope: DiffScope;
+  wide: boolean;
   patterns: string[];
   theme: Theme;
   view: DiffViewSettings;
   onViewChange: (change: Partial<DiffViewSettings>) => void;
   version: string;
 }) {
-  const { files, patterns, view, onViewChange } = props;
+  const { files, patterns, view, wide, onViewChange } = props;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
   const toggle = (file: DiffFile, open = !isExpanded(file)) => setExpanded((e) => ({ ...e, [file.path]: open }));
@@ -168,41 +242,56 @@ function DiffFiles(props: {
   const needle = query.trim().toLowerCase();
   const matching = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(needle)), [files, needle]);
   const shown = useMemo(() => new Set(matching), [matching]);
+  // A wide Panel always has the tree beside the diffs; a narrow one stacks it above them, open or not.
+  const treeOpen = wide || view.fileList;
+  const listId = useId();
   return (
-    <div className="diff-files">
-      <div className="diff-files-bar">
-        <input
-          className="diff-search"
-          type="search"
-          aria-label="Filter changed files"
-          placeholder="Filter files…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            // Esc clears the filter first; on an empty one it is left to close the drawer it's in.
-            if (event.key !== 'Escape' || !query) return;
-            event.preventDefault();
-            setQuery('');
-          }}
-        />
-        <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={view.fileList} onClick={() => onViewChange({ fileList: !view.fileList })}>
-          <PanelLeft />
-        </button>
-        <StateToggle label="Wrap long lines" pressed={view.wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => onViewChange({ wrap: !view.wrap })} />
-        <StateToggle label="Side by side" pressed={view.sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => onViewChange({ sideBySide: !view.sideBySide })} />
+    <div className={wide ? 'ch-body wide' : 'ch-body'}>
+      <div className="ch-tree">
+        {wide ? null : (
+          <button type="button" className="tree-head" aria-expanded={treeOpen} aria-controls={listId} onClick={() => onViewChange({ fileList: !view.fileList })}>
+            {treeOpen ? <ChevronDown className="sm" /> : <ChevronRight className="sm" />}
+            <ListTree className="sm" />
+            <span>{needle ? `${matching.length} of ${files.length} files` : `${files.length} ${files.length === 1 ? 'file' : 'files'}`}</span>
+            <span className="grow" />
+            <Counts lines={totals(matching)} />
+          </button>
+        )}
+        {treeOpen ? (
+          <div className="tree-list" id={listId}>
+            <input
+              className="diff-search"
+              type="search"
+              aria-label="Filter changed files"
+              placeholder="Filter files…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                // Esc clears the filter first; on an empty one it is left to close the drawer it's in.
+                if (event.key !== 'Escape' || !query) return;
+                event.preventDefault();
+                setQuery('');
+              }}
+            />
+            {/* With no match, the diffs beside it say so. */}
+            {matching.length === 0 ? null : <FileTree files={matching} searching={needle !== ''} onPick={show} />}
+          </div>
+        ) : null}
       </div>
-      <div className="diff-files-body">
-        <FileTree files={matching} searching={needle !== ''} hidden={!view.fileList || matching.length === 0} onPick={show} />
-        <div className="diff-sections">
-          {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
-          {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
-          {files.map((file) => (
-            <FileSection key={file.path} {...props} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
-          ))}
-        </div>
+      <div className="diff-sections">
+        {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
+        {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
+        {files.map((file) => (
+          <FileSection key={file.path} {...props} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
+        ))}
       </div>
     </div>
   );
+}
+
+/** The files' changed lines, added up. */
+function totals(files: DiffFile[]): ChangedLines {
+  return { added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0) };
 }
 
 /** An on/off icon button: it shows the current state's icon and, on hover, the icon of the state a click gives. */
@@ -234,7 +323,7 @@ function buildTree(files: DiffFile[]): TreeNode[] {
   return root.children;
 }
 
-function FileTree({ files, searching, hidden, onPick }: { files: DiffFile[]; searching: boolean; hidden: boolean; onPick: (file: DiffFile) => void }) {
+function FileTree({ files, searching, onPick }: { files: DiffFile[]; searching: boolean; onPick: (file: DiffFile) => void }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [closed, setClosed] = useState<Set<string>>(new Set());
   // A search shows every match, so no folder is closed during one.
@@ -243,10 +332,10 @@ function FileTree({ files, searching, hidden, onPick }: { files: DiffFile[]; sea
     nodes.map((node) =>
       node.file ? (
         <li key={node.path}>
-          <button type="button" className="diff-tree-row" style={{ paddingLeft: 8 + depth * 14 }} onClick={() => onPick(node.file!)} {...copyable('path', node.file.path)}>
-            <span className="name">{node.name}</span>
+          <button type="button" className="diff-tree-row" style={{ paddingLeft: 10 + depth * 14 }} title={`${node.file.path} · ${statusLabel(node.file)}`} onClick={() => onPick(node.file!)} {...copyable('path', node.file.path)}>
             <StatusBadge file={node.file} />
-            <Counts file={node.file} />
+            <span className="name">{node.name}</span>
+            <Counts lines={node.file} />
           </button>
         </li>
       ) : (
@@ -254,7 +343,7 @@ function FileTree({ files, searching, hidden, onPick }: { files: DiffFile[]; sea
           <button
             type="button"
             className="diff-tree-row folder"
-            style={{ paddingLeft: 8 + depth * 14 }}
+            style={{ paddingLeft: 10 + depth * 14 }}
             aria-expanded={!isClosed(node.path)}
             disabled={searching}
             onClick={() =>
@@ -274,22 +363,30 @@ function FileTree({ files, searching, hidden, onPick }: { files: DiffFile[]; sea
       ),
     );
   return (
-    <nav className="diff-tree" aria-label="Changed files" hidden={hidden}>
+    <nav className="diff-tree" aria-label="Changed files">
       <ul>{render(tree, 0)}</ul>
     </nav>
   );
 }
 
-function StatusBadge({ file }: { file: DiffFile }) {
-  return <span className={`diff-status ${file.status}`}>{STATUS_LABEL[file.status]}</span>;
+/** What a file's badge says: deleted or renamed when it is, else where its change is. */
+function statusLabel(file: DiffFile): string {
+  return file.change ?? STATUS_LABEL[file.status];
 }
 
-function Counts({ file }: { file: DiffFile }) {
-  if (file.binary) return <span className="diff-counts">binary</span>;
-  if (file.uncounted) return <span className="diff-counts">not counted</span>;
+function StatusBadge({ file }: { file: DiffFile }) {
+  return <span className={`diff-status ${file.change ?? file.status}`}>{statusLabel(file)}</span>;
+}
+
+/** Lines added and removed, by one file or several; a binary or uncounted file has none to give. */
+type ChangedLines = Pick<DiffFile, 'added' | 'removed'> & Partial<Pick<DiffFile, 'binary' | 'uncounted'>>;
+
+function Counts({ lines }: { lines: ChangedLines }) {
+  if (lines.binary) return <span className="diff-counts">binary</span>;
+  if (lines.uncounted) return <span className="diff-counts">not counted</span>;
   return (
     <span className="diff-counts">
-      <span className="add">+{file.added}</span> <span className="del">−{file.removed}</span>
+      <span className="add">+{lines.added}</span> <span className="del">−{lines.removed}</span>
     </span>
   );
 }
@@ -302,7 +399,7 @@ function FileSection({
   hidden,
   readOnly,
   onComment,
-  uncommittedOnly,
+  scope,
   expanded,
   onToggle,
   view,
@@ -315,7 +412,7 @@ function FileSection({
   readOnly: boolean;
   /** Absent when the diff can't be commented on. */
   onComment: ((comment: DiffComment) => void) | undefined;
-  uncommittedOnly: boolean;
+  scope: DiffScope;
   expanded: boolean;
   onToggle: () => void;
   view: DiffViewSettings;
@@ -337,7 +434,7 @@ function FileSection({
     let current = true;
     // A diff shown stays until the new one comes: a comment being written on it isn't lost meanwhile.
     setText((t) => (t.state === 'done' ? t : { state: 'loading' }));
-    api.invoke('sessions.diffFile', { id: session.id, path: file.path, uncommittedOnly }).then(
+    api.invoke('sessions.diffFile', { id: session.id, path: file.path, scope }).then(
       (diff) => current && setText({ state: 'done', ...diff }),
       (error: unknown) => current && setText({ state: 'error', message: (error as Error).message }),
     );
@@ -345,7 +442,7 @@ function FileSection({
       current = false;
     };
     // `file` is compared by what identifies its diff.
-  }, [api, session.id, file.path, file.oldPath, file.status, file.added, file.removed, uncommittedOnly, expanded, visible, version]);
+  }, [api, session.id, file.path, file.oldPath, file.status, file.added, file.removed, file.change, scope, expanded, visible, version]);
 
   const commenting = useCommenting(file.path, text.state === 'done' ? text.text : undefined, onComment);
 
@@ -360,7 +457,7 @@ function FileSection({
           </span>
         </button>
         <StatusBadge file={file} />
-        <Counts file={file} />
+        <Counts lines={file} />
         {readOnly ? null : (
           <button className="icon-btn sm" type="button" title="Open in editor" aria-label={`Open ${file.path} in the editor`} onClick={openInEditor}>
             <SquarePen />
@@ -502,6 +599,62 @@ function useDiffView(stored: DiffViewSettings | undefined): [DiffViewSettings, (
 
 function sameDiffView(a: DiffViewSettings, b: DiffViewSettings): boolean {
   return a.fileList === b.fileList && a.wrap === b.wrap && a.sideBySide === b.sideBySide;
+}
+
+/**
+ * Whether the element is at least `px` wide, as it is resized; false until
+ * measured.
+ */
+function useWide(ref: RefObject<HTMLElement | null>, px: number): boolean {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => setWide(el.clientWidth >= px);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, px]);
+  return wide;
+}
+
+/**
+ * A counter that moves each time the Session's working copy changes, by the
+ * agent or anyone else: its fingerprint, asked every WATCH_INTERVAL_MS while
+ * the window is visible, differs from the one before.
+ */
+function useWorkingCopyChanges(id: number, live: boolean): number {
+  const api = useApi();
+  const [changes, setChanges] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    let last: string | undefined;
+    let asking = false;
+    let stopped = false;
+    const check = () => {
+      if (asking || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return;
+      asking = true;
+      api.invoke('sessions.diffFingerprint', { id }).then(
+        (fingerprint) => {
+          asking = false;
+          if (stopped) return;
+          if (last !== undefined && fingerprint !== last) setChanges((n) => n + 1);
+          last = fingerprint;
+        },
+        () => {
+          asking = false;
+        },
+      );
+    };
+    check();
+    const timer = setInterval(check, WATCH_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [api, id, live]);
+  return changes;
 }
 
 /** How many times the Session has left `working`: a counter that moves once per turn end. */

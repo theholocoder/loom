@@ -2,9 +2,10 @@
 // its HEAD and its start base, an `origin/…` branch as the local ref has it:
 // recorded, else the one the branch was created from, else origin's default. Runs git in the Session's Environment through its bridge (ADR 0008) and
 // never fetches.
+import { createHash } from 'node:crypto';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
-import type { DiffBaseSource, DiffFile, DiffStat, DiffSummary, FileDiff } from '../../shared/api';
+import type { DiffBaseSource, DiffCounts, DiffFile, DiffFileChange, DiffScope, DiffStat, DiffSummary, FileDiff } from '../../shared/api';
 import type { GitEnvironment } from './working-copies';
 
 /** A file's diff text is cut short past this many characters. */
@@ -22,7 +23,10 @@ export interface DiffTarget {
   branch?: string;
 }
 
-const BASE_FLAGS = ['--no-color', '--no-ext-diff'];
+/** Whatever the user's git config says (diff.mnemonicPrefix, diff.noprefix), a diff's paths start `a/` and `b/`, as its parser expects. */
+const BASE_FLAGS = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/'];
+/** At most this many changed files have their size and time read for a fingerprint. */
+const MAX_FINGERPRINT_STATS = 2_000;
 /** Files past 1 MB are binary to git, so it doesn't read them whole. */
 const BIG_FILE = ['-c', 'core.bigFileThreshold=1m'];
 /** How many untracked files are counted at once. */
@@ -36,26 +40,67 @@ export class WorkingCopyDiff {
     private readonly maxUntrackedCounted = MAX_UNTRACKED_COUNTED,
   ) {}
 
-  /** Lists the changed files; `uncommittedOnly` compares the working tree with HEAD instead. */
-  async summary(uncommittedOnly = false): Promise<DiffSummary> {
-    const head = uncommittedOnly && !this.target.branch;
+  /**
+   * Lists the changed files of `scope`. An archived branch has only its
+   * commits, whatever the scope. Throws when a scope with a start base has
+   * none to compare with; `uncommitted` never needs one.
+   */
+  async summary(scope: DiffScope = 'all'): Promise<DiffSummary> {
+    const archived = !!this.target.branch;
+    const uncommitted = scope === 'uncommitted' && !archived;
     // The start base is only resolved when something is compared with it.
-    const base = head ? undefined : await this.base();
+    const base = uncommitted ? undefined : await this.base();
     const from = base ? await this.mergeBase(base.ref) : 'HEAD';
-    const range = this.range(from);
-    const listed = parseNumstat((await this.gitOrThrow(['diff', '--numstat', '-z', '-M', ...BASE_FLAGS, ...range])).stdout);
+    const listed = parseRawNumstat((await this.gitOrThrow(['diff', '--raw', '--numstat', '-z', '-M', ...BASE_FLAGS, ...this.range(from, scope)])).stdout);
     const files: DiffFile[] = [];
-    if (this.target.branch) {
+    if (archived || scope === 'committed') {
       for (const file of listed) files.push({ ...file, status: 'committed' });
     } else {
-      const uncommitted = uncommittedOnly
-        ? undefined
-        : new Set(splitZ((await this.gitOrThrow(['diff', '--name-only', '-z', ...BASE_FLAGS, 'HEAD'])).stdout));
-      for (const file of listed) files.push({ ...file, status: !uncommitted || uncommitted.has(file.path) ? 'modified' : 'committed' });
+      const changed = uncommitted ? undefined : new Set(await this.uncommittedPaths());
+      for (const file of listed) files.push({ ...file, status: !changed || changed.has(file.path) ? 'modified' : 'committed' });
       files.push(...(await this.untracked()));
     }
     files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    return { available: true, readOnly: !!this.target.branch, ...(base ? { base: base.ref, baseSource: base.source } : { base: 'HEAD' }), files };
+    return { available: true, readOnly: archived, ...(base ? { base: base.ref, baseSource: base.source } : { base: 'HEAD' }), files };
+  }
+
+  /**
+   * How many files each scope of a working copy holds, from file names
+   * alone: none for the scopes with a start base when there is none to
+   * compare with.
+   */
+  async counts(): Promise<DiffCounts> {
+    const untracked = await this.untrackedPaths();
+    const counts: DiffCounts = { uncommitted: (await this.uncommittedPaths()).length + untracked.length };
+    const base = await this.base().catch(() => undefined);
+    if (!base) return counts;
+    const from = await this.mergeBase(base.ref);
+    const names = async (range: string[]) => splitZ((await this.gitOrThrow(['diff', '--name-only', '-z', '-M', ...BASE_FLAGS, ...range])).stdout).length;
+    return { ...counts, all: (await names([from])) + untracked.length, committed: await names([from, 'HEAD']) };
+  }
+
+  /**
+   * What the working copy holds now, hashed: its HEAD and `git status`, and
+   * the size and modification time of each file that lists (so a second
+   * edit to a file already changed shows too). Takes no lock, so it never
+   * gets in the agent's way.
+   */
+  async fingerprint(): Promise<string> {
+    const hash = createHash('sha1');
+    if (this.target.branch) {
+      hash.update((await this.git(['rev-parse', '--verify', '--quiet', `refs/heads/${this.target.branch}`])).stdout);
+      return hash.digest('hex');
+    }
+    const status = await this.git(['--no-optional-locks', 'status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all']);
+    hash.update(`${status.exitCode}\0${status.stdout}`);
+    // Its paths are from the repository's top level, which a working copy always is.
+    const paths = statusPaths(status.stdout).slice(0, MAX_FINGERPRINT_STATS);
+    if (paths.length > 0) {
+      // A bridge older than files.stat has the status alone to go on.
+      const stats = await this.environment.request<{ files: unknown[] }>('files.stat', GIT_TIMEOUT_MS, { root: this.target.repo, paths }).catch(() => undefined);
+      if (stats) hash.update(JSON.stringify(stats.files));
+    }
+    return hash.digest('hex');
   }
 
   /** The Glance strip's diff stat, from a summary of the whole diff. */
@@ -63,18 +108,19 @@ export class WorkingCopyDiff {
     return { files: files.length, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0) };
   }
 
-  /** One file's unified diff, cut short past MAX_FILE_DIFF_CHARS; none for one too big to read. */
-  async file(file: DiffFile, uncommittedOnly = false): Promise<FileDiff> {
+  /** One file's unified diff in `scope`, cut short past MAX_FILE_DIFF_CHARS; none for one too big to read. */
+  async file(file: DiffFile, scope: DiffScope = 'all'): Promise<FileDiff> {
     if (file.binary) return { text: '', truncated: false };
     if (file.uncounted) return { text: '', truncated: true };
     if (file.added + file.removed > MAX_FILE_DIFF_LINES) return { text: '', truncated: true };
+    const archived = !!this.target.branch;
     let result: ExecResult;
-    if (file.status === 'untracked' && !this.target.branch) {
+    if (file.status === 'untracked' && !archived) {
       result = await this.git([...BIG_FILE, 'diff', '--no-index', ...BASE_FLAGS, '--', '/dev/null', file.path]);
     } else {
-      const from = uncommittedOnly && !this.target.branch ? 'HEAD' : await this.mergeBase((await this.base()).ref);
+      const from = scope === 'uncommitted' && !archived ? 'HEAD' : await this.mergeBase((await this.base()).ref);
       const paths = file.oldPath ? [file.oldPath, file.path] : [file.path];
-      result = await this.git(['--literal-pathspecs', 'diff', '-M', ...BASE_FLAGS, ...this.range(from), '--', ...paths]);
+      result = await this.git(['--literal-pathspecs', 'diff', '-M', ...BASE_FLAGS, ...this.range(from, scope), '--', ...paths]);
     }
     // `--no-index` exits 1 when the files differ.
     if (result.exitCode > 1) throw new Error(`Couldn't read the diff of ${file.path}: ${message(result)}`);
@@ -108,7 +154,8 @@ export class WorkingCopyDiff {
    * The start base, and where it came from: the one recorded for the branch
    * (by `createWorktree` or setBase), else the `origin` branch its reflog
    * says it was created from, else `origin/HEAD`'s branch as the local ref
-   * names it, else `origin/main` or `origin/master`.
+   * names it, else `origin/main` or `origin/master`; and with none of those
+   * here (no `origin`, or never fetched), the local default branch.
    */
   private async base(): Promise<{ ref: string; source: DiffBaseSource }> {
     const branch = await this.branch();
@@ -122,7 +169,23 @@ export class WorkingCopyDiff {
     for (const candidate of candidates) {
       if (await this.hasRemoteRef(candidate.ref)) return candidate;
     }
-    throw new Error("There's no local origin/main or origin/master to compare with; fetch origin to see this diff.");
+    const local = await this.localDefault(head);
+    if (local) return { ref: local, source: 'local' };
+    throw new Error("There's no origin/main or origin/master here, nor a local main or master, to compare with: fetch origin to see this diff. Uncommitted shows what changed since the last commit.");
+  }
+
+  /**
+   * The local default branch: `origin/HEAD`'s namesake, else
+   * `init.defaultBranch`, else `main` or `master`, the first one the
+   * repository has.
+   */
+  private async localDefault(originHead: string | undefined): Promise<string | undefined> {
+    const configured = (await this.git(['config', '--get', 'init.defaultBranch'])).stdout.trim();
+    const names = [originHead?.replace(/^origin\//, ''), configured, 'main', 'master'].filter((name): name is string => !!name);
+    for (const name of new Set(names)) {
+      if ((await this.git(['rev-parse', '--verify', '--quiet', `refs/heads/${name}^{commit}`])).exitCode === 0) return name;
+    }
+    return undefined;
   }
 
   /** The branch compared: the archived one, else the working copy's; undefined on a detached HEAD. */
@@ -163,14 +226,28 @@ export class WorkingCopyDiff {
     return result.stdout.trim();
   }
 
-  /** What `git diff` compares: the working tree with `from`, or `from` with the archived branch. */
-  private range(from: string): string[] {
-    return this.target.branch ? [from, `refs/heads/${this.target.branch}`] : [from];
+  /**
+   * What `git diff` compares: `from` with the archived branch, with HEAD for
+   * committed changes only, else with the working tree.
+   */
+  private range(from: string, scope: DiffScope): string[] {
+    if (this.target.branch) return [from, `refs/heads/${this.target.branch}`];
+    return scope === 'committed' ? [from, 'HEAD'] : [from];
+  }
+
+  /** The tracked files changed since HEAD, by path (a rename by its new one). */
+  private async uncommittedPaths(): Promise<string[]> {
+    return splitZ((await this.gitOrThrow(['diff', '--name-only', '-z', '-M', ...BASE_FLAGS, 'HEAD'])).stdout);
+  }
+
+  /** The untracked files git doesn't ignore, by path. */
+  private async untrackedPaths(): Promise<string[]> {
+    return splitZ((await this.gitOrThrow(['ls-files', '-z', '--others', '--exclude-standard'])).stdout);
   }
 
   /** Untracked files git doesn't ignore, as additions. */
   private async untracked(): Promise<DiffFile[]> {
-    const paths = splitZ((await this.gitOrThrow(['ls-files', '-z', '--others', '--exclude-standard'])).stdout);
+    const paths = await this.untrackedPaths();
     const files: DiffFile[] = paths.map((path, index) => ({ path, status: 'untracked', added: 0, removed: 0, binary: false, ...(index < this.maxUntrackedCounted ? {} : { uncounted: true }) }));
     const counted = files.filter((f) => !f.uncounted);
     let next = 0;
@@ -220,6 +297,58 @@ export function parseNumstat(text: string): Omit<DiffFile, 'status'>[] {
     }
   }
   return files;
+}
+
+/**
+ * Parses `git diff --raw --numstat -z`: the raw entries (`:modes hashes
+ * STATUS\0path\0`, or `…\0old\0new\0` for a rename or copy), then the
+ * numstat ones, each file's counts marked deleted or renamed as its raw
+ * entry says.
+ */
+export function parseRawNumstat(text: string): Omit<DiffFile, 'status'>[] {
+  const parts = text.split('\0');
+  const changes = new Map<string, DiffFileChange>();
+  let i = 0;
+  for (; i < parts.length && parts[i]!.replace(/^\n/, '').startsWith(':'); i++) {
+    const letter = parts[i]!.trim().split(' ').at(-1)?.[0];
+    if (letter === 'R' || letter === 'C') {
+      i += 2;
+      if (letter === 'R') changes.set(parts[i]!, 'renamed');
+    } else {
+      i += 1;
+      if (letter === 'D') changes.set(parts[i]!, 'deleted');
+    }
+  }
+  return parseNumstat(parts.slice(i).join('\0')).map((file) => {
+    const change = changes.get(file.path);
+    return change ? { ...file, change } : file;
+  });
+}
+
+/**
+ * The paths `git status --porcelain=v2 -z` lists: each changed, unmerged or
+ * untracked file (a rename by its new path).
+ */
+export function statusPaths(text: string): string[] {
+  const parts = text.split('\0');
+  const paths: string[] = [];
+  // Fields before the path: ordinary `1` entries have 8, renames `2` 9, unmerged `u` 10.
+  const fields: Record<string, number> = { '1': 8, '2': 9, u: 10 };
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i]!;
+    if (entry.startsWith('? ')) {
+      paths.push(entry.slice(2));
+      continue;
+    }
+    const skip = fields[entry[0] ?? ''];
+    if (skip === undefined || entry[1] !== ' ') continue;
+    let at = 0;
+    for (let n = 0; n < skip && at !== -1; n++) at = entry.indexOf(' ', at + 1);
+    if (at !== -1) paths.push(entry.slice(at + 1));
+    // A rename's old path follows as its own part.
+    if (entry[0] === '2') i++;
+  }
+  return paths;
 }
 
 /** Parses `git diff --shortstat`: ` 3 files changed, 10 insertions(+), 2 deletions(-)`. */

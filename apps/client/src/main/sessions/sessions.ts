@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -126,7 +126,7 @@ export class Sessions {
   private readonly stuckWatches = this.perSessionTimers();
   /** Idle agents still closing, by Session: the next one opened for the Session waits for the process to exit, so two never share its conversation. */
   private readonly closing = this.perSession<Promise<void>>();
-  /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
+  /** The last diff summary worked out per Session and DiffScope, which `diffFile` looks its file up in. */
   private readonly diffSummaries = new Map<string, DiffSummary>();
   /**
    * Archives running, by Session: an agent that opens meanwhile waits for the
@@ -1228,7 +1228,7 @@ export class Sessions {
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
     if (!this.deleting.has(id)) void this.lookUpMergeRequestState(id);
-    for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
+    for (const scope of DIFF_SCOPES) this.diffSummaries.delete(summaryKey(id, scope));
   }
 
   /** Says what Babysit last saw of the Session's Merge request. */
@@ -1812,14 +1812,27 @@ export class Sessions {
     this.save(id, { branch });
   }
 
-  /** Works out the Session's diff, and the Glance strip's diff stat with it. */
-  async diff(id: number, uncommittedOnly = false): Promise<DiffSummary> {
+  /**
+   * Works out the Session's diff of `scope`, with how many files each scope
+   * holds while it isn't archived, and the Glance strip's diff stat with
+   * the whole diff.
+   */
+  async diff(id: number, scope: DiffScope = 'all'): Promise<DiffSummary> {
+    checkScope(scope);
     const diff = await this.diffOf(id);
     if (!diff) return { available: false, reason: 'No diff available' };
-    const summary = await diff.summary(uncommittedOnly);
-    this.diffSummaries.set(`${id}:${uncommittedOnly}`, summary);
-    if (!uncommittedOnly && this.get(id).status !== 'archived') this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
-    return summary;
+    const live = this.get(id).status !== 'archived';
+    // Counting is a nicety: the diff shows without it.
+    const [summary, counts] = await Promise.all([diff.summary(scope), live ? diff.counts().catch(() => undefined) : undefined]);
+    this.diffSummaries.set(summaryKey(id, scope), summary);
+    if (scope === 'all' && live) this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
+    return summary.available && counts ? { ...summary, counts } : summary;
+  }
+
+  /** What the Session's working copy holds now, as a string that changes whenever its diff may have. */
+  async diffFingerprint(id: number): Promise<string> {
+    const diff = await this.diffOf(id);
+    return diff ? diff.fingerprint() : '';
   }
 
   /** The `origin/…` branches the Session's diff can be against, as the local refs have them. */
@@ -1843,19 +1856,20 @@ export class Sessions {
   }
 
   /** One file of the Session's diff; the renderer names the path, what git is asked about it is worked out here. */
-  async diffFile(id: number, path: string, uncommittedOnly = false): Promise<FileDiff> {
+  async diffFile(id: number, path: string, scope: DiffScope = 'all'): Promise<FileDiff> {
+    checkScope(scope);
     const diff = await this.diffOf(id);
     if (!diff) throw new Error('No diff available');
-    const key = `${id}:${uncommittedOnly}`;
+    const key = summaryKey(id, scope);
     const known = this.diffSummaries.get(key);
     let file = known && filesOf(known).find((f) => f.path === path);
     if (!file) {
-      const summary = await diff.summary(uncommittedOnly);
+      const summary = await diff.summary(scope);
       this.diffSummaries.set(key, summary);
       file = filesOf(summary).find((f) => f.path === path);
     }
     if (!file) throw new Error(`${path} isn't in this diff`);
-    return diff.file(file, uncommittedOnly);
+    return diff.file(file, scope);
   }
 
   /**
@@ -1883,7 +1897,7 @@ export class Sessions {
       if (session.status === 'archived' || session.worktreeMissing) return;
       const diff = new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path }, this.options.maxUntrackedCounted);
       const summary = await diff.summary();
-      this.diffSummaries.set(`${id}:false`, summary);
+      this.diffSummaries.set(summaryKey(id, 'all'), summary);
       this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
     } catch {
       return;
@@ -2467,6 +2481,16 @@ function linkOf(number: number | null, url: string | null): ForgeLink | undefine
 /** Drops absent optional fields, so a Session compares equal however it was built. */
 function withoutUndefined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
+
+/** Where a Session's last summary of a scope is kept. */
+function summaryKey(id: number, scope: DiffScope): string {
+  return `${id}:${scope}`;
+}
+
+/** Rejects what isn't a DiffScope, as the renderer may send anything. */
+function checkScope(scope: DiffScope): void {
+  if (!DIFF_SCOPES.includes(scope)) throw new Error(`${String(scope)} isn't a diff scope.`);
 }
 
 function filesOf(summary: DiffSummary): DiffFile[] {

@@ -139,3 +139,39 @@ func writeFile(params fileWriteParams) (*struct{}, *Error) {
 	}
 	return &struct{}{}, nil
 }
+
+type statParams struct {
+	Root string `json:"root"`
+	// Paths are relative to Root, with `/` separators.
+	Paths []string `json:"paths"`
+}
+
+type fileStat struct {
+	Size    int64 `json:"size"`
+	MtimeNs int64 `json:"mtimeNs"`
+}
+
+type statResult struct {
+	// One per path, in order: null for a path with nothing there, or outside Root.
+	Files []*fileStat `json:"files"`
+}
+
+// statFiles reads the size and modification time of each path in a folder,
+// without following a link at the end of a path, so a caller can tell when
+// files change without reading them.
+func statFiles(params statParams) (*statResult, *Error) {
+	if params.Root == "" {
+		return nil, &Error{Code: "bad_params", Message: "files.stat needs a root"}
+	}
+	files := make([]*fileStat, len(params.Paths))
+	for i, path := range params.Paths {
+		local := filepath.FromSlash(path)
+		if !filepath.IsLocal(local) {
+			continue
+		}
+		if info, err := os.Lstat(filepath.Join(params.Root, local)); err == nil {
+			files[i] = &fileStat{Size: info.Size(), MtimeNs: info.ModTime().UnixNano()}
+		}
+	}
+	return &statResult{Files: files}, nil
+}
