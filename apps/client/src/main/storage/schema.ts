@@ -148,6 +148,12 @@ export interface BabysitTable {
   state: string;
 }
 
+/** Each Session's Panels as the user left them (shared/panels' SessionPanels, JSON-encoded); none until changed. */
+export interface SessionPanelsTable {
+  session_id: number;
+  state: string;
+}
+
 export interface Schema {
   settings: SettingsTable;
   projects: ProjectsTable;
@@ -158,4 +164,5 @@ export interface Schema {
   usage_buckets: UsageBucketsTable;
   session_spans: SessionSpansTable;
   babysit: BabysitTable;
+  session_panels: SessionPanelsTable;
 }

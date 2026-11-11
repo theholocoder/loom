@@ -1,16 +1,17 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, PanelBottom, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type MessageComment, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
+import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
 import { ChangesView } from './Changes';
 import { SessionInfo } from './SessionInfo';
-import { Sidebar, type SidebarControl } from './Sidebar';
-import { Dock, type DockState } from './Dock';
+import { PanelArea, usePanels } from './Panels';
+import { TerminalView } from './TerminalView';
 import { Popover, Select } from './Popover';
 import { Markdown } from './Markdown';
 import { ProjectRemoved, useArchive, useRemovedProject, WorktreeMissing } from './Archive';
@@ -327,11 +328,24 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
 }
 
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */
-export type SessionCommand = 'archive' | 'delete' | 'openMergeRequest' | 'requestMergeRequest' | 'linkMergeRequest' | 'openInEditor' | 'openInTerminal' | 'retry' | 'markUnread';
+export type SessionCommand =
+  | 'archive'
+  | 'delete'
+  | 'openMergeRequest'
+  | 'requestMergeRequest'
+  | 'linkMergeRequest'
+  | 'openInEditor'
+  | 'openInTerminal'
+  | 'retry'
+  | 'markUnread'
+  | 'toggleSideArea'
+  | 'toggleChanges'
+  | 'toggleInfo'
+  | 'toggleTerminal';
 
 /**
- * One Session: its header, its conversation and the composer, and the right
- * sidebar beside them while `sidebar` is open. Showing it
+ * One Session: its header, its conversation and the composer, with its Panels
+ * in the Side area beside them and the Dock under them. Showing it
  * marks it read, as does a status change while it is shown. Changing
  * `replyRequest` focuses the composer. A `command` is run once, showing what
  * went wrong in the conversation like the header's own actions, then handed
@@ -344,19 +358,12 @@ export function SessionView({
   command,
   onCommandDone,
   onRetryableChange,
-  sidebar,
-  dock,
-  onDockChange,
 }: {
   session: Session;
   replyRequest?: number;
   command?: SessionCommand;
   onCommandDone?: () => void;
   onRetryableChange?: (retryable: boolean) => void;
-  /** The Session's bottom dock; none for a Session that can have no terminal. */
-  dock?: DockState;
-  onDockChange?: (change: Partial<DockState>) => void;
-  sidebar: SidebarControl;
 }) {
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
@@ -368,7 +375,12 @@ export function SessionView({
   const [error, setError] = useState<string>();
   /** Whether Session info's Link Merge request popover is open. */
   const [linking, setLinking] = useState(false);
-  const infoShown = sidebar.open && sidebar.view === 'info';
+  // Only a Session that can still work has Terminals: not archived, its worktree there.
+  const dockable = session.status !== 'archived' && !session.worktreeMissing;
+  const terminals = useTopic('terminals', { sessionId: session.id });
+  const panels = usePanels(session.id, terminals);
+  const { side, dock } = panels.state;
+  const infoShown = side.open && side.shown === 'info';
   useEffect(() => {
     if (!infoShown) setLinking(false);
   }, [infoShown]);
@@ -410,13 +422,19 @@ export function SessionView({
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
       requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
       linkMergeRequest: async () => {
-        sidebar.reveal('info');
+        panels.show('info');
         setLinking(true);
       },
       openInEditor: () => api.invoke('sessions.openInEditor', { id }),
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
       retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
       markUnread: () => api.invoke('sessions.setUnread', { id, unread: true }),
+      toggleSideArea: async () => panels.toggleArea('side'),
+      toggleChanges: async () => panels.toggle('changes'),
+      toggleInfo: async () => panels.toggle('info'),
+      toggleTerminal: async () => {
+        if (dockable) panels.toggleTerminal();
+      },
     };
     runs[command]().catch((e: unknown) => setError((e as Error).message));
     // Run once per command: onCommandDone clears it, so asking again runs it again.
@@ -478,9 +496,6 @@ export function SessionView({
   // Loom quit or crashed during the run, which the agent can go on with.
   const continuable = session.status === 'waiting' && session.waitingReason === 'interrupted' && !session.worktreeMissing;
 
-  // Only a Session that can still work has terminals: not archived, its worktree there.
-  const dockable = dock && session.status !== 'archived' && !session.worktreeMissing ? dock : undefined;
-
   // Comments can go with the next message: not while the composer takes none, nor with an answer to a question.
   const composerDisabled = readOnly || (asked && !freeAnswer) || !!session.worktreeMissing;
   /** Comment…, on a right-click of text selected in the conversation: the passage and a note go to the composer as a chip. */
@@ -512,6 +527,31 @@ export function SessionView({
   const archive = () => {
     setError(undefined);
     archiver.archive(session).catch((e: unknown) => setError((e as Error).message));
+  };
+
+  /** A Panel's content, in whichever area it sits. */
+  const renderPanel = (panel: PanelId) => {
+    switch (kindOf(panel)) {
+      case 'changes':
+        return <ChangesView session={session} onComment={(comment) => setComments((list) => [...list, comment])} />;
+      case 'info':
+        return (
+          <SessionInfo
+            session={session}
+            project={project}
+            linking={linking}
+            onLinkingChange={setLinking}
+            onShowChanges={() => panels.show('changes')}
+            onArchive={archive}
+            onDelete={() => deleter.delete(session)}
+            onError={setError}
+          />
+        );
+      case 'terminal': {
+        const terminal = terminals?.find((t) => t.id === terminalOf(panel));
+        return terminal && <TerminalView key={terminal.id} terminal={terminal} focusPending={panels.focus === panel} onFocused={panels.onFocused} />;
+      }
+    }
   };
 
   return (
@@ -549,11 +589,11 @@ export function SessionView({
           <button
             className="icon-btn"
             type="button"
-            title={sidebar.open ? 'Hide sidebar' : 'Show sidebar'}
-            aria-label={sidebar.open ? 'Hide sidebar' : 'Show sidebar'}
-            aria-expanded={sidebar.open}
-            aria-controls="session-sidebar"
-            onClick={sidebar.toggle}
+            title={side.open ? 'Hide the Side area' : 'Show the Side area'}
+            aria-label={side.open ? 'Hide the Side area' : 'Show the Side area'}
+            aria-expanded={side.open}
+            aria-controls="session-side"
+            onClick={() => panels.toggleArea('side')}
           >
             <PanelRight />
           </button>
@@ -561,13 +601,13 @@ export function SessionView({
             <button
               className="icon-btn"
               type="button"
-              title={dockable.open ? 'Hide terminal' : 'Show terminal'}
-              aria-label={dockable.open ? 'Hide terminal' : 'Show terminal'}
-              aria-expanded={dockable.open}
+              title={dock.open ? 'Hide the Dock' : 'Show the Dock'}
+              aria-label={dock.open ? 'Hide the Dock' : 'Show the Dock'}
+              aria-expanded={dock.open}
               aria-controls="session-dock"
-              onClick={() => onDockChange?.(dockable.open ? { open: false } : { open: true, applet: 'terminal', focusPending: true })}
+              onClick={() => panels.toggleArea('dock')}
             >
-              <SquareTerminal />
+              <PanelBottom />
             </button>
           )}
           {archiver.dialog}
@@ -700,25 +740,12 @@ export function SessionView({
             ) : undefined
           }
         />
-        {dockable?.open && <Dock session={session} state={dockable} onChange={(change) => onDockChange?.(change)} />}
+        {panels.ready && dockable && dock.open && (
+          <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
+        )}
       </main>
-      {sidebar.open && (
-        <Sidebar control={sidebar}>
-          {sidebar.view === 'changes' ? (
-            <ChangesView session={session} onComment={(comment) => setComments((list) => [...list, comment])} />
-          ) : (
-            <SessionInfo
-              session={session}
-              project={project}
-              linking={linking}
-              onLinkingChange={setLinking}
-              onShowChanges={() => sidebar.reveal('changes')}
-              onArchive={archive}
-              onDelete={() => deleter.delete(session)}
-              onError={setError}
-            />
-          )}
-        </Sidebar>
+      {panels.ready && side.open && (
+        <PanelArea area="side" session={session} terminals={terminals} control={panels} render={renderPanel} />
       )}
     </>
   );
