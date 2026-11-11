@@ -21,6 +21,11 @@ describe('placing a popover', () => {
     expect(placePopover({ top: 260, bottom: 284, left: 20 }, VIEWPORT, { width: 200, height: 400 })).toEqual({ side: 'up', bottom: 44, left: 20, maxHeight: 248 });
   });
 
+  it('grows taller than a menu when asked to, room allowing', () => {
+    expect(placePopover({ top: 10, bottom: 34, left: 20 }, { width: 800, height: 600 }, { width: 200, height: 500 }, 640).maxHeight).toBe(600 - 34 - 4 - 8);
+    expect(placePopover({ top: 10, bottom: 34, left: 20 }, { width: 800, height: 900 }, { width: 200, height: 500 }, 640).maxHeight).toBe(640);
+  });
+
   it('stays inside the viewport horizontally', () => {
     expect(placePopover({ top: 10, bottom: 34, left: 700 }, VIEWPORT, { width: 360, height: 50 }).left).toBe(800 - 8 - 360);
     expect(placePopover({ top: 10, bottom: 34, left: -50 }, VIEWPORT, { width: 100, height: 50 }).left).toBe(8);

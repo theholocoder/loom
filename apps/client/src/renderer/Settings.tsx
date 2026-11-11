@@ -189,7 +189,7 @@ function AutoPromptDefault() {
         <input type="checkbox" checked={on} onChange={(event) => change(event.target.checked)} />
         <span>Auto-prompt new Sessions</span>
       </label>
-      <div className="muted">New feedback on a Session's Merge request goes straight to its agent, up to {MAX_AUTO_PROMPTS} attempts in a row without a message from you. Each Session can change this in its Session info.</div>
+      <div className="muted">New feedback on a Session's Merge request goes straight to its agent, up to {MAX_AUTO_PROMPTS} attempts in a row without a message from you. Each Session can change this from its Merge request, in the Glance strip.</div>
       <ErrorAlert error={error} />
     </div>
   );

@@ -10,7 +10,7 @@ export const PANEL_AREAS = ['side', 'dock'] as const;
 export type PanelArea = (typeof PANEL_AREAS)[number];
 
 /** The kinds of Panel Loom has. */
-export const PANEL_KINDS = ['info', 'changes', 'terminal'] as const;
+export const PANEL_KINDS = ['changes', 'terminal'] as const;
 /** One kind of Panel. */
 export type PanelKind = (typeof PANEL_KINDS)[number];
 
@@ -38,9 +38,8 @@ export interface PanelKindSpec {
   several: boolean;
 }
 
-/** Each Panel kind's area and sizes: Session info and Changes open in the Side area, Terminals in the Dock. */
+/** Each Panel kind's area and sizes: Changes opens in the Side area, Terminals in the Dock. */
 export const PANEL_SPECS: Record<PanelKind, PanelKindSpec> = {
-  info: { area: 'side', width: { min: 280, preferred: 420 }, height: { min: 120, preferred: 280 }, several: false },
   changes: { area: 'side', width: { min: 280, preferred: 640 }, height: { min: 120, preferred: 340 }, several: false },
   terminal: { area: 'dock', width: { min: 320, preferred: 520 }, height: { min: 120, preferred: 280 }, several: true },
 };

@@ -48,13 +48,13 @@ function open(main: FakeMain) {
   return { header: screen.getByRole('region', { name: 'Session header' }), log: screen.getByRole('log', { name: 'Conversation' }) };
 }
 
-/** Session info's Git group, opening the view with Ctrl+I if it isn't shown. */
-function gitGroup(): HTMLElement {
-  if (!screen.queryByRole('tabpanel', { name: 'Session info' })) fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
-  return within(screen.getByRole('tabpanel', { name: 'Session info' })).getByRole('region', { name: 'Git' });
-}
+const glance = () => screen.getByRole('group', { name: 'Session at a glance' });
 
-const mergeRequestFact = (git: HTMLElement) => within(git).getAllByRole('term').find((t) => t.textContent === 'Merge request')!.nextElementSibling as HTMLElement;
+/** The Merge request popover, opened from its chip in the Glance strip if it isn't open. */
+function mergeRequestPopover(): HTMLElement {
+  if (!screen.queryByRole('dialog', { name: 'Merge request' })) fireEvent.click(within(glance()).getByRole('button', { name: /^(Merge request [#!]\d+|No Merge request yet)$/ }));
+  return screen.getByRole('dialog', { name: 'Merge request' });
+}
 
 const calls = (main: FakeMain, command: string) => main.invoked.filter((i) => i.command === command).map((i) => i.params);
 
@@ -81,48 +81,52 @@ describe("the Session's Merge request", () => {
     expect(within(log).getByRole('note').textContent).toBe("Couldn't link Merge request 41: That Merge request is closed: only an open one can be linked.");
   });
 
-  it('shows in Session info once linked, with its state: open it, ask the agent to update it, or link another', async () => {
+  it('shows in the Glance strip once linked, its popover opening it, asking the agent to update it, or linking another', async () => {
     const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] });
     open(main);
-    const git = gitGroup();
-    expect(within(git).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
-    expect(mergeRequestFact(git).querySelector('.value')!.textContent).toBe('!12');
+    expect(within(glance()).getByRole('button', { name: 'Merge request !12' }).textContent).toBe('!12');
+    const popover = mergeRequestPopover();
+    expect(within(popover).getByRole('heading').textContent).toBe('Merge request !12Open');
+    expect(within(popover).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
 
-    fireEvent.click(within(git).getByRole('button', { name: 'Open Merge request !12' }));
+    fireEvent.click(within(popover).getByRole('button', { name: 'Open !12' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
-    fireEvent.click(within(git).getByRole('button', { name: 'Update Merge request' }));
+    fireEvent.click(within(mergeRequestPopover()).getByRole('button', { name: 'Link Merge request…' }));
+    expect(within(mergeRequestPopover()).getByRole('form', { name: 'Link Merge request' })).toBeTruthy();
+    fireEvent.click(within(mergeRequestPopover()).getByRole('button', { name: 'Update Merge request' }));
     await waitFor(() => expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]));
-    fireEvent.click(within(git).getByRole('button', { name: 'Link Merge request' }));
-    expect(screen.getByRole('dialog', { name: 'Link Merge request' })).toBeTruthy();
+    // Asking closes it: the agent's reply is in the conversation.
+    expect(screen.queryByRole('dialog', { name: 'Merge request' })).toBeNull();
   });
 
-  it('just opens the linked one from Session info of an archived Session', async () => {
+  it("shows a merged one's state, and just opens it from an archived Session", async () => {
     const main = new FakeMain({ projects: [gitlab], sessions: [session({ status: 'archived', mergeRequest: { number: 12, url }, mergeRequestState: 'merged' })] });
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: /Archive/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Fix login' }));
-    const git = gitGroup();
+    expect(within(glance()).getByRole('button', { name: 'Merge request !12' }).textContent).toBe('!12Merged');
+    const popover = mergeRequestPopover();
 
-    expect(within(git).queryByRole('button', { name: 'Update Merge request' })).toBeNull();
-    expect(within(git).queryByRole('button', { name: 'Link Merge request' })).toBeNull();
-    fireEvent.click(within(git).getByRole('button', { name: 'Open Merge request !12' }));
+    for (const name of ['Update Merge request', 'Link Merge request…', 'Babysit', 'Auto-prompt']) expect(within(popover).queryByRole('button', { name })).toBeNull();
+    expect(within(popover).queryAllByRole('switch')).toEqual([]);
+    fireEvent.click(within(popover).getByRole('button', { name: 'Open !12' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
   });
 
-  it('asks the agent to create one from Session info when none is linked, and offers no actions with the Forge off', () => {
+  it('asks the agent to create one when none is linked, and offers nothing with the Forge off', () => {
     const main = new FakeMain({ projects: [gitlab], sessions: [session()] });
     open(main);
-    fireEvent.click(within(gitGroup()).getByRole('button', { name: 'Create Merge request' }));
+    expect(within(glance()).getByRole('button', { name: 'No Merge request yet' }).textContent).toBe('Merge request');
+    fireEvent.click(within(mergeRequestPopover()).getByRole('button', { name: 'Create Merge request' }));
     expect(calls(main, 'sessions.requestMergeRequest')).toEqual([{ id: 1 }]);
     cleanup();
 
     const off = new FakeMain({ projects: [{ ...gitlab, forge: { state: 'no-remote', checking: false } }], sessions: [session()] });
     open(off);
-    expect(within(gitGroup()).queryByRole('button', { name: 'Create Merge request' })).toBeNull();
-    expect(within(gitGroup()).queryByRole('button', { name: 'Link Merge request' })).toBeNull();
+    expect(within(glance()).queryByRole('button', { name: 'No Merge request yet' })).toBeNull();
   });
 
-  it('links one by hand from Session info, showing why the Forge refused it', async () => {
+  it('links one by hand, showing why the Forge refused it', async () => {
     let refuse = true;
     const main = new FakeMain({ projects: [gitlab], sessions: [session()] }, {
       'sessions.linkMergeRequest': () => {
@@ -131,8 +135,9 @@ describe("the Session's Merge request", () => {
     });
     open(main);
 
-    fireEvent.click(within(gitGroup()).getByRole('button', { name: 'Link Merge request' }));
-    const dialog = screen.getByRole('dialog', { name: 'Link Merge request' });
+    fireEvent.click(within(mergeRequestPopover()).getByRole('button', { name: 'Link Merge request…' }));
+    const dialog = within(mergeRequestPopover()).getByRole('form', { name: 'Link Merge request' });
+    expect(document.activeElement).toBe(within(dialog).getByRole('textbox', { name: 'Merge request number or URL' }));
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Merge request number or URL' }), { target: { value: ' !41 ' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Link' }));
     expect((await within(dialog).findByRole('alert')).textContent).toBe('That Merge request is closed: only an open one can be linked.');
@@ -140,7 +145,7 @@ describe("the Session's Merge request", () => {
     refuse = false;
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Merge request number or URL' }), { target: { value: url } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Link' }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Link Merge request' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Merge request' })).toBeNull());
     expect(calls(main, 'sessions.linkMergeRequest')).toEqual([
       { id: 1, mergeRequest: '!41' },
       { id: 1, mergeRequest: url },
@@ -155,6 +160,8 @@ describe("the Session's Merge request", () => {
     expect(within(palette).getByRole('option', { name: 'Update Merge request !12 for this Session' })).toBeTruthy();
     fireEvent.click(within(palette).getByRole('option', { name: 'Link Merge request…' }));
 
-    expect(screen.getByRole('dialog', { name: 'Link Merge request' })).toBeTruthy();
+    const popover = screen.getByRole('dialog', { name: 'Merge request' });
+    expect(within(popover).getByRole('form', { name: 'Link Merge request' })).toBeTruthy();
+    expect(document.activeElement).toBe(within(popover).getByRole('textbox', { name: 'Merge request number or URL' }));
   });
 });

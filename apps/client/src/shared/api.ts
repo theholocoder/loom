@@ -435,7 +435,7 @@ export interface Session {
   worktreeMissing?: boolean;
   /**
    * What its branch changed against the merge-base with its start base, for
-   * Session info's diff stat: worked out after each turn and when the Session is
+   * the Glance strip's diff stat: worked out after each turn and when the Session is
    * opened, kept in memory only. Absent until known.
    */
   diffStat?: DiffStat;
@@ -1295,7 +1295,7 @@ export interface Commands {
    */
   'sessions.openInEditor': { params: { id: number; file?: string }; result: void };
   /**
-   * Works out the Session's diff (and Session info's diff stat) again, in its
+   * Works out the Session's diff (and the Glance strip's diff stat) again, in its
    * Environment. Never fetches. Not available for an archived checkout
    * Session, or an archived worktree Session whose branch is gone.
    */
@@ -1380,6 +1380,12 @@ export interface Commands {
    * Rejects an empty title.
    */
   'sessions.rename': { params: { id: number; title: string }; result: void };
+  /**
+   * Links a Session to an issue on its Project's Forge, in place of any it
+   * had, while its Project is there. Rejects an issue with no number or no
+   * http(s) link.
+   */
+  'sessions.linkIssue': { params: { id: number; issue: ForgeLink }; result: void };
   /**
    * Keeps a Session's Panels as the user left them: which are open in each
    * Panel area, the one shown and whether each area is shown. Its Terminals'

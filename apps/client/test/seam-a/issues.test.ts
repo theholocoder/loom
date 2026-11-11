@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { git, startMain, tempMachine, waitFor, type ForgeCliScript, type Machine } from './harness';
+import { git, startMain, tempDir, tempMachine, waitFor, type ForgeCliScript, type Machine } from './harness';
 import type { EnvironmentStatus, Issue, Session } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -14,8 +14,8 @@ const loginBug: Issue = {
 const darkMode: Issue = { number: 7, title: 'Dark mode', body: 'Assigned to someone else.', url: 'https://github.com/theholocoder/loom/issues/7' };
 const issues: ForgeCliScript['issues'] = [loginBug, darkMode];
 
-async function withProject(machine: Machine, checkout: string) {
-  const main = await startMain({ machine });
+async function withProject(machine: Machine, checkout: string, userDataDir?: string) {
+  const main = await startMain({ machine, userDataDir });
   await waitFor(main.api, 'environments', ready);
   const project = await main.api.invoke('projects.link', { path: checkout });
   return { main, project };
@@ -133,5 +133,35 @@ describe('a Session started from an issue', () => {
     // The branch the user typed wins.
     const third = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', issue: loginBug, branch: 'loom/sso', prompt: '' });
     expect(third.branch).toBe('loom/sso');
+  });
+});
+
+describe('linking an issue to a Session', () => {
+  it('links it, in place of any it had, kept when main starts again', async () => {
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git');
+    const userDataDir = tempDir('loom-issues-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix SSO' });
+    expect(created.issue).toBeUndefined();
+
+    await main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: darkMode.number, url: darkMode.url } });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.issue?.number === 7));
+    await main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: loginBug.number, url: loginBug.url } });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.issue?.number === 31));
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    await main.close();
+
+    const again = await startMain({ machine, userDataDir });
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === created.id)?.issue).toEqual({ number: 31, url: loginBug.url });
+  });
+
+  it('rejects an issue with no number, or whose link is not a web page', async () => {
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git');
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix SSO' });
+
+    await expect(main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 31, url: 'file:///etc/passwd' } })).rejects.toThrow('An issue needs a number and an http(s) link.');
+    await expect(main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 0, url: loginBug.url } })).rejects.toThrow('An issue needs a number and an http(s) link.');
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)?.issue).toBeUndefined();
   });
 });
