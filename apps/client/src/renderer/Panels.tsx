@@ -5,7 +5,7 @@
 // in the database; each kind's size is the Layout's, the same for every
 // Session. An area takes the size of the Panel it shows.
 import { ChevronDown, FileDiff, Info, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { Session, TerminalInfo } from '../shared/api';
 import {
   DEFAULT_LAYOUT,
@@ -30,6 +30,8 @@ import {
 } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { Popover } from './Popover';
+import { ResizeEdge } from './ResizeEdge';
+import { useWindowLayout } from './WindowLayout';
 
 /** What a tab shows beside its label: a count, with what it counts for a screen reader and the tooltip. */
 export interface PanelBadge {
@@ -59,10 +61,8 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
 /** The Panel areas' names, as the user reads them. */
 export const AREA_LABELS: Record<PanelAreaName, string> = { side: 'Side area', dock: 'Dock' };
 
-/** How much of the window an area may take, leaving room for the conversation. */
-const WINDOW_SHARE = 0.7;
-/** How far one arrow key press moves an area's edge, in pixels. */
-const KEY_STEP = 24;
+/** How much of the window's height the Dock may take, leaving room for the conversation. */
+const DOCK_SHARE = 0.7;
 /** The width of a Side area with no Panel in it. */
 const EMPTY_WIDTH = 360;
 /** The size a Terminal starts at, until it is fitted to its Panel. */
@@ -73,6 +73,12 @@ export interface PanelsControl {
   /** Whether main has said what the Session's Panels are; until then none shows. */
   ready: boolean;
   state: SessionPanels;
+  /** Whether the Side area is a drawer over the conversation, the window being narrow. */
+  drawer: boolean;
+  /** Whether the Side area shows: beside the conversation, or, as a drawer, open over it. */
+  sideShown: boolean;
+  /** Closes the drawer, leaving the Session's Panels as they are. */
+  closeDrawer(): void;
   /** Why the last Terminal couldn't open, shown in the Dock. */
   error?: string;
   /** The Panel to put the focus in once it shows: a Terminal just opened or asked for. */
@@ -104,8 +110,14 @@ export interface PanelsControl {
  * until main holds the same. A change main refuses is undone, unless a later
  * one has replaced it. A Terminal's Panel goes once `terminals` no longer
  * lists it, and the area it leaves empty is hidden.
+ *
+ * In a narrow window the Side area is a drawer, closed until a Panel is
+ * shown in it or the area is toggled, and closed again when the window
+ * crosses the breakpoint or the area is left with no Panel. Whether it is open is not kept: the Session's
+ * Panels say whether the area shows in a wide window.
  */
 export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefined): PanelsControl {
+  const { narrow } = useWindowLayout();
   const api = useApi();
   const stored = useTopic('panels', { sessionId });
   const [local, setLocal] = useState<SessionPanels>();
@@ -115,6 +127,8 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   const layout = useLayout();
   const [error, setError] = useState<string>();
   const [focus, setFocus] = useState<PanelId>();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => setDrawerOpen(false), [narrow]);
   /** Terminals just opened that `terminals` doesn't list yet. */
   const starting = useRef(new Set<number>());
   const opening = useRef(false);
@@ -138,8 +152,11 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   const loaded = useRef(false);
   loaded.current = !!stored;
   // Not before main has said what they are: the change would replace them with a new Session's.
-  const update = (change: (state: SessionPanels) => SessionPanels) => {
-    if (loaded.current) save(change(latest.current));
+  const update = (change: (state: SessionPanels) => SessionPanels): SessionPanels | undefined => {
+    if (!loaded.current) return undefined;
+    const next = change(latest.current);
+    save(next);
+    return next;
   };
   // Terminals that ended are kept closed.
   const ended = !!stored && !same(current, base);
@@ -147,7 +164,12 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     if (ended) save(current);
   }, [ended]);
 
-  const show = (panel: PanelId) => update((state) => showing(state, panel));
+  const show = (panel: PanelId) => {
+    const next = update((state) => showing(state, panel));
+    if (narrow && next?.side.panels.includes(panel)) setDrawerOpen(true);
+  };
+  /** Whether the Side area shows in `state`: beside the conversation, or as the open drawer. */
+  const sideShownIn = (state: SessionPanels) => state.side.open && (!narrow || drawerOpen);
   const newTerminal = async () => {
     if (opening.current) return;
     opening.current = true;
@@ -167,14 +189,27 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   };
   const toggleArea = (area: PanelAreaName) => {
     const state = latest.current[area];
+    if (area === 'side' && narrow) {
+      if (drawerOpen && state.open) return setDrawerOpen(false);
+      setDrawerOpen(true);
+      if (!state.open) update((all) => ({ ...all, side: { ...all.side, open: true } }));
+      return;
+    }
     if (state.open) return update((all) => ({ ...all, [area]: { ...all[area], open: false } }));
     if (area === 'dock' && !state.panels.length) return void newTerminal();
     update((all) => ({ ...all, [area]: { ...all[area], open: true } }));
   };
 
+  const sideShown = sideShownIn(current);
+  useEffect(() => {
+    if (!current.side.open) setDrawerOpen(false);
+  }, [current.side.open]);
   return {
     ready: !!stored,
     state: current,
+    drawer: narrow,
+    sideShown,
+    closeDrawer: () => setDrawerOpen(false),
     error,
     focus,
     onFocused: () => setFocus(undefined),
@@ -189,7 +224,8 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     toggleArea,
     toggle: (panel) => {
       const area = areaOf(latest.current, panel);
-      if (area && latest.current[area].open && latest.current[area].shown === panel) toggleArea(area);
+      const shown = area === 'side' ? sideShownIn(latest.current) : area && latest.current[area].open;
+      if (area && shown && latest.current[area].shown === panel) toggleArea(area);
       else show(panel);
     },
     newTerminal: () => void newTerminal(),
@@ -271,16 +307,10 @@ function withTerminals(state: SessionPanels, running: Set<number>): SessionPanel
   return next;
 }
 
-/** How large an area can be in the window as it is now, across `dimension`. */
-function useLargestFitting(dimension: PanelDimension): number {
-  const largest = () => Math.min(PANEL_MAX_SIZE[dimension], Math.floor((dimension === 'width' ? window.innerWidth : window.innerHeight) * WINDOW_SHARE));
-  const [size, setSize] = useState(largest);
-  useEffect(() => {
-    const onResize = () => setSize(largest());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return size;
+/** How large `area` can be in the window as it is now: the Side area leaves the conversation its least width. */
+function useLargest(area: PanelAreaName): number {
+  const { sideMaxWidth, height } = useWindowLayout();
+  return area === 'side' ? sideMaxWidth : Math.min(PANEL_MAX_SIZE.height, Math.floor(height * DOCK_SHARE));
 }
 
 /** A Panel's tab: its label and icon, and its badge. */
@@ -340,10 +370,11 @@ export function PanelArea({
   const label = AREA_LABELS[area];
   const dimension = dimensionOf(area);
   const kind = state.shown ? kindOf(state.shown) : undefined;
-  const largest = useLargestFitting(dimension);
+  const largest = useLargest(area);
   const min = kind ? PANEL_SPECS[kind][dimension].min : 0;
   const max = Math.max(min, largest);
-  const size = kind ? Math.min(Math.max(control.size(kind, dimension), min), max) : area === 'side' ? EMPTY_WIDTH : undefined;
+  const size = kind ? Math.min(Math.max(control.size(kind, dimension), min), max) : area === 'side' ? Math.min(EMPTY_WIDTH, largest) : undefined;
+  const drawer = area === 'side' && control.drawer;
   const id = `session-${area}`;
   const tabId = (panel: PanelId) => `${area}-tab-${panel.replace(':', '-')}`;
   const tabs = useRef<HTMLDivElement>(null);
@@ -359,10 +390,25 @@ export function PanelArea({
     control.show(panel);
     tabs.current?.querySelector<HTMLElement>(`#${tabId(panel)}`)?.focus();
   };
+  const element = useRef<HTMLElement>(null);
+  useDrawer(drawer, element, control.closeDrawer);
   const Element = area === 'side' ? 'aside' : 'section';
   return (
-    <Element className={`panel-area ${area}`} id={id} aria-label={label} style={size === undefined ? undefined : { [dimension]: size }}>
-      {kind && size !== undefined && <ResizeEdge area={area} label={label} controls={id} size={size} min={min} max={max} onResize={(to, done) => control.resize(kind, dimension, Math.min(Math.max(to, min), max), done)} />}
+    <>
+    {drawer && <div className="drawer-scrim" aria-hidden="true" />}
+    <Element ref={element} className={drawer ? `panel-area ${area} drawer` : `panel-area ${area}`} id={id} aria-label={label} style={size === undefined ? undefined : { [dimension]: size }}>
+      {kind && size !== undefined && (
+        <ResizeEdge
+          side={area === 'side' ? 'left' : 'top'}
+          label={`Resize the ${label}`}
+          controls={id}
+          size={size}
+          min={min}
+          max={max}
+          preferred={PANEL_SPECS[kind][dimension].preferred}
+          onResize={(to, done) => control.resize(kind, dimension, to, done)}
+        />
+      )}
       <header className="panel-tabs-bar">
         <div ref={tabs} role="tablist" aria-label={`${label} Panels`} className={fit.compact ? 'panel-tabs compact' : 'panel-tabs'} onKeyDown={step}>
           {state.panels.map((panel) => {
@@ -413,7 +459,45 @@ export function PanelArea({
         {state.shown ? render(state.shown) : area === 'side' && <div className="panel-empty">No Panels here. Add one with +.</div>}
       </div>
     </Element>
+    </>
   );
+}
+
+/**
+ * While the Side area is a drawer over the conversation: the focus goes into
+ * it as it opens, and back where it was as it closes. Esc closes it, unless
+ * something in it (a menu, a search) took the key first, or a dialog or menu
+ * is open over the window. So does a click outside it, on the scrim or the
+ * Inbox, but for one in a menu or dialog over it.
+ */
+function useDrawer(drawer: boolean, element: RefObject<HTMLElement | null>, close: () => void) {
+  const closing = useRef(close);
+  closing.current = close;
+  useEffect(() => {
+    if (!drawer) return;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const area = element.current;
+    if (area && !area.contains(document.activeElement)) area.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest('.terminal-screen')) return;
+      if (document.querySelector('[aria-modal="true"], .popover')) return;
+      event.preventDefault();
+      closing.current();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || area?.contains(event.target) || event.target.closest('[aria-modal="true"], .popover')) return;
+      closing.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+      // Back where it was, unless the focus has gone elsewhere since.
+      if (returnFocus?.isConnected && (!document.activeElement || document.activeElement === document.body || area?.contains(document.activeElement))) returnFocus.focus();
+    };
+  }, [drawer]);
 }
 
 /**
@@ -524,52 +608,5 @@ function AddMenu({ area, choices }: { area: string; choices: PanelChoice[] }) {
         </Popover>
       )}
     </>
-  );
-}
-
-/** The edge facing the conversation: dragged, or moved with the arrow keys, it sets the size of the Panel shown, within `min` and `max`. */
-function ResizeEdge({ area, label, controls, size, min, max, onResize }: { area: PanelAreaName; label: string; controls: string; size: number; min: number; max: number; onResize: (size: number, done: boolean) => void }) {
-  const resize = useRef(onResize);
-  resize.current = onResize;
-  const side = area === 'side';
-  const bodyClass = side ? 'resizing' : 'resizing-rows';
-  const start = (event: ReactMouseEvent) => {
-    event.preventDefault();
-    const from = { at: side ? event.clientX : event.clientY, size };
-    // Dragging left widens the Side area; dragging up makes the Dock taller.
-    const sizeAt = (e: MouseEvent) => from.size + (from.at - (side ? e.clientX : e.clientY));
-    const move = (e: MouseEvent) => resize.current(sizeAt(e), false);
-    const up = (e: MouseEvent) => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-      document.body.classList.remove(bodyClass);
-      resize.current(sizeAt(e), true);
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-    document.body.classList.add(bodyClass);
-  };
-  const key = (event: ReactKeyboardEvent) => {
-    const grow = side ? 'ArrowLeft' : 'ArrowUp';
-    const shrink = side ? 'ArrowRight' : 'ArrowDown';
-    const by = event.key === grow ? KEY_STEP : event.key === shrink ? -KEY_STEP : 0;
-    if (!by) return;
-    event.preventDefault();
-    onResize(size + by, true);
-  };
-  return (
-    <div
-      className="panel-edge"
-      role="separator"
-      aria-orientation={side ? 'vertical' : 'horizontal'}
-      aria-label={`Resize the ${label}`}
-      aria-controls={controls}
-      aria-valuemin={min}
-      aria-valuemax={max}
-      aria-valuenow={size}
-      tabIndex={0}
-      onMouseDown={start}
-      onKeyDown={key}
-    />
   );
 }

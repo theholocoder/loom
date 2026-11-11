@@ -1,6 +1,7 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
 import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues } from '../shared/api';
 import { clampPanelSize, isPanelDimension, isPanelKind, readLayout, type PanelDimension, type PanelKind } from '../shared/panels';
+import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
@@ -34,6 +35,7 @@ export class Settings {
     }
     // Each Panel kind's size stands alone: one Loom no longer has is dropped, one never set takes its preferred size.
     current.layout = readLayout(stored.layout);
+    current.inbox = readInbox(stored.inbox);
     // Each part of the Changes view's layout stands alone: one Loom no longer takes falls back to its default.
     if (typeof stored.diffView === 'object' && stored.diffView !== null) {
       const { fileList, wrap, sideBySide } = stored.diffView as Record<string, unknown>;
@@ -114,6 +116,16 @@ export class Settings {
     if (typeof size !== 'number' || !Number.isFinite(size)) throw new Error("A Panel's size must be a number of pixels.");
     const { layout } = this.current;
     return this.set('layout', { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } });
+  }
+
+  /** Sets the Inbox's width, kept within its least and most, whether it is shown, or both. */
+  async setInbox(inbox: Partial<InboxSettings>): Promise<SettingsValues> {
+    if (typeof inbox !== 'object' || inbox === null) throw new Error("The Inbox's settings must be an object.");
+    const { width, open } = inbox;
+    if (width !== undefined && (typeof width !== 'number' || !Number.isFinite(width))) throw new Error("The Inbox's width must be a number of pixels.");
+    if (open !== undefined && typeof open !== 'boolean') throw new Error('Whether the Inbox is shown must be true or false.');
+    const current = this.current.inbox;
+    return this.set('inbox', { width: width === undefined ? current.width : clampInboxWidth(width), open: open ?? current.open });
   }
 
   /** Sets the Changes view's layout, all of it, so that quick changes can't undo each other. */

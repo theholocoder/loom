@@ -20,6 +20,8 @@ import {
   Mail,
   MessageSquarePlus,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
   Plus,
   Reply,
@@ -31,7 +33,7 @@ import {
   Waypoints,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { mergeRequestRef, type Project, type Session } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
@@ -49,6 +51,9 @@ import { ContextMenuHost } from './ContextMenu';
 import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
 import { matchesShortcut, SHORTCUTS, type ShortcutName } from './shortcuts';
+import { ResizeEdge } from './ResizeEdge';
+import { useInbox, useWindowSize, WindowLayoutProvider } from './WindowLayout';
+import { INBOX_WIDTH, windowLayout } from '../shared/window';
 
 type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
 
@@ -125,6 +130,9 @@ function Workspace() {
     void linker.link();
   };
   const forgeProjects = projects.filter((p) => p.forge.state === 'available');
+  const inbox = useInbox();
+  const windowSize = useWindowSize();
+  const layout = { ...windowLayout(windowSize.width, inbox.value), height: windowSize.height };
 
   const waiting = inboxOrder(sessions, projects);
   const actions = paletteActions({
@@ -145,6 +153,7 @@ function Workspace() {
     },
     setView,
     showHelp: (returnFocus) => setHelp({ returnFocus }),
+    toggleInbox: inbox.toggle,
   });
 
   const openPalette = () => setPalette({ returnFocus: focusedElement() });
@@ -203,30 +212,67 @@ function Workspace() {
 
   return (
     <NewSessionContext.Provider value={startNewSessionOn}>
-      <div className="app">
+      <WindowLayoutProvider value={layout}>
+      <div className="app" style={{ '--inbox-width': `${layout.inboxWidth}px` } as CSSProperties}>
         <ContextMenuHost />
-        <aside className="side" aria-label="Inbox">
-          <div className="side-top">
-            <div className="brand">
-              <Waypoints /> Loom<span className="grow" />
-              <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddExistingClone={addExistingClone} />
+        {inbox.value.open ? (
+          <aside className="side" id="inbox" aria-label="Inbox">
+            <ResizeEdge
+              side="right"
+              label="Resize the Inbox"
+              controls="inbox"
+              size={layout.inboxWidth}
+              min={layout.inboxBounds.min}
+              max={layout.inboxBounds.max}
+              preferred={INBOX_WIDTH.preferred}
+              onResize={inbox.resize}
+            />
+            <div className="side-top">
+              <div className="brand">
+                <Waypoints /> Loom<span className="grow" />
+                <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddExistingClone={addExistingClone} />
+                <button className="icon-btn" type="button" title="Collapse the Inbox" aria-label="Collapse the Inbox" aria-expanded="true" aria-controls="inbox" onClick={inbox.toggle}>
+                  <PanelLeftClose />
+                </button>
+              </div>
+              <button className="search" type="button" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
+                <Search />
+                <span>Search Sessions and actions</span>
+                <kbd>Ctrl K</kbd>
+              </button>
             </div>
-            <button className="search" type="button" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
-              <Search />
-              <span>Search Sessions and actions</span>
-              <kbd>Ctrl K</kbd>
+            <div className="side-list">
+              <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
+            </div>
+            <ViewNav className="side-foot" view={view} onView={setView} />
+          </aside>
+        ) : (
+          <aside className="side rail" id="inbox" aria-label="Inbox">
+            <button
+              className="icon-btn"
+              type="button"
+              title={`Show the Inbox: ${waiting.length} Waiting`}
+              aria-label="Show the Inbox"
+              aria-description={`${waiting.length} Waiting`}
+              aria-expanded="false"
+              aria-controls="inbox"
+              onClick={inbox.toggle}
+            >
+              <PanelLeftOpen />
+              {waiting.length > 0 && (
+                <span className="badge" aria-hidden="true">
+                  {waiting.length}
+                </span>
+              )}
             </button>
-          </div>
-          <div className="side-list">
-            <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
-          </div>
-          <nav className="side-foot">
-            <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => setView('projects')} />
-            <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => setView('dashboard')} />
+            <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddExistingClone={addExistingClone} />
+            <button className="icon-btn" type="button" title="Search Sessions and actions" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
+              <Search />
+            </button>
             <span className="grow" />
-            <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => setView('settings')} />
-          </nav>
-        </aside>
+            <ViewNav className="rail-foot" view={view} onView={setView} />
+          </aside>
+        )}
         {view === 'settings' ? (
           <Settings />
         ) : view === 'dashboard' ? (
@@ -282,6 +328,7 @@ function Workspace() {
           />
         )}
       </div>
+      </WindowLayoutProvider>
     </NewSessionContext.Provider>
   );
 }
@@ -329,6 +376,7 @@ function paletteActions(app: {
   setTheme: (theme: Theme) => void;
   setView: (view: View) => void;
   showHelp: (returnFocus: HTMLElement | null) => void;
+  toggleInbox: () => void;
 }): PaletteAction[] {
   const { session, nextWaiting, previousWaiting } = app;
   const project = session && app.projects.find((p) => p.id === session.projectId);
@@ -363,6 +411,7 @@ function paletteActions(app: {
     // The user's own terminal app, which Ctrl+` no longer opens.
     open && { label: 'Open in terminal', icon: ExternalLink, run: () => app.command('openInTerminal') },
     active && shortcutAction('toggleTerminal', SquareTerminal, () => app.command('toggleTerminal')),
+    shortcutAction('toggleInbox', PanelLeftClose, app.toggleInbox),
     // The Side area is the open Session's: with none, there is none to toggle.
     session && shortcutAction('toggleSideArea', PanelRight, () => app.command('toggleSideArea')),
     session && shortcutAction('toggleDiff', FileDiff, () => app.command('toggleChanges')),
@@ -421,6 +470,18 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: (trigger:
         </Popover>
       )}
     </>
+  );
+}
+
+/** The Inbox's foot: Projects, Dashboard and Settings, Settings at the end. */
+function ViewNav({ className, view, onView }: { className: string; view: View; onView: (view: View) => void }) {
+  return (
+    <nav className={className}>
+      <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => onView('projects')} />
+      <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => onView('dashboard')} />
+      <span className="grow" />
+      <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => onView('settings')} />
+    </nav>
   );
 }
 
