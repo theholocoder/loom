@@ -19,7 +19,7 @@ import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { ThinkingBlock, ToolCard } from './WorkCards';
 import { useAgentCommands, useCheckoutModels } from './checkout';
-import { wakeTime } from './Snooze';
+import { isSnoozed, wakeTime } from './Snooze';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
 import { AttachmentList, Composer } from './Composer';
 
@@ -495,7 +495,7 @@ export function SessionView({
                 {status.label}
               </span>
               {session.worktreeMissing && <WorktreeMissing />}
-              {session.status === 'waiting' && session.snoozedUntil !== undefined && <Snoozed session={session} onError={setError} />}
+              {isSnoozed(session) && <Snoozed session={session} onError={setError} />}
             </div>
           </div>
           <button

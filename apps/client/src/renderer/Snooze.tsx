@@ -12,6 +12,11 @@ const MINUTE = 60_000;
 /** The hour "Tomorrow" and "Next week" come back at. */
 const MORNING = 9;
 
+/** Whether the Session is Snoozed: Waiting, out of the Inbox until its snooze ends. */
+export function isSnoozed(session: Session): boolean {
+  return session.status === 'waiting' && session.snoozedUntil !== undefined;
+}
+
 /** The snooze times offered first, as of `now`: in 1 and 3 hours, tomorrow and next Monday at 9:00. */
 export function snoozePresets(now: number): Array<{ label: string; until: number }> {
   const morningIn = (days: number) => {

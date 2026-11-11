@@ -1341,6 +1341,7 @@ export class Sessions {
     );
   }
 
+  /** Cancels the Session's pending wake, if any. */
   private clearWake(id: number): void {
     const handle = this.wakes.get(id);
     if (handle !== undefined) this.options.clock.clearTimeout(handle);

@@ -8,7 +8,7 @@ import { useApi } from './api';
 import { ProjectRemoved, useArchive, useRemovedProjectIds, WorktreeMissing } from './Archive';
 import { ProjectAvatar } from './ProjectAvatar';
 import { StatusIcon } from './Sessions';
-import { SnoozeButton, wakeTime } from './Snooze';
+import { isSnoozed, SnoozeButton, wakeTime } from './Snooze';
 
 /** How often the rows' times are brought up to date. */
 const TICK_MS = 60_000;
@@ -57,7 +57,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
           </div>
         </section>
       ))}
-      <Section label="Snoozed" icon={AlarmClock} sessions={sessions.filter((s) => s.status === 'waiting' && s.snoozedUntil !== undefined)} now={now} {...rows} />
+      <Section label="Snoozed" icon={AlarmClock} sessions={sessions.filter(isSnoozed)} now={now} {...rows} />
       <Section label="Working" icon={LoaderCircle} sessions={sessions.filter((s) => s.status === 'working')} {...rows} />
       <Section label="Archived" icon={Archive} sessions={sessions.filter((s) => s.status === 'archived')} {...rows} />
     </>
@@ -66,7 +66,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
 
 /** Whether the Session is in the Inbox: Waiting, and not Snoozed. */
 function inInbox(session: Session): boolean {
-  return session.status === 'waiting' && session.snoozedUntil === undefined;
+  return session.status === 'waiting' && !isSnoozed(session);
 }
 
 /** The Waiting Sessions in the order the Inbox lists them: what `j` and `k` step through, and Ctrl+1 to Ctrl+9 count. */
