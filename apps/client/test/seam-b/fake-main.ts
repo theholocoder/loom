@@ -151,6 +151,9 @@ export class FakeMain implements LoomApi {
       'sessions.delete': () => ({ deleted: true }),
       'sessions.requestMergeRequest': () => {},
       'sessions.linkMergeRequest': () => {},
+      'sessions.mergeRequest': () => {
+        throw new Error('sessions.mergeRequest is not scripted');
+      },
       'sessions.sendFeedback': () => {},
       'sessions.setAutoPrompt': () => {},
       'sessions.setBabysitting': () => {},

@@ -1,7 +1,7 @@
 // What is going on on a Merge request, read through the Forge's CLI and the
 // user's login (ADR 0002), in terms Babysit needs: who said what, its CI, and
 // whether it conflicts. The user's own comments are already left out.
-import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState } from '../../shared/api';
+import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState, type ReviewCount } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 
 const ACTIVITY_TIMEOUT_MS = 30_000;
@@ -35,6 +35,8 @@ export interface MergeRequestActivity {
   };
   /** Absent while the Forge hasn't worked it out. */
   conflicts?: boolean;
+  /** The reviews and comments of others. */
+  reviews: ReviewCount;
 }
 
 /** Reads a Merge request's activity from `forge`; rejects when the Forge can't say. */
@@ -64,7 +66,7 @@ const GITHUB_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   }
 }`.replace(/\s*\n\s*/g, ' ');
 
-interface GitHubAuthored {
+export interface GitHubAuthored {
   author: { login: string } | null;
 }
 interface GitHubReview extends GitHubAuthored {
@@ -79,7 +81,7 @@ interface GitHubComment extends GitHubAuthored {
   body: string;
   url: string;
 }
-type GitHubContext = { __typename: 'CheckRun'; databaseId: number; name: string; status: string; conclusion: string | null; detailsUrl: string | null } | { __typename: 'StatusContext'; context: string; state: string; targetUrl: string | null; createdAt: string };
+export type GitHubContext = { __typename: 'CheckRun'; databaseId: number; name: string; status: string; conclusion: string | null; detailsUrl: string | null } | { __typename: 'StatusContext'; context: string; state: string; targetUrl: string | null; createdAt: string };
 interface GitHubResponse {
   data: {
     viewer: { login: string };
@@ -102,7 +104,6 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
   const pull = data.repository.pullRequest;
   const own = data.viewer.login.toLowerCase();
   const others = <T extends GitHubAuthored>(list: T[]) => list.filter((entry) => entry.author?.login.toLowerCase() !== own);
-  const authorOf = ({ author }: GitHubAuthored) => author?.login ?? 'ghost';
 
   const reviews = others(pull.reviews.nodes);
   const feedback: KeyedFeedback[] = reviews.flatMap((review) => {
@@ -115,8 +116,16 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
 
   const approvals = reviews.filter((r) => r.state === 'APPROVED').map((r) => ({ key: `review:${r.databaseId}`, author: authorOf(r), url: r.url }));
   const commit = pull.commits.nodes[0]?.commit;
+  // A reviewer's verdict is their latest one: a comment leaves it as it was.
+  const verdicts = new Map<string, string>();
+  for (const review of reviews) if (review.state !== 'COMMENTED' && review.state !== 'PENDING') verdicts.set(authorOf(review), review.state);
   return {
-    state: pull.state === 'OPEN' ? 'open' : pull.state === 'MERGED' ? 'merged' : 'closed',
+    reviews: {
+      reviews: approvals.length + feedback.filter(({ item }) => item.kind === 'review').length,
+      comments: feedback.filter(({ item }) => item.kind === 'comment').length,
+      changesRequested: [...verdicts.values()].includes('CHANGES_REQUESTED'),
+    },
+    state: gitHubState(pull.state),
     feedback,
     approvals,
     ci: gitHubCi(commit?.oid ?? '', commit?.statusCheckRollup ?? undefined),
@@ -133,7 +142,7 @@ const GITHUB_PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
  * the first 100. A failure's key has each failed run in it, so a re-run that
  * fails again is reported again.
  */
-function gitHubCi(oid: string, rollup: { state: string; contexts: { nodes: GitHubContext[] } } | undefined): MergeRequestActivity['ci'] {
+export function gitHubCi(oid: string, rollup: { state: string; contexts: { nodes: GitHubContext[] } } | undefined): MergeRequestActivity['ci'] {
   if (!rollup) return { failing: [], checks: [] };
   const results = rollup.contexts.nodes.map((c) =>
     c.__typename === 'CheckRun'
@@ -154,7 +163,7 @@ function gitHubCheckState(result: string | undefined): BabysitCheckState {
   return GITHUB_FAILED.has(result) ? 'failed' : GITHUB_PASSED.has(result) ? 'passed' : 'not-run';
 }
 
-interface GitLabMergeRequest {
+export interface GitLabMergeRequest {
   state: string;
   has_conflicts?: boolean;
   head_pipeline?: { id: number; status: string } | null;
@@ -189,10 +198,13 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
       return { key: `note:${note.id}`, item: { kind: 'comment', author: note.author.username, ...(path ? { path } : {}), ...lineOf(note.position?.new_line ?? note.position?.old_line), excerpt: excerptOf(note.body), url: `${url}#note_${note.id}` } };
     });
 
+  const approved = approvals.approved_by.filter(({ user: u }) => u.username.toLowerCase() !== own);
   return {
-    state: request.state === 'merged' ? 'merged' : request.state === 'closed' ? 'closed' : 'open',
+    state: gitLabState(request.state),
     feedback,
-    approvals: approvals.approved_by.filter(({ user: u }) => u.username.toLowerCase() !== own).map(({ user: u }) => ({ key: `approval:${u.username}`, author: u.username, url })),
+    // GitLab's reviews are its approvals.
+    reviews: { reviews: approved.length, comments: feedback.length, changesRequested: false },
+    approvals: approved.map(({ user: u }) => ({ key: `approval:${u.username}`, author: u.username, url })),
     ci: await gitLabCi(run, project, request.head_pipeline ?? undefined),
     conflicts: request.has_conflicts,
   };
@@ -200,7 +212,7 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
 
 const GITLAB_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'scheduled']);
 
-async function gitLabCi(run: (args: string[]) => Promise<unknown>, project: string, pipeline: GitLabMergeRequest['head_pipeline']): Promise<MergeRequestActivity['ci']> {
+export async function gitLabCi(run: (args: string[]) => Promise<unknown>, project: string, pipeline: GitLabMergeRequest['head_pipeline']): Promise<MergeRequestActivity['ci']> {
   if (!pipeline) return { failing: [], checks: [] };
   const all = (await run(['api', `${project}/pipelines/${pipeline.id}/jobs?per_page=100`])) as { id: number; name: string; status: string; web_url: string }[];
   const checks = all.map((job) => listedCheck(job.name, gitLabCheckState(job.status), job.web_url));
@@ -217,7 +229,22 @@ function gitLabCheckState(status: string): BabysitCheckState {
   return status === 'failed' ? 'failed' : status === 'success' || status === 'skipped' ? 'passed' : 'not-run';
 }
 
-function listedCheck(name: string, state: BabysitCheckState, url: string | null): BabysitCheck {
+/** Who wrote something on GitHub: `ghost` for a deleted account. */
+export function authorOf({ author }: GitHubAuthored): string {
+  return author?.login ?? 'ghost';
+}
+
+/** A pull request's state as GitHub's GraphQL API gives it. */
+export function gitHubState(state: string): MergeRequestState {
+  return state === 'OPEN' ? 'open' : state === 'MERGED' ? 'merged' : 'closed';
+}
+
+/** A merge request's state as GitLab gives it: `locked` is an open one being merged. */
+export function gitLabState(state: string): MergeRequestState {
+  return state === 'merged' ? 'merged' : state === 'closed' ? 'closed' : 'open';
+}
+
+export function listedCheck(name: string, state: BabysitCheckState, url: string | null): BabysitCheck {
   return { name, state, ...(url ? { url } : {}) };
 }
 
@@ -225,7 +252,7 @@ function checkOf({ name, url }: { name: string; url: string | null }): FeedbackC
   return { name, ...(url ? { url } : {}) };
 }
 
-function lineOf(line: number | null | undefined): { line?: number } {
+export function lineOf(line: number | null | undefined): { line?: number } {
   return line ? { line } : {};
 }
 
@@ -234,7 +261,7 @@ function excerptOf(text: string): string {
   return oneLine.length > EXCERPT_LENGTH ? `${oneLine.slice(0, EXCERPT_LENGTH)}…` : oneLine;
 }
 
-async function runJson(call: BridgeCall, kind: keyof typeof FORGE_CLI, args: string[], workingCopy?: string): Promise<unknown> {
+export async function runJson(call: BridgeCall, kind: keyof typeof FORGE_CLI, args: string[], workingCopy?: string): Promise<unknown> {
   const cli = FORGE_CLI[kind];
   const result = await exec(call, cli, args, ACTIVITY_TIMEOUT_MS, workingCopy);
   const what = `${cli} ${args[0]} ${args[1]}`;

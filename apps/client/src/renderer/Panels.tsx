@@ -5,7 +5,7 @@
 // in the database; each kind's size is the Layout's, the same for every
 // Session. An area takes the size of the Panel it shows. A Panel with a large
 // work surface can take the Session's main area instead, in Review mode.
-import { ChevronDown, FileDiff, Maximize2, Minimize2, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
+import { ChevronDown, FileDiff, GitPullRequest, Maximize2, Minimize2, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { Session, TerminalInfo } from '../shared/api';
 import {
@@ -30,6 +30,7 @@ import {
   type SessionPanels,
 } from '../shared/panels';
 import { useApi, useTopic } from './api';
+import { countText } from './MergeRequestLooks';
 import { Popover } from './Popover';
 import { ResizeEdge } from './ResizeEdge';
 import { SHORTCUTS, shortcutLabel } from './shortcuts';
@@ -48,6 +49,8 @@ export interface PanelKindView extends PanelKindSpec {
   badge?: (session: Session) => PanelBadge | undefined;
   /** Whether it can take the Session's main area, in Review mode: a large work surface. */
   reviewable?: boolean;
+  /** Whether the + menu offers it for `session`; always, without. */
+  offered?: (session: Session) => boolean;
 }
 
 /** The Panel registry: every kind of Panel, once. */
@@ -58,6 +61,18 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
     icon: FileDiff,
     reviewable: true,
     badge: ({ diffStat }) => (diffStat?.files ? { text: String(diffStat.files), description: `${diffStat.files} ${diffStat.files === 1 ? 'file' : 'files'} changed` } : undefined),
+  },
+  'merge-request': {
+    ...PANEL_SPECS['merge-request'],
+    label: 'Merge request',
+    icon: GitPullRequest,
+    // It means nothing on a Session without one (ADR 0009); one open when it goes says so.
+    offered: (session) => !!session.mergeRequest,
+    badge: ({ babysit }) => {
+      const reviews = babysit?.reviews?.reviews;
+      if (!reviews) return undefined;
+      return { text: String(reviews), description: `${countText(reviews, 'review')}${babysit.reviews!.changesRequested ? ', changes requested' : ''}` };
+    },
   },
   terminal: { ...PANEL_SPECS.terminal, label: 'Terminal', icon: SquareTerminal },
 };
@@ -373,9 +388,9 @@ interface PanelChoice {
   run: () => void;
 }
 
-/** What the + menu of `area` adds: each kind that opens there, a new Terminal for those a Session has several of. */
-function choicesFor(area: PanelAreaName, control: PanelsControl): PanelChoice[] {
-  return PANEL_KINDS.filter((kind) => PANELS[kind].area === area).map((kind) => ({
+/** What the + menu of `area` adds for `session`: each kind that opens there and it offers, a new Terminal for those a Session has several of. */
+function choicesFor(area: PanelAreaName, session: Session, control: PanelsControl): PanelChoice[] {
+  return PANEL_KINDS.filter((kind) => PANELS[kind].area === area && (PANELS[kind].offered?.(session) ?? true)).map((kind) => ({
     label: PANELS[kind].label,
     icon: PANELS[kind].icon,
     run: PANELS[kind].several ? control.newTerminal : () => control.show(kind as PanelId),
@@ -501,7 +516,7 @@ export function PanelArea({
           })}
         </div>
         {fit.hidden.length > 0 && <OverflowMenu hidden={fit.hidden as PanelId[]} tabOf={tab} onShow={control.show} />}
-        <AddMenu area={label} choices={choicesFor(area, control)} />
+        <AddMenu area={label} choices={choicesFor(area, session, control)} />
         <span className="grow" />
         {reviewable && (
           <button
