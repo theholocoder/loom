@@ -223,6 +223,11 @@ button.pick.full-access, button.pick.full-access b { color: var(--wait); }
 .diff-comment textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; outline: none; }
 .diff-comment textarea:focus { border-color: var(--accent); }
 .diff-comment .row { gap: 6px; font-size: 12px; }
+/* A comment added, until it is sent: dashed, as a draft of what goes with the next message. */
+.diff-comment.note { border-left: 3px solid var(--accent); border-style: dashed dashed dashed solid; gap: 4px; }
+.diff-comment.note .row > svg { color: var(--accent); flex: none; }
+.diff-comment.note b { font-weight: 600; white-space: nowrap; }
+.note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff-loading { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; }
 
 /* dashboard (also the layout of other full pages, like Settings) */
@@ -354,6 +359,13 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .bubble .attachments { padding: 6px 0 0; }
 .attachments .chip { max-width: 260px; gap: 5px; }
 .attachments .icon-btn.sm { padding: 0; width: 16px; height: 16px; }
+/* A comment's chip: what it's on, then its note, which a click edits. */
+.attachments .comment-chip { max-width: min(340px, 100%); min-width: 0; }
+.comment-chip .chip-edit { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; padding: 0; border: 0; background: none; color: inherit; font: inherit; }
+.comment-chip button.chip-edit { cursor: pointer; }
+.comment-chip button.chip-edit:hover .note, .comment-chip button.chip-edit[aria-expanded="true"] .note { text-decoration: underline; }
+.comment-chip .what { flex: 0 0 auto; max-width: 60%; }
+.comment-chip .note { flex: 1 1 auto; min-width: 0; color: var(--text); }
 /* What `/` and `@` offer, over the prompt. */
 .composer-menu { margin: 6px 6px 0; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--line); padding: 2px 0 6px; }
 /* Rows keep their height: they don't shrink to fit the list. */
@@ -399,6 +411,14 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .panel-area.dock .panel-view { background: var(--code); }
 .panel-empty { flex: 1; display: grid; place-items: center; padding: 20px; color: var(--muted); font-size: 13px; text-align: center; }
 .panel-error { margin: 8px 12px; color: var(--err); font-size: 13px; }
+/* Review mode: the Panel takes the Side area's place and the room the conversation gives up, narrowed to a column. */
+.session-body.reviewing .convo { flex: 0 0 clamp(300px, 30%, 420px); }
+.panel-area.side.review { flex: 1; }
+.review-head { align-items: center; gap: 8px; padding: 4px 10px; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.review-head > .icon-btn { margin-bottom: 0; }
+.review-head > svg { flex: none; }
+.review-head b { font-weight: 600; }
+.review-head .review-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .terminal-host { flex: 1; min-height: 0; padding: 4px 0 0 8px; }
 .terminal-screen { height: 100%; }
 /* The edges panes are resized by: the Side area's left, the Dock's top, the Inbox's right. */

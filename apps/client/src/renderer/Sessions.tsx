@@ -1,18 +1,18 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
-import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Commands, type ExistingBranch, type MessageComment, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
-import { ChangesView } from './Changes';
+import { ChangesView, type DiffComments } from './Changes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { PanelArea, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
-import { Popover, Select } from './Popover';
+import { Select } from './Popover';
 import { Markdown } from './Markdown';
 import { useArchive, useRemovedProject } from './Archive';
 import { useDelete } from './Delete';
@@ -24,7 +24,8 @@ import { useAgentCommands, useCheckoutModels } from './checkout';
 import { isSnoozed, wakeTime } from './Snooze';
 import { useNow } from './now';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
-import { AttachmentList, Composer, quoteSummary } from './Composer';
+import { AttachmentList, CommentNoteForm, Composer } from './Composer';
+import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
 import { addToContextMenu, selectedText } from './ContextMenu';
 
@@ -353,6 +354,7 @@ export type SessionCommand =
   | 'markUnread'
   | 'toggleSideArea'
   | 'toggleChanges'
+  | 'reviewChanges'
   | 'sessionDetails'
   | 'toggleTerminal';
 
@@ -438,6 +440,7 @@ export function SessionView({
       markUnread: () => api.invoke('sessions.setUnread', { id, unread: true }),
       toggleSideArea: async () => panels.toggleArea('side'),
       toggleChanges: async () => panels.toggle('changes'),
+      reviewChanges: async () => panels.toggleReview('changes'),
       sessionDetails: async () => setPopover((open) => (open?.kind === 'details' ? undefined : { kind: 'details', from: 'title' })),
       toggleTerminal: async () => {
         if (dockable) panels.toggleTerminal();
@@ -463,14 +466,15 @@ export function SessionView({
     if (session.unread) api.invoke('sessions.setUnread', { id: session.id, unread: false }).catch(() => {});
   }, [session.id, session.updatedAt]);
 
-  /** The comments on the diff to go with the next message, as chips in the composer. */
-  const [comments, setComments] = useState<MessageComment[]>([]);
+  /** The comments on the diff or the conversation to go with the next message: chips in the composer, and notes in the diff. */
+  const [pending, setPending] = useState<PendingComment[]>([]);
+  const comments = useMemo(() => pending.map((p) => p.comment), [pending]);
   const send = async (prompt: string, attachments: NewAttachment[]) => {
     setError(undefined);
     try {
       if (freeAnswer) return await freeAnswer.send(prompt);
       await api.invoke('sessions.send', { id: session.id, prompt, ...(attachments.length ? { attachments } : {}), ...(comments.length ? { comments } : {}) });
-      setComments([]);
+      setPending([]);
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -517,13 +521,14 @@ export function SessionView({
         icon: MessageSquareQuote,
         disabled: composerDisabled || !!freeAnswer,
         open: (anchor, close) => (
-          <ConversationCommentForm
+          <CommentNoteForm
             anchor={anchor}
+            label="Comment on the conversation"
             quote={quote}
             onClose={close}
-            onAdd={(note) => {
+            onSave={(note) => {
               close();
-              setComments((list) => [...list, { quote, note }]);
+              setPending((list) => [...list, { comment: { quote, note } }]);
             }}
           />
         ),
@@ -531,11 +536,18 @@ export function SessionView({
     ]);
   };
 
+  const removeComment = (index: number) => setPending((list) => list.filter((_, i) => i !== index));
+  const diffComments: DiffComments = {
+    pending: pending.flatMap((p, index) => (p.range ? [{ index, comment: p.comment, range: p.range }] : [])),
+    add: (comment, range) => setPending((list) => [...list, { comment, range }]),
+    remove: removeComment,
+  };
+
   /** A Panel's content, in whichever area it sits. */
   const renderPanel = (panel: PanelId) => {
     switch (kindOf(panel)) {
       case 'changes':
-        return <ChangesView session={session} onComment={(comment) => setComments((list) => [...list, comment])} />;
+        return <ChangesView session={session} comments={diffComments} />;
       case 'terminal': {
         const terminal = terminals?.find((t) => t.id === terminalOf(panel));
         return terminal && <TerminalView key={terminal.id} terminal={terminal} focusPending={panels.focus === panel} onFocused={panels.onFocused} />;
@@ -565,7 +577,7 @@ export function SessionView({
         {deleter.dialog}
         {menu.dialogs}
       </SessionHeader>
-      <div className="session-body">
+      <div className={panels.review ? 'session-body reviewing' : 'session-body'}>
         <div className="convo">
           <div className="chat" role="log" aria-label="Conversation" onContextMenu={commentOnSelection}>
             {items.map((item) =>
@@ -663,7 +675,8 @@ export function SessionView({
             commands={commands}
             // Not with an answer to a question: they wait for the next message.
             comments={freeAnswer ? undefined : comments}
-            onRemoveComment={(index) => setComments((list) => list.filter((_, i) => i !== index))}
+            onRemoveComment={removeComment}
+            onEditComment={(index, note) => setPending((list) => list.map((p, i) => (i === index ? withNote(p, note) : p)))}
             queueing={working}
             tools={
               <ModelPickers
@@ -694,7 +707,7 @@ export function SessionView({
             }
           />
         </div>
-        {panels.ready && sideShown && (
+        {panels.ready && (sideShown || panels.review) && (
           <PanelArea area="side" session={session} terminals={terminals} control={panels} render={renderPanel} />
         )}
       </div>
@@ -702,42 +715,6 @@ export function SessionView({
         <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
       )}
     </main>
-  );
-}
-
-/** The note on a passage of the conversation, beside `anchor`: added as a chip in the composer. */
-function ConversationCommentForm({ anchor, quote, onAdd, onClose }: { anchor: RefObject<HTMLElement | null>; quote: string; onAdd: (note: string) => void; onClose: () => void }) {
-  const [note, setNote] = useState('');
-  const add = () => note.trim() && onAdd(note.trim());
-  return (
-    <Popover anchor={anchor} role="dialog" label="Comment on the conversation" className="conversation-comment" onClose={onClose}>
-      <blockquote className="muted ellipsis" title={quote}>
-        {quoteSummary(quote)}
-      </blockquote>
-      <textarea
-        data-autofocus
-        aria-label="Comment"
-        rows={3}
-        placeholder="Note for the agent…"
-        value={note}
-        onChange={(event) => setNote(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-            event.preventDefault();
-            add();
-          }
-        }}
-      />
-      <div className="row">
-        <span className="grow" />
-        <button type="button" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="primary" type="button" disabled={!note.trim()} onClick={add}>
-          Add comment
-        </button>
-      </div>
-    </Popover>
   );
 }
 
