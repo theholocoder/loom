@@ -72,13 +72,39 @@ _Avoid_: PR (except when talking about GitHub specifically)
 Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedback (review comments from others, failed checks, merge conflicts) puts the Session in **Waiting**, or is sent straight to the agent when auto-prompt is on (at most 3 times in a row without a message from the user, then it pauses and the Session goes **Waiting**); a merged or closed Merge request archives the Session, once its run has ended, unless its worktree has unsaved work (the Session goes **Waiting** instead); one closed without merging is left unread. The user can stop and restart the watch per **Session**; a newly linked Merge request is always watched.
 _Avoid_: Watch, monitor
 
+**Panel**:
+One tool shown in a tab beside an open **Session**'s conversation: Changes, the **Merge request**, a **Terminal**. Each kind has its own size, wherever it sits, and every Terminal shares one.
+_Avoid_: Applet, widget, view, tab (the tab is only its handle)
+
+**Panel area**:
+A place an open **Session**'s **Panels** sit, as tabs, one shown at a time. There are two: the **Side area** and the **Dock**. A Panel can be moved from one to the other.
+
+**Side area**:
+The **Panel area** to the right of the conversation, running from the **Glance strip** to the bottom. In a narrow window it slides over the conversation instead of sitting beside it.
+_Avoid_: Sidebar, right panel, right area
+
 **Dock**:
-The area under an open **Session**'s conversation, holding applets. The only applet so far is the **Terminal**. Whether a Session's Dock is open, and its height, belong to that Session, while Loom runs.
-_Avoid_: Panel, bottom bar
+The **Panel area** under an open **Session**'s conversation and composer. **Terminals** open here.
+_Avoid_: Bottom bar, bottom area
+
+**Layout**:
+Which kind of **Panel** sits in which **Panel area**, and each kind's size. One for the whole app, kept when Loom quits. Which Panels are open, which one is shown and whether each Panel area is shown belong to each **Session**.
+
+**Glance strip**:
+The row under an open **Session**'s header showing what is changing right now (its **Merge request** and checks, its changes, the context used, its issue), each opening its detail.
+_Avoid_: Status bar, Session info
+
+**Session details**:
+What rarely changes about a **Session** (its **Project**, **Environment**, working copy, branch, agent and model), shown on demand rather than kept on screen.
+_Avoid_: Session info
+
+**Review mode**:
+A **Panel** with a large work surface (Changes, the **Merge request**'s diff) taking the main area of the **Session**, the conversation narrowed beside it, until the user leaves it. The **Side area** is hidden meanwhile.
+_Avoid_: Fullscreen, zen mode
 
 **Terminal**:
-A shell in Loom's **Dock**, run by the **Session**'s **Environment** in its working copy. A Session can have several. They keep running when another Session is shown, and end when closed, when their shell exits, when the Session is archived or when Loom quits. None outlives Loom. "Open in terminal" is different: it opens the working copy in the user's own terminal app.
-_Avoid_: Console, shell (for the Dock's tab)
+A shell in a **Panel**, run by the **Session**'s **Environment** in its working copy. A Session can have several. They keep running when another Session is shown, and end when closed, when their shell exits, when the Session is archived or when Loom quits. None outlives Loom. "Open in terminal" is different: it opens the working copy in the user's own terminal app.
+_Avoid_: Console, shell (for the Panel's tab)
 
 ## Relationships
 
@@ -93,4 +119,5 @@ _Avoid_: Console, shell (for the Dock's tab)
 
 - "Discussion" was used for what is now **Session**; a Session is 1:1 with the agent's own conversation.
 - "Server", "Team", "Artifact" and Loom's own memory were dropped (ADR 0006): team knowledge, if any, reaches agents through the user's own MCP servers.
+- "Sidebar" and "Session info" were the right-hand area and its first tab before the **Panel** model (ADR 0009): the area is now the **Side area**, and Session info is split between the **Glance strip** and **Session details**.
 - "In progress" / "working" in the original brief: resolved as **Waiting** (needs attention, shown in the **Inbox**) vs **Working** (agent busy, collapsed).
