@@ -1,6 +1,6 @@
 // The sidebar's Inbox, following docs/prototypes/ui-layout.html (variant B):
-// Waiting Sessions grouped by Project, with Snoozed Sessions (the same cards),
-// Working and Archived Sessions in collapsed sections below.
+// Waiting Sessions grouped by Project, with Snoozed Sessions (the same cards,
+// in one list), Working and Archived Sessions in collapsed sections below.
 import { AlarmClock, AlarmClockOff, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
@@ -37,9 +37,15 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
         {waiting.length}
       </div>
       {groups.length === 0 && <div className="empty">Nothing needs you right now.</div>}
-      <ProjectGroups groups={groups} count="Waiting" {...cards} />
+      <ProjectGroups groups={groups} {...cards} />
       <Section label="Snoozed" icon={AlarmClock} sessions={snoozed}>
-        <ProjectGroups groups={groupByProject(snoozed, projects, (a, b) => a.snoozedUntil! - b.snoozedUntil!)} count="Snoozed" {...cards} />
+        <div role="list" aria-label="Snoozed">
+          {[...snoozed]
+            .sort((a, b) => a.snoozedUntil! - b.snoozedUntil!)
+            .map((session) => (
+              <InboxRow key={session.id} session={session} project={projectOf(session.projectId, projects)} now={now} selected={session.id === selectedId} onSelect={onSelect} onReply={onReply} />
+            ))}
+        </div>
       </Section>
       <Section label="Working" icon={LoaderCircle} sessions={working}>
         <SessionRows sessions={working} {...rows} />
@@ -51,8 +57,8 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
   );
 }
 
-/** Sessions as Inbox cards, under their Project's head saying how many there are (`count`: what they are). */
-function ProjectGroups({ groups, count, now, selectedId, onSelect, onReply }: { groups: ProjectGroup[]; count: string; now: number } & Omit<InboxProps, 'sessions' | 'projects'>) {
+/** Waiting Sessions as Inbox cards, under their Project's head saying how many there are. */
+function ProjectGroups({ groups, now, selectedId, onSelect, onReply }: { groups: ProjectGroup[]; now: number } & Omit<InboxProps, 'sessions' | 'projects'>) {
   return (
     <>
       {groups.map(({ project, sessions }) => (
@@ -66,7 +72,7 @@ function ProjectGroups({ groups, count, now, selectedId, onSelect, onReply }: { 
               </span>
             )}
             <span className="grow" />
-            <span className="chip" aria-label={count}>
+            <span className="chip" aria-label="Waiting">
               {sessions.length}
             </span>
           </div>
@@ -98,17 +104,22 @@ export function inboxOrder(sessions: Session[], projects: Project[]): Session[] 
 type ProjectGroup = { project: Project; sessions: Session[] };
 
 /**
- * The Sessions of each Project that has some, Projects by name and Sessions
- * in `order`: most recently Waiting first, unless said otherwise.
+ * The Waiting Sessions of each Project that has some, Projects by name and
+ * Sessions most recently Waiting first.
  */
-function groupByProject(sessions: Session[], projects: Project[], order: (a: Session, b: Session) => number = (a, b) => b.updatedAt - a.updatedAt): ProjectGroup[] {
+function groupByProject(waiting: Session[], projects: Project[]): ProjectGroup[] {
   const groups = new Map<number, Session[]>();
-  for (const session of [...sessions].sort(order)) {
+  for (const session of [...waiting].sort((a, b) => b.updatedAt - a.updatedAt)) {
     groups.set(session.projectId, [...(groups.get(session.projectId) ?? []), session]);
   }
   return [...groups.entries()]
-    .map(([id, sessions]) => ({ project: projects.find((p) => p.id === id) ?? unknownProject(id), sessions }))
+    .map(([id, sessions]) => ({ project: projectOf(id, projects), sessions }))
     .sort((a, b) => a.project.name.localeCompare(b.project.name));
+}
+
+/** The Project with this id, or a stand-in until the projects topic reports it. */
+function projectOf(id: number, projects: Project[]): Project {
+  return projects.find((p) => p.id === id) ?? unknownProject(id);
 }
 
 /** Stands in for a Project the projects topic hasn't reported yet. */

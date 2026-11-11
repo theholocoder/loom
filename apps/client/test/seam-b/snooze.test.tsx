@@ -127,7 +127,7 @@ describe('snoozing a Session from its Inbox row', () => {
 });
 
 describe('a snoozed Session', () => {
-  it('leaves the Inbox for the Snoozed section, as the same cards grouped by Project, soonest back first', () => {
+  it('leaves the Inbox for the Snoozed section, as the same cards in one list, soonest back first', () => {
     renderApp([
       session({ title: 'Now' }),
       session({ title: 'Next week', snoozedUntil: new Date(2026, 10, 16, 9, 0).getTime() }),
@@ -137,10 +137,10 @@ describe('a snoozed Session', () => {
     const section = within(inbox()).getByRole('button', { name: 'Snoozed' });
     expect(section.textContent).toContain('2');
     fireEvent.click(section);
-    const group = within(inbox()).getAllByRole('group').find((g) => within(g).queryByRole('listitem', { name: 'Later' }))!;
-    expect(group.getAttribute('aria-label')).toBe('loom');
-    expect(within(group).getByLabelText('Snoozed').textContent).toBe('2');
-    expect(within(group).getAllByRole('listitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Later', 'Next week']);
+    expect(within(inbox()).getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual(['loom']);
+    expect(within(within(inbox()).getByRole('group')).getAllByRole('listitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Now']);
+    const list = within(inbox()).getByRole('list', { name: 'Snoozed' });
+    expect(within(list).getAllByRole('listitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Later', 'Next week']);
     const later = within(row('Later'));
     expect(later.getByRole('time').textContent).toBe('Tomorrow 09:00');
     expect(later.getByTitle('Branch').textContent).toBe('loom/later');
