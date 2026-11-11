@@ -20,8 +20,11 @@ const DAY_MS = 24 * 60 * 60_000;
 function machineWith(turns: AcpTurn[]): { machine: Machine; checkout: string } {
   const machine = tempMachine();
   machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, models, acp: { turns } });
-  const checkout = machine.gitRepo('loom');
-  machine.commit(checkout, 'README.md', '# loom\n');
+  const { checkout } = machine.setUp('loom', (m) => {
+    const checkout = m.gitRepo('loom');
+    m.commit(checkout, 'README.md', '# loom\n');
+    return { checkout };
+  });
   return { machine, checkout };
 }
 

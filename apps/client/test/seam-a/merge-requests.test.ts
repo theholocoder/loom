@@ -23,12 +23,15 @@ function machineOn(cli: ForgeCli, origin: string, { turns = [], mergeRequests = 
   const script: ForgeCliScript = { signedInHosts: [host], mergeRequests };
   if (cli === 'glab') script.repoView = { stdout: { path_with_namespace: 'acme/loom', web_url: 'https://gitlab.example.org/acme/loom' } };
   machine.installForgeCli(cli, script);
-  const checkout = machine.gitRepo('loom', { origin });
-  git(checkout, 'checkout', '--quiet', '-b', 'main');
-  machine.commit(checkout, 'README.md', '# loom\n');
-  // origin/HEAD names the default branch, as a clone sets it.
-  git(checkout, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
-  if (branch !== 'main') git(checkout, 'checkout', '--quiet', '-b', branch);
+  const { checkout } = machine.setUp(`${origin} ${branch}`, (m) => {
+    const checkout = m.gitRepo('loom', { origin });
+    git(checkout, 'checkout', '--quiet', '-b', 'main');
+    m.commit(checkout, 'README.md', '# loom\n');
+    // origin/HEAD names the default branch, as a clone sets it.
+    git(checkout, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+    if (branch !== 'main') git(checkout, 'checkout', '--quiet', '-b', branch);
+    return { checkout };
+  });
   const forge = (scripted: MergeRequests) => machine.installForgeCli(cli, { ...script, mergeRequests: scripted });
   return { machine, checkout, forge };
 }

@@ -2,7 +2,7 @@
 // stand-in login shell, stand-in tools and real git repositories. Shared by
 // seam A and the Electron smoke tests, so it imports no test runner.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -190,6 +190,8 @@ export interface EditorInvocation {
 export class Machine {
   readonly dir = mkdtempSync(join(tmpdir(), 'loom-machine-'));
   private shellPath: string[] = [];
+  /** The origins `gitOrigin` copied from a template, and their refs then. */
+  private pristineOrigins = new Map<string, { key: string; refs: string }>();
   private scripts: string[] = [];
 
   constructor() {
@@ -313,8 +315,11 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
    */
   gitRepo(name: string, options: { origin?: string } = {}): string {
     const dir = this.folder(name);
-    execFileSync('git', ['init', '--quiet', dir]);
-    if (options.origin) execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', options.origin]);
+    cpSync(template('repo', (t) => execFileSync('git', ['init', '--quiet', t])), dir, { recursive: true });
+    if (options.origin) {
+      const url = options.origin.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+      appendFileSync(join(dir, '.git', 'config'), `[remote "origin"]\n\turl = "${url}"\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`);
+    }
     return dir;
   }
 
@@ -323,21 +328,76 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
    * `defaultBranch` has one commit adding `README.md`. Returns its path.
    */
   gitOrigin(name: string, defaultBranch = 'main'): string {
+    const key = `origin:${name}:${defaultBranch}`;
     const dir = this.folder(`${name}.git`);
-    execFileSync('git', ['init', '--quiet', '--bare', `--initial-branch=${defaultBranch}`, dir]);
-    const seed = this.folder(`${name}-seed`);
-    execFileSync('git', ['clone', '--quiet', dir, seed], { stdio: 'ignore' });
-    this.commit(seed, 'README.md', `# ${name}\n`);
-    git(seed, 'push', '--quiet', 'origin', `HEAD:${defaultBranch}`);
-    rmSync(seed, { recursive: true, force: true });
+    cpSync(
+      template(key, (t) => {
+        execFileSync('git', ['init', '--quiet', '--bare', `--initial-branch=${defaultBranch}`, t]);
+        const seed = `${t}-seed`;
+        execFileSync('git', ['clone', '--quiet', t, seed], { stdio: 'ignore' });
+        writeFileSync(join(seed, 'README.md'), `# ${name}\n`);
+        git(seed, 'add', 'README.md');
+        git(seed, 'commit', '--quiet', '-m', 'Change README.md');
+        git(seed, 'push', '--quiet', 'origin', `HEAD:${defaultBranch}`);
+        rmSync(seed, { recursive: true, force: true });
+      }),
+      dir,
+      { recursive: true },
+    );
+    this.pristineOrigins.set(dir, { key, refs: refsOf(dir) });
     return dir;
   }
 
   /** A clone of `origin`, as a user's checkout. Returns its path as git reports it. */
   gitClone(origin: string, name: string): string {
     const dir = this.folder(name);
+    const pristine = this.pristineOrigins.get(origin);
+    if (pristine && refsOf(origin) === pristine.refs) {
+      // Nothing was pushed to `origin` since it was made: its template's clone is this clone.
+      const from = templates.get(pristine.key)!;
+      cpSync(
+        template(`clone:${pristine.key}`, (t) => execFileSync('git', ['clone', '--quiet', from, t], { stdio: 'ignore' })),
+        dir,
+        { recursive: true },
+      );
+      const config = join(dir, '.git', 'config');
+      writeFileSync(config, readFileSync(config, 'utf8').replace(`url = ${from}\n`, () => `url = ${origin}\n`));
+      return dir;
+    }
     execFileSync('git', ['clone', '--quiet', origin, dir], { stdio: 'ignore' });
     return dir;
+  }
+
+  /**
+   * The repositories `build` makes in a Machine's `code/` folder, made once
+   * per test file and copied into this Machine for each test after that.
+   * Returns what `build` returned, its paths moved to this Machine. `key`
+   * names the set-up: two calls with the same key must build the same thing.
+   */
+  setUp<T extends Record<string, string>>(key: string, build: (machine: Machine) => T): T {
+    let made = setUps.get(key);
+    if (!made) {
+      const machine = new Machine();
+      made = { machine, result: build(machine) };
+      setUps.set(key, made);
+    }
+    const from = made.machine.folder('');
+    const to = this.folder('');
+    cpSync(from, to, { recursive: true });
+    // Repositories name each other (remotes, worktrees) by path, in these files.
+    const relink = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== 'objects') relink(path);
+        } else if (['config', 'gitdir', '.git'].includes(entry.name)) {
+          const text = readFileSync(path, 'utf8');
+          if (text.includes(from)) writeFileSync(path, text.replaceAll(from, to));
+        }
+      }
+    };
+    relink(to);
+    return Object.fromEntries(Object.entries(made.result).map(([name, value]) => [name, value.replaceAll(from, to)])) as T;
   }
 
   /** Writes `file` in the checkout `repo` and commits it. Returns the new commit. */
@@ -409,6 +469,50 @@ export function git(repo: string, ...args: string[]): string {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
+}
+
+// Set-up repositories are made once per test file (vitest runs each in a
+// fresh module scope) and copied for each test that asks for one: a copy
+// costs no git process, and starting git is slow on Windows.
+let templateRoot: string | undefined;
+const templates = new Map<string, string>();
+const setUps = new Map<string, { machine: Machine; result: Record<string, string> }>();
+
+// Seam A's harness removes them after each file; this is for the smoke tests.
+process.once('exit', removeTemplates);
+
+/** The template folder for `key`, made by `build` the first time it is asked for. */
+function template(key: string, build: (dir: string) => void): string {
+  let dir = templates.get(key);
+  if (dir) return dir;
+  if (!templateRoot) {
+    const root = mkdtempSync(join(tmpdir(), 'loom-templates-'));
+    templateRoot = process.platform === 'win32' ? realpathSync.native(root).replaceAll('\\', '/') : realpathSync.native(root);
+  }
+  dir = `${templateRoot}/${templates.size}`;
+  build(dir);
+  templates.set(key, dir);
+  return dir;
+}
+
+/** Removes the set-up templates this test file made; seam A's harness does this after each file. */
+export function removeTemplates(): void {
+  if (templateRoot) rmSync(templateRoot, { recursive: true, force: true, maxRetries: 10 });
+  templateRoot = undefined;
+  templates.clear();
+  for (const { machine } of setUps.values()) machine.remove();
+  setUps.clear();
+}
+
+/** Every ref of the bare repository `dir` and where it points, as one string. */
+function refsOf(dir: string): string {
+  const read = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '');
+  const walk = (path: string): string[] =>
+    readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
+      const child = join(path, entry.name);
+      return entry.isDirectory() ? walk(child) : [`${child} ${read(child)}`];
+    });
+  return [read(join(dir, 'HEAD')), read(join(dir, 'packed-refs')), ...walk(join(dir, 'refs'))].join('\n');
 }
 
 /** The non-empty lines of a log file, none if it doesn't exist yet. */

@@ -32,18 +32,21 @@ async function babysat(
   if (cli === 'glab') base.repoView = { stdout: { path_with_namespace: 'acme/loom', web_url: 'https://gitlab.example.org/acme/loom' } };
   const forge = (activity: Activity, extras: Extras = {}) => machine.installForgeCli(cli, { ...base, ...extras, mergeRequests: [{ number: 12, url: URLS[cli], branch: BRANCH, ...activity }] });
   forge(initial);
-  const checkout = machine.gitRepo('loom', { origin: cli === 'gh' ? GITHUB : GITLAB });
-  git(checkout, 'checkout', '--quiet', '-b', 'main');
-  machine.commit(checkout, 'README.md', '# loom\n');
-  git(checkout, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
-  if (worktree) {
-    git(checkout, 'branch', BRANCH);
-    const mirror = machine.gitOrigin('mirror');
-    git(checkout, 'remote', 'add', 'mirror', mirror);
-    git(checkout, 'push', '--quiet', '--force', 'mirror', 'main', BRANCH);
-  } else {
-    git(checkout, 'checkout', '--quiet', '-b', BRANCH);
-  }
+  const { checkout } = machine.setUp(`babysat:${cli}:${worktree}`, (m) => {
+    const checkout = m.gitRepo('loom', { origin: cli === 'gh' ? GITHUB : GITLAB });
+    git(checkout, 'checkout', '--quiet', '-b', 'main');
+    m.commit(checkout, 'README.md', '# loom\n');
+    git(checkout, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+    if (worktree) {
+      git(checkout, 'branch', BRANCH);
+      const mirror = m.gitOrigin('mirror');
+      git(checkout, 'remote', 'add', 'mirror', mirror);
+      git(checkout, 'push', '--quiet', '--force', 'mirror', 'main', BRANCH);
+    } else {
+      git(checkout, 'checkout', '--quiet', '-b', BRANCH);
+    }
+    return { checkout };
+  });
 
   const main = await startMain({ machine, userDataDir });
   await waitFor(main.api, 'environments', ready);
