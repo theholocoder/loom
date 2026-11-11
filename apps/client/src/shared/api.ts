@@ -600,6 +600,23 @@ export interface DiffStat {
 /** How a file in a Session's diff changed: committed on its branch, changed since its last commit, or new to git. */
 export type DiffFileStatus = 'committed' | 'modified' | 'untracked';
 
+/** A file the diff deletes, or renames (from its `oldPath`). */
+export type DiffFileChange = 'deleted' | 'renamed';
+
+/**
+ * Which of a Session's changes its diff shows: all of them (its working tree
+ * against its start base), those committed on its branch (HEAD against its
+ * start base), or those not committed yet (its working tree against HEAD,
+ * untracked files with them).
+ */
+export type DiffScope = 'all' | 'committed' | 'uncommitted';
+
+/** Every DiffScope, in the order the Changes Panel offers them. */
+export const DIFF_SCOPES: readonly DiffScope[] = ['all', 'committed', 'uncommitted'];
+
+/** How many files each DiffScope holds; one with no start base to compare with has none. */
+export type DiffCounts = Partial<Record<DiffScope, number>>;
+
 /** One file of a Session's diff. */
 export interface DiffFile {
   /** Its path in the working copy, with `/`. */
@@ -607,6 +624,8 @@ export interface DiffFile {
   /** Where it was before a rename. */
   oldPath?: string;
   status: DiffFileStatus;
+  /** Set when the diff deletes or renames it; none when it adds it or changes its content. */
+  change?: DiffFileChange;
   added: number;
   removed: number;
   binary: boolean;
@@ -615,24 +634,27 @@ export interface DiffFile {
 }
 
 /**
- * A Session's diff: its working tree against the merge-base of HEAD and its
- * start base (an `origin/…` branch as the local ref has it; see
- * DiffBaseSource for which), or against
- * HEAD for uncommitted changes only. An archived worktree Session's is its
- * branch's commits, read-only.
+ * A Session's diff, of one DiffScope: against the merge-base of HEAD and its
+ * start base (an `origin/…` branch as the local ref has it, else the local
+ * default branch; see DiffBaseSource for which), or against HEAD for
+ * uncommitted changes only. An archived worktree Session's is its branch's
+ * commits, read-only. `counts` is how many files each scope holds, for a
+ * Session that isn't archived.
  */
 export type DiffSummary =
   | { available: false; reason: string }
-  | { available: true; readOnly: boolean; base: string; baseSource?: DiffBaseSource; files: DiffFile[] };
+  | { available: true; readOnly: boolean; base: string; baseSource?: DiffBaseSource; files: DiffFile[]; counts?: DiffCounts };
 
 /**
  * Where a diff's start base came from (none for an uncommitted-only diff, against `HEAD`):
  * - `recorded`: Loom recorded it when it made the branch, or the user set it
  *   (`sessions.setDiffBase`), in the repository's local git config;
  * - `created-from`: the branch's reflog says it was created from it;
- * - `default`: neither says, so it is `origin`'s default branch, a guess.
+ * - `default`: neither says, so it is `origin`'s default branch, a guess;
+ * - `local`: there's no `origin` branch to compare with, so it is the local
+ *   default branch, which may be behind `origin`'s.
  */
-export type DiffBaseSource = 'recorded' | 'created-from' | 'default';
+export type DiffBaseSource = 'recorded' | 'created-from' | 'default' | 'local';
 
 /** One file's unified diff text, cut short past a size limit. */
 export interface FileDiff {
@@ -687,7 +709,7 @@ export interface Settings extends Appearance {
 
 /** The Changes view's layout, kept in settings. */
 export interface DiffViewSettings {
-  /** Whether the list of changed files shows beside the diffs. */
+  /** Whether the tree of changed files is open, where it stacks above the diffs in a narrow Panel; a wide one always shows it beside them. */
   fileList: boolean;
   /** Whether long lines wrap, rather than scroll sideways. */
   wrap: boolean;
@@ -695,8 +717,8 @@ export interface DiffViewSettings {
   sideBySide: boolean;
 }
 
-/** The Changes view until the user changes it: unified, long lines scrolling, no file list. */
-export const DEFAULT_DIFF_VIEW: DiffViewSettings = { fileList: false, wrap: false, sideBySide: false };
+/** The Changes view until the user changes it: unified, long lines scrolling, the file tree open. */
+export const DEFAULT_DIFF_VIEW: DiffViewSettings = { fileList: true, wrap: false, sideBySide: false };
 
 /**
  * The kinds of action an Approval request is about (see APPROVAL_CATEGORIES
@@ -1328,7 +1350,14 @@ export interface Commands {
    * Environment. Never fetches. Not available for an archived checkout
    * Session, or an archived worktree Session whose branch is gone.
    */
-  'sessions.diff': { params: { id: number; uncommittedOnly?: boolean }; result: DiffSummary };
+  'sessions.diff': { params: { id: number; scope?: DiffScope }; result: DiffSummary };
+  /**
+   * What the Session's working copy holds now, as a string that changes
+   * whenever its diff may have: a commit, a file added, removed or edited,
+   * by the agent or anyone else. Cheap enough to ask every few seconds.
+   * Never fetches.
+   */
+  'sessions.diffFingerprint': { params: { id: number }; result: string };
   /**
    * The `origin/…` branches the Session's diff can be against, as the local
    * refs have them, by name. Never fetches.
@@ -1342,7 +1371,7 @@ export interface Commands {
    */
   'sessions.setDiffBase': { params: { id: number; base: string }; result: void };
   /** One file of the Session's diff, as `sessions.diff` listed it. */
-  'sessions.diffFile': { params: { id: number; path: string; uncommittedOnly?: boolean }; result: FileDiff };
+  'sessions.diffFile': { params: { id: number; path: string; scope?: DiffScope }; result: FileDiff };
   /**
    * Runs the terminal command in the Session's working copy, in its
    * Environment. Rejects when no terminal command is set.

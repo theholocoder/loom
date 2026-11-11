@@ -4,17 +4,17 @@ import { describe, expect, it } from 'vitest';
 import { startMain, tempDir, waitFor } from './harness';
 
 describe("the Changes view's layout settings", () => {
-  it('are all off until set, and are kept across a restart', async () => {
+  it('have the file tree open and the rest off until set, and are kept across a restart', async () => {
     const userDataDir = tempDir('loom-diff-view-');
     const main = await startMain({ userDataDir });
-    expect((await waitFor(main.api, 'settings', () => true)).diffView).toEqual({ fileList: false, wrap: false, sideBySide: false });
+    expect((await waitFor(main.api, 'settings', () => true)).diffView).toEqual({ fileList: true, wrap: false, sideBySide: false });
 
-    const set = await main.api.invoke('settings.setDiffView', { fileList: true, wrap: false, sideBySide: true });
-    expect(set.diffView).toEqual({ fileList: true, wrap: false, sideBySide: true });
+    const set = await main.api.invoke('settings.setDiffView', { fileList: false, wrap: false, sideBySide: true });
+    expect(set.diffView).toEqual({ fileList: false, wrap: false, sideBySide: true });
     await main.close();
 
     const again = await startMain({ userDataDir });
-    expect((await waitFor(again.api, 'settings', () => true)).diffView).toEqual({ fileList: true, wrap: false, sideBySide: true });
+    expect((await waitFor(again.api, 'settings', () => true)).diffView).toEqual({ fileList: false, wrap: false, sideBySide: true });
     await again.close();
   });
 
@@ -29,11 +29,11 @@ describe("the Changes view's layout settings", () => {
     const userDataDir = tempDir('loom-diff-view-');
     await (await startMain({ userDataDir })).close();
     const db = new Database(join(userDataDir, 'loom.db'));
-    db.prepare('insert into settings (key, value) values (?, ?)').run('diffView', JSON.stringify({ fileList: true, wrap: 'always' }));
+    db.prepare('insert into settings (key, value) values (?, ?)').run('diffView', JSON.stringify({ fileList: false, wrap: 'always' }));
     db.close();
 
     const main = await startMain({ userDataDir });
-    expect((await waitFor(main.api, 'settings', () => true)).diffView).toEqual({ fileList: true, wrap: false, sideBySide: false });
+    expect((await waitFor(main.api, 'settings', () => true)).diffView).toEqual({ fileList: false, wrap: false, sideBySide: false });
     await main.close();
   });
 });
