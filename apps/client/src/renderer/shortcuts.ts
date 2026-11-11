@@ -60,6 +60,7 @@ export const SHORTCUTS = {
   openInEditor: { label: 'Open in editor', shortcut: { key: 'e', ctrl: true, shift: true } },
   // The one shortcut that also works while a terminal has the focus.
   toggleTerminal: { label: 'Toggle terminal', shortcut: { key: '`', ctrl: true, code: 'Backquote' } },
+  toggleInbox: { label: 'Toggle the Inbox', shortcut: { key: 'b', ctrl: true, shift: true } },
   toggleSideArea: { label: 'Toggle the Side area', shortcut: { key: 'b', ctrl: true } },
   toggleDiff: { label: 'Toggle diff', shortcut: { key: 'd' } },
   toggleInfo: { label: 'Toggle Session info', shortcut: { key: 'i', ctrl: true } },

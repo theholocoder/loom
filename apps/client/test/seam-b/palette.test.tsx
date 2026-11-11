@@ -81,6 +81,7 @@ describe('palette actions', () => {
     expect(actionNames()).toEqual([
       'New Session',
       'Add Project from existing clone…',
+      'Toggle the Inbox',
       'Theme: Midnight',
       'Theme: Paper',
       'Theme: Nord',
@@ -95,6 +96,7 @@ describe('palette actions', () => {
     expect(keys('New Session')).toBe('Ctrl N');
     expect(keys('Add Project from existing clone…')).toBe('Ctrl O');
     expect(keys('Open Settings')).toBe('Ctrl ,');
+    expect(keys('Toggle the Inbox')).toBe('Ctrl Shift B');
   });
 
   it('adds the open Session’s actions, next Waiting and starting from an issue when they apply', () => {
@@ -114,6 +116,7 @@ describe('palette actions', () => {
       'Open in editor',
       'Open in terminal',
       'Toggle terminal',
+      'Toggle the Inbox',
       'Toggle the Side area',
       'Toggle diff',
       'Toggle Session info',

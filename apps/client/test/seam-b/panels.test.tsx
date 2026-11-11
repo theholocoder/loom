@@ -236,16 +236,28 @@ describe('Panel sizes', () => {
     expect(sizes(main).at(-1)).toEqual({ kind: 'info', dimension: 'width', size: 280 });
   });
 
-  it('take at most 70% of the window, however large the Layout says, dragging from what shows', () => {
-    // jsdom's window is 1024px wide.
+  it('leave the conversation its least width, however large the Layout says, dragging from what shows', () => {
+    // A 1440px window, less the Inbox's 360px and the conversation's 360px.
     const main = renderApp(fakeMain({ layout: { width: { changes: 1000 } } }));
     openSession();
-    expect(sideArea()!.style.width).toBe('716px');
+    expect(sideArea()!.style.width).toBe('720px');
     const edge = within(sideArea()!).getByRole('separator', { name: 'Resize the Side area' });
-    expect(edge.getAttribute('aria-valuemax')).toBe('716');
+    expect(edge.getAttribute('aria-valuemax')).toBe('720');
     fireEvent.mouseDown(edge, { clientX: 500 });
     fireEvent.mouseUp(window, { clientX: 600 });
-    expect(sizes(main)).toEqual([{ kind: 'changes', dimension: 'width', size: 616 }]);
+    expect(sizes(main)).toEqual([{ kind: 'changes', dimension: 'width', size: 620 }]);
+    fireEvent.mouseDown(edge, { clientX: 600 });
+    fireEvent.mouseUp(window, { clientX: 100 });
+    expect(sizes(main).at(-1)).toEqual({ kind: 'changes', dimension: 'width', size: 720 });
+  });
+
+  it("go back to the kind's preferred size on a double click on the edge", () => {
+    const main = renderApp(fakeMain({ side: BOTH, layout: { width: { info: 600 } } }));
+    openSession();
+    expect(sideArea()!.style.width).toBe('600px');
+    fireEvent.doubleClick(within(sideArea()!).getByRole('separator', { name: 'Resize the Side area' }));
+    expect(sideArea()!.style.width).toBe('420px');
+    expect(sizes(main)).toEqual([{ kind: 'info', dimension: 'width', size: 420 }]);
   });
 
   it('keep a drag going through an unrelated settings change', () => {

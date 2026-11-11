@@ -2,6 +2,7 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, shell } from 'electron';
 import { THEMES, type Theme } from '../shared/appearance';
+import { MIN_WINDOW } from '../shared/window';
 import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { serveApi } from './ipc';
@@ -20,6 +21,9 @@ function createWindow(theme: Theme): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
+    // Down to this size, the window's panes give way without scrolling it sideways.
+    minWidth: MIN_WINDOW.width,
+    minHeight: MIN_WINDOW.height,
     title: 'Loom',
     // The saved theme's background, so the window never shows another first.
     backgroundColor: THEMES[theme].background,

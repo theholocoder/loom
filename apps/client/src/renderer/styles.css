@@ -397,10 +397,12 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .panel-error { margin: 8px 12px; color: var(--err); font-size: 13px; }
 .terminal-host { flex: 1; min-height: 0; padding: 4px 0 0 8px; }
 .terminal-screen { height: 100%; }
-.panel-edge { position: absolute; z-index: 2; }
-.panel-area.side > .panel-edge { left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
-.panel-area.dock > .panel-edge { top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; }
-.panel-edge:hover, .panel-edge:focus-visible { background: color-mix(in srgb, var(--accent) 40%, transparent); outline: none; }
+/* The edges panes are resized by: the Side area's left, the Dock's top, the Inbox's right. */
+.resize-edge { position: absolute; z-index: 3; }
+.resize-edge.left { left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.resize-edge.right { right: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.resize-edge.top { top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; }
+.resize-edge:hover, .resize-edge:focus-visible { background: color-mix(in srgb, var(--accent) 40%, transparent); outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing-rows { cursor: row-resize; user-select: none; }
 .panel-view .diff-panes { display: flex; flex-direction: column; overflow: hidden; }
@@ -450,3 +452,25 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .context .bar > span { display: block; height: 100%; background: var(--accent); }
 .info-foot { padding-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
 .removed-tag { margin-left: 6px; font-size: 11px; padding: 0 6px; vertical-align: 1px; }
+
+/* The window's panes give way rather than scroll it sideways: the Inbox takes
+   the width the App works out (shared/window.ts), the conversation the rest. */
+.app { grid-template-columns: var(--inbox-width, 360px) minmax(0, 1fr) auto; position: relative; overflow: hidden; }
+.side { position: relative; min-width: 0; }
+.side-top .search { white-space: nowrap; } .side-top .search span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; } .side-top .search kbd { flex: none; }
+/* The collapsed Inbox: a rail of its actions. */
+.side.rail { align-items: center; gap: 4px; padding: 10px 0 6px; }
+.side.rail > .icon-btn { position: relative; }
+.side.rail .badge { position: absolute; top: -4px; right: -8px; background: var(--accent); color: var(--accent-text); }
+.rail-foot { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--line); padding-top: 6px; }
+.rail-foot .icon-btn[aria-current="page"] { color: var(--accent); }
+/* In a narrow window the Side area is a drawer over the conversation, with a scrim over the rest of it. */
+.panel-area.side.drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; box-shadow: -14px 0 36px var(--shadow); }
+.drawer-scrim { position: absolute; top: 0; right: 0; bottom: 0; left: var(--inbox-width, 0); z-index: 19; background: color-mix(in srgb, #000 28%, transparent); }
+/* The composer's tools shrink, their names cut short, before its buttons do. */
+.ctoolbar .pick { min-width: 0; }
+.ctoolbar .pick b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctoolbar > .send, .ctoolbar > .icon-btn, .ctoolbar > .gauge { flex: none; }
+/* At the conversation's least width, the pickers show only their icons, their names in their tooltips. */
+.ctoolbar { container-type: inline-size; }
+@container (max-width: 360px) { .ctoolbar .pick b { display: none; } }
