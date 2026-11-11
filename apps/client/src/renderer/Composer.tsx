@@ -175,6 +175,18 @@ export function Composer({
     setDraft(draft.slice(0, start) + text + draft.slice(end), at);
     requestAnimationFrame(() => prompt.current?.setSelectionRange(at, at));
   };
+  /** Paste from the menu: an image on the clipboard is attached, as Ctrl+V does; otherwise its text goes in. */
+  const pasteFromClipboard = async () => {
+    if (attachable) {
+      const images = await clipboardImages().catch(() => []);
+      if (images.length) {
+        attach(images);
+        return;
+      }
+    }
+    const text = await navigator.clipboard.readText();
+    if (text) replaceSelection(text);
+  };
   /** Cut, Copy and Paste, on a right-click of the prompt. */
   const onContextMenu = (event: ReactMouseEvent<HTMLTextAreaElement>) => {
     const { selectionStart: start, selectionEnd: end } = event.currentTarget;
@@ -194,11 +206,7 @@ export function Composer({
         label: 'Paste',
         icon: ClipboardPaste,
         disabled,
-        run: () =>
-          void navigator.clipboard.readText().then(
-            (text) => text && replaceSelection(text),
-            (error: unknown) => console.error('could not paste:', error),
-          ),
+        run: () => void pasteFromClipboard().catch((error: unknown) => console.error('could not paste:', error)),
       },
     ]);
   };
@@ -522,6 +530,17 @@ function AttachmentChip({ name, mimeType, size, children }: Pick<Attachment, 'na
       {children}
     </li>
   );
+}
+
+/** The images on the clipboard, as files named as pasted: one per clipboard item, in its first image type. */
+async function clipboardImages(): Promise<File[]> {
+  if (typeof navigator.clipboard.read !== 'function') return [];
+  const items = await navigator.clipboard.read();
+  const images = items.flatMap((item) => {
+    const type = item.types.find(isImage);
+    return type ? [{ item, type }] : [];
+  });
+  return Promise.all(images.map(async ({ item, type }) => new File([await item.getType(type)], `Pasted image.${type.slice('image/'.length).split('+')[0]}`, { type })));
 }
 
 /** How long a quote's chip lets it get. */

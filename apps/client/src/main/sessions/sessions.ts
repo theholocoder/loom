@@ -558,7 +558,13 @@ export class Sessions {
       if (await pathExists(environment, path)) {
         // Left over from an archive that didn't finish, it is used as it is, if it is the Session's.
         const head = await exec(environment.request, 'git', ['-C', path, 'rev-parse', '--abbrev-ref', 'HEAD'], GIT_TIMEOUT_MS).catch(() => undefined);
-        if (!name || head?.exitCode !== 0 || head.stdout.trim() !== name) throw new Error(`${path} isn't this Session's worktree on "${name ?? 'its branch'}"; move it away to reopen the Session.`);
+        const now = head?.exitCode === 0 ? head.stdout.trim() : undefined;
+        if (!name || now !== name) {
+          // Another Session works in it: moving it away would take it from that Session too.
+          const sharer = [...this.sessions.values()].find((other) => other.id !== id && other.status !== 'archived' && other.workingCopy.kind === 'worktree' && other.workingCopy.path === path);
+          if (sharer && name && now) throw new Error(`The Session "${sharer.title}" works in ${path}, now on "${now}"; switch it back to "${name}", or archive that Session, to reopen this one.`);
+          throw new Error(`${path} isn't this Session's worktree on "${name ?? 'its branch'}"; move it away to reopen the Session.`);
+        }
       } else {
         if (!name) throw new Error("This Session's worktree was on no branch, so it can't be reopened.");
         await this.oneAtATime(project.id, () =>

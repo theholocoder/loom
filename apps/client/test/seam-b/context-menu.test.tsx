@@ -8,16 +8,26 @@ import { FakeMain } from './fake-main';
 const NOW = new Date(2026, 10, 11, 10, 42).getTime();
 const HOUR = 3_600_000;
 
-/** What the app put on the clipboard, latest last; `pasted` is what it reads back. */
+/** What the app put on the clipboard, latest last; `pasted` is what it reads back, `pastedImage` an image it holds instead. */
 let clipboard: string[];
 let pasted: string;
+let pastedImage: Blob | undefined;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: NOW });
   clipboard = [];
   pasted = '';
+  pastedImage = undefined;
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
-    value: { writeText: async (text: string) => void clipboard.push(text), readText: async () => pasted },
+    value: {
+      writeText: async (text: string) => void clipboard.push(text),
+      readText: async () => pasted,
+      read: async () => [
+        pastedImage
+          ? { types: [pastedImage.type], getType: async () => pastedImage! }
+          : { types: ['text/plain'], getType: async () => new Blob([pasted], { type: 'text/plain' }) },
+      ],
+    },
   });
 });
 afterEach(() => {
@@ -225,6 +235,17 @@ describe("the composer's right-click menu", () => {
     fireEvent.contextMenu(prompt());
     pick('Paste');
     await waitFor(() => expect(prompt().value).toBe('Fix a login bug'));
+  });
+
+  it('attaches an image on the clipboard, as Ctrl+V does, typing nothing', async () => {
+    openSession();
+    fireEvent.change(prompt(), { target: { value: 'Look' } });
+    pastedImage = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+    fireEvent.contextMenu(prompt());
+    pick('Paste');
+    const attachments = await screen.findByRole('list', { name: 'Attachments' });
+    expect(within(attachments).getByRole('listitem').textContent).toContain('Pasted image.png');
+    expect(prompt().value).toBe('Look');
   });
 
   it("can't cut or copy with nothing selected", () => {

@@ -55,7 +55,8 @@ const MAX_SUFFIX = 100;
  * branch is fetched and checked out on its same-named local branch, which is
  * created to track it if there is none. Neither records a start base: its
  * diff is against `origin/HEAD`, as Loom can't know where it started.
- * Rejects an existing branch checked out in another worktree, naming it.
+ * Rejects an existing branch checked out in another worktree, naming it;
+ * one whose folder was deleted outside git is pruned first, unless locked.
  */
 export async function createWorktree(environment: GitEnvironment, worktree: NewWorktree): Promise<{ path: string; branch: string }> {
   const { checkout } = worktree;
@@ -82,7 +83,12 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
     if (!local && !(remote && (await hasRef(environment, checkout, `refs/remotes/origin/${name}`)))) {
       throw new Error(remote ? `origin has no branch "${name}"` : `There's no local branch "${name}"`);
     }
-    const holder = (await worktreesOf(environment, checkout)).find((listed) => listed.branch === name);
+    let holder = (await worktreesOf(environment, checkout)).find((listed) => listed.branch === name);
+    // A worktree deleted outside git still holds its branch until git forgets it.
+    if (holder?.gone && !holder.locked) {
+      await gitOrThrow(environment, ['-C', checkout, 'worktree', 'prune'], "Couldn't prune the deleted worktrees");
+      holder = (await worktreesOf(environment, checkout)).find((listed) => listed.branch === name);
+    }
     if (holder) throw new Error(`"${name}" is checked out in ${holder.path}; work there instead`);
     path = worktree.at ?? (await freeFolder(environment, place, name));
     const add = local ? [path, name] : ['--track', '-b', name, path, `origin/${name}`];
@@ -146,6 +152,8 @@ interface ListedWorktree extends ExistingWorktree {
   unusable: boolean;
   /** Locked: git won't remove it, so archiving its Session would fail. */
   locked: boolean;
+  /** Its folder is gone, deleted outside git: `git worktree prune` forgets it, unless it is locked. */
+  gone: boolean;
 }
 
 /** Every worktree of the checkout, the main one first, as git lists them. */
@@ -155,10 +163,11 @@ async function worktreesOf(environment: GitRunner, checkout: string): Promise<Li
   // One `worktree <path>` line starts each, its other lines follow.
   for (const line of list.stdout.split('\0')) {
     const current = worktrees.at(-1);
-    if (line.startsWith('worktree ')) worktrees.push({ path: line.slice('worktree '.length), main: worktrees.length === 0, unusable: false, locked: false });
+    if (line.startsWith('worktree ')) worktrees.push({ path: line.slice('worktree '.length), main: worktrees.length === 0, unusable: false, locked: false, gone: false });
     else if (!current) continue;
     else if (line.startsWith('branch refs/heads/')) current.branch = line.slice('branch refs/heads/'.length);
-    else if (line === 'bare' || line === 'prunable' || line.startsWith('prunable ')) current.unusable = true;
+    else if (line === 'bare') current.unusable = true;
+    else if (line === 'prunable' || line.startsWith('prunable ')) current.unusable = current.gone = true;
     else if (line === 'locked' || line.startsWith('locked ')) current.locked = true;
   }
   return worktrees;

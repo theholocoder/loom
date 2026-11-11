@@ -377,6 +377,28 @@ describe('a worktree Session in a worktree another Session works in', () => {
     expect(await main.api.invoke('sessions.list')).toMatchObject([{ id: first.id, status: 'waiting' }]);
   });
 
+  it("starts on the branch of a worktree deleted outside Loom, which git still counted as checked out there", async () => {
+    const { main, checkout, first, path } = await sharing();
+    rmSync(path, { recursive: true, force: true });
+    expect(git(checkout, 'worktree', 'list', '--porcelain')).toContain(path);
+
+    const again = await main.api.invoke('sessions.create', { projectId: first.projectId, workingCopy: 'worktree', existing: { branch: { name: first.branch!, remote: false } }, prompt: 'Start over' });
+
+    expect(again).toMatchObject({ workingCopy: { kind: 'worktree' }, branch: first.branch });
+    expect(existsSync(again.workingCopy.path)).toBe(true);
+  });
+
+  it("won't reopen an archived one once the other has switched the worktree to another branch, naming it", async () => {
+    const { main, first, second, path } = await sharing();
+    expect(await main.api.invoke('sessions.archive', { id: first.id })).toEqual({ archived: true });
+    git(path, 'switch', '--quiet', '-c', 'elsewhere');
+
+    await expect(main.api.invoke('sessions.send', { id: first.id, prompt: 'Back to it' })).rejects.toThrow(
+      `The Session "${second.title}" works in ${path}, now on "elsewhere"; switch it back to "${first.branch}", or archive that Session, to reopen this one.`,
+    );
+    expect(existsSync(path)).toBe(true);
+  });
+
   it('reopens an archived one in the worktree the other still works in', async () => {
     const { main, first, second, path } = await sharing();
     expect(await main.api.invoke('sessions.archive', { id: first.id })).toEqual({ archived: true });
