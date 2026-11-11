@@ -36,6 +36,7 @@ export default defineConfig({
           name: 'seam-b',
           include: ['test/seam-b/**/*.test.tsx'],
           environment: 'jsdom',
+          setupFiles: ['test/seam-b/setup.ts'],
         },
       },
     ],

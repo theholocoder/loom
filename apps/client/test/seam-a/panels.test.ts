@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/main/storage/database';
 import { migrations } from '../../src/main/storage/migrations';
 import { DEFAULT_SESSION_PANELS, PANEL_MAX_SIZE, type SessionPanels } from '../../src/shared/panels';
+import { DEFAULT_INBOX, INBOX_WIDTH } from '../../src/shared/window';
 import { startMain, tempDir, waitFor } from './harness';
 
 /** The migration that brought in the Panel model. */
@@ -151,5 +152,38 @@ describe('the Layout', () => {
 
     const main = await startMain({ userDataDir });
     expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ width: { info: PANEL_MAX_SIZE.width }, height: {} });
+  });
+});
+
+describe("the Inbox's width and whether it is shown", () => {
+  it('are kept across restarts, the width within its least and most', async () => {
+    const userDataDir = await before();
+    const main = await startMain({ userDataDir });
+    expect((await waitFor(main.api, 'settings', () => true)).inbox).toEqual(DEFAULT_INBOX);
+    await main.api.invoke('settings.setInbox', { width: 300.6 });
+    expect((await main.api.invoke('settings.setInbox', { open: false })).inbox).toEqual({ width: 301, open: false });
+    expect((await main.api.invoke('settings.setInbox', { width: 10_000 })).inbox).toEqual({ width: INBOX_WIDTH.max, open: false });
+    expect((await main.api.invoke('settings.setInbox', { width: 10 })).inbox).toEqual({ width: INBOX_WIDTH.min, open: false });
+    await main.close();
+
+    const again = await startMain({ userDataDir });
+    expect((await waitFor(again.api, 'settings', () => true)).inbox).toEqual({ width: INBOX_WIDTH.min, open: false });
+  });
+
+  it('refuse a width that is not a number, or a shown that is not true or false', async () => {
+    const main = await startMain({ userDataDir: await before() });
+    await expect(main.api.invoke('settings.setInbox', { width: Number.NaN })).rejects.toThrow('number of pixels');
+    await expect(main.api.invoke('settings.setInbox', { open: 'yes' as never })).rejects.toThrow('true or false');
+  });
+
+  it('fall back to the defaults for what the database holds that Loom no longer takes', async () => {
+    const userDataDir = await before();
+    await (await startMain({ userDataDir })).close();
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.prepare("insert or replace into settings (key, value) values ('inbox', ?)").run(JSON.stringify({ width: 'wide', open: false }));
+    db.close();
+
+    const main = await startMain({ userDataDir });
+    expect((await waitFor(main.api, 'settings', () => true)).inbox).toEqual({ width: DEFAULT_INBOX.width, open: false });
   });
 });

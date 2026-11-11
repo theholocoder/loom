@@ -2,6 +2,7 @@
 // renderer tests control exactly what main reports.
 import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
 import { clampPanelSize, DEFAULT_SESSION_PANELS, type SessionPanels } from '../../src/shared/panels';
+import { clampInboxWidth } from '../../src/shared/window';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
 export function emptyDashboard(days: UsageRange): UsageDashboard {
@@ -120,6 +121,12 @@ export class FakeMain implements LoomApi {
         const current = this.value('settings');
         const { layout } = current;
         const settings = { ...current, layout: { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } } };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setInbox': ({ width, open }) => {
+        const current = this.value('settings');
+        const settings = { ...current, inbox: { width: width === undefined ? current.inbox.width : clampInboxWidth(width), open: open ?? current.inbox.open } };
         this.publish('settings', settings);
         return settings;
       },

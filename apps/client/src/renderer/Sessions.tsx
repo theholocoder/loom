@@ -11,6 +11,7 @@ import { IssuePicker } from './IssuePicker';
 import { ChangesView } from './Changes';
 import { SessionInfo } from './SessionInfo';
 import { PanelArea, usePanels } from './Panels';
+import { useWindowLayout } from './WindowLayout';
 import { TerminalView } from './TerminalView';
 import { Popover, Select } from './Popover';
 import { Markdown } from './Markdown';
@@ -378,9 +379,10 @@ export function SessionView({
   // Only a Session that can still work has Terminals: not archived, its worktree there.
   const dockable = session.status !== 'archived' && !session.worktreeMissing;
   const terminals = useTopic('terminals', { sessionId: session.id });
-  const panels = usePanels(session.id, terminals);
+  const panels = usePanels(session.id, terminals, useWindowLayout().narrow);
   const { side, dock } = panels.state;
-  const infoShown = side.open && side.shown === 'info';
+  const sideShown = panels.sideShown;
+  const infoShown = sideShown && side.shown === 'info';
   useEffect(() => {
     if (!infoShown) setLinking(false);
   }, [infoShown]);
@@ -589,9 +591,9 @@ export function SessionView({
           <button
             className="icon-btn"
             type="button"
-            title={side.open ? 'Hide the Side area' : 'Show the Side area'}
-            aria-label={side.open ? 'Hide the Side area' : 'Show the Side area'}
-            aria-expanded={side.open}
+            title={sideShown ? 'Hide the Side area' : 'Show the Side area'}
+            aria-label={sideShown ? 'Hide the Side area' : 'Show the Side area'}
+            aria-expanded={sideShown}
             aria-controls="session-side"
             onClick={() => panels.toggleArea('side')}
           >
@@ -744,7 +746,7 @@ export function SessionView({
           <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
         )}
       </main>
-      {panels.ready && side.open && (
+      {panels.ready && sideShown && (
         <PanelArea area="side" session={session} terminals={terminals} control={panels} render={renderPanel} />
       )}
     </>

@@ -178,7 +178,12 @@ function DiffFiles(props: {
           placeholder="Filter files…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
+          onKeyDown={(event) => {
+            // Esc clears the filter first; on an empty one it is left to close the drawer it's in.
+            if (event.key !== 'Escape' || !query) return;
+            event.preventDefault();
+            setQuery('');
+          }}
         />
         <button className="icon-btn sm" type="button" title="File list" aria-label="File list" aria-pressed={view.fileList} onClick={() => onViewChange({ fileList: !view.fileList })}>
           <PanelLeft />
