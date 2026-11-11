@@ -1364,8 +1364,8 @@ export interface Commands {
   /**
    * Snoozes a Waiting Session until `until`, a clock time to come: it leaves
    * the Inbox and comes back unread then, or as soon as its status changes.
-   * `null` ends the snooze now. Rejects a Session that isn't Waiting, and a
-   * time that isn't to come.
+   * `null` ends the snooze now. Rejects a Session that isn't Waiting or
+   * whose worktree is missing, and a time that isn't to come.
    */
   'sessions.snooze': { params: { id: number; until: number | null }; result: void };
   /** The usage dashboard over the last `days` days (see UsageDashboard). Rejects a range not in USAGE_RANGES. */

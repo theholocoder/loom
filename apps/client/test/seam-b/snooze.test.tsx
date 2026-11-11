@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
@@ -151,7 +151,19 @@ describe('a snoozed Session', () => {
     fireEvent.click(within(inbox()).getByRole('button', { name: 'Later' }));
     const header = within(screen.getByRole('region', { name: 'Session header' }));
     expect(header.getByRole('status', { name: 'Snoozed' }).textContent).toBe('Snoozed until 11:42');
-    fireEvent.click(header.getByRole('button', { name: 'Unsnooze' }));
+    fireEvent.click(header.getByRole('button', { name: 'Wake' }));
     await waitFor(() => expect(snoozes(main)).toEqual([{ id: later.id, until: null }]));
   });
+
+  it('keeps its header up to date as time passes', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'], now: NOW });
+    renderApp([session({ title: 'Later', snoozedUntil: new Date(2026, 10, 12, 9, 0).getTime() })]);
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Snoozed' }));
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Later' }));
+    const status = () => within(screen.getByRole('region', { name: 'Session header' })).getByRole('status', { name: 'Snoozed' }).textContent;
+    expect(status()).toBe('Snoozed until Tomorrow 09:00');
+    act(() => vi.advanceTimersByTime(14 * HOUR));
+    expect(status()).toBe('Snoozed until 09:00');
+  });
 });
+

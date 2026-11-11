@@ -20,6 +20,7 @@ import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './
 import { ThinkingBlock, ToolCard } from './WorkCards';
 import { useAgentCommands, useCheckoutModels } from './checkout';
 import { isSnoozed, wakeTime } from './Snooze';
+import { useNow } from './now';
 import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
 import { AttachmentList, Composer } from './Composer';
 
@@ -788,21 +789,22 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry?: () => void
   );
 }
 
-/** A Snoozed Session's mark in its header: until when, and a button to wake it now. */
+/** A Snoozed Session's mark in its header: until when, and Wake, to bring it back now. */
 function Snoozed({ session, onError }: { session: Session; onError: (message: string | undefined) => void }) {
   const api = useApi();
+  const now = useNow();
   const until = session.snoozedUntil!;
   return (
     <>
       <span className="chip" role="status" aria-label="Snoozed" title={new Date(until).toLocaleString()}>
         <AlarmClock className="sm" />
-        Snoozed until {wakeTime(until, Date.now())}
+        Snoozed until {wakeTime(until, now)}
       </span>
       <button
         className="icon-btn sm"
         type="button"
-        title="Unsnooze"
-        aria-label="Unsnooze"
+        title="Wake"
+        aria-label="Wake"
         onClick={() => {
           onError(undefined);
           api.invoke('sessions.snooze', { id: session.id, until: null }).catch((e: unknown) => onError((e as Error).message));

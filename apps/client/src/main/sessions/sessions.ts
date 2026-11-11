@@ -1305,6 +1305,7 @@ export class Sessions {
     if (typeof until !== 'number' || !Number.isFinite(until)) throw new Error('A snooze needs a time to wake at.');
     if (until <= this.options.clock.now()) throw new Error('A snooze must end in the future.');
     if (session.status !== 'waiting') throw new Error('Only a Waiting Session can be snoozed.');
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     this.update(id, { snoozedUntil: until });
     this.save(id, { snoozed_until: until });
     this.watchWake(id);

@@ -5,13 +5,11 @@ import { AlarmClock, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink
 import { useEffect, useState } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
+import { useNow } from './now';
 import { ProjectRemoved, useArchive, useRemovedProjectIds, WorktreeMissing } from './Archive';
 import { ProjectAvatar } from './ProjectAvatar';
 import { StatusIcon } from './Sessions';
 import { isSnoozed, SnoozeButton, wakeTime } from './Snooze';
-
-/** How often the rows' times are brought up to date. */
-const TICK_MS = 60_000;
 
 export interface InboxProps {
   sessions: Session[];
@@ -193,14 +191,6 @@ function timeOf(at: number, now: number): string {
   return new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-function useNow(): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
 
 const FORGE_MARK: Record<ForgeKind, { name: string; path: string }> = {
   github: {
