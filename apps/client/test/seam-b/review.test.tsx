@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type DiffSummary, type Project, type Session } from '../../src/shared/api';
-import { DEFAULT_SESSION_PANELS, type SessionPanels } from '../../src/shared/panels';
+import { DEFAULT_SESSION_PANELS, type LayoutSettings, type SessionPanels } from '../../src/shared/panels';
 import { FakeMain, HIDDEN_PANELS } from './fake-main';
 
 type DiffProps = { patch: string; options: { onGutterUtilityClick?: (range: SelectedLineRange) => void } };
@@ -57,9 +57,9 @@ const summary: DiffSummary = {
 };
 const patch = `diff --git a/${loginTs} b/${loginTs}\n--- a/${loginTs}\n+++ b/${loginTs}\n@@ -1,2 +1,2 @@\n context\n-old line\n+new line\n`;
 
-function renderApp({ panels = DEFAULT_SESSION_PANELS }: { panels?: SessionPanels } = {}) {
+function renderApp({ panels = DEFAULT_SESSION_PANELS, layout = DEFAULT_SETTINGS.layout }: { panels?: SessionPanels; layout?: LayoutSettings } = {}) {
   const main = new FakeMain(
-    { projects: [project], sessions: [session, other], settings: DEFAULT_SETTINGS },
+    { projects: [project], sessions: [session, other], settings: { ...DEFAULT_SETTINGS, layout } },
     { 'sessions.diff': () => summary, 'sessions.diffFile': () => ({ text: patch, truncated: false }) },
   );
   main.publish('panels', panels, { sessionId: session.id });
@@ -145,7 +145,10 @@ describe('Review mode', () => {
   });
 
   it("isn't offered for Changes sitting in the Dock, which stays there", () => {
-    renderApp({ panels: { side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: true } } });
+    renderApp({
+      panels: { side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: true } },
+      layout: { ...DEFAULT_SETTINGS.layout, area: { changes: 'dock' } },
+    });
     const dock = screen.getByRole('region', { name: 'Dock' });
     expect(within(dock).getByRole('tab', { name: 'Changes' })).toBeTruthy();
     expect(within(dock).queryByRole('button', { name: 'Review Changes' })).toBeNull();

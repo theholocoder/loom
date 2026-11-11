@@ -403,7 +403,7 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .badge { flex-shrink: 0; min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--panel2); color: var(--muted); font: 600 10.5px/16px var(--mono); text-align: center; }
 .panel-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .panel-view .scroll { flex: 1; overflow: auto; padding: 0 12px; }
-.panel-area.dock .panel-view { background: var(--code); }
+.panel-view:has(> .terminal-host) { background: var(--code); }
 .panel-empty { flex: 1; display: grid; place-items: center; padding: 20px; color: var(--muted); font-size: 13px; text-align: center; }
 .panel-error { margin: 8px 12px; color: var(--err); font-size: 13px; }
 /* Review mode: the Panel takes the Side area's place and the room the conversation gives up, narrowed to a column. */

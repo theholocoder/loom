@@ -84,7 +84,7 @@ The **Panel area** to the right of the conversation, running from the **Glance s
 _Avoid_: Sidebar, right panel, right area
 
 **Dock**:
-The **Panel area** under an open **Session**'s conversation and composer. **Terminals** open here.
+The **Panel area** under an open **Session**'s conversation and composer. **Terminals** open here, until moved to the **Side area**.
 _Avoid_: Bottom bar, bottom area
 
 **Layout**:

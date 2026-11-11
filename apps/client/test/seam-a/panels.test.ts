@@ -46,7 +46,7 @@ describe("the old sidebar's settings", () => {
     const userDataDir = await before({ open: true, view: 'changes', width: 600 });
     const main = await startMain({ userDataDir });
 
-    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ width: { changes: 600 }, height: {} });
+    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, width: { changes: 600 }, height: {} });
     for (const id of [7, 8]) {
       expect(await panelsOf(main, id)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } });
     }
@@ -56,7 +56,7 @@ describe("the old sidebar's settings", () => {
 
   it('as Loom had them until changed: closed, at the preferred widths', async () => {
     const main = await startMain({ userDataDir: await before() });
-    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ width: {}, height: {} });
+    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, width: {}, height: {} });
     expect((await panelsOf(main, 7)).side).toEqual({ panels: ['changes'], shown: 'changes', open: false });
   });
 
@@ -88,7 +88,7 @@ describe('Session info, which is no longer a Panel', () => {
     const main = await startMain({ userDataDir });
     expect(await panelsOf(main, 7)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } });
     expect((await panelsOf(main, 8)).side).toEqual({ panels: [], shown: null, open: false });
-    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ width: { changes: 700 }, height: {} });
+    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, width: { changes: 700 }, height: {} });
     await main.close();
     expect(stored(userDataDir, 'layout')).toEqual({ width: { changes: 700 }, height: {} });
   });
@@ -154,13 +154,32 @@ describe('the Layout', () => {
     await main.api.invoke('settings.setPanelSize', { kind: 'changes', dimension: 'height', size: 10 });
     await main.api.invoke('settings.setPanelSize', { kind: 'terminal', dimension: 'height', size: 99_999 });
     expect((await main.api.invoke('settings.setPanelSize', { kind: 'terminal', dimension: 'width', size: 10 })).layout).toEqual({
+      area: {},
       width: { changes: 700, terminal: 320 },
       height: { changes: 120, terminal: PANEL_MAX_SIZE.height },
     });
     await main.close();
 
     const again = await startMain({ userDataDir });
-    expect((await waitFor(again.api, 'settings', () => true)).layout).toEqual({ width: { changes: 700, terminal: 320 }, height: { changes: 120, terminal: PANEL_MAX_SIZE.height } });
+    expect((await waitFor(again.api, 'settings', () => true)).layout).toEqual({ area: {}, width: { changes: 700, terminal: 320 }, height: { changes: 120, terminal: PANEL_MAX_SIZE.height } });
+  });
+
+  it('keeps the area each Panel kind was moved to across restarts', async () => {
+    const userDataDir = await before();
+    const main = await startMain({ userDataDir });
+    await main.api.invoke('settings.setPanelArea', { kind: 'changes', area: 'dock' });
+    expect((await main.api.invoke('settings.setPanelArea', { kind: 'terminal', area: 'side' })).layout.area).toEqual({ changes: 'dock', terminal: 'side' });
+    await main.close();
+
+    const again = await startMain({ userDataDir });
+    expect((await waitFor(again.api, 'settings', () => true)).layout.area).toEqual({ changes: 'dock', terminal: 'side' });
+  });
+
+  it('refuses to move a kind Loom has not, or to an area it has not', async () => {
+    const main = await startMain({ userDataDir: await before() });
+    await expect(main.api.invoke('settings.setPanelArea', { kind: 'files' as never, area: 'dock' })).rejects.toThrow('"files" is not a Panel.');
+    await expect(main.api.invoke('settings.setPanelArea', { kind: 'changes', area: 'top' as never })).rejects.toThrow('not "top"');
+    expect((await waitFor(main.api, 'settings', () => true)).layout.area).toEqual({});
   });
 
   it('refuses a kind Loom has not, or a size that is not a number', async () => {
@@ -175,11 +194,11 @@ describe('the Layout', () => {
     const userDataDir = await before();
     await (await startMain({ userDataDir })).close();
     const db = new Database(join(userDataDir, 'loom.db'));
-    db.prepare("insert or replace into settings (key, value) values ('layout', ?)").run(JSON.stringify({ width: { files: 300, info: 400, changes: 5000, terminal: 'wide' }, height: 12 }));
+    db.prepare("insert or replace into settings (key, value) values ('layout', ?)").run(JSON.stringify({ area: { changes: 'dock', files: 'side', terminal: 'top' }, width: { files: 300, info: 400, changes: 5000, terminal: 'wide' }, height: 12 }));
     db.close();
 
     const main = await startMain({ userDataDir });
-    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ width: { changes: PANEL_MAX_SIZE.width }, height: {} });
+    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: { changes: 'dock' }, width: { changes: PANEL_MAX_SIZE.width }, height: {} });
   });
 });
 
