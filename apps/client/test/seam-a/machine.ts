@@ -151,9 +151,9 @@ export interface ForgeCliScript {
 /** What Babysit's polls see of a Merge request, in terms common to both stand-ins. */
 export interface ScriptedActivity {
   /** GitHub's issue comments, or GitLab's notes (`system` ones and `path`/`line` diff notes too). */
-  comments?: { id: number; author: string | null; body: string; url?: string; path?: string; line?: number; system?: boolean }[];
+  comments?: { id: number; author: string | null; body: string; url?: string; path?: string; line?: number; system?: boolean; createdAt?: string }[];
   /** GitHub's reviews with their inline comments. */
-  reviews?: { id: number; author: string | null; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'; body?: string; url: string; comments?: { path: string; line?: number; originalLine?: number; body: string; url: string }[] }[];
+  reviews?: { id: number; author: string | null; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'; body?: string; url: string; submittedAt?: string; comments?: { path: string; line?: number; originalLine?: number; body: string; url: string; createdAt?: string }[] }[];
   /** GitHub's check runs (`id`) and commit statuses (`context`) on the head commit. */
   checks?: ({ id: number; name: string; status?: string; conclusion?: string; url?: string; context?: undefined } | { context: string; state: string; url?: string; createdAt?: string })[];
   /** What GitHub sums the checks up as, when it isn't what they say (a suite with no runs yet). */
@@ -166,6 +166,19 @@ export interface ScriptedActivity {
   pipeline?: { id: number; status: string; failedJobs?: { id: number; name: string; url: string }[]; jobs?: { id: number; name: string; status: string; url: string }[] };
   /** Who approved it on GitLab. */
   approvedBy?: string[];
+  /** What the Merge request Panel shows of it (default: `Merge request <n>`, by octocat, into main, one commit). */
+  title?: string;
+  draft?: boolean;
+  author?: string;
+  /** The branch it merges into. */
+  target?: string;
+  commits?: number;
+  /** GitHub's sums of its changes. */
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+  /** GitLab's diffs of its files, without file headers. */
+  diffs?: { new_path: string; diff: string }[];
 }
 
 export type ForgeCli = 'gh' | 'glab';

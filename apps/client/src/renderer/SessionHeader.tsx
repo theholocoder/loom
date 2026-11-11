@@ -5,7 +5,6 @@
 // its detail: the branch, the Merge request and its checks, the changes, the
 // context used and the issue.
 import {
-  Bot,
   CircleCheck,
   CircleDot,
   CircleMinus,
@@ -14,23 +13,19 @@ import {
   CodeXml,
   Copy,
   Ellipsis,
-  ExternalLink,
-  Eye,
   FileDiff,
   Gauge,
   GitBranch,
-  GitMerge,
   GitPullRequest,
-  GitPullRequestClosed,
   GitPullRequestCreate,
   Info,
-  Link,
+  MessageSquare,
   PanelBottom,
   PanelRight,
   SquareTerminal,
 } from 'lucide-react';
-import { useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
-import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type ForgeLink, type MergeRequestState, type Project, type RemovedProject, type Session } from '../shared/api';
+import { useRef, type ReactNode, type RefObject } from 'react';
+import { mergeRequestRef, type BabysitCi, type DiffStat, type ForgeLink, type Project, type RemovedProject, type Session } from '../shared/api';
 import { useApi } from './api';
 import { ProjectRemoved, WorktreeMissing } from './Archive';
 import { copyable, copyText, MenuButtonMenu, type ContextMenuSection } from './ContextMenu';
@@ -41,6 +36,7 @@ import { Popover } from './Popover';
 import { projectColor } from './ProjectAvatar';
 import { attempt, openable, SessionDetails, workingMs } from './SessionDetails';
 import type { SessionMenu } from './SessionMenu';
+import { canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
 
 /** Where Session details opens from: the title, the branch chip, the context meter or the ⋯ menu. */
 export type DetailsAnchor = 'title' | 'branch' | 'context' | 'menu';
@@ -48,15 +44,9 @@ export type DetailsAnchor = 'title' | 'branch' | 'context' | 'menu';
 /** The header's one popover open at a time, if any. */
 export type HeaderPopover =
   | { kind: 'details'; from: DetailsAnchor }
-  | { kind: 'merge-request'; linking?: boolean }
   | { kind: 'checks' }
   | { kind: 'issue' }
   | { kind: 'menu' };
-
-/** Whether the Session can act on its Project's Forge: not archived, its worktree there, the Forge on. */
-function canActOnForge(session: Session, project: Project | undefined): boolean {
-  return session.status !== 'archived' && !session.worktreeMissing && project?.forge.state === 'available';
-}
 
 /** What the header shows of the Session's status: in words, as an icon and its class. */
 export interface StatusLook {
@@ -83,6 +73,7 @@ export function SessionHeader({
   dock,
   menu,
   onShowChanges,
+  onShowMergeRequest,
   onError,
   children,
 }: {
@@ -97,6 +88,8 @@ export function SessionHeader({
   dock?: { shown: boolean; onToggle: () => void };
   menu: SessionMenu;
   onShowChanges: () => void;
+  /** Shows the Merge request Panel, at its reviews and comments when asked. */
+  onShowMergeRequest: (at?: 'reviews') => void;
   onError: (message: string | undefined) => void;
   /** Rendered in the header: the dialogs its actions open. */
   children?: ReactNode;
@@ -209,7 +202,7 @@ export function SessionHeader({
             {session.branch ? <span className="tech branch">{session.branch}</span> : <span className="muted">No branch yet</span>}
           </button>
         </span>
-        <MergeRequestChip session={session} project={project} popover={popover} onPopover={onPopover} onError={onError} />
+        <MergeRequestChip session={session} project={project} popover={popover} onPopover={onPopover} onShow={onShowMergeRequest} onError={onError} />
         <span className="g-chip">
           <button type="button" title="Show Changes" aria-label={session.diffStat ? `Show changes: ${diffStatLabel(session.diffStat)}` : 'Show changes'} onClick={onShowChanges}>
             {session.diffStat ? (
@@ -293,13 +286,6 @@ function IssueChip({ session, project, open, onPopover, onError }: { session: Se
   );
 }
 
-const CHECK_STATES: Record<BabysitCheckState, { label: string; icon: ReactNode }> = {
-  passed: { label: 'Passed', icon: <CircleCheck className="sm tone-passed" /> },
-  failed: { label: 'Failed', icon: <CircleX className="sm tone-failed" /> },
-  pending: { label: 'Pending', icon: <Clock className="sm tone-pending" /> },
-  'not-run': { label: 'Not run', icon: <CircleMinus className="sm muted" /> },
-};
-
 /** How the Merge request's CI is going, in a word or two, as an icon and its tone. */
 const CI_LOOKS: Record<BabysitCi, { label: string; icon: ReactNode; tone: string }> = {
   passed: { label: 'CI passed', icon: <CircleCheck className="sm" />, tone: 'tone-passed' },
@@ -309,43 +295,41 @@ const CI_LOOKS: Record<BabysitCi, { label: string; icon: ReactNode; tone: string
 
 const CI_HEADINGS: Record<BabysitCi, string> = { passed: 'All checks have passed', failed: 'Some checks failed', pending: 'Checks are running' };
 
-/** A merged or closed Merge request's state, as a word, an icon and its tone. */
-const ENDED_LOOKS: Record<Exclude<MergeRequestState, 'open'>, { label: string; icon: ReactNode; tone: string }> = {
-  merged: { label: 'Merged', icon: <GitMerge className="sm" />, tone: 'tone-accent' },
-  closed: { label: 'Closed', icon: <GitPullRequestClosed className="sm" />, tone: 'tone-failed' },
-};
-
-/** "1 failed, 5 passed": the checks by state, the ones needing attention first. */
-function checksSummary(checks: BabysitCheck[]): string {
-  const order: BabysitCheckState[] = ['failed', 'passed', 'pending', 'not-run'];
-  return order
-    .flatMap((state) => {
-      const count = checks.filter((check) => check.state === state).length;
-      return count ? [`${count} ${CHECK_STATES[state].label.toLowerCase()}`] : [];
-    })
-    .join(', ');
-}
-
 /**
  * The Merge request chip: its number (and state once merged or closed),
- * opening the Merge request popover, then how its CI is going, opening its
- * checks. With none linked, it offers to create or link one, where the
- * Session can act on its Forge.
+ * showing the Merge request Panel, then how its CI is going, opening its
+ * checks, then how many reviews or comments others left, showing them in the
+ * Panel. With none linked, it shows the Panel to create or link one, where
+ * the Session can act on its Forge.
  */
-function MergeRequestChip({ session, project, popover, onPopover, onError }: { session: Session; project: Project | undefined; popover: HeaderPopover | undefined; onPopover: (popover: HeaderPopover | undefined) => void; onError: (message: string | undefined) => void }) {
-  const mrTrigger = useRef<HTMLButtonElement>(null);
+function MergeRequestChip({
+  session,
+  project,
+  popover,
+  onPopover,
+  onShow,
+  onError,
+}: {
+  session: Session;
+  project: Project | undefined;
+  popover: HeaderPopover | undefined;
+  onPopover: (popover: HeaderPopover | undefined) => void;
+  onShow: (at?: 'reviews') => void;
+  onError: (message: string | undefined) => void;
+}) {
   const ciTrigger = useRef<HTMLButtonElement>(null);
   const { mergeRequest, mergeRequestState: state } = session;
   if (!mergeRequest && !canActOnForge(session, project)) return null;
   const ref = mergeRequest && mergeRequestRef(project?.forge.kind, mergeRequest.number);
   const ended = state === 'merged' || state === 'closed' ? ENDED_LOOKS[state] : undefined;
-  const { ci, checks = [] } = session.babysit ?? {};
+  const { ci, checks = [], reviews } = session.babysit ?? {};
   const showsCi = mergeRequest && !ended && (ci !== undefined || checks.length > 0);
   const ciLook = ci ? CI_LOOKS[ci] : { label: 'Checks', icon: <CircleMinus className="sm" />, tone: 'muted' };
-  const open = popover?.kind === 'merge-request';
+  const discussed = mergeRequest && !ended && reviews && (reviews.reviews || reviews.comments) ? reviews : undefined;
+  const discussion = discussed && (discussed.reviews ? countText(discussed.reviews, 'review') : countText(discussed.comments, 'comment'));
   return (
     <span className={mergeRequest ? 'g-chip' : 'g-chip quiet'}>
-      <button ref={mrTrigger} type="button" title={ref ? `Merge request ${ref}` : 'No Merge request yet'} aria-label={ref ? `Merge request ${ref}` : 'No Merge request yet'} aria-haspopup="dialog" aria-expanded={open} onClick={() => onPopover(open ? undefined : { kind: 'merge-request' })}>
+      <button type="button" title={ref ? `Merge request ${ref}` : 'No Merge request yet'} aria-label={ref ? `Merge request ${ref}` : 'No Merge request yet'} aria-controls="session-side" onClick={() => onShow()}>
         {mergeRequest ? (
           <>
             {ended ? <span className={ended.tone}>{ended.icon}</span> : <GitPullRequest className="sm" />}
@@ -367,149 +351,16 @@ function MergeRequestChip({ session, project, popover, onPopover, onError }: { s
           </span>
         </button>
       )}
-      {open && <MergeRequestPopover session={session} project={project} anchor={mrTrigger} linking={!!popover.linking} onLinking={(linking) => onPopover({ kind: 'merge-request', linking })} onClose={() => onPopover(undefined)} onError={onError} />}
-      {popover?.kind === 'checks' && showsCi && <ChecksPopover session={session} anchor={ciTrigger} onClose={() => onPopover(undefined)} onError={onError} />}
-    </span>
-  );
-}
-
-/**
- * The Merge request, until its own Panel (#131): open it on the Forge, and,
- * where the Session can act on its Forge, the Babysit and Auto-prompt
- * switches, asking the agent to create or update it, and linking one by hand.
- */
-function MergeRequestPopover({
-  session,
-  project,
-  anchor,
-  linking,
-  onLinking,
-  onClose,
-  onError,
-}: {
-  session: Session;
-  project: Project | undefined;
-  anchor: RefObject<HTMLElement | null>;
-  linking: boolean;
-  onLinking: (linking: boolean) => void;
-  onClose: () => void;
-  onError: (message: string | undefined) => void;
-}) {
-  const api = useApi();
-  const { mergeRequest, mergeRequestState: state } = session;
-  const ref = mergeRequest && mergeRequestRef(project?.forge.kind, mergeRequest.number);
-  const canAct = canActOnForge(session, project);
-  // Only an open one can be watched.
-  const watchable = session.status !== 'archived' && project?.forge.state === 'available' && state === 'open';
-  const watching = !session.babysitOff;
-  const invoke = (run: () => Promise<unknown>) => attempt(onError, run);
-  const ask = () => {
-    onClose();
-    invoke(() => api.invoke('sessions.requestMergeRequest', { id: session.id }));
-  };
-  return (
-    <Popover anchor={anchor} role="dialog" label="Merge request" className="mr-popover" onClose={onClose}>
-      <h4 tabIndex={-1} data-autofocus={linking ? undefined : true}>
-        {ref ? (
-          <>
-            Merge request <span className="tech">{ref}</span>
-          </>
-        ) : (
-          'No Merge request yet'
-        )}
-        {state && <span className="chip">{state === 'open' ? 'Open' : ENDED_LOOKS[state].label}</span>}
-        {session.babysit?.stale && (
-          <span className="chip stale" title="Loom couldn't reach the Forge on its last check: this may be out of date.">
-            Stale
+      {discussed && (
+        <button type="button" title={discussed.changesRequested ? `${discussion}, changes requested` : discussion} aria-label={`${discussion}${discussed.changesRequested ? ', changes requested' : ''}: show them`} aria-controls="session-side" onClick={() => onShow('reviews')}>
+          <span className={discussed.changesRequested ? 'row tone-pending' : 'row'}>
+            <MessageSquare className="sm" />
+            {discussion}
           </span>
-        )}
-      </h4>
-      {mergeRequest && ref && (
-        <button type="button" onClick={() => invoke(() => api.invoke('links.open', { url: mergeRequest.url }))}>
-          <ExternalLink className="sm" />
-          Open {ref}
         </button>
       )}
-      {(watchable || canAct) && (
-        <div className="switches">
-          {watchable && <Switch label="Babysit" icon={<Eye className="sm" />} on={watching} hint={watching ? `Babysit watches ${ref} for new feedback.` : `Loom isn't watching ${ref}.`} onSwitch={(on) => invoke(() => api.invoke('sessions.setBabysitting', { id: session.id, on }))} />}
-          {canAct && (
-            <Switch
-              label="Auto-prompt"
-              icon={<Bot className="sm" />}
-              on={!!session.autoPrompt}
-              disabled={!watching}
-              hint={!watching ? 'Auto-prompt needs this Merge request to be watched.' : session.autoPrompt ? 'Feedback goes straight to the agent.' : 'Feedback waits for you.'}
-              onSwitch={(on) => invoke(() => api.invoke('sessions.setAutoPrompt', { id: session.id, on }))}
-            />
-          )}
-        </div>
-      )}
-      {canAct && (
-        <div className="acts">
-          <button type="button" onClick={ask}>
-            {mergeRequest ? <GitPullRequest className="sm" /> : <GitPullRequestCreate className="sm" />}
-            {mergeRequest ? 'Update Merge request' : 'Create Merge request'}
-          </button>
-          <button type="button" aria-expanded={linking} onClick={() => onLinking(!linking)}>
-            <Link className="sm" />
-            Link Merge request…
-          </button>
-        </div>
-      )}
-      {canAct && linking && <LinkMergeRequestForm session={session} onLinked={onClose} />}
-    </Popover>
-  );
-}
-
-/** A labelled switch: its name, whether it is on, and what that means. */
-function Switch({ label, icon, on, hint, disabled, onSwitch }: { label: string; icon: ReactNode; on: boolean; hint: string; disabled?: boolean; onSwitch: (on: boolean) => void }) {
-  return (
-    <button type="button" role="switch" className="switch" aria-checked={on} aria-description={hint} title={hint} disabled={disabled} onClick={() => onSwitch(!on)}>
-      {icon}
-      <span className="grow">{label}</span>
-      <span className="track" aria-hidden="true">
-        <span />
-      </span>
-    </button>
-  );
-}
-
-/** A number or URL to link, checked on the Forge; what went wrong shows under it. */
-function LinkMergeRequestForm({ session, onLinked }: { session: Session; onLinked: () => void }) {
-  const api = useApi();
-  const [value, setValue] = useState('');
-  const [error, setError] = useState<string>();
-  const [linking, setLinking] = useState(false);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!value.trim() || linking) return;
-    setLinking(true);
-    setError(undefined);
-    try {
-      await api.invoke('sessions.linkMergeRequest', { id: session.id, mergeRequest: value.trim() });
-      onLinked();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLinking(false);
-    }
-  };
-  return (
-    <form className="link-mr" aria-label="Link Merge request" onSubmit={submit}>
-      <label>
-        <span>Merge request number or URL</span>
-        <input autoFocus data-autofocus aria-label="Merge request number or URL" className="tech" placeholder="12, or its URL" value={value} onChange={(event) => setValue(event.target.value)} />
-      </label>
-      {error && (
-        <div className="err" role="alert">
-          {error}
-        </div>
-      )}
-      <button className="primary" type="submit" disabled={!value.trim() || linking}>
-        Link
-      </button>
-    </form>
+      {popover?.kind === 'checks' && showsCi && <ChecksPopover session={session} anchor={ciTrigger} onClose={() => onPopover(undefined)} onError={onError} />}
+    </span>
   );
 }
 

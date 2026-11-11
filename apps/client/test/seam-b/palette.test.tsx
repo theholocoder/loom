@@ -225,12 +225,22 @@ describe('running palette actions', () => {
     expect((await within(screen.getByRole('main', { name: 'Session' })).findByRole('alert')).textContent).toBe('The agent is not running');
   });
 
-  it('opens the linked Merge request instead of asking for one', async () => {
+  it('shows the linked Merge request instead of asking for one, Ctrl+Shift+M hiding it again, and opens it on the Forge', async () => {
     const url = 'https://github.com/acme/billing-api/pull/12';
     const main = renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Fix login', mergeRequest: { number: 12, url } })] }));
     fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
 
-    runAction('Open Merge request #12 for this Session');
+    ctrlK();
+    const keys = within(within(palette()).getByRole('option', { name: 'Show Merge request #12 for this Session' })).getByText((_, el) => el?.tagName === 'KBD');
+    expect(keys.textContent).toBe('Ctrl Shift M');
+    press('Escape', search());
+    runAction('Show Merge request #12 for this Session');
+    expect(screen.getByRole('tabpanel', { name: 'Merge request' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Prompt' }), { key: 'M', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.queryByRole('tabpanel', { name: 'Merge request' })).toBeNull());
+    expect(main.invoked.map((i) => i.command)).not.toContain('sessions.requestMergeRequest');
+
+    runAction('Open Merge request #12 on GitHub');
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'links.open', params: { url } }));
   });
 
