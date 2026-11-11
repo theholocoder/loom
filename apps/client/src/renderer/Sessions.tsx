@@ -342,7 +342,6 @@ export function SessionView({
 }) {
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
-  // None once the Project is removed: its archived Sessions stay readable, but it has no checkout to ask.
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
   const commands = useAgentCommands(project?.id, session.agentCommands);
   const removedProject = useRemovedProject(session.projectId);
