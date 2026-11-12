@@ -578,6 +578,42 @@ describe('a Session', () => {
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.stop')).toEqual([{ command: 'sessions.stop', params: { id: 7 } }]));
   });
 
+  it('empties the prompt on Enter, before main answers, so what is typed next stays apart', async () => {
+    let answer!: () => void;
+    const main = open(
+      renderApp(new FakeMain({ projects: [project], sessions: [working] }, { 'sessions.send': () => new Promise<void>((resolve) => (answer = resolve)) })),
+      working,
+    );
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+
+    fireEvent.change(prompt, { target: { value: 'Also update the README' } });
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.send')).toHaveLength(1));
+    expect(prompt.value).toBe('');
+    fireEvent.change(prompt, { target: { value: 'And bump the version' } });
+    await act(async () => answer());
+    expect(prompt.value).toBe('And bump the version');
+  });
+
+  it('puts the message back in the prompt when sending it fails, before what was typed since', async () => {
+    let fail!: (error: Error) => void;
+    open(
+      renderApp(new FakeMain({ projects: [project], sessions: [working] }, { 'sessions.send': () => new Promise<void>((_, reject) => (fail = reject)) })),
+      working,
+    );
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+
+    fireEvent.change(prompt, { target: { value: 'Also update the README' } });
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+    await waitFor(() => expect(prompt.value).toBe(''));
+    fireEvent.change(prompt, { target: { value: 'And bump the version' } });
+    await act(async () => fail(new Error('Native is not connected')));
+
+    expect(prompt.value).toBe('Also update the README\nAnd bump the version');
+    expect(screen.getByRole('alert').textContent).toBe('Native is not connected');
+  });
+
   it('lists the queue, each message with Remove and Send now', async () => {
     const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);
@@ -596,6 +632,71 @@ describe('a Session', () => {
         { command: 'sessions.removeQueued', params: { id: 7, queuedId: 3 } },
       ]),
     );
+  });
+
+  it('edits a queued message in place: Enter saves, Escape leaves it as it was', async () => {
+    const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);
+    const items = () => within(screen.getByRole('list', { name: 'Queued messages' })).getAllByRole('listitem');
+
+    fireEvent.click(within(items()[1]!).getByRole('button', { name: 'Edit' }));
+    const editor = within(items()[1]!).getByRole('textbox', { name: 'Queued message' }) as HTMLTextAreaElement;
+    expect(editor.value).toBe('And update the docs');
+    expect(document.activeElement).toBe(editor);
+    fireEvent.change(editor, { target: { value: 'And update the README' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(main.invoked.filter((i) => i.command === 'sessions.editQueued')).toEqual([{ command: 'sessions.editQueued', params: { id: 7, queuedId: 4, text: 'And update the README' } }]),
+    );
+    expect(within(items()[1]!).queryByRole('textbox', { name: 'Queued message' })).toBeNull();
+
+    fireEvent.click(within(items()[0]!).getByRole('button', { name: 'Edit' }));
+    const other = within(items()[0]!).getByRole('textbox', { name: 'Queued message' });
+    fireEvent.change(other, { target: { value: 'Never mind' } });
+    fireEvent.keyDown(other, { key: 'Escape' });
+
+    expect(within(items()[0]!).queryByRole('textbox', { name: 'Queued message' })).toBeNull();
+    expect(within(items()[0]!).getByText('Then add tests')).toBeTruthy();
+    expect(main.invoked.filter((i) => i.command === 'sessions.editQueued')).toHaveLength(1);
+  });
+
+  it("keeps the edit open, saying why, when main won't take it", async () => {
+    const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }] };
+    open(
+      renderApp(
+        new FakeMain(
+          { projects: [project], sessions: [queuedUp] },
+          {
+            'sessions.editQueued': () => {
+              throw new Error('There is no such queued message.');
+            },
+          },
+        ),
+      ),
+      queuedUp,
+    );
+    const item = () => within(screen.getByRole('list', { name: 'Queued messages' })).getByRole('listitem');
+
+    fireEvent.click(within(item()).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(within(item()).getByRole('textbox', { name: 'Queued message' }), { target: { value: 'Then add more tests' } });
+    fireEvent.click(within(item()).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('There is no such queued message.'));
+    expect((within(item()).getByRole('textbox', { name: 'Queued message' }) as HTMLTextAreaElement).value).toBe('Then add more tests');
+  });
+
+  it('says so when the message being edited is sent before the edit is saved', () => {
+    const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);
+    const queue = () => screen.getByRole('list', { name: 'Queued messages' });
+
+    fireEvent.click(within(within(queue()).getAllByRole('listitem')[0]!).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(within(queue()).getByRole('textbox', { name: 'Queued message' }), { target: { value: 'Then add more tests' } });
+    act(() => main.publish('sessions', [{ ...queuedUp, queue: [{ id: 4, text: 'And update the docs' }] }]));
+
+    expect(within(queue()).queryByRole('textbox', { name: 'Queued message' })).toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe('The queued message was sent before your edit was saved.');
   });
 
   it('offers Steer instead of Send now when the agent can be steered', async () => {

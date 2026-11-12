@@ -166,6 +166,7 @@ export class FakeMain implements LoomApi {
       'sessions.send': () => {},
       'sessions.stop': () => {},
       'sessions.removeQueued': () => {},
+      'sessions.editQueued': () => {},
       'sessions.sendNow': () => {},
       'sessions.steer': () => {},
       'sessions.setModel': () => {},

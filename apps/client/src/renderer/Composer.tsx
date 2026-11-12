@@ -123,10 +123,15 @@ export function Composer({
   }, [disabled]);
   // Kept with the draft: what it was typed for may have changed while away.
   const [clearedFor, setClearedFor] = useKeptState(draftKey, 'clearedFor', clearKey);
+  /** The `clearKey` an answer was last sent for, until it changes or the answer fails: typed since, the prompt holds what comes next. */
+  const answeredFor = useRef<string>(undefined);
+  const latestClearKey = useRef(clearKey);
+  latestClearKey.current = clearKey;
   useEffect(() => {
     if (clearedFor === clearKey) return;
     setClearedFor(clearKey);
-    setDraft('');
+    if (answeredFor.current !== undefined && answeredFor.current === clearedFor) answeredFor.current = undefined;
+    else setDraft('');
   }, [clearKey]);
   /** The files attached so far, each with a key of its own: the same file may be attached twice. */
   const [files, setFiles] = useKeptState<Array<{ key: number; file: File }>>(draftKey, 'files', []);
@@ -151,15 +156,28 @@ export function Composer({
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!canSend) return;
+    // Emptied at once, so that what is typed next is a message of its own; put back if it doesn't go.
+    const sent = { text: draft, files: attached, for: clearKey };
     setSending(true);
+    setDraft('');
+    setFiles([]);
+    if (sent.for !== undefined) answeredFor.current = sent.for;
+    let accepted = false;
     try {
-      const attachments = await Promise.all(attached.map(({ file }) => readAttachment(file)));
-      if (await onSend(draft, attachments)) {
-        setDraft('');
-        setFiles([]);
-      }
+      const attachments = await Promise.all(sent.files.map(({ file }) => readAttachment(file)));
+      accepted = await onSend(sent.text, attachments);
     } finally {
       setSending(false);
+      if (!accepted) {
+        if (answeredFor.current === sent.for) answeredFor.current = undefined;
+        // Not once what it answered is no longer asked; otherwise before what was typed since.
+        if (latestClearKey.current === sent.for) {
+          let restored = sent.text;
+          setDraftState((typed) => (restored = typed && sent.text ? `${sent.text}\n${typed}` : sent.text || typed));
+          setCaret(restored.length);
+          setFiles((since) => [...sent.files, ...since]);
+        }
+      }
     }
   };
   /** Puts the menu's highlighted option in the prompt: a skill or command, or the file it mentions. */

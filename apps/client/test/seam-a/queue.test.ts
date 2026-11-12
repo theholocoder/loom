@@ -94,6 +94,34 @@ describe("a Working Session's queue", () => {
     expect(prompts(machine)).toEqual(['First', 'Third']);
   });
 
+  it('sends an edited message as edited, where it was in the queue', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['One.'], hold: 'first' }, { chunks: ['Two.'] }, { chunks: ['Three.'] }]);
+    const { main, id } = await withSession(machine, checkout);
+    await main.api.invoke('sessions.send', { id, prompt: 'Second' });
+    await main.api.invoke('sessions.send', { id, prompt: 'Third' });
+    const [second] = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!.queue!;
+
+    await main.api.invoke('sessions.editQueued', { id, queuedId: second!.id, text: 'Second, and the README' });
+
+    expect(queued((await main.api.invoke('sessions.list')).find((s) => s.id === id)!)).toEqual(['Second, and the README', 'Third']);
+    machine.release('first');
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.queue === undefined));
+    expect(prompts(machine)).toEqual(['First', 'Second, and the README', 'Third']);
+  });
+
+  it("won't edit a message no longer queued, nor leave one with nothing to send", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['One.'], hold: 'first' }, { chunks: ['Two.'] }]);
+    const { main, id } = await withSession(machine, checkout);
+    await main.api.invoke('sessions.send', { id, prompt: 'Second' });
+    const [second] = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!.queue!;
+
+    await expect(main.api.invoke('sessions.editQueued', { id, queuedId: second!.id, text: '  ' })).rejects.toThrow('A queued message needs something to send: remove it instead.');
+    machine.release('first');
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.queue === undefined));
+    await expect(main.api.invoke('sessions.editQueued', { id, queuedId: second!.id, text: 'Too late' })).rejects.toThrow('There is no such queued message.');
+    expect(prompts(machine)).toEqual(['First', 'Second']);
+  });
+
   it('Stop interrupts the run without sending the queue, which it keeps: Waiting (stopped)', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Working on it'], hold: 'never' }, { chunks: ['Fresh answer.'] }, { chunks: ['Second answer.'] }]);
     const { main, id } = await withSession(machine, checkout);
@@ -210,11 +238,13 @@ describe("a Working Session's queue", () => {
     await main.api.invoke('sessions.send', { id, prompt: 'Third' });
     const [second] = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!.queue!;
     await main.api.invoke('sessions.removeQueued', { id, queuedId: second!.id });
+    const [third] = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!.queue!;
+    await main.api.invoke('sessions.editQueued', { id, queuedId: third!.id, text: 'Third, edited' });
     await main.close();
 
     const again = await startMain({ machine, userDataDir });
     const [kept] = (await again.api.invoke('sessions.list')).filter((s) => s.id === id);
-    expect(kept).toMatchObject({ status: 'waiting', waitingReason: 'interrupted', queue: [{ id: expect.any(Number), text: 'Third' }] });
+    expect(kept).toMatchObject({ status: 'waiting', waitingReason: 'interrupted', queue: [{ id: expect.any(Number), text: 'Third, edited' }] });
   });
 
   it('goes with the Session when it is archived', async () => {

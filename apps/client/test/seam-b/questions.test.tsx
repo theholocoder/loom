@@ -310,6 +310,23 @@ describe('answering step by step', () => {
     expect(answers().at(-1)).toEqual({ id: 7, itemId: 1, answer: { notes: 'Fast' } });
   });
 
+  it('keeps what is typed once the last answer is sent, as the next message', async () => {
+    const notes: TranscriptItem = { kind: 'question', id: 1, message: 'Release', state: 'asked', fields: [{ type: 'text', key: 'notes', title: 'Release notes', required: false }] };
+    let answered!: () => void;
+    const { main, prompt, type } = openSession([notes], { 'sessions.answer': () => new Promise<void>((resolve) => (answered = resolve)) });
+
+    await type('Fast');
+    expect(prompt().value).toBe('');
+    fireEvent.change(prompt(), { target: { value: 'Then tag the release' } });
+    await act(async () => {
+      main.publish('transcript', [{ kind: 'user', id: 0, text: 'Add a button' }, { ...notes, state: 'answered', answer: { notes: 'Fast' } }], { sessionId: 7 });
+      main.publish('sessions', [{ ...asking, status: 'working', waitingReason: undefined }]);
+      answered();
+    });
+
+    expect(prompt().value).toBe('Then tag the release');
+  });
+
   it('empties the composer when a choice moves on, so its text never answers the next question', async () => {
     const { prompt, pick, step } = openSession([questions]);
     fireEvent.change(prompt(), { target: { value: 'Gre' } });

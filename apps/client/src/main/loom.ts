@@ -320,6 +320,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.files': ({ id }) => sessionService.files(id),
     'sessions.stop': (params) => sessionService.stop(params),
     'sessions.removeQueued': (params) => sessionService.removeQueued(params),
+    'sessions.editQueued': (params) => sessionService.editQueued(params),
     'sessions.sendNow': (params) => sessionService.sendNow(params),
     'sessions.steer': (params) => sessionService.steer(params),
     'sessions.setModel': (params) => sessionService.setModel(params),

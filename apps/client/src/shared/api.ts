@@ -734,6 +734,11 @@ export interface QueuedMessage {
   attachments?: Attachment[];
 }
 
+/** Whether a queued message, as edited, would leave the agent nothing: no text and nothing attached. */
+export function hasNothingToSend({ text, attachments }: Pick<QueuedMessage, 'text' | 'attachments'>): boolean {
+  return !text.trim() && !attachments?.length;
+}
+
 /** A file or image the user attaches to a message, as the renderer read it. */
 export interface NewAttachment {
   /** Its file name, which the agent sees too. */
@@ -1553,6 +1558,12 @@ export interface Commands {
   'sessions.stop': { params: { id: number }; result: void };
   /** Drops a message from the Session's queue. */
   'sessions.removeQueued': { params: { id: number; queuedId: number }; result: void };
+  /**
+   * Changes the text of a message in the Session's queue, which keeps its
+   * place and its attachments. Rejects once it has left the queue, and text
+   * that would leave it nothing to send.
+   */
+  'sessions.editQueued': { params: { id: number; queuedId: number; text: string }; result: void };
   /**
    * Sends a queued message now: a run going is interrupted first, which the
    * transcript shows; the rest of the queue stays.
