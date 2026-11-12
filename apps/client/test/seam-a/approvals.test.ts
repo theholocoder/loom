@@ -238,7 +238,7 @@ describe('Approval requests', () => {
   });
 
   it('tells the categories apart from the command, on a best-effort basis', async () => {
-    // Asks, by category; each is answered "once" and the next prompt goes on.
+    // Asks, by category; each is answered "once" and the agent goes on.
     const asks: Array<[string, string, string?]> = [
       ['git push --force-with-lease', 'otherPush'],
       ['git push origin +HEAD', 'otherPush'],
@@ -274,24 +274,27 @@ describe('Approval requests', () => {
       'glab issue view 5 2>/dev/null | cat',
       'glab api projects/1/merge_requests &>/dev/null | jq .',
     ];
-    const setup = machineWith((checkout) => [...asks.map(([command]) => ({ chunks: [shell(command, checkout)] })), { chunks: allowed.map((command, i) => shell(command, checkout, `call_ok${i}`)) }]);
+    // One turn, so the test doesn't pay for Loom's after-turn lookups once per command.
+    const setup = machineWith((checkout) => [{ chunks: [...asks.map(([command], i) => shell(command, checkout, `call_ask${i}`)), ...allowed.map((command, i) => shell(command, checkout, `call_ok${i}`)), 'Done.'] }]);
     const main = await started(setup.machine);
     // Ask for every category, so the ones allowed by default show too.
     for (const category of ['ownPush', 'ownMergeRequest'] as const) await main.api.invoke('settings.setApproval', { category, setting: 'ask' });
     const project = await main.api.invoke('projects.link', { path: setup.checkout });
     const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Ship it' });
+    // One subscription, as the renderer has: opening the conversation again would read the branch and diff again each time.
+    let items: TranscriptItem[] = [];
+    const unsubscribe = main.api.subscribe('transcript', (list) => (items = list), { sessionId: id });
     const seen: Array<[string, string | undefined, string?]> = [];
     for (let n = 0; n < asks.length; n++) {
-      await waitFor(main.api, 'sessions', waitingOn(id, 'approval'));
-      const card = approvals(await waitFor(main.api, 'transcript', (list) => approvals(list).length === n + 1, { sessionId: id })).at(-1)!;
+      await until(() => approvals(items).length === n + 1);
+      const card = approvals(items).at(-1)!;
       seen.push(card.defaultBranch ? [card.detail, card.category, card.defaultBranch] : [card.detail, card.category]);
       await main.api.invoke('sessions.approve', { id, itemId: card.id, decision: 'once' });
-      await waitFor(main.api, 'sessions', waitingOn(id, 'finished'));
-      await main.api.invoke('sessions.send', { id, prompt: 'Next' });
     }
     await waitFor(main.api, 'sessions', waitingOn(id, 'finished'));
+    unsubscribe();
     expect(seen).toEqual(asks);
-    expect(approvals(await waitFor(main.api, 'transcript', () => true, { sessionId: id }))).toHaveLength(asks.length);
+    expect(approvals(items)).toHaveLength(asks.length);
     expect(permissionAnswers(setup.machine)).toEqual([...asks.map(() => 'once'), ...allowed.map(() => 'once')]);
   });
 
