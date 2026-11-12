@@ -89,7 +89,7 @@ describe('Session highlights', () => {
     expect(configs).toEqual([CHEAP, 'low']);
     // Away from the working copy and its instructions, in the Environment's temp directory.
     expect(messages.length).toBeGreaterThan(0);
-    expect(messages.every((m) => m.cwd !== checkout)).toBe(true);
+    expect(messages.every((m) => m.cwd !== checkout && m.cwd.endsWith('/loom-highlights'))).toBe(true);
     const [prompt] = checkPrompts(machine);
     expect(prompt).toContain('User: Move sessions to Redis');
     expect(prompt).toContain('Agent: I switched the session store to Redis; you need to set REDIS_URL.');

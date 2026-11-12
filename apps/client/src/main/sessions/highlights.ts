@@ -9,6 +9,7 @@
 import { DEFAULT_APPROVALS, type Highlight, type HighlightCounts, type HighlightsSettings, type Session, type SessionHighlights, type TokenCounts, type TranscriptItem } from '../../shared/api';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
+import type { BridgeCall } from '../environments/exec';
 import type { LoomDatabase } from '../storage/database';
 import type { HighlightsTable } from '../storage/schema';
 import { Topic } from '../topic';
@@ -18,11 +19,16 @@ import { checkPrompt, readAnswer, turnsOf } from './highlight-check';
 /** How long a check's model may take to answer before the check fails. */
 export const CHECK_TIMEOUT_MS = 5 * 60_000;
 
+/** How long writing the checks' folder into the Environment may take. */
+const WRITE_TIMEOUT_MS = 30_000;
+
 /** Where a check's agent runs: the Session's Environment. */
 export interface HighlightsEnvironment extends AgentEnvironment {
   ready(): Promise<void>;
-  /** Its temp directory: the check's agent starts there, away from the working copy and its instructions. */
+  /** Its temp directory, where the checks' own folder is made: away from the working copy and its instructions. */
   tempDir(): string;
+  /** Its bridge, which makes that folder. */
+  request: BridgeCall;
 }
 
 export interface HighlightsOptions {
@@ -272,8 +278,12 @@ export class Highlights {
       }
     };
     const tempDir = environment.tempDir();
+    // A folder of the checks' own, made by writing a file in it: the temp directory itself may not be there yet (native Windows).
+    const folder = `${tempDir}/loom-highlights`;
+    const readme = "Session highlights' checks run here, with every tool refused.\n";
+    await environment.request('files.write', WRITE_TIMEOUT_MS, { path: `${folder}/README.md`, data: Buffer.from(readme, 'utf8').toString('base64') });
     // `toolsOff` stands in for any approval policy; the adapter still takes one.
-    agent = await this.options.adapter.open({ environment, workingCopy: tempDir, tempDir, approvals: DEFAULT_APPROVALS, toolsOff: true, onEvent });
+    agent = await this.options.adapter.open({ environment, workingCopy: folder, tempDir, approvals: DEFAULT_APPROVALS, toolsOff: true, onEvent });
     let timer: TimerHandle | undefined;
     try {
       await agent.configure(pick);
