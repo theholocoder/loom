@@ -5,6 +5,7 @@ import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environme
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { Branches, ExistingBranch, ExistingWorktree, UnsavedWork } from '../../shared/api';
 import { checkWorktreeRoot } from '../settings';
+import { branchName } from '../../shared/branches';
 
 /** What the Working copy service needs from an Environment. */
 export interface GitEnvironment extends GitRunner {
@@ -31,10 +32,10 @@ export interface NewWorktree extends WorktreePlace {
   checkout: string;
   /**
    * A new branch to create, `-2`, `-3`, … added if it is taken, from `base`
-   * (an `origin` branch, `origin`'s default if absent); or an existing branch
-   * to check out as-is.
+   * (an `origin` branch or a local one, the default base if absent; see
+   * defaultBase); or an existing branch to check out as-is.
    */
-  branch: { new: string; base?: string } | { existing: ExistingBranch };
+  branch: { new: string; base?: ExistingBranch } | { existing: ExistingBranch };
   /** Where to make it, for an existing branch, instead of a free folder under the root: a reopened Session's old place. */
   at?: string;
 }
@@ -50,11 +51,13 @@ const MAX_SUFFIX = 100;
  * files `.worktreeinclude` asks for. Resolves with where it is and its branch.
  * The checkout's own branch and changes play no part.
  *
- * A new branch is made from a freshly fetched `origin/<base>`, not tracking
- * it. An existing local branch is checked out as it is; an existing `origin`
- * branch is fetched and checked out on its same-named local branch, which is
- * created to track it if there is none. Neither records a start base: its
- * diff is against `origin/HEAD`, as Loom can't know where it started.
+ * `origin` is fetched first, if there is one; if it can't be, its branches
+ * are as the checkout last fetched them. A new branch is made from its base,
+ * not tracking it. An existing local branch is checked out as it is; an
+ * existing `origin` branch is checked out on its same-named local branch,
+ * which is created to track it if there is none. Neither records a start
+ * base: its diff is against `origin/HEAD`, as Loom can't know where it
+ * started.
  * Rejects an existing branch checked out in another worktree, naming it;
  * one whose folder was deleted outside git is pruned first, unless locked.
  */
@@ -67,22 +70,23 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
   let created: boolean;
   if ('new' in worktree.branch) {
     await checkBranchName(environment, worktree.branch.new);
-    await fetchOrigin(environment, checkout);
-    const base = `origin/${worktree.branch.base ?? (await originDefaultBranch(environment, checkout))}`;
-    if (worktree.branch.base !== undefined && !(await hasRef(environment, checkout, `refs/remotes/${base}`))) throw new Error(`origin has no branch "${worktree.branch.base}"`);
+    const fetched = await tryFetchOrigin(environment, checkout);
+    const picked = worktree.branch.base ?? (await defaultBase(environment, checkout, fetched));
+    if (!picked) throw new Error("There's no branch to start the worktree from: commit on a branch first");
+    if (!(await hasRef(environment, checkout, refOf(picked)))) throw missingBranch(picked, fetched);
+    const base = branchName(picked);
     ({ branch, path } = await freeName(environment, checkout, place, worktree.branch.new));
-    await gitOrThrow(environment, ['-C', checkout, 'worktree', 'add', '--quiet', '--no-track', '-b', branch, path, base], "Couldn't create the worktree");
+    await gitOrThrow(environment, ['-C', checkout, 'worktree', 'add', '--quiet', '--no-track', '-b', branch, path, refOf(picked)], "Couldn't create the worktree");
     created = true;
-    // Where the Session's diff starts from, whatever `origin/HEAD` says later; local config only.
+    // Where the Session's diff starts from, whatever `origin/HEAD` says later, as git names it
+    // (`origin/<name>`, or a local branch's name: see the diff's base); local config only.
     await git(environment, ['-C', checkout, 'config', '--local', `branch.${branch}.loomBase`, base]).catch(() => {});
   } else {
     const { name, remote } = worktree.branch.existing;
     branch = name;
-    if (remote) await fetchOrigin(environment, checkout);
-    const local = await hasRef(environment, checkout, `refs/heads/${name}`);
-    if (!local && !(remote && (await hasRef(environment, checkout, `refs/remotes/origin/${name}`)))) {
-      throw new Error(remote ? `origin has no branch "${name}"` : `There's no local branch "${name}"`);
-    }
+    const fetched: Fetched = remote ? await tryFetchOrigin(environment, checkout) : { state: 'none' };
+    const local = await hasRef(environment, checkout, refOf({ name, remote: false }));
+    if (!local && !(remote && (await hasRef(environment, checkout, refOf({ name, remote: true }))))) throw missingBranch(worktree.branch.existing, fetched);
     let holder = (await worktreesOf(environment, checkout)).find((listed) => listed.branch === name);
     // A worktree deleted outside git still holds its branch until git forgets it.
     if (holder?.gone && !holder.locked) {
@@ -107,22 +111,24 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
 }
 
 /**
- * Fetches `origin`, then lists its branches; the branches git can still
- * check out in a new worktree: local ones not checked out in the checkout or
- * any of its worktrees, and `origin`'s with no local namesake (which would be
- * reused, so is listed instead); and the worktrees a Session can work in (see
- * workable).
+ * Fetches `origin` if there is one (as the checkout last fetched it if it
+ * can't be, saying why), then lists the bases a new branch can start from:
+ * its branches, then the local ones, and the default one (see defaultBase);
+ * the branches git can still check out in a new worktree: local ones not
+ * checked out in the checkout or any of its worktrees, and `origin`'s with no
+ * local namesake (which would be reused, so is listed instead); and the
+ * worktrees a Session can work in (see workable).
  */
 export async function listBranches(environment: GitRunner, checkout: string): Promise<Branches> {
-  await fetchOrigin(environment, checkout);
-  const defaultBranch = await originDefaultBranch(environment, checkout);
+  const fetched = await tryFetchOrigin(environment, checkout);
+  const base = await defaultBase(environment, checkout, fetched);
   const { local, remote } = await branchesOf(environment, checkout);
   const all = await worktreesOf(environment, checkout);
   const busy = new Set(all.flatMap((worktree) => (worktree.branch ? [worktree.branch] : [])));
   const locals = new Set(local);
   return {
-    defaultBranch,
-    remote,
+    ...(base && { defaultBase: base }),
+    bases: [...remote.map((name) => ({ name, remote: true })), ...local.map((name) => ({ name, remote: false }))],
     existing: [
       ...local.filter((name) => !busy.has(name)).map((name) => ({ name, remote: false })),
       ...remote.filter((name) => !locals.has(name)).map((name) => ({ name, remote: true })),
@@ -130,6 +136,7 @@ export async function listBranches(environment: GitRunner, checkout: string): Pr
     worktrees: workable(all, checkout)
       .filter((worktree) => !worktree.locked)
       .map(({ path, branch }) => (branch ? { path, branch } : { path })),
+    ...(fetched.state === 'failed' && { fetchError: `Couldn't fetch origin: ${fetched.error}` }),
   };
 }
 
@@ -220,9 +227,25 @@ export async function removeWorktree(environment: GitEnvironment, { checkout, pa
   await gitOrThrow(environment, ['-C', checkout, 'worktree', 'remove', ...(force ? ['--force'] : []), path], "Couldn't remove the worktree");
 }
 
-/** Fetches `origin` into the checkout. */
-async function fetchOrigin(environment: GitRunner, checkout: string): Promise<void> {
-  await gitOrThrow(environment, ['-C', checkout, 'fetch', '--quiet', 'origin'], "Couldn't fetch origin", FETCH_TIMEOUT_MS);
+/** How fetching `origin` went: fetched, failed with git's message saying why, or not tried as there's no `origin`. */
+type Fetched = { state: 'fetched' } | { state: 'failed'; error: string } | { state: 'none' };
+
+/** Fetches `origin` into the checkout, if it has one; a failure is reported, not thrown, as the checkout's refs will do. */
+async function tryFetchOrigin(environment: GitRunner, checkout: string): Promise<Fetched> {
+  if ((await git(environment, ['-C', checkout, 'remote', 'get-url', 'origin'])).exitCode !== 0) return { state: 'none' };
+  const result = await git(environment, ['-C', checkout, 'fetch', '--quiet', 'origin'], FETCH_TIMEOUT_MS);
+  return result.exitCode === 0 ? { state: 'fetched' } : { state: 'failed', error: message(result) };
+}
+
+/** The ref an `origin` or a local branch has in the checkout. */
+function refOf(branch: ExistingBranch): string {
+  return branch.remote ? `refs/remotes/origin/${branch.name}` : `refs/heads/${branch.name}`;
+}
+
+/** The error for a branch the checkout hasn't got, saying why `origin`'s may be out of date. */
+function missingBranch({ name, remote }: ExistingBranch, fetched: Fetched): Error {
+  if (!remote) return new Error(`There's no local branch "${name}"`);
+  return new Error(fetched.state === 'failed' ? `origin has no branch "${name}" here, and couldn't be fetched: ${fetched.error}` : `origin has no branch "${name}"`);
 }
 
 /** The root with a leading `~` replaced by the Environment's home. */
@@ -239,12 +262,32 @@ async function checkBranchName(environment: GitEnvironment, branch: string): Pro
   if (result.exitCode !== 0 || branch.startsWith('-')) throw new Error(`"${branch}" can't be a branch name`);
 }
 
-/** `origin`'s default branch, as `origin` itself says. */
-async function originDefaultBranch(environment: GitRunner, checkout: string): Promise<string> {
-  const result = await gitOrThrow(environment, ['-C', checkout, 'ls-remote', '--symref', 'origin', 'HEAD'], "Couldn't find origin's default branch");
-  const head = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(result.stdout);
-  if (!head) throw new Error("Couldn't find origin's default branch: origin has no HEAD");
-  return head[1]!;
+/**
+ * What a new branch starts from unless another base is picked: `origin`'s
+ * default branch, as `origin` itself says once fetched, else as the checkout
+ * last heard (`origin/HEAD`); else the local default branch: `origin/HEAD`'s
+ * namesake, `init.defaultBranch`, `main` or `master`, or the checkout's own
+ * branch, the first the checkout has. Undefined with none of them, as in a
+ * repository with no commit.
+ */
+async function defaultBase(environment: GitRunner, checkout: string, fetched: Fetched): Promise<ExistingBranch | undefined> {
+  const remote: string[] = [];
+  if (fetched.state === 'fetched') {
+    const said = await git(environment, ['-C', checkout, 'ls-remote', '--symref', 'origin', 'HEAD'], FETCH_TIMEOUT_MS);
+    const head = said.exitCode === 0 ? /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(said.stdout)?.[1] : undefined;
+    if (head) remote.push(head);
+  }
+  const known = await git(environment, ['-C', checkout, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  if (known.exitCode === 0) remote.push(known.stdout.trim().replace(/^origin\//, ''));
+  for (const name of remote) {
+    if (await hasRef(environment, checkout, refOf({ name, remote: true }))) return { name, remote: true };
+  }
+  const configured = (await git(environment, ['-C', checkout, 'config', '--get', 'init.defaultBranch'])).stdout.trim();
+  const current = (await git(environment, ['-C', checkout, 'symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim();
+  for (const name of new Set([...remote, configured, 'main', 'master', current].filter(Boolean))) {
+    if (await hasRef(environment, checkout, refOf({ name, remote: false }))) return { name, remote: false };
+  }
+  return undefined;
 }
 
 /**

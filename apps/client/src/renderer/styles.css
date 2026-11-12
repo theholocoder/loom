@@ -368,6 +368,11 @@ input.prefix { background: var(--panel2); border: 1px solid var(--line); border-
 .diff-base { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; }
 .diff-base .err { font-size: 12px; }
 
+/* what the New Session's controls have to say, above the composer */
+.composer-remarks { margin: 0 8px 6px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.composer-remarks .link { background: none; border: 0; padding: 0 0 0 6px; color: var(--accent); cursor: pointer; font: inherit; }
+.composer-remarks .link:hover:not(:disabled) { text-decoration: underline; }
+.composer-remarks .link:disabled { opacity: .5; cursor: default; }
 /* the queue, above the composer, and where the user interrupted a run */
 .queue { list-style: none; margin: 0 8px 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .queue li { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); }

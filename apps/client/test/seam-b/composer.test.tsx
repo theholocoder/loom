@@ -122,7 +122,7 @@ describe('attachments when starting a Session', () => {
 
 describe('@-mentions', () => {
   it("suggests, when starting a new worktree, the files of the branch it starts from", async () => {
-    const main = new FakeMain({ projects: [project] }, { 'projects.files': () => ['README.md'], 'projects.branches': () => ({ defaultBranch: 'trunk', remote: ['trunk'], existing: [], worktrees: [] }) });
+    const main = new FakeMain({ projects: [project] }, { 'projects.files': () => ['README.md'], 'projects.branches': () => ({ defaultBase: { name: 'trunk', remote: true }, bases: [{ name: 'trunk', remote: true }], existing: [], worktrees: [] }) });
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));

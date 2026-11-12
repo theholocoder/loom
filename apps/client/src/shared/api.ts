@@ -462,14 +462,20 @@ export interface IssueDetails extends ForgeLink {
 
 /**
  * What a worktree Session can start from, as `projects.branches` lists it
- * after fetching `origin`: a base for a new branch, an existing worktree to
- * work in, or an existing branch to check out in a new worktree.
+ * after fetching `origin` (or failing to): a base for a new branch, an
+ * existing worktree to work in, or an existing branch to check out in a new
+ * worktree.
  */
 export interface Branches {
-  /** `origin`'s default branch, as `origin` itself says, without `origin/`. */
-  defaultBranch: string;
-  /** `origin`'s branches, without `origin/`, by name: what a new branch can start from. */
-  remote: string[];
+  /**
+   * What a new branch starts from unless another base is picked: `origin`'s
+   * default branch, as `origin` says or else as the checkout last heard; or,
+   * with no `origin` branch here, the local default branch. Absent in a
+   * repository with no commit.
+   */
+  defaultBase?: ExistingBranch;
+  /** What a new branch can start from: `origin`'s branches, then the local ones, each by name. */
+  bases: ExistingBranch[];
   /**
    * The branches git can still check out in a new worktree, local ones first,
    * each by name: local branches not checked out in the checkout or any
@@ -483,6 +489,12 @@ export interface Branches {
    * missing and locked ones; those Sessions work in too, to share.
    */
   worktrees: ExistingWorktree[];
+  /**
+   * Why `origin` couldn't be fetched, when it couldn't (offline, or gone):
+   * its branches are then as the checkout last fetched them. Absent once
+   * fetched, and for a checkout with no `origin`.
+   */
+  fetchError?: string;
 }
 
 /** A git worktree of the Project's checkout that already exists. */
@@ -1376,10 +1388,11 @@ export interface Commands {
    */
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
   /**
-   * Fetches the Project's `origin`, then lists what a worktree Session can
-   * start from (see Branches): `origin`'s branches to branch from, the
-   * branches git can still check out, and the worktrees a Session can work
-   * in. Rejects if `origin` can't be fetched.
+   * Fetches the Project's `origin`, if it has one, then lists what a
+   * worktree Session can start from (see Branches): the branches to branch
+   * from, the branches git can still check out, and the worktrees a Session
+   * can work in. When `origin` can't be fetched, they are what the checkout
+   * already has, and `fetchError` says why.
    */
   'projects.branches': { params: { id: number }; result: Branches };
   /** Checks every Project's Forge again, and resolves once done. */
@@ -1456,16 +1469,17 @@ export interface Commands {
    * Starts a Session on a Project and sends it its first prompt. Resolves with
    * the new Session, Working, once its record exists; the run goes on after.
    *
-   * A `worktree` Session gets its own git worktree: Loom fetches `origin` and
-   * branches from `origin/<default branch>` as `branch` (by default
+   * A `worktree` Session gets its own git worktree: Loom fetches `origin`, if
+   * it can (using the branches the checkout already has otherwise), and
+   * branches from the default base (see Branches) as `branch` (by default
    * `<prefix>/<slug of the prompt>`, see suggestBranch), adding `-2`, `-3`, …
    * if that is taken, in a new folder under the worktree root. Files the
    * checkout's `.worktreeinclude` lists that git ignores are copied in. It
    * rejects if any of that fails. A `checkout` Session stays on whatever
    * branch the Project's checkout has.
    *
-   * `base` names another `origin` branch to branch from instead, without
-   * `origin/`; it rejects if `origin` has no such branch.
+   * `base` names another branch to branch from instead, on `origin` or
+   * local; it rejects if the checkout has no such branch.
    *
    * A `worktree` Session given an `existing` working copy names no new
    * branch (`branch` and `base` are not allowed):
@@ -1498,7 +1512,7 @@ export interface Commands {
       projectId: number;
       workingCopy: WorkingCopyKind;
       branch?: string;
-      base?: string;
+      base?: ExistingBranch;
       existing?: ExistingWorkingCopy;
       issue?: Issue;
       prompt: string;

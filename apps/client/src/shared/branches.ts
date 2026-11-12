@@ -1,5 +1,6 @@
 // Naming the branches Loom creates for worktree Sessions. Shared so the
 // composer shows the name main will use.
+import type { ExistingBranch } from './api';
 
 const MAX_SLUG_LENGTH = 40;
 
@@ -33,4 +34,9 @@ export function suggestBranch(prefix: string, prompt: string): string {
 /** The branch Loom suggests for a worktree Session started from an issue: `<prefix>/<issue#>-<slug of its title>`. */
 export function issueBranch(prefix: string, issue: { number: number; title: string }): string {
   return `${prefix}/${issue.number}-${slugOf(issue.title)}`;
+}
+
+/** How git names a branch on `origin` or a local one: `origin/<name>`, or its name. */
+export function branchName(branch: ExistingBranch): string {
+  return branch.remote ? `origin/${branch.name}` : branch.name;
 }

@@ -31,6 +31,7 @@ export function Composer({
   queueing = false,
   onStop,
   queue,
+  remarks,
   gauge,
   loadFiles,
   commands = [],
@@ -64,6 +65,8 @@ export function Composer({
   onStop?: () => void;
   /** The Session's queue, shown above the prompt box. */
   queue?: ReactNode;
+  /** What the controls under the prompt box have to say, such as why sending failed: shown just above it. */
+  remarks?: ReactNode;
   /** How full the agent's context is, by the send button. */
   gauge?: ReactNode;
   /** Lists the working copy's files, for @-mentions; asked again each time one starts. */
@@ -232,6 +235,7 @@ export function Composer({
   return (
     <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
       {queue}
+      {remarks && <div className="composer-remarks">{remarks}</div>}
       <div className={`composer${dock ? ' docked' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
         {dock}
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}

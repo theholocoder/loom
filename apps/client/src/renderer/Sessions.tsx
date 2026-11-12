@@ -3,7 +3,7 @@
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
-import { issueBranch, suggestBranch } from '../shared/branches';
+import { branchName, issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -78,11 +78,6 @@ export type ExistingPick = { worktree: ExistingWorktree } | { branch: ExistingBr
 /** The working copy a New Session starts on, when it is started from another Session: its checkout, or its worktree or branch. */
 export type NewSessionWorkingCopy = { workingCopy: 'checkout' } | { workingCopy: 'existing'; existing: ExistingPick };
 
-/** How a branch reads: `origin/<name>` for one on `origin`. */
-function branchLabel(branch: ExistingBranch): string {
-  return branch.remote ? `origin/${branch.name}` : branch.name;
-}
-
 /** The existing-worktree picker's options: the worktrees first, by branch, then the branches a new worktree can check out. */
 function existingOptions(branches: Branches): PickerOption<ExistingPick>[] {
   return [
@@ -95,18 +90,18 @@ function existingOptions(branches: Branches): PickerOption<ExistingPick>[] {
 function existingKey(pick: ExistingPick): { key: string; label: string } {
   return 'worktree' in pick
     ? { key: `worktree:${pick.worktree.path}`, label: pick.worktree.branch ?? 'detached HEAD' }
-    : { key: `branch:${pick.branch.remote}:${pick.branch.name}`, label: branchLabel(pick.branch) };
+    : { key: `branch:${pick.branch.remote}:${pick.branch.name}`, label: branchName(pick.branch) };
 }
 
-/** The base picker's key and label for an `origin` branch. */
-function baseKey(name: string): { key: string; label: string } {
-  return { key: name, label: branchLabel({ name, remote: true }) };
+/** The base picker's key and label for a branch, on `origin` or local. */
+function baseKey(branch: ExistingBranch): { key: string; label: string } {
+  return { key: `${branch.remote}:${branch.name}`, label: branchName(branch) };
 }
 
 /** What `sessions.create` is given for the working copy choice and what was picked for it. */
 function workingCopyParams(
   choice: WorkingCopyChoice,
-  { existing, branch, base }: { existing?: ExistingPick; branch?: string; base?: string },
+  { existing, branch, base }: { existing?: ExistingPick; branch?: string; base?: ExistingBranch },
 ): Pick<Commands['sessions.create']['params'], 'workingCopy' | 'branch' | 'base' | 'existing'> {
   switch (choice) {
     case 'checkout':
@@ -123,9 +118,9 @@ function workingCopyParams(
  * worktree starts from or checks out, or an existing worktree has checked
  * out; or else the checkout itself.
  */
-function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: ExistingPick; base?: string }): { ref?: string } {
-  if (choice === 'worktree' && base) return { ref: `origin/${base}` };
-  if (choice === 'existing' && existing && 'branch' in existing) return { ref: branchLabel(existing.branch) };
+function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: ExistingPick; base?: ExistingBranch }): { ref?: string } {
+  if (choice === 'worktree' && base) return { ref: branchName(base) };
+  if (choice === 'existing' && existing && 'branch' in existing) return { ref: branchName(existing.branch) };
   // An existing worktree's files are those of its branch, but for what it hasn't committed.
   if (choice === 'existing' && existing && 'worktree' in existing && existing.worktree.branch) return { ref: existing.worktree.branch };
   return {};
@@ -149,12 +144,15 @@ export function NewSession({
   const [projectId, setProjectId] = useState(initialProjectId);
   const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
   const [workingCopy, setWorkingCopy] = useState<WorkingCopyChoice>(initialWorkingCopy?.workingCopy ?? 'worktree');
-  // The `origin` branch picked to branch from; until then, origin's default.
-  const [pickedBase, setPickedBase] = useState<string>();
+  // The branch picked to branch from; until then, the default base.
+  const [pickedBase, setPickedBase] = useState<ExistingBranch>();
   const [existing, setExisting] = useState<ExistingPick | undefined>(initialWorkingCopy?.workingCopy === 'existing' ? initialWorkingCopy.existing : undefined);
-  const { listed, refresh } = useBranches(workingCopy === 'checkout' ? undefined : chosen?.id);
-  const defaultBranch = listed && 'value' in listed ? listed.value.defaultBranch : undefined;
-  const base = pickedBase ?? defaultBranch;
+  const { listed, refresh, refreshing } = useBranches(workingCopy === 'checkout' ? undefined : chosen?.id);
+  const branches = listed && 'value' in listed ? listed.value : undefined;
+  const unlisted = listed && 'error' in listed ? listed : undefined;
+  // Why origin's branches may be out of date, for the pickers that list them.
+  const stale = workingCopy === 'checkout' ? undefined : branches?.fetchError;
+  const base = pickedBase ?? branches?.defaultBase;
   const [draft, setDraft] = useState('');
   // The branch the user typed; until then, the one suggested from the prompt.
   const [editedBranch, setEditedBranch] = useState<string>();
@@ -195,11 +193,6 @@ export function NewSession({
       </div>
       <div className="chat">
         {projects.length === 0 && <div className="empty">Add a Project before starting a Session.</div>}
-        {error && (
-          <div className="err" role="alert">
-            {error}
-          </div>
-        )}
       </div>
       {chosen && (
         <Composer
@@ -212,6 +205,25 @@ export function NewSession({
           commands={commands}
           canSendEmpty={!!issue}
           disabled={workingCopy === 'existing' && !existing}
+          remarks={
+            (error || stale) && (
+              <>
+                {stale && (
+                  <div className="muted" role="status" title={stale}>
+                    Couldn't refresh origin, using what's here.
+                    <button type="button" className="link" disabled={refreshing} onClick={refresh}>
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {error && (
+                  <div className="err" role="alert">
+                    {error}
+                  </div>
+                )}
+              </>
+            )
+          }
           tools={
             <>
               <Select
@@ -281,8 +293,8 @@ export function NewSession({
                   placeholder="Pick a worktree"
                   icon={<FolderTree className="sm" />}
                   noun="worktrees"
-                  loading="Fetching origin…"
-                  options={listed && 'value' in listed ? { value: existingOptions(listed.value) } : listed}
+                  loading="Listing branches…"
+                  options={branches ? { value: existingOptions(branches) } : unlisted}
                   selected={existing && existingKey(existing)}
                   onOpen={refresh}
                   onChange={setExisting}
@@ -291,11 +303,11 @@ export function NewSession({
               {workingCopy === 'worktree' && (
                 <SearchPicker
                   label="Branch from"
-                  placeholder="origin/…"
+                  placeholder="Pick a branch"
                   icon={<GitBranch className="sm" />}
                   noun="branches"
-                  loading="Fetching origin…"
-                  options={listed && 'value' in listed ? { value: listed.value.remote.map((name) => ({ ...baseKey(name), value: name })) } : listed}
+                  loading="Listing branches…"
+                  options={branches ? { value: branches.bases.map((branch) => ({ ...baseKey(branch), value: branch })) } : unlisted}
                   selected={base === undefined ? undefined : baseKey(base)}
                   onOpen={refresh}
                   onChange={setPickedBase}
@@ -324,26 +336,27 @@ export function NewSession({
 /**
  * What a worktree Session on the Project `projectId` can start from, listed
  * by main (fetching origin) when the Project is chosen and again on
- * `refresh`, the last list staying until the new one comes; nothing while
- * `projectId` is undefined.
+ * `refresh`, the last list staying until the new one comes (`refreshing`
+ * meanwhile); nothing while `projectId` is undefined.
  */
-function useBranches(projectId: number | undefined): { listed: Loaded<Branches>; refresh: () => void } {
+function useBranches(projectId: number | undefined): { listed: Loaded<Branches>; refresh: () => void; refreshing: boolean } {
   const api = useApi();
-  const [listed, setListed] = useState<{ projectId: number; result: NonNullable<Loaded<Branches>> }>();
+  const [listed, setListed] = useState<{ projectId: number; generation: number; result: NonNullable<Loaded<Branches>> }>();
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     if (projectId === undefined) return;
     let current = true;
     api
       .invoke('projects.branches', { id: projectId })
-      .then((value) => current && setListed({ projectId, result: { value } }))
-      .catch((e: unknown) => current && setListed({ projectId, result: { error: (e as Error).message } }));
+      .then((value) => current && setListed({ projectId, generation, result: { value } }))
+      .catch((e: unknown) => current && setListed({ projectId, generation, result: { error: (e as Error).message } }));
     return () => {
       current = false;
     };
   }, [api, projectId, generation]);
   const refresh = useCallback(() => setGeneration((n) => n + 1), []);
-  return { listed: listed && listed.projectId === projectId ? listed.result : undefined, refresh };
+  const shown = listed && listed.projectId === projectId ? listed : undefined;
+  return { listed: shown?.result, refresh, refreshing: !!shown && shown.generation !== generation };
 }
 
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */

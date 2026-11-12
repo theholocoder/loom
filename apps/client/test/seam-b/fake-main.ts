@@ -71,7 +71,7 @@ export class FakeMain implements LoomApi {
       'projects.remove': () => ({ removed: true }),
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       'projects.issues': () => [],
-      'projects.branches': () => ({ defaultBranch: 'main', remote: ['main'], existing: [], worktrees: [] }),
+      'projects.branches': () => ({ defaultBase: { name: 'main', remote: true }, bases: [{ name: 'main', remote: true }], existing: [], worktrees: [] }),
       'projects.check': () => {},
       'projects.models': () => [],
       'projects.commands': () => [],
