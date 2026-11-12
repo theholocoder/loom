@@ -387,6 +387,9 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 .queue li { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); }
 .queue li .grow { color: var(--text); min-width: 0; }
 .queue li button:not(.icon-btn) { border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
+.queue li.editing { align-items: flex-start; border-style: solid; }
+.queue li.editing:focus-within { border-color: var(--accent); }
+.queue li.editing textarea { field-sizing: content; max-height: 10lh; resize: none; font: inherit; color: var(--text); background: transparent; border: 0; outline: none; padding: 2px 0; }
 .interruption { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 4px 0; font-size: 12.5px; color: var(--muted); }
 
 /* Markdown in chat messages; highlighting takes the theme's own colours */

@@ -640,6 +640,15 @@ export class Sessions {
     if (!this.dequeue(id, queuedId)) throw new Error('There is no such queued message.');
   }
 
+  /** Changes the text of a queued message, which keeps its place and attachments. */
+  editQueued({ id, queuedId, text }: { id: number; queuedId: number; text: string }): void {
+    const message = this.queued(id, queuedId);
+    if (!text.trim() && !message.attachments) throw new Error('A queued message needs something to send: remove it instead.');
+    const edited = { ...message, text };
+    this.update(id, { queue: this.get(id).queue!.map((m) => (m === message ? edited : m)) });
+    this.write((trx) => trx.updateTable('queued_messages').set({ text }).where('id', '=', queuedId).execute());
+  }
+
   /**
    * Interrupts the Session's run without sending its queue: once the run
    * ends, the Session is Waiting (stopped), its queue kept.
@@ -712,11 +721,12 @@ export class Sessions {
     const files = await this.deliver(id, message.attachments);
     // The run may have ended, or the message gone, while the files were written.
     const steer = steerable();
-    this.queued(id, queuedId); // throws if it's gone
-    this.dequeue(id, message.id);
+    // Throws if it's gone; its text as it is now, which may have been edited meanwhile.
+    const current = this.queued(id, queuedId);
+    this.dequeue(id, current.id);
     this.endStreaming(id);
-    this.addItem(id, { kind: 'user', ...messageOf(message) });
-    steer({ text: message.text, files });
+    this.addItem(id, { kind: 'user', ...messageOf(current) });
+    steer({ text: current.text, files });
   }
 
   /**

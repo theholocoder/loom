@@ -1554,6 +1554,12 @@ export interface Commands {
   /** Drops a message from the Session's queue. */
   'sessions.removeQueued': { params: { id: number; queuedId: number }; result: void };
   /**
+   * Changes the text of a message in the Session's queue, which keeps its
+   * place and its attachments. Rejects once it has left the queue, and text
+   * that would leave it nothing to send.
+   */
+  'sessions.editQueued': { params: { id: number; queuedId: number; text: string }; result: void };
+  /**
    * Sends a queued message now: a run going is interrupted first, which the
    * transcript shows; the rest of the queue stays.
    */

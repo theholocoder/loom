@@ -36,7 +36,7 @@ The agent is currently running; the **Session** does not need the user's attenti
 The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, is held on an **Approval request**, its **Merge request** has new feedback from **Babysit**, or was merged or closed while its worktree has uncommitted changes or unpushed commits; the **Session** needs the user's attention.
 
 **Queued message**:
-A message the user, or **Babysit**'s auto-prompt, sent a **Working** Session, waiting in the Session's queue to be sent to the agent once the runs before it settle. The user can remove it, or send it now: interrupt the run and send it. **Stop** interrupts the run and keeps the queue. "The queue" always means a Session's queued messages, never the **Inbox**.
+A message the user, or **Babysit**'s auto-prompt, sent a **Working** Session, waiting in the Session's queue to be sent to the agent once the runs before it settle. The user can edit its text, remove it, or send it now: interrupt the run and send it. **Stop** interrupts the run and keeps the queue. "The queue" always means a Session's queued messages, never the **Inbox**.
 
 **Attachment**:
 A file or image the user sends with a message. Loom keeps it with the **Session**'s history on the **Client** machine, and writes a copy into the **Environment** for the agent to read with that message.

@@ -634,6 +634,58 @@ describe('a Session', () => {
     );
   });
 
+  it('edits a queued message in place: Enter saves, Escape leaves it as it was', async () => {
+    const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);
+    const items = () => within(screen.getByRole('list', { name: 'Queued messages' })).getAllByRole('listitem');
+
+    fireEvent.click(within(items()[1]!).getByRole('button', { name: 'Edit' }));
+    const editor = within(items()[1]!).getByRole('textbox', { name: 'Queued message' }) as HTMLTextAreaElement;
+    expect(editor.value).toBe('And update the docs');
+    expect(document.activeElement).toBe(editor);
+    fireEvent.change(editor, { target: { value: 'And update the README' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(main.invoked.filter((i) => i.command === 'sessions.editQueued')).toEqual([{ command: 'sessions.editQueued', params: { id: 7, queuedId: 4, text: 'And update the README' } }]),
+    );
+    expect(within(items()[1]!).queryByRole('textbox', { name: 'Queued message' })).toBeNull();
+
+    fireEvent.click(within(items()[0]!).getByRole('button', { name: 'Edit' }));
+    const other = within(items()[0]!).getByRole('textbox', { name: 'Queued message' });
+    fireEvent.change(other, { target: { value: 'Never mind' } });
+    fireEvent.keyDown(other, { key: 'Escape' });
+
+    expect(within(items()[0]!).queryByRole('textbox', { name: 'Queued message' })).toBeNull();
+    expect(within(items()[0]!).getByText('Then add tests')).toBeTruthy();
+    expect(main.invoked.filter((i) => i.command === 'sessions.editQueued')).toHaveLength(1);
+  });
+
+  it("keeps the edit open, saying why, when main won't take it", async () => {
+    const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }] };
+    open(
+      renderApp(
+        new FakeMain(
+          { projects: [project], sessions: [queuedUp] },
+          {
+            'sessions.editQueued': () => {
+              throw new Error('There is no such queued message.');
+            },
+          },
+        ),
+      ),
+      queuedUp,
+    );
+    const item = within(screen.getByRole('list', { name: 'Queued messages' })).getByRole('listitem');
+
+    fireEvent.click(within(item).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(within(item).getByRole('textbox', { name: 'Queued message' }), { target: { value: 'Then add more tests' } });
+    fireEvent.click(within(item).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('There is no such queued message.'));
+    expect((within(item).getByRole('textbox', { name: 'Queued message' }) as HTMLTextAreaElement).value).toBe('Then add more tests');
+  });
+
   it('offers Steer instead of Send now when the agent can be steered', async () => {
     const steerable: Session = { ...working, canSteer: true, queue: [{ id: 3, text: 'Then add tests' }] };
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [steerable] })), steerable);

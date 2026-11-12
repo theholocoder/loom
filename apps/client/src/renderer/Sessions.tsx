@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
@@ -898,6 +898,16 @@ export function SessionView({
                   onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
                   onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
                   onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
+                  onEdit={async (queuedId, text) => {
+                    setError(undefined);
+                    try {
+                      await api.invoke('sessions.editQueued', { id: session.id, queuedId, text });
+                      return true;
+                    } catch (e) {
+                      setError((e as Error).message);
+                      return false;
+                    }
+                  }}
                 />
               ) : undefined
             }
@@ -958,50 +968,99 @@ function Interruption({ item, onContinue }: { item: Extract<TranscriptItem, { ki
   );
 }
 
-/** The messages waiting to be sent, oldest first: each can be removed, or sent now (or steered in, if the agent can be). */
+/** The messages waiting to be sent, oldest first: each can be edited in place, removed, or sent now (or steered in, if the agent can be). */
 function Queue({
   queue,
   steer,
   onSendNow,
   onSteer,
   onRemove,
+  onEdit,
 }: {
   queue: QueuedMessage[];
   steer: boolean;
   onSendNow: (queuedId: number) => void;
   onSteer: (queuedId: number) => void;
   onRemove: (queuedId: number) => void;
+  /** Resolves to whether main took the edit. */
+  onEdit: (queuedId: number, text: string) => Promise<boolean>;
 }) {
+  /** The message being edited, and its text so far. */
+  const [editing, setEditing] = useState<{ id: number; text: string }>();
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!editing || saving) return;
+    setSaving(true);
+    try {
+      if (await onEdit(editing.id, editing.text)) setEditing((now) => (now?.id === editing.id ? undefined : now));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <ul className="queue" aria-label="Queued messages">
-      {queue.map((message) => (
-        <li key={message.id}>
-          <ListPlus className="sm" />
-          <span className="grow ellipsis" title={message.text}>
-            {message.text}
-          </span>
-          {message.attachments && (
-            <span className="row muted" title={message.attachments.map((a) => a.name).join('\n')} aria-label={`${message.attachments.length} attached`}>
-              <Paperclip className="sm" />
-              {message.attachments.length}
+      {queue.map((message) =>
+        editing?.id === message.id ? (
+          <li key={message.id} className="editing">
+            <ListPlus className="sm" />
+            <textarea
+              className="grow"
+              aria-label="Queued message"
+              rows={1}
+              value={editing.text}
+              autoFocus
+              onFocus={(event) => event.currentTarget.setSelectionRange(event.currentTarget.value.length, event.currentTarget.value.length)}
+              onChange={(event) => setEditing({ id: message.id, text: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void save();
+                } else if (event.key === 'Escape') {
+                  // Taken here: not the view's Escape too.
+                  event.preventDefault();
+                  setEditing(undefined);
+                }
+              }}
+            />
+            <button type="button" className="primary" disabled={saving || (!editing.text.trim() && !message.attachments)} onClick={() => void save()}>
+              Save
+            </button>
+            <button type="button" onClick={() => setEditing(undefined)}>
+              Cancel
+            </button>
+          </li>
+        ) : (
+          <li key={message.id}>
+            <ListPlus className="sm" />
+            <span className="grow ellipsis" title={message.text}>
+              {message.text}
             </span>
-          )}
-          {steer ? (
-            <button type="button" onClick={() => onSteer(message.id)}>
-              <Navigation className="sm" />
-              Steer
+            {message.attachments && (
+              <span className="row muted" title={message.attachments.map((a) => a.name).join('\n')} aria-label={`${message.attachments.length} attached`}>
+                <Paperclip className="sm" />
+                {message.attachments.length}
+              </span>
+            )}
+            {steer ? (
+              <button type="button" onClick={() => onSteer(message.id)}>
+                <Navigation className="sm" />
+                Steer
+              </button>
+            ) : (
+              <button type="button" onClick={() => onSendNow(message.id)}>
+                <SendHorizontal className="sm" />
+                Send now
+              </button>
+            )}
+            <button className="icon-btn sm" type="button" title="Edit" aria-label="Edit" onClick={() => setEditing({ id: message.id, text: message.text })}>
+              <Pencil className="sm" />
             </button>
-          ) : (
-            <button type="button" onClick={() => onSendNow(message.id)}>
-              <SendHorizontal className="sm" />
-              Send now
+            <button className="icon-btn sm" type="button" title="Remove" aria-label="Remove" onClick={() => onRemove(message.id)}>
+              <X className="sm" />
             </button>
-          )}
-          <button className="icon-btn sm" type="button" title="Remove" aria-label="Remove" onClick={() => onRemove(message.id)}>
-            <X className="sm" />
-          </button>
-        </li>
-      ))}
+          </li>
+        ),
+      )}
     </ul>
   );
 }
