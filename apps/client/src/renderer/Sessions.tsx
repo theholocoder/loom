@@ -2,7 +2,7 @@
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderOpen, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, modelNameIn, type ModelChoice, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
@@ -25,10 +25,10 @@ import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
-import { useAgentCommands, useCheckoutModels } from './checkout';
+import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed, wakeTime } from './Snooze';
 import { useNow } from './now';
-import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicker';
+import { ContextGauge, effortsOf, listedModels, ModelMarker, ModelName, ModelPickers } from './ModelPicker';
 import { AttachmentList, CommentNoteForm, Composer } from './Composer';
 import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
@@ -544,15 +544,10 @@ export function SessionView({
   const pickersDisabled = working || asked || readOnly || !!session.worktreeMissing;
   const { agentConfig } = session;
   // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
-  const checkoutModels = useCheckoutModels(agentConfig ? undefined : project?.id);
+  const sessionModels = useSessionModels(session, project?.id);
+  const offeredModels = listedModels(sessionModels.listed);
   const shownModel = session.model ?? agentConfig?.model;
-  /** A model's name as the agent gives it, or else its id. */
-  const modelName = (model: string | undefined) => {
-    if (model === undefined) return undefined;
-    const offered = agentConfig?.models ?? (checkoutModels.listed && 'value' in checkoutModels.listed ? checkoutModels.listed.value : []);
-    return offered.find((m) => m.id === model)?.name || model;
-  };
-  const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(checkoutModels.listed, shownModel);
+  const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(sessionModels.listed, shownModel);
   const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
     api.invoke('sessions.answer', { id: session.id, itemId, answer }),
   );
@@ -796,7 +791,7 @@ export function SessionView({
           <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onContextMenu={commentOnSelection}>
             {turnParts(items).map((item) =>
               'said' in item ? (
-                <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={modelName(item.said.find((i) => i.model)?.model)} />
+                <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
               ) : item.kind === 'user' ? (
                 <div key={item.id} className="msg user" data-item-id={item.id}>
                   <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -819,7 +814,7 @@ export function SessionView({
               ) : item.kind === 'interruption' ? (
                 <Interruption key={item.id} item={item} onContinue={continuable && item === items.at(-1) ? () => void runCommand(() => api.invoke('sessions.continue', { id: session.id })) : undefined} />
               ) : item.kind === 'model' ? (
-                <ModelMarker key={item.id} item={item} />
+                <ModelMarker key={item.id} item={item} models={offeredModels} />
               ) : item.kind === 'merge-request-refused' ? (
                 <div key={item.id} className="interruption" role="note">
                   <TriangleAlert className="sm" />
@@ -891,12 +886,12 @@ export function SessionView({
             tools={
               <ModelPickers
                 agent={session.agent}
-                models={agentConfig ? { value: agentConfig.models } : checkoutModels.listed}
+                models={sessionModels.listed}
                 model={shownModel}
                 efforts={shownEfforts}
                 effort={session.effort ?? agentConfig?.effort}
                 disabled={pickersDisabled}
-                onOpen={checkoutModels.refresh}
+                onOpen={sessionModels.refresh}
                 onModel={(model) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, model }))}
                 onEffort={(effort) => void runCommand(() => api.invoke('sessions.setModel', { id: session.id, effort }))}
               />
@@ -1170,8 +1165,8 @@ function turnParts(items: TranscriptItem[]): Array<Exclude<TranscriptItem, Said>
   return parts;
 }
 
-/** The agent's name, and the model that spoke when known ("OpenCode · Claude Sonnet 5.5"), over its thinking and its words. */
-function AgentWords({ agent, said, model }: { agent: string; said: Said[]; model: string | undefined }) {
+/** The agent's name, and the model that spoke when known ("OpenCode · Claude Sonnet 5.5", `provider/model` in its tooltip), over its thinking and its words. */
+function AgentWords({ agent, said, model, models }: { agent: string; said: Said[]; model: string | undefined; models: readonly ModelChoice[] | undefined }) {
   return (
     <div className="msg agent">
       <div className="who">
@@ -1183,7 +1178,7 @@ function AgentWords({ agent, said, model }: { agent: string; said: Said[]; model
           {model && (
             <>
               {' · '}
-              <span className="tech">{model}</span>
+              <ModelName id={model} name={modelNameIn(models, model)} />
             </>
           )}
         </div>

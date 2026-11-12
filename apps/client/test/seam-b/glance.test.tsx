@@ -194,6 +194,25 @@ describe('Session details', () => {
     expect(writeText).toHaveBeenCalledWith('ses_abc123');
   });
 
+  it("shows the model by name, provider/model in its tooltip, and which the agent's default is", async () => {
+    const models = { 'projects.models': () => [{ id: 'opencode/pulse-free', name: 'Pulse Free', default: true as const }, { id: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }] };
+    renderApp(full, models);
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+    await waitFor(() => expect(value(group('Agent'), 'Model')).toBe('Claude Sonnet 5.5'));
+    expect(within(fact(group('Agent'), 'Model')).getByText('Claude Sonnet 5.5').title).toBe('anthropic/claude-sonnet-5-5');
+    cleanup();
+
+    renderApp({ ...full, model: undefined }, models);
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+    await waitFor(() => expect(value(group('Agent'), 'Model')).toBe("Pulse Free, the agent's default"));
+    cleanup();
+
+    // Running, the agent says which it runs with.
+    renderApp({ ...full, model: undefined, agentConfig: { model: 'anthropic/claude-sonnet-5-5', models: [{ id: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }], efforts: [] } });
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+    expect(value(group('Agent'), 'Model')).toBe("Claude Sonnet 5.5, the agent's default");
+  });
+
   it('shows a Full access Session as such', () => {
     renderApp({ ...full, fullAccess: true });
     fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { RemovedTag } from './Archive';
+import { ModelName } from './ModelPicker';
 
 /** Series colours, the prototype's categorical slots, in order. */
 const SERIES = ['var(--p1)', 'var(--p2)', 'var(--p3)', 'var(--accent)', 'var(--wait)', 'var(--work)'];
@@ -131,7 +132,7 @@ function Content({
           <div className="card-head">
             <h3 id="dash-per-model">Tokens per model</h3>
           </div>
-          <Bars label="Tokens per model" rows={data.perModel.map((m) => ({ label: m.model, value: m.tokens, color: 'var(--accent)', tech: true }))} format={formatTokens} />
+          <Bars label="Tokens per model" rows={data.perModel.map((m) => ({ key: m.model, label: m.name ?? m.model, title: m.model, value: m.tokens, color: 'var(--accent)', tech: !m.name }))} format={formatTokens} />
         </section>
         <section className="card" aria-labelledby="dash-mix">
           <div className="card-head">
@@ -201,7 +202,7 @@ function Content({
                       </td>
                       <td>{references(top, projects)}</td>
                       <td>
-                        <span className="tech">{top.model}</span>
+                        <ModelName id={top.model} name={top.modelName} />
                       </td>
                       <td className="n">{formatTokens(top.tokens)}</td>
                       <td className="n">{formatDuration(top.workingMs)}</td>
@@ -261,14 +262,14 @@ function Tile({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: s
   );
 }
 
-function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: string; label: string; removed?: boolean; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
+function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: string; label: string; title?: string; removed?: boolean; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
   if (!rows.length) return <div className="empty">Nothing yet.</div>;
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
     <ul className="hbars" aria-label={label}>
       {rows.map((row) => (
         <li key={row.key ?? row.label} className="hbar">
-          <span className={row.tech ? 'ellipsis tech' : 'ellipsis'} title={row.label}>
+          <span className={row.tech ? 'ellipsis tech' : 'ellipsis'} title={row.title ?? row.label}>
             {row.label}
             {row.removed && <RemovedTag />}
           </span>

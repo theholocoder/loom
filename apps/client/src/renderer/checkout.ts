@@ -1,7 +1,7 @@
 // What the agent offers in a Project's checkout, as main lists it (asking the
 // agent once per checkout): its models, and its commands and skills.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AgentCommand, Commands, ModelChoice } from '../shared/api';
+import type { AgentCommand, Commands, ModelChoice, Session } from '../shared/api';
 import { useApi } from './api';
 import type { Loaded } from './SearchPicker';
 
@@ -41,6 +41,19 @@ export function useCheckoutModels(projectId: number | undefined): { listed: Load
   const failed = !!listed && 'error' in listed;
   const refresh = useCallback(() => failed && setGeneration((n) => n + 1), [failed]);
   return { listed, refresh };
+}
+
+/**
+ * The models a Session's agent offers, as it last said; until it has (it
+ * hasn't run since the Client started), those of its Project's checkout,
+ * asked again on `refresh` after a failure.
+ */
+export function useSessionModels(session: Pick<Session, 'agentConfig'>, projectId: number | undefined): { listed: Loaded<ModelChoice[]>; refresh: () => void } {
+  const { agentConfig } = session;
+  const checkout = useCheckoutModels(agentConfig ? undefined : projectId);
+  const offered = agentConfig?.models;
+  const listed = useMemo(() => (offered ? { value: offered } : checkout.listed), [offered, checkout.listed]);
+  return { listed, refresh: checkout.refresh };
 }
 
 /** No skills or commands, the same each time. */

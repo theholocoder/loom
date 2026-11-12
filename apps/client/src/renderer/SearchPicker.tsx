@@ -20,6 +20,8 @@ export interface PickerOption<T> {
 export function SearchPicker<T>({
   label,
   placeholder,
+  tooltip = label,
+  tech = true,
   icon,
   noun,
   loading,
@@ -33,6 +35,10 @@ export function SearchPicker<T>({
   label: string;
   /** What the trigger shows while nothing is selected. */
   placeholder: string;
+  /** The trigger's tooltip; its accessible name by default. */
+  tooltip?: string;
+  /** Whether the labels are names in code (branches, paths), shown as such; they are by default. */
+  tech?: boolean;
   icon?: ReactNode;
   /** What the options are, plural, for the list and its search box: `branches`. */
   noun: string;
@@ -65,14 +71,14 @@ export function SearchPicker<T>({
 
   return (
     <>
-      <button ref={trigger} type="button" className="pick" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={() => {
+      <button ref={trigger} type="button" className="pick" title={tooltip} aria-label={label} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={() => {
           if (open) return close();
           setOpen(true);
           onOpen?.();
         }}
       >
         {icon}
-        <b className="tech ellipsis">{selected?.label ?? placeholder}</b>
+        <b className={tech ? 'tech ellipsis' : 'ellipsis'}>{selected?.label ?? placeholder}</b>
         <ChevronDown className="chev" aria-hidden />
       </button>
       {open && !disabled && (
@@ -108,7 +114,7 @@ export function SearchPicker<T>({
                 data-enter={option === shown[0] ? '' : undefined}
                 onClick={() => pick(option.value)}
               >
-                <span className="tech ellipsis">{option.label}</span>
+                <span className={tech ? 'tech ellipsis' : 'ellipsis'}>{option.label}</span>
                 {option.detail && <span className="muted ellipsis">{option.detail}</span>}
               </button>
             ))}

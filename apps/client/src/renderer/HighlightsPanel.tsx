@@ -8,6 +8,8 @@ import { Bot, Check, ChevronDown, ChevronRight, Copy, LoaderCircle, RotateCcw, T
 import { useEffect, useState, type ReactNode } from 'react';
 import { HIGHLIGHT_KINDS, HIGHLIGHT_LABELS, type Highlight, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { useSessionModels } from './checkout';
+import { listedModels, modelName } from './ModelPicker';
 
 /** A place in the code a Highlight names, `path:line`: a path with a file extension, and a line. */
 const CODE_PLACE = /`?((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.[A-Za-z0-9]+):(\d+)`?/g;
@@ -31,6 +33,9 @@ export function HighlightsPanel({
   const api = useApi();
   const value = useTopic('highlights', { sessionId: session.id });
   const settings = useTopic('settings')?.highlights;
+  // Its model by name: the same agent offers the same models as the Session's.
+  const models = listedModels(useSessionModels(session, session.projectId).listed);
+  const checkModel = settings?.model && modelName(models, settings.model);
   const [foldedOpen, setFoldedOpen] = useState(false);
   const last = value?.highlights.at(-1)?.id ?? 0;
   // Shown, what it holds is seen: as it comes, while it shows.
@@ -50,14 +55,14 @@ export function HighlightsPanel({
 
   return (
     <div className="highlights" aria-label="Highlights">
-      <HighlightsStatus checking={value.checking} error={value.error} on={settings?.on ?? false} model={settings?.model} />
+      <HighlightsStatus checking={value.checking} error={value.error} on={settings?.on ?? false} model={checkModel || undefined} />
       <div className="scroll">
         {open.length === 0 ? (
           <div className="empty">
             {value.highlights.length
               ? 'Nothing open: every Highlight here was resolved.'
               : settings?.on
-                ? `No highlights yet. After each turn, ${settings.model} notes here what you should know about the work: what's left for you, what wasn't done, risks, assumptions and decisions.`
+                ? `No highlights yet. After each turn, ${checkModel || 'a model'} notes here what you should know about the work: what's left for you, what wasn't done, risks, assumptions and decisions.`
                 : 'No highlights. Turn Session highlights on in Settings to have a model note what you should know after each turn.'}
           </div>
         ) : (

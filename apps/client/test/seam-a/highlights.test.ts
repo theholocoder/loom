@@ -222,8 +222,8 @@ describe('Session highlights', () => {
     expect(dashboard.tokens).toBe(1550);
     expect(dashboard.reportedCost).toBeCloseTo(0.11);
     expect(dashboard.perModel).toEqual([
-      { model: 'anthropic/claude-sonnet-5-5', tokens: 1200 },
-      { model: CHEAP, tokens: 350 },
+      { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1200 },
+      { model: CHEAP, name: 'Claude Haiku 5.5', tokens: 350 },
     ]);
     expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 1550 }]);
     expect(dashboard.topSessions.map((s) => s.tokens)).toEqual([1200]);
@@ -248,6 +248,6 @@ describe('Session highlights', () => {
 
     await main.api.invoke('sessions.delete', { id });
     expect(() => main.api.subscribe('highlights', () => {}, { sessionId: id })).toThrow(/unknown Session/);
-    expect((await main.api.invoke('usage.dashboard', { days: 7 })).perModel).toContainEqual({ model: CHEAP, tokens: 15 });
+    expect((await main.api.invoke('usage.dashboard', { days: 7 })).perModel).toContainEqual({ model: CHEAP, name: 'Claude Haiku 5.5', tokens: 15 });
   });
 });

@@ -4,12 +4,13 @@
 // rather than kept on screen. An archived Session's are read-only.
 import { Check, CodeXml, Copy, Info, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { useEffect, useState, type ReactNode, type RefObject } from 'react';
-import { APPROVAL_MODES, type EnvironmentStatus, type Project, type Session } from '../shared/api';
+import { APPROVAL_MODES, modelNameIn, type EnvironmentStatus, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
 import { baseName, copyable } from './ContextMenu';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
-import { contextPercent } from './ModelPicker';
+import { contextPercent, defaultModelOf, listedModels, ModelName } from './ModelPicker';
+import { useSessionModels } from './checkout';
 import { Popover } from './Popover';
 
 /** Session details show whole, room allowing, rather than scroll like a menu. */
@@ -46,6 +47,9 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
   const removedProject = useRemovedProject(session.projectId);
   const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal') => attempt(onError, () => api.invoke(command, { id: session.id }));
   const model = session.model ?? session.agentConfig?.model;
+  const models = listedModels(useSessionModels(session, project?.id).listed);
+  // Not picked, the model is the agent's default: the one it runs with, once it has said, or else the one the checkout's models mark.
+  const agentDefault = session.model === undefined ? (session.agentConfig?.model ?? defaultModelOf(models)?.id) : undefined;
   const effort = session.effort ?? session.agentConfig?.effort;
   const { workingCopy } = session;
 
@@ -92,7 +96,18 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
       </Group>
       <Group label="Agent">
         <Fact label="Agent">{session.agent}</Fact>
-        <Fact label="Model">{model ? <span className="tech">{model}</span> : <span className="muted">The agent's default</span>}</Fact>
+        <Fact label="Model">
+          {agentDefault ? (
+            <>
+              <ModelName id={agentDefault} name={modelNameIn(models, agentDefault)} />
+              <span className="muted">, the agent's default</span>
+            </>
+          ) : model ? (
+            <ModelName id={model} name={modelNameIn(models, model)} />
+          ) : (
+            <span className="muted">The agent's default</span>
+          )}
+        </Fact>
         <Fact label="Effort">{effort ? <span className="tech">{effort}</span> : <span className="muted">Default</span>}</Fact>
         <Fact label="Approvals">{APPROVAL_MODES[session.fullAccess ? 'full' : 'supervised'].label}</Fact>
         <Fact label="Agent session" actions={session.agentSessionId && <CopyAction text={session.agentSessionId} label="Copy agent session id" />}>

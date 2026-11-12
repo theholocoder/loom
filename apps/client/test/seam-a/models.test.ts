@@ -29,14 +29,14 @@ async function withProject(machine: Machine, checkout: string) {
 const modelListings = (machine: Machine) => machine.opencodeRequests().filter((r) => r.path === '/api/model');
 
 describe('the models before a Session exists', () => {
-  it("lists the models OpenCode offers in the Project's checkout, as provider/model with their Effort levels, leaving out those turned off", async () => {
+  it("lists the models OpenCode offers in the Project's checkout, as provider/model with their Effort levels, leaving out those turned off, and which it runs without one picked", async () => {
     const { machine, checkout } = machineWith();
     const { main, project } = await withProject(machine, checkout);
 
     const listed = await main.api.invoke('projects.models', { id: project.id });
 
     expect(listed).toEqual([
-      { id: 'opencode/pulse-free', name: 'Pulse Free', efforts: [] },
+      { id: 'opencode/pulse-free', name: 'Pulse Free', efforts: [], default: true },
       { id: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: ['low', 'high', 'max', 'default'] },
     ]);
     expect(modelListings(machine)).toEqual([{ method: 'GET', path: '/api/model', directory: checkout }]);

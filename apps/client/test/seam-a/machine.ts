@@ -16,7 +16,8 @@ export interface OpencodeScript {
   /**
    * The models the user's providers offer, in the order `GET /api/model`
    * lists them; `opencode acp`'s `model` and `effort` config options offer
-   * them too, the first being the current one of a new session.
+   * them too, the first being the current one of a new session, and
+   * `GET /api/model/default` answers it (404 with none).
    */
   models?: StandInModel[];
   /**

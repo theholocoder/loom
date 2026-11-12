@@ -73,7 +73,7 @@ function listed(name: string) {
 }
 
 describe('the model and Effort pickers before a Session exists', () => {
-  it("lists the models OpenCode offers in the Project's checkout as provider/model, starting on the one picked with its Effort", async () => {
+  it("lists the models OpenCode offers in the Project's checkout by name, provider/model beside, starting on the one picked with its Effort", async () => {
     const created: unknown[] = [];
     const main = renderApp(
       new FakeMain(
@@ -93,10 +93,12 @@ describe('the model and Effort pickers before a Session exists', () => {
     expect(within(pane).queryByRole('button', { name: 'Effort' })).toBeNull();
 
     fireEvent.click(model);
-    await waitFor(() => expect(listed('Models')).toEqual(['opencode/pulse-freePulse Free', 'anthropic/claude-sonnet-5-5Claude Sonnet 5.5']));
+    await waitFor(() => expect(listed('Models')).toEqual(['Pulse Freeopencode/pulse-free', 'Claude Sonnet 5.5anthropic/claude-sonnet-5-5']));
     expect(main.invoked.filter((i) => i.command === 'projects.models')).toEqual([{ command: 'projects.models', params: { id: 1 } }]);
     fireEvent.click(screen.getByRole('option', { name: /claude-sonnet-5-5/ }));
-    expect(model.textContent).toBe('anthropic/claude-sonnet-5-5');
+    expect(model.textContent).toBe('Claude Sonnet 5.5');
+    // The id stays in its tooltip.
+    expect(model.title).toBe('anthropic/claude-sonnet-5-5');
 
     const effort = within(pane).getByRole('button', { name: 'Effort' });
     expect(effort.textContent).toBe('Effort: default');
@@ -137,6 +139,15 @@ describe('the model and Effort pickers before a Session exists', () => {
     expect(created[0]).not.toHaveProperty('effort');
   });
 
+  it('says which model the default is, once OpenCode has said', async () => {
+    renderApp(new FakeMain({ projects: [project] }, { 'projects.models': () => [{ ...probed[0]!, default: true }, probed[1]!] }));
+    const pane = startNewSession();
+    const model = within(pane).getByRole('button', { name: 'Model' });
+
+    await waitFor(() => expect(model.textContent).toBe('Pulse Free (default)'));
+    expect(model.title).toBe("OpenCode's default model: opencode/pulse-free");
+  });
+
   it("says why the models couldn't be listed", async () => {
     renderApp(
       new FakeMain(
@@ -160,9 +171,10 @@ describe('the model and Effort pickers in a Session', () => {
     const composer = open(finished);
 
     const model = within(composer).getByRole('button', { name: 'Model' });
-    expect(model.textContent).toBe('anthropic/claude-sonnet-5-5');
+    expect(model.textContent).toBe('Claude Sonnet 5.5');
+    expect(model.title).toBe('anthropic/claude-sonnet-5-5');
     fireEvent.click(model);
-    expect(listed('Models')).toEqual(['opencode/pulse-freePulse Free', 'anthropic/claude-sonnet-5-5Claude Sonnet 5.5']);
+    expect(listed('Models')).toEqual(['Pulse Freeopencode/pulse-free', 'Claude Sonnet 5.5anthropic/claude-sonnet-5-5']);
     fireEvent.click(screen.getByRole('option', { name: /pulse-free/ }));
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.setModel', params: { id: 7, model: 'opencode/pulse-free' } }));
 
@@ -180,8 +192,8 @@ describe('the model and Effort pickers in a Session', () => {
     renderApp(new FakeMain({ projects: [project], sessions: [picked] }, { 'projects.models': () => probed }));
     const composer = open(picked);
 
-    expect(within(composer).getByRole('button', { name: 'Model' }).textContent).toBe('anthropic/claude-sonnet-5-5');
     await waitFor(() => expect(within(composer).getByRole('button', { name: 'Effort' }).textContent).toBe('Effort: low'));
+    expect(within(composer).getByRole('button', { name: 'Model' }).textContent).toBe('Claude Sonnet 5.5');
   });
 
   it('are disabled while the agent is Working, or waits on an answer', () => {
@@ -219,7 +231,15 @@ describe('the model and Effort pickers in a Session', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('could not switch');
   });
 
-  it('marks each change in the timeline', () => {
+  it('says which model the default is before the agent runs, from the models of the checkout', async () => {
+    const unpicked: Session = { ...finished, agentConfig: undefined };
+    renderApp(new FakeMain({ projects: [project], sessions: [unpicked] }, { 'projects.models': () => [{ ...probed[0]!, default: true }, probed[1]!] }));
+    const composer = open(unpicked);
+
+    await waitFor(() => expect(within(composer).getByRole('button', { name: 'Model' }).textContent).toBe('Pulse Free (default)'));
+  });
+
+  it('marks each change in the timeline, by name, provider/model in its tooltip', () => {
     const main = renderApp(new FakeMain({ projects: [project], sessions: [finished] }));
     const items: TranscriptItem[] = [
       { kind: 'user', id: 0, text: 'Hi' },
@@ -232,10 +252,11 @@ describe('the model and Effort pickers in a Session', () => {
 
     const notes = within(screen.getByRole('log', { name: 'Conversation' })).getAllByRole('note').map((n) => n.textContent);
     expect(notes).toEqual([
-      'Model opencode/pulse-free from the next prompt',
+      'Model Pulse Free from the next prompt',
       'Effort max from the next prompt',
-      'Model anthropic/claude-sonnet-5-5, Effort high from the next prompt',
+      'Model Claude Sonnet 5.5, Effort high from the next prompt',
     ]);
+    expect(screen.getByText('Pulse Free').title).toBe('opencode/pulse-free');
   });
 });
 

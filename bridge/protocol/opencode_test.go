@@ -145,16 +145,21 @@ func TestProbeListsTheCheckoutsModelsCommandsAndSkillsWithoutTheirContent(t *tes
 		{"id": "opencode", "name": "OpenCode", "path": "skill://opencode/SKILL.md", "content": "# OpenCode"},
 	})
 	p, log := probeWith(t, map[string]fakeAnswer{
-		"/api/integration": data(`[]`),
-		"/api/model":       data(models),
-		"/api/command":     data(`[{"name":"review","description":"review changes"}]`),
-		"/api/skill":       data(skills),
+		"/api/integration":   data(`[]`),
+		"/api/model":         data(models),
+		"/api/model/default": data(`{"id":"pulse-free","modelID":"pulse-free","providerID":"opencode","name":"Pulse Free","settings":{"apiKey":"public"}}`),
+		"/api/command":       data(`[{"name":"review","description":"review changes"}]`),
+		"/api/skill":         data(skills),
 	})
 
 	result := p.call(1, "opencode.probe", map[string]any{"directory": checkout})
 
 	if got, want := asJSON(t, result["models"]), models; got != want {
 		t.Errorf("models = %s, want %s", got, want)
+	}
+	// Only which model it is: not its settings.
+	if got, want := asJSON(t, result["defaultModel"]), `{"id":"pulse-free","providerID":"opencode"}`; got != want {
+		t.Errorf("defaultModel = %s, want %s", got, want)
 	}
 	if got, want := asJSON(t, result["commands"]), `[{"description":"review changes","name":"review"}]`; got != want {
 		t.Errorf("commands = %s, want %s", got, want)
@@ -164,7 +169,7 @@ func TestProbeListsTheCheckoutsModelsCommandsAndSkillsWithoutTheirContent(t *tes
 		t.Errorf("skills = %s, want %s", got, wantSkills)
 	}
 	// The skills after the models: OpenCode lists none before it has loaded the checkout.
-	want := []string{"/api/integration ", "/api/model " + checkout, "/api/command " + checkout, "/api/skill " + checkout}
+	want := []string{"/api/integration ", "/api/model " + checkout, "/api/model/default " + checkout, "/api/command " + checkout, "/api/skill " + checkout}
 	if got := requests(t, log); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("asked %q, want %q", got, want)
 	}
@@ -200,6 +205,27 @@ func TestProbeStillListsTheModelsWhenCommandsAndSkillsCantBeListed(t *testing.T)
 			}
 			if _, ok := result["skills"]; ok {
 				t.Errorf("skills = %v, want none", result["skills"])
+			}
+		})
+	}
+}
+
+func TestProbeStillListsTheModelsWithoutADefaultModel(t *testing.T) {
+	cases := map[string]fakeAnswer{
+		"none set":            {Status: http.StatusNotFound, Body: "none"},
+		"an answer of no use": data(`{"name":"no id"}`),
+	}
+	for name, answer := range cases {
+		t.Run(name, func(t *testing.T) {
+			p, _ := probeWith(t, map[string]fakeAnswer{"/api/integration": data(`[]`), "/api/model": data(models), "/api/model/default": answer})
+
+			result := p.call(1, "opencode.probe", map[string]any{"directory": t.TempDir()})
+
+			if got := asJSON(t, result["models"]); got != models {
+				t.Errorf("models = %s, want %s", got, models)
+			}
+			if _, ok := result["defaultModel"]; ok {
+				t.Errorf("defaultModel = %v, want none", result["defaultModel"])
 			}
 		})
 	}

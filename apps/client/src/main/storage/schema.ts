@@ -98,6 +98,8 @@ export interface UsageBucketsTable {
   day: string;
   /** The model Loom ran them with, `provider/model`. */
   model: string;
+  /** What the agent last called it, when it said; null when it didn't, as before Loom kept it. */
+  model_name: string | null;
   project_id: number;
   /** The Project's name when they were recorded, so usage outlives the Project. */
   project_name: string;

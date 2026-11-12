@@ -60,7 +60,7 @@ describe('usage per turn', () => {
     expect(dashboard.reportedCost).toBeCloseTo(0.2);
     expect(dashboard.mix).toEqual({ input: 1500, output: 300, reasoning: 50, cacheRead: 3000, cacheWrite: 400 });
     expect(dashboard.cacheHitRate).toBeCloseTo(3000 / 4900);
-    expect(dashboard.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', tokens: 5250 }]);
+    expect(dashboard.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 5250 }]);
     expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 5250 }]);
     expect(dashboard.perDay).toHaveLength(7);
     expect(dashboard.perDay.at(-1)).toMatchObject({ tokens: 5250, byProject: { [project.id]: 5250 } });
@@ -85,7 +85,7 @@ describe('usage of cancelled turns', () => {
 });
 
 describe('where a turn is filed', () => {
-  it('under the day it ended and the model Loom set for it', async () => {
+  it('under the day it ended and the model Loom set for it, by the name the agent gave it', async () => {
     const { machine, checkout } = machineWith([
       { chunks: ['Late night.'], tokens: { inputTokens: 1000, outputTokens: 100 } },
       { chunks: ['Next morning.'], tokens: { inputTokens: 500, outputTokens: 50 } },
@@ -105,8 +105,8 @@ describe('where a turn is filed', () => {
       { day: '2026-11-05', tokens: 550, byProject: { [project.id]: 550 } },
     ]);
     expect(dashboard.perModel).toEqual([
-      { model: 'anthropic/claude-sonnet-5-5', tokens: 1100 },
-      { model: 'anthropic/claude-haiku-5-5', tokens: 550 },
+      { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1100 },
+      { model: 'anthropic/claude-haiku-5-5', name: 'Claude Haiku 5.5', tokens: 550 },
     ]);
   });
 });
@@ -237,6 +237,7 @@ describe('Session outcomes', () => {
       project: 'loom',
       mergeRequest: { number: 12, url: pr(12) },
       model: 'anthropic/claude-sonnet-5-5',
+      modelName: 'Claude Sonnet 5.5',
       tokens: 110,
       workingMs: 0,
       outcome: 'merged',

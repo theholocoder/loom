@@ -42,7 +42,10 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
       { projectId: 1, project: 'loom', tokens: 900_000 },
       { projectId: 2, project: 'docs', tokens: 300_000 },
     ],
-    perModel: [{ model: 'anthropic/claude-sonnet-5-5', tokens: 1_200_000 }],
+    perModel: [
+      { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1_000_000 },
+      { model: 'openai/gpt-5.1', tokens: 200_000 },
+    ],
     mix: { input: 300_000, output: 100_000, cacheRead: 700_000, cacheWrite: 50_000, reasoning: 50_000 },
     cacheHitRate: 700_000 / 1_050_000,
     outcomes: { merged: 2, closed: 0, archived: 1, open: 2, stuck: 1 },
@@ -55,6 +58,7 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
         issue: { number: 42, url: 'https://github.com/theholocoder/loom/issues/42' },
         mergeRequest: { number: 12, url: 'https://github.com/theholocoder/loom/pull/12' },
         model: 'anthropic/claude-sonnet-5-5',
+        modelName: 'Claude Sonnet 5.5',
         tokens: 900_000,
         workingMs: 72 * 60_000,
         outcome: 'merged',
@@ -105,7 +109,7 @@ describe('the dashboard', () => {
     expect(within(view).getByRole('radio', { name: '90 days' })).toBeTruthy();
   });
 
-  it('charts tokens per day, Project and model, the token mix with the cache hit rate, and Session outcomes', async () => {
+  it('charts tokens per day, Project and model (by name, provider/model in its tooltip), the token mix with the cache hit rate, and Session outcomes', async () => {
     const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': ({ days }) => dashboard(days) });
     const view = openDashboard(main);
     await within(view).findByRole('group', { name: 'Tokens' });
@@ -114,7 +118,8 @@ describe('the dashboard', () => {
     const perProject = within(view).getByRole('list', { name: 'Tokens per Project' });
     expect(within(perProject).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['loom900k', 'docs300k']);
     const perModel = within(view).getByRole('list', { name: 'Tokens per model' });
-    expect(within(perModel).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['anthropic/claude-sonnet-5-5' + '1.2M']);
+    expect(within(perModel).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['Claude Sonnet 5.5' + '1.0M', 'openai/gpt-5.1' + '200k']);
+    expect(within(perModel).getByText('Claude Sonnet 5.5').title).toBe('anthropic/claude-sonnet-5-5');
     const mix = within(view).getByRole('region', { name: 'Token mix' });
     expect(mix.textContent).toContain('cache read 58%');
     expect(mix.textContent).toContain('Cache hit rate 67%');
@@ -130,9 +135,11 @@ describe('the dashboard', () => {
     const table = within(view).getByRole('table', { name: 'Top Sessions by tokens' });
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows.map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
-      ['Fix the login bug', 'loom', '#42 · #12', 'anthropic/claude-sonnet-5-5', '900k', '1h 12m', 'Merged'],
+      ['Fix the login bug', 'loom', '#42 · #12', 'Claude Sonnet 5.5', '900k', '1h 12m', 'Merged'],
       ['Old Session', 'gone', '—', 'openai/gpt-5.1', '300k', '30s', 'Archived'],
     ]);
+
+    expect(within(rows[0]!).getByText('Claude Sonnet 5.5').title).toBe('anthropic/claude-sonnet-5-5');
 
     fireEvent.click(rows[0]!);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Dashboard' })).toBeNull());
