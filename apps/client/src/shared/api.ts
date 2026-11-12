@@ -1726,9 +1726,13 @@ export interface Commands {
    */
   'sessions.retry': { params: { id: number }; result: void };
   /**
-   * Has the agent go on with the run Loom quit or crashed during: the
-   * Session, Waiting as interrupted, becomes Working, and its agent is sent
-   * CONTINUE_PROMPT in its resumed conversation. Rejects for any other Session.
+   * Has the agent go on with a run that ended early: one Loom quit or crashed
+   * during (Waiting as interrupted), one the user stopped (Waiting as
+   * stopped, the Stopped note ending the conversation), or one that failed
+   * partway through its answer (Waiting on an error the agent had said
+   * something before). The Session becomes Working, and its agent is sent a
+   * prompt to carry on, saying which, in its resumed conversation. Rejects
+   * for any other Session, an unanswered prompt being Retry's (see goingOn).
    */
   'sessions.continue': { params: { id: number }; result: void };
   /**
