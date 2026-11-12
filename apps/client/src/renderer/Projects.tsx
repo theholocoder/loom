@@ -70,7 +70,9 @@ export function useExistingCloneLinker(): ExistingCloneLinker {
 function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: RestorableProject; onRestore: () => void; onNew: () => void; onCancel: () => void }) {
   const restore = useRef<HTMLButtonElement>(null);
   useEffect(() => restore.current?.focus(), []);
-  const sessions = project.sessions === 1 ? '1 archived Session' : `${project.sessions} archived Sessions`;
+  const archived = project.sessions === 1 ? '1 archived Session' : `${project.sessions} archived Sessions`;
+  // A Project removed before it had a Session has none to bring back: saying "its 0" would read as a loss.
+  const restoredWith = project.sessions === 0 ? 'its usage history' : `its ${archived} and usage history`;
   return (
     <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && onCancel()}>
       <div className="card modal" role="alertdialog" aria-modal="true" aria-labelledby="restore-title" aria-describedby="restore-text">
@@ -79,7 +81,7 @@ function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: Restor
           <h3 id="restore-title">Restore {project.name}?</h3>
         </div>
         <p id="restore-text">
-          This checkout is of a Project you removed. Restore {project.name} with its {sessions} and usage history, or start a new Project?
+          This checkout is of a Project you removed. Restore {project.name} with {restoredWith}, or start a new Project?
         </p>
         <div className="row modal-actions">
           <button type="button" onClick={onCancel}>

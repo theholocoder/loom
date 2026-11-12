@@ -87,7 +87,7 @@ describe('the dashboard', () => {
     expect(tile(view, 'Reported cost').textContent).toContain('$3.40');
     expect(tile(view, 'Reported cost').textContent).toContain('Subscription and local models report $0');
     expect(tile(view, 'Sessions started').textContent).toContain('5');
-    expect(tile(view, 'Merge requests merged').textContent).toContain('2');
+    expect(tile(view, 'Merge requests merged').textContent).toContain('2 Sessions still open');
     expect(tile(view, 'Cache hit rate').textContent).toContain('67%');
     expect(tile(view, 'Median agent run').textContent).toContain('6m 40s');
     expect(within(view).queryByRole('group', { name: 'Median wait for you' })).toBeNull();
@@ -131,7 +131,7 @@ describe('the dashboard', () => {
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows.map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
       ['Fix the login bug', 'loom', '#42 · #12', 'anthropic/claude-sonnet-5-5', '900k', '1h 12m', 'Merged'],
-      ['Old Session', 'gone', 'Session without issue', 'openai/gpt-5.1', '300k', '30s', 'Archived'],
+      ['Old Session', 'gone', '—', 'openai/gpt-5.1', '300k', '30s', 'Archived'],
     ]);
 
     fireEvent.click(rows[0]!);
@@ -171,6 +171,30 @@ describe('the dashboard', () => {
     act(() => main.publish('sessions', [{ ...session, updatedAt: 99 }]));
 
     await waitFor(() => expect(asked()).toBe(before + 1));
+  });
+
+  it('counts one Session still open in the singular', async () => {
+    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': ({ days }) => ({ ...dashboard(days), outcomes: { merged: 0, closed: 0, archived: 0, open: 1, stuck: 0 } }) });
+    const view = openDashboard(main);
+
+    await waitFor(() => expect(tile(view, 'Merge requests merged').textContent).toContain('1 Session still open'));
+  });
+
+  it('shows runs and working time under a second as such, not as none', async () => {
+    const main = new FakeMain(
+      { projects: [project] },
+      {
+        'usage.dashboard': ({ days }) => {
+          const data = dashboard(days);
+          return { ...data, medianRunMs: 300, topSessions: [{ ...data.topSessions[1]!, workingMs: 400 }] };
+        },
+      },
+    );
+    const view = openDashboard(main);
+
+    await waitFor(() => expect(tile(view, 'Median agent run').textContent).toContain('<1s'));
+    const row = within(within(view).getByRole('table', { name: 'Top Sessions by tokens' })).getAllByRole('row')[1]!;
+    expect(within(row).getAllByRole('cell')[5]!.textContent).toBe('<1s');
   });
 
   it('rounds token counts up into the next unit', async () => {
