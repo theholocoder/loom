@@ -62,8 +62,11 @@ function open(main: FakeMain, session: Session) {
 
 describe('starting a Session', () => {
   const branches = {
-    defaultBranch: 'trunk',
-    remote: ['feature/login', 'release/1.2', 'trunk'],
+    defaultBase: { name: 'trunk', remote: true },
+    bases: [
+      ...['feature/login', 'release/1.2', 'trunk'].map((name) => ({ name, remote: true })),
+      { name: 'loom/spike', remote: false },
+    ],
     // origin/trunk is checked out locally, so only offered as a base.
     existing: [
       { name: 'loom/spike', remote: false },
@@ -76,7 +79,7 @@ describe('starting a Session', () => {
     ],
   };
 
-  it("branches the new worktree from origin's default unless another origin branch is picked", async () => {
+  it("branches the new worktree from origin's default unless another branch is picked", async () => {
     const main = renderApp(new FakeMain({ projects: [project] }, { 'projects.branches': () => branches, 'sessions.create': () => inWorktree }));
     const pane = startNewSession();
     const base = within(pane).getByRole('button', { name: 'Branch from' });
@@ -89,6 +92,7 @@ describe('starting a Session', () => {
       ['origin/feature/login', 'false'],
       ['origin/release/1.2', 'false'],
       ['origin/trunk', 'true'],
+      ['loom/spike', 'false'],
     ]);
     fireEvent.click(screen.getByRole('option', { name: 'origin/release/1.2' }));
     expect(base.textContent).toBe('origin/release/1.2');
@@ -97,7 +101,7 @@ describe('starting a Session', () => {
 
     await waitFor(() =>
       expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
-        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', base: 'release/1.2', approvalMode: 'supervised', prompt: 'Backport the fix' } },
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', base: { name: 'release/1.2', remote: true }, approvalMode: 'supervised', prompt: 'Backport the fix' } },
       ]),
     );
   });
@@ -163,7 +167,7 @@ describe('starting a Session', () => {
     renderApp(
       new FakeMain({ projects: [project] }, {
         'projects.branches': () => {
-          throw new Error("Couldn't fetch origin: no network");
+          throw new Error("Couldn't list the branches: not a git repository");
         },
       }),
     );
@@ -171,7 +175,30 @@ describe('starting a Session', () => {
 
     fireEvent.click(within(pane).getByRole('button', { name: 'Branch from' }));
 
-    expect((await screen.findByRole('alert')).textContent).toBe("Couldn't fetch origin: no network");
+    expect((await screen.findByRole('alert')).textContent).toBe("Couldn't list the branches: not a git repository");
+  });
+
+  it("says quietly when origin couldn't be refreshed, by the branch pickers, and lists again on Retry", async () => {
+    let fetchError: string | undefined = "Couldn't fetch origin: Could not resolve host: github.com";
+    const main = renderApp(
+      new FakeMain({ projects: [project] }, {
+        'projects.branches': () => ({ defaultBase: { name: 'main', remote: false }, bases: [{ name: 'main', remote: false }], existing: [], worktrees: [], ...(fetchError && { fetchError }) }),
+      }),
+    );
+    const pane = startNewSession();
+    const composer = within(within(pane).getByRole('form', { name: 'Composer' }));
+
+    const note = await composer.findByRole('status');
+    expect(note.textContent).toBe("Couldn't refresh origin, using what's here.Retry");
+    expect(note.getAttribute('title')).toBe(fetchError);
+    expect(within(pane).getByRole('button', { name: 'Branch from' }).textContent).toBe('main');
+    expect(within(pane).queryByRole('alert')).toBeNull();
+
+    fetchError = undefined;
+    fireEvent.click(within(note).getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(composer.queryByRole('status')).toBeNull());
+    expect(main.invoked.filter((i) => i.command === 'projects.branches')).toHaveLength(2);
   });
 
   it('defaults to a new worktree, also offering an existing worktree or the current branch, with OpenCode as the agent', () => {
@@ -286,7 +313,8 @@ describe('starting a Session', () => {
     fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Go' } });
     fireEvent.keyDown(within(pane).getByRole('textbox', { name: 'Prompt' }), { key: 'Enter' });
 
-    expect((await within(pane).findByRole('alert')).textContent).toBe('Native is not connected');
+    // By the composer's controls, not at the top of the pane.
+    expect((await within(within(pane).getByRole('form', { name: 'Composer' })).findByRole('alert')).textContent).toBe('Native is not connected');
   });
 
   it('asks for a Project first when there is none', () => {

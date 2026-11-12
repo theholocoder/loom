@@ -167,7 +167,8 @@ export class WorkingCopyDiff {
       ...[head, 'origin/main', 'origin/master'].flatMap((ref) => (ref ? [{ ref, source: 'default' as const }] : [])),
     ];
     for (const candidate of candidates) {
-      if (await this.hasRemoteRef(candidate.ref)) return candidate;
+      // A recorded base may be a local branch: one Loom made the branch from.
+      if ((await this.hasRemoteRef(candidate.ref)) || (candidate.source === 'recorded' && (await this.hasLocalBranch(candidate.ref)))) return candidate;
     }
     const local = await this.localDefault(head);
     if (local) return { ref: local, source: 'local' };
@@ -214,6 +215,10 @@ export class WorkingCopyDiff {
     if (!from || from === 'HEAD') return [];
     const base = from === 'origin/HEAD' ? originHead : from.startsWith('origin/') ? from : `origin/${from}`;
     return base && base !== `origin/${branch}` ? [base] : [];
+  }
+
+  private async hasLocalBranch(name: string): Promise<boolean> {
+    return (await this.git(['rev-parse', '--verify', '--quiet', `refs/heads/${name}^{commit}`])).exitCode === 0;
   }
 
   private async hasRemoteRef(ref: string): Promise<boolean> {

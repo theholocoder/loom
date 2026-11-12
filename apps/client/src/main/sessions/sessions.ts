@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -366,6 +366,7 @@ export class Sessions {
       if (workingCopy !== 'worktree') throw new Error('Only a worktree Session works on an existing branch or worktree.');
       if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch or worktree doesn't name or base a new one.");
     }
+    if (params.base !== undefined) checkBranch(params.base, 'A base');
     const newAttachments = checkAttachments(params.attachments);
     const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt, { attached: newAttachments.length > 0 });
     let path = project.checkout.path;
@@ -390,7 +391,7 @@ export class Sessions {
             ? { existing: existing.branch }
             : {
                 new: params.branch?.trim() || (issue ? issueBranch(project.branchPrefix, issue) : suggestBranch(project.branchPrefix, text)),
-                ...(params.base?.trim() ? { base: params.base.trim() } : {}),
+                ...(params.base !== undefined && { base: params.base }),
               },
           root: this.options.worktreeRoot(),
         }),
@@ -2522,9 +2523,13 @@ function checkExisting(existing: ExistingWorkingCopy): void {
     if (typeof existing.worktree !== 'string' || !existing.worktree) throw new Error('An existing worktree needs its path.');
     return;
   }
-  const { branch } = existing;
+  checkBranch(existing.branch, 'An existing branch');
+}
+
+/** Checks a branch named in a request: `what` needs a name, and whether it is on origin. */
+function checkBranch(branch: ExistingBranch | undefined, what: string): void {
   if (typeof branch?.name !== 'string' || !branch.name || branch.name.startsWith('-') || typeof branch.remote !== 'boolean') {
-    throw new Error('An existing branch needs a name, and whether it is on origin.');
+    throw new Error(`${what} needs a name, and whether it is on origin.`);
   }
 }
 
