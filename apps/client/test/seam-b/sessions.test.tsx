@@ -578,6 +578,42 @@ describe('a Session', () => {
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.stop')).toEqual([{ command: 'sessions.stop', params: { id: 7 } }]));
   });
 
+  it('empties the prompt on Enter, before main answers, so what is typed next stays apart', async () => {
+    let answer!: () => void;
+    const main = open(
+      renderApp(new FakeMain({ projects: [project], sessions: [working] }, { 'sessions.send': () => new Promise<void>((resolve) => (answer = resolve)) })),
+      working,
+    );
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+
+    fireEvent.change(prompt, { target: { value: 'Also update the README' } });
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.send')).toHaveLength(1));
+    expect(prompt.value).toBe('');
+    fireEvent.change(prompt, { target: { value: 'And bump the version' } });
+    await act(async () => answer());
+    expect(prompt.value).toBe('And bump the version');
+  });
+
+  it('puts the message back in the prompt when sending it fails, before what was typed since', async () => {
+    let fail!: (error: Error) => void;
+    open(
+      renderApp(new FakeMain({ projects: [project], sessions: [working] }, { 'sessions.send': () => new Promise<void>((_, reject) => (fail = reject)) })),
+      working,
+    );
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+
+    fireEvent.change(prompt, { target: { value: 'Also update the README' } });
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+    await waitFor(() => expect(prompt.value).toBe(''));
+    fireEvent.change(prompt, { target: { value: 'And bump the version' } });
+    await act(async () => fail(new Error('Native is not connected')));
+
+    expect(prompt.value).toBe('Also update the README\nAnd bump the version');
+    expect(screen.getByRole('alert').textContent).toBe('Native is not connected');
+  });
+
   it('lists the queue, each message with Remove and Send now', async () => {
     const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);

@@ -151,15 +151,24 @@ export function Composer({
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!canSend) return;
+    // Emptied at once, so that what is typed next is a message of its own; put back if it doesn't go.
+    const sent = { text: draft, files: attached };
     setSending(true);
+    setDraft('');
+    setFiles([]);
+    let gone = false;
     try {
-      const attachments = await Promise.all(attached.map(({ file }) => readAttachment(file)));
-      if (await onSend(draft, attachments)) {
-        setDraft('');
-        setFiles([]);
-      }
+      const attachments = await Promise.all(sent.files.map(({ file }) => readAttachment(file)));
+      gone = await onSend(sent.text, attachments);
     } finally {
       setSending(false);
+      if (!gone) {
+        // Before what was typed since.
+        let restored = sent.text;
+        setDraftState((typed) => (restored = typed && sent.text ? `${sent.text}\n${typed}` : sent.text || typed));
+        setCaret(restored.length);
+        setFiles((since) => [...sent.files, ...since]);
+      }
     }
   };
   /** Puts the menu's highlighted option in the prompt: a skill or command, or the file it mentions. */
