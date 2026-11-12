@@ -157,7 +157,11 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px 0; }
 .att { display: inline-flex; align-items: center; gap: 6px; background: var(--panel2); border-radius: 8px; padding: 4px 6px 4px 8px; font-size: 12px; }
 .composer textarea { width: 100%; border: 0; outline: none; background: none; resize: none; padding: 12px 14px 4px; min-height: 52px; max-height: 200px; }
-.ctoolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; }
+.ctoolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px; }
+.ctoolbar .pick { white-space: nowrap; }
+/* Wrapped onto a line of their own, Stop and Send stay at the right. */
+.ctoolbar .grow ~ .send { margin-left: auto; }
+.ctoolbar .send ~ .send { margin-left: 0; }
 .pick { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 8px; color: var(--muted); font-size: 12.5px; cursor: pointer; }
 .pick:hover { background: var(--hover); color: var(--text); }
 .settings-fields { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; }
@@ -165,6 +169,7 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .approval-row { grid-template-columns: minmax(260px, 420px) 120px; }
 .approval-description { display: block; font-size: 12px; }
 .pick b { color: var(--text); font-weight: 500; }
+button.pick.full-access, button.pick.full-access b { color: var(--wait); }
 .pick input.branch { border: 0; background: transparent; color: var(--text); outline: none; width: 22ch; padding: 0; }
 .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

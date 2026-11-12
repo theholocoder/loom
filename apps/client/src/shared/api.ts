@@ -424,6 +424,8 @@ export interface Session {
   babysitOff?: boolean;
   /** Set when its Merge request's feedback goes straight to the agent; seeded from the global default. */
   autoPrompt?: boolean;
+  /** Set when it runs in the Full access Approval mode, picked when it started: Loom approves all its agent asks. */
+  fullAccess?: boolean;
   status: SessionStatus;
   /**
    * Set when a worktree Session's worktree is gone, deleted outside Loom: it
@@ -671,6 +673,8 @@ export interface Settings extends Appearance {
   stuckAfterMinutes: number;
   /** Whether a new Session starts with auto-prompt on: its Merge request's feedback goes straight to the agent. */
   autoPromptDefault: boolean;
+  /** The Approval mode the New Session composer starts on. */
+  approvalModeDefault: ApprovalMode;
   /** The open Session's right sidebar, as the user left it: the same for every Session. */
   sidebar: SidebarSettings;
   /** How the Changes view is laid out, as the user left it: the same for every Session. */
@@ -732,6 +736,24 @@ export type ApprovalCategory = 'ownPush' | 'ownMergeRequest' | 'mcp' | 'writeEls
 
 export type ApprovalSetting = 'allow' | 'ask';
 
+/**
+ * A Session's Approval mode: `supervised`, its agent's requests follow the
+ * approval settings and ask the user what they don't allow; `full`, Loom
+ * approves every one of them, a push to the default branch included.
+ */
+export type ApprovalMode = 'supervised' | 'full';
+
+/** Each Approval mode, in the order the pickers list them, with its name and what it does. */
+export const APPROVAL_MODES: Record<ApprovalMode, { label: string; description: string }> = {
+  supervised: { label: 'Supervised', description: 'Asks you before what the approval settings say Ask.' },
+  full: { label: 'Full access', description: 'Approves everything the agent asks, a push to the default branch included.' },
+};
+
+/** Whether `value` names an Approval mode Loom has. */
+export function isApprovalMode(value: unknown): value is ApprovalMode {
+  return typeof value === 'string' && Object.hasOwn(APPROVAL_MODES, value);
+}
+
 export type ApprovalPolicy = Record<ApprovalCategory, ApprovalSetting>;
 
 /** Each category, in the order Settings lists them, with its name and its default. */
@@ -780,6 +802,7 @@ export const DEFAULT_SETTINGS: Settings = {
   approvals: DEFAULT_APPROVALS,
   stuckAfterMinutes: 15,
   autoPromptDefault: false,
+  approvalModeDefault: 'supervised',
   sidebar: DEFAULT_SIDEBAR,
   diffView: DEFAULT_DIFF_VIEW,
   ...DEFAULT_APPEARANCE,
@@ -1151,6 +1174,8 @@ export interface Commands {
   'settings.setStuckAfterMinutes': { params: { minutes: number }; result: Settings };
   /** Sets whether Sessions started from now on have auto-prompt on. */
   'settings.setAutoPromptDefault': { params: { on: boolean }; result: Settings };
+  /** Sets the Approval mode the New Session composer starts on. Rejects one Loom has not. */
+  'settings.setApprovalModeDefault': { params: { mode: ApprovalMode }; result: Settings };
   /** Sets which files the Changes view shows collapsed; blank patterns are dropped. */
   'settings.setDiffCollapsedPatterns': { params: { patterns: string[] }; result: Settings };
   /**
@@ -1204,6 +1229,9 @@ export interface Commands {
    * while absent.
    *
    * `attachments` go with the first prompt (see `sessions.send`).
+   *
+   * `approvalMode` is the Session's for good; the `approvalModeDefault`
+   * setting while absent. Rejects one Loom has not.
    */
   'sessions.create': {
     params: {
@@ -1215,6 +1243,7 @@ export interface Commands {
       issue?: Issue;
       prompt: string;
       attachments?: NewAttachment[];
+      approvalMode?: ApprovalMode;
     } & ModelPick;
     result: Session;
   };

@@ -46,6 +46,10 @@ _Avoid_: Upload
 The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
 _Avoid_: Permission prompt, confirmation
 
+**Approval mode**:
+How a **Session** handles its agent's **Approval requests**, picked when it starts and kept for good: _Supervised_ asks the user what the approval settings don't allow; _Full access_ approves every request, a push to the default branch included. Settings picks which one new Sessions start in.
+_Avoid_: Authorization mode, permission mode, yolo
+
 **Archived** (Session status):
 The **Session** is closed and kept for history. A new message reopens it (a worktree Session gets a worktree again, on the branch archiving kept), unless its **Project** was **Removed**: then it is read-only.
 

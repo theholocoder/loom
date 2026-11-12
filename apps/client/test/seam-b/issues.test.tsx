@@ -74,7 +74,7 @@ describe('starting a Session from an issue', () => {
     fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
 
     await waitFor(() => expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy());
-    expect(main.invoked.find((i) => i.command === 'sessions.create')?.params).toEqual({ projectId: 1, workingCopy: 'worktree', issue: loginBug, prompt: '' });
+    expect(main.invoked.find((i) => i.command === 'sessions.create')?.params).toEqual({ projectId: 1, workingCopy: 'worktree', issue: loginBug, approvalMode: 'supervised', prompt: '' });
     expect(main.invoked.find((i) => i.command === 'projects.issues')?.params).toEqual({ id: 1 });
   });
 

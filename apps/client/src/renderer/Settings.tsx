@@ -1,6 +1,6 @@
 import { CircleCheckBig, CircleX, CodeXml, FolderTree, GitPullRequestArrow, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, Timer, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { APPROVAL_CATEGORIES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, type AgentStatus, type ApprovalCategory, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
+import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, type AgentStatus, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { Select } from './Popover';
@@ -133,15 +133,34 @@ const APPROVAL_OPTIONS: { value: ApprovalSetting; label: string }[] = [
 /** Whether the agent asks before each category of action beyond its working copy. */
 function ApprovalSettings() {
   const api = useApi();
-  const approvals = useTopic('settings')?.approvals;
+  const settings = useTopic('settings');
+  const approvals = settings?.approvals;
   const [error, setError] = useState<string>();
-  if (!approvals) return null;
+  if (!settings || !approvals) return null;
   const save = (category: ApprovalCategory, setting: ApprovalSetting) => {
     setError(undefined);
     api.invoke('settings.setApproval', { category, setting }).catch((e: unknown) => setError((e as Error).message));
   };
+  const saveMode = (mode: ApprovalMode) => {
+    setError(undefined);
+    api.invoke('settings.setApprovalModeDefault', { mode }).catch((e: unknown) => setError((e as Error).message));
+  };
   return (
     <div className="settings-fields">
+      <div className="field-row approval-row">
+        <span>
+          New Sessions start in
+          <span className="muted approval-description">
+            {APPROVAL_MODES.supervised.label} follows the settings below. {APPROVAL_MODES.full.label} approves everything the agent asks, a push to the default branch included. Each Session picks its own in the New Session composer, for good.
+          </span>
+        </span>
+        <Select
+          label="Default Approval mode"
+          value={settings.approvalModeDefault}
+          options={(Object.keys(APPROVAL_MODES) as ApprovalMode[]).map((mode) => ({ value: mode, label: APPROVAL_MODES[mode].label }))}
+          onChange={saveMode}
+        />
+      </div>
       <p className="muted" style={{ margin: 0 }}>
         The agent reads, edits and runs commands in its working copy and the temp directory freely. For the rest, Ask pauses it with an Approval request. Rules match commands and paths on a best-effort basis: a guardrail, not a security boundary. Agents started from now on get the changes.
       </p>

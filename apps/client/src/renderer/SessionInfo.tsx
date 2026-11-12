@@ -3,7 +3,7 @@
 // groups: Where, Git, Agent and Usage. An archived Session's are read-only.
 import { Archive, Bot, BotOff, Check, CircleCheck, CircleDot, CircleMinus, CircleX, Clock, CodeXml, Copy, ExternalLink, Eye, EyeOff, FileDiff, GitMerge, GitPullRequest, GitPullRequestArrow, GitPullRequestClosed, GitPullRequestCreate, Link, SquareTerminal, Trash2, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
-import { mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type EnvironmentStatus, type MergeRequestState, type Project, type Session } from '../shared/api';
+import { APPROVAL_MODES, mergeRequestRef, type BabysitCheck, type BabysitCheckState, type BabysitCi, type DiffStat, type EnvironmentStatus, type MergeRequestState, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
@@ -131,6 +131,7 @@ export function SessionInfo({
         <Fact label="Agent">{session.agent}</Fact>
         <Fact label="Model">{model ? <span className="tech">{model}</span> : <span className="muted">The agent's default</span>}</Fact>
         <Fact label="Effort">{effort ? <span className="tech">{effort}</span> : <span className="muted">Default</span>}</Fact>
+        <Fact label="Approvals">{APPROVAL_MODES[session.fullAccess ? 'full' : 'supervised'].label}</Fact>
         <Fact label="Agent session" actions={session.agentSessionId && <CopyAction text={session.agentSessionId} label="Copy agent session id" />}>
           {session.agentSessionId ? <span className="tech path">{session.agentSessionId}</span> : <span className="muted">Not started yet</span>}
         </Fact>

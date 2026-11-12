@@ -195,6 +195,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     approvals: () => settingsService.value.approvals,
     stuckAfterMs: () => settingsService.value.stuckAfterMinutes * 60_000,
     autoPromptDefault: () => settingsService.value.autoPromptDefault,
+    approvalModeDefault: () => settingsService.value.approvalModeDefault,
     attachments: new Attachments(options.userDataDir),
     // Only checking what the user picked: not worth holding the change while the Environment starts.
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
@@ -270,6 +271,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setTerminalCommand': ({ terminalCommand }) => settingsService.setTerminalCommand(terminalCommand),
     'settings.setStuckAfterMinutes': ({ minutes }) => settingsService.setStuckAfterMinutes(minutes),
     'settings.setAutoPromptDefault': ({ on }) => settingsService.setAutoPromptDefault(on),
+    'settings.setApprovalModeDefault': ({ mode }) => settingsService.setApprovalModeDefault(mode),
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
     'settings.setSidebar': (sidebar) => settingsService.setSidebar(sidebar),
