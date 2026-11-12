@@ -38,8 +38,9 @@ describe('the window', () => {
     for (const section of ['Working', 'Archived']) {
       expect(within(inbox).getByRole('button', { name: section }).getAttribute('aria-expanded')).toBe('false');
     }
+    expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy();
     // No Project yet: the welcome, in the main pane.
-    expect(screen.getByRole('main', { name: 'Welcome' })).toBeTruthy();
+    expect(within(screen.getByRole('main', { name: 'Session' })).getByRole('region', { name: 'Welcome' })).toBeTruthy();
     // No Session selected: no header, so no diff toggle, and no panel or rail taking space.
     expect(screen.queryByRole('button', { name: /changes/i })).toBeNull();
     expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
@@ -492,7 +493,7 @@ describe('the + menu', () => {
   it('closes when clicking elsewhere', () => {
     openMenu(new FakeMain());
 
-    fireEvent.mouseDown(screen.getByRole('main', { name: 'Welcome' }));
+    fireEvent.mouseDown(screen.getByRole('region', { name: 'Welcome' }));
 
     expect(screen.queryByRole('menu')).toBeNull();
   });

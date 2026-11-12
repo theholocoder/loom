@@ -52,7 +52,7 @@ describe('the welcome, with no Project', () => {
   it('says what Loom is, with one way forward: Add a Project…', () => {
     renderApp();
 
-    const welcome = screen.getByRole('main', { name: 'Welcome' });
+    const welcome = screen.getByRole('region', { name: 'Welcome' });
     expect(within(welcome).getByRole('heading', { name: 'Welcome to Loom' })).toBeTruthy();
     expect(within(welcome).getByText(/coding agents/)).toBeTruthy();
     const add = within(welcome).getByRole('button', { name: 'Add a Project…' });
@@ -63,7 +63,7 @@ describe('the welcome, with no Project', () => {
   it('adds the folder chosen as a Project', async () => {
     const main = renderApp(linking());
 
-    fireEvent.click(within(screen.getByRole('main', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(within(screen.getByRole('region', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
   });
@@ -71,7 +71,7 @@ describe('the welcome, with no Project', () => {
   it('checks each Environment and its agent', () => {
     const main = renderApp(new FakeMain({ environments: [native({ name: 'OpenCode', state: 'ready', checking: false, version: '2.2.0' })] }));
 
-    const check = within(screen.getByRole('main', { name: 'Welcome' })).getByRole('list', { name: 'Environments' });
+    const check = within(screen.getByRole('region', { name: 'Welcome' })).getByRole('list', { name: 'Environments' });
     const row = within(check).getByRole('listitem');
     expect(row.textContent).toMatch('Native');
     expect(row.textContent).toMatch('connected');
@@ -83,20 +83,20 @@ describe('the welcome, with no Project', () => {
   it('says the Environments are starting until main reports them', () => {
     renderApp();
 
-    expect(within(screen.getByRole('main', { name: 'Welcome' })).getByText('Starting your Environments…')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Welcome' })).getByText('Starting your Environments…')).toBeTruthy();
   });
 
   it('says what to fix when the agent is missing', () => {
     renderApp(new FakeMain({ environments: [native({ name: 'OpenCode', state: 'missing', checking: false })] }));
 
-    const welcome = screen.getByRole('main', { name: 'Welcome' });
+    const welcome = screen.getByRole('region', { name: 'Welcome' });
     expect(within(welcome).getByRole('alert').textContent).toMatch("OpenCode isn't installed in this Environment");
   });
 
   it('gives way to "No Session selected." once there is a Project', () => {
     renderApp(new FakeMain({ projects: [loom] }));
 
-    expect(screen.queryByRole('main', { name: 'Welcome' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Welcome' })).toBeNull();
     expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy();
   });
 });
@@ -133,7 +133,7 @@ describe('after adding a Project', () => {
 
   it('offers to start a Session in it, from the welcome', async () => {
     renderApp(linking());
-    fireEvent.click(within(screen.getByRole('main', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(within(screen.getByRole('region', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
 
     const page = screen.getByRole('dialog', { name: 'Projects' });
     expect((await within(page).findByRole('status')).textContent).toMatch('Added loom.');
@@ -167,7 +167,7 @@ describe('after adding a Project', () => {
       },
     );
     renderApp(main);
-    fireEvent.click(within(screen.getByRole('main', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(within(screen.getByRole('region', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
     fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Restore loom?' })).getByRole('button', { name: 'Restore' }));
 
     const page = screen.getByRole('dialog', { name: 'Projects' });
@@ -179,7 +179,7 @@ describe('after adding a Project', () => {
 
   it('forgets the offer when leaving Projects', async () => {
     renderApp(linking());
-    fireEvent.click(within(screen.getByRole('main', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(within(screen.getByRole('region', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
     await screen.findByRole('button', { name: 'Start a Session' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));

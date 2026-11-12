@@ -8,8 +8,9 @@ import { SHORTCUTS } from './shortcuts';
 export function Welcome({ onAddProject }: { onAddProject: () => void }) {
   useAgentCheck();
   return (
-    <main className="main" aria-label="Welcome">
-      <div className="welcome">
+    // Still the main pane's Session landmark, as it is with a Project; the welcome is a region in it.
+    <main className="main" aria-label="Session">
+      <section className="welcome" aria-label="Welcome">
         <h1>
           <Waypoints /> Welcome to Loom
         </h1>
@@ -21,7 +22,7 @@ export function Welcome({ onAddProject }: { onAddProject: () => void }) {
         <h2>Ready to run {OPENCODE_NAME}?</h2>
         <EnvironmentCheck />
         <p className="muted">Settings has the full check, and Reload for tools installed since Loom started.</p>
-      </div>
+      </section>
     </main>
   );
 }
