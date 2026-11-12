@@ -34,11 +34,11 @@ import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
 import { isFreeEscape } from './escape';
 import { addToContextMenu, selectedText } from './ContextMenu';
-import { useForgetDrafts, useKeptState } from './drafts';
+import { useForgetDraft, useKeptState } from './drafts';
 
-/** Where New Session's draft is kept (see `useKeptState`). */
+/** Whose draft New Session's is (see `useKeptState`). */
 const NEW_SESSION_DRAFT = 'new-session';
-/** Where a Session's draft is kept. */
+/** Whose draft a Session's is. */
 const sessionDraft = (id: number) => `session:${id}`;
 
 /** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
@@ -198,7 +198,7 @@ export function NewSession({
   const approvalModeDefault = useTopic('settings')?.approvalModeDefault ?? 'supervised';
   const [pickedMode, setApprovalMode] = useState<ApprovalMode>();
   const approvalMode = pickedMode ?? approvalModeDefault;
-  const forgetDrafts = useForgetDrafts();
+  const forgetDraft = useForgetDraft();
   // Esc gives up, but for what was typed: only Cancel throws that away.
   const escape = useRef<() => void>(undefined);
   escape.current = () => !draft.trim() && editedBranch === undefined && onCancel();
@@ -237,7 +237,7 @@ export function NewSession({
           type="button"
           title="Cancel (Esc)"
           onClick={() => {
-            forgetDrafts(`${NEW_SESSION_DRAFT}:`);
+            forgetDraft(NEW_SESSION_DRAFT);
             onCancel();
           }}
         >
@@ -593,7 +593,7 @@ export function SessionView({
   }, [session.id, session.updatedAt]);
 
   /** The comments on the diff or the conversation to go with the next message: chips in the composer, and notes in the diff. */
-  const [pending, setPending] = useKeptState<PendingComment[]>(`${sessionDraft(session.id)}:comments`, []);
+  const [pending, setPending] = useKeptState<PendingComment[]>(sessionDraft(session.id), 'comments', []);
   const comments = useMemo(() => pending.map((p) => p.comment), [pending]);
   const send = async (prompt: string, attachments: NewAttachment[]) => {
     setError(undefined);

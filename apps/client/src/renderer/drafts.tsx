@@ -2,10 +2,10 @@
 // runs: one draft per Session and one for New Session, so that going to
 // another Session, or to a Page and from there to a Session, loses none of
 // it. A draft lives in the renderer only, gone with the window.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 
-/** The drafts kept, each part of one by its own key: `session:7:text`, `new-session:files`. */
-type Drafts = Map<string, unknown>;
+/** The drafts kept, by whose they are (`session:7`, `new-session`), each in parts: its text, its files… */
+type Drafts = Map<string, Map<string, unknown>>;
 
 const DraftsContext = createContext<Drafts | undefined>(undefined);
 
@@ -16,24 +16,32 @@ export function DraftsProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * `useState`, but kept under `key` across unmounts: the next component to
- * ask for `key` starts from what was left there. Without a key, or outside
- * a DraftsProvider, it is plain state.
+ * `useState`, but kept as `part` of the draft of `owner` across unmounts:
+ * the next component to ask for it starts from what was left there. Kept as
+ * it is set, so that what is set as the component goes, such as a sent
+ * draft cleared, sticks. Without an owner, or outside a DraftsProvider, it
+ * is plain state.
  */
-export function useKeptState<T>(key: string | undefined, initial: T): [T, (next: T | ((was: T) => T)) => void] {
+export function useKeptState<T>(owner: string | undefined, part: string, initial: T): [T, (next: T | ((was: T) => T)) => void] {
   const drafts = useContext(DraftsContext);
-  const kept = key !== undefined && drafts !== undefined;
-  const [value, setValue] = useState<T>(() => (kept && drafts.has(key) ? (drafts.get(key) as T) : initial));
-  useEffect(() => {
-    if (kept) drafts.set(key, value);
-  }, [kept, key, value]);
-  return [value, setValue];
+  const draft = () => (owner === undefined || !drafts ? undefined : drafts.get(owner) ?? drafts.set(owner, new Map()).get(owner)!);
+  const [value, setValue] = useState<T>(() => {
+    const parts = draft();
+    return parts?.has(part) ? (parts.get(part) as T) : initial;
+  });
+  const set = (next: T | ((was: T) => T)) => {
+    const parts = draft();
+    if (!parts) return setValue(next);
+    const was = parts.has(part) ? (parts.get(part) as T) : value;
+    const now = typeof next === 'function' ? (next as (was: T) => T)(was) : next;
+    parts.set(part, now);
+    setValue(now);
+  };
+  return [value, set];
 }
 
-/** Throws away the drafts kept under keys starting with `prefix`. */
-export function useForgetDrafts(): (prefix: string) => void {
+/** Throws away the draft of an owner. */
+export function useForgetDraft(): (owner: string) => void {
   const drafts = useContext(DraftsContext);
-  return (prefix) => {
-    for (const key of [...(drafts?.keys() ?? [])]) if (key.startsWith(prefix)) drafts!.delete(key);
-  };
+  return (owner) => void drafts?.delete(owner);
 }

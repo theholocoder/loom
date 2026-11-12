@@ -89,13 +89,12 @@ export function Composer({
   onEscape?: () => void;
   /** The prompt box is being disabled with the focus in it, which it can't keep: where the focus goes instead. */
   onDisabledWithFocus?: () => void;
-  /** Given, what is typed and attached is kept under it until sent, to be there again the next time a composer has it (see `useKeptState`). */
+  /** Given, what is typed and attached is kept as its draft until sent, to be there again the next time a composer has it (see `useKeptState`). */
   draftKey?: string;
 }) {
   const id = useId();
-  const kept = (part: string) => draftKey && `${draftKey}:${part}`;
-  const [draft, setDraftState] = useKeptState(kept('text'), '');
-  const [caret, setCaret] = useKeptState(kept('caret'), 0);
+  const [draft, setDraftState] = useKeptState(draftKey, 'text', '');
+  const [caret, setCaret] = useKeptState(draftKey, 'caret', 0);
   const setDraft = (value: string, at = value.length) => {
     setDraftState(value);
     setCaret(at);
@@ -123,14 +122,14 @@ export function Composer({
     handOnFocus.current?.();
   }, [disabled]);
   // Kept with the draft: what it was typed for may have changed while away.
-  const [clearedFor, setClearedFor] = useKeptState(kept('clearedFor'), clearKey);
+  const [clearedFor, setClearedFor] = useKeptState(draftKey, 'clearedFor', clearKey);
   useEffect(() => {
     if (clearedFor === clearKey) return;
     setClearedFor(clearKey);
     setDraft('');
   }, [clearKey]);
   /** The files attached so far, each with a key of its own: the same file may be attached twice. */
-  const [files, setFiles] = useKeptState<Array<{ key: number; file: File }>>(kept('files'), []);
+  const [files, setFiles] = useKeptState<Array<{ key: number; file: File }>>(draftKey, 'files', []);
   const nextKey = useRef(files.reduce((next, { key }) => Math.max(next, key + 1), 0));
   const attachable = canAttach && !disabled;
   const attached = attachable ? files : [];

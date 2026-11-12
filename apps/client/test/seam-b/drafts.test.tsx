@@ -161,7 +161,20 @@ describe("New Session's draft", () => {
     expect(prompt().value).toBe('');
   });
 
-  it("keeps, Esc giving up New Session, what was typed there", () => {
+  it('is gone once a Session starts from it', async () => {
+    const main = renderApp({ 'sessions.create': () => login });
+    startNew();
+    type('Add dark mode');
+    fireEvent.change(composer().getByLabelText('Attach files or images'), { target: { files: [new File(['a'], 'mock.png', { type: 'image/png' })] } });
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(main.invoked.some((i) => i.command === 'sessions.create')).toBe(true));
+    await screen.findByRole('heading', { name: 'Fix login' });
+    startNew();
+    expect(prompt().value).toBe('');
+    expect(composer().queryByRole('list', { name: 'Attachments' })).toBeNull();
+  });
+
+  it("isn't given up by Esc when it comes back with text in it", () => {
     renderApp();
     startNew();
     type('Add dark mode');
