@@ -1,6 +1,7 @@
-import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderMinus, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, TriangleAlert, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project, type RestorableProject, type UnsavedSession } from '../shared/api';
+import { branchPrefixError, branchPrefixOf } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { unsavedWorkSummary } from './Archive';
 import { copyable } from './ContextMenu';
@@ -17,6 +18,8 @@ export interface ExistingCloneLinker {
    * cancels. A checkout of a removed Project first asks whether to restore it.
    */
   link(): Promise<void>;
+  /** Clears the last attempt's error and any open restore offer; an attempt still running then fails silently. */
+  dismiss(): void;
   /** The offer to restore a removed Project, while one is open; render it anywhere. */
   dialog: ReactNode;
 }
@@ -26,13 +29,16 @@ export function useExistingCloneLinker(): ExistingCloneLinker {
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string>();
   const [offer, setOffer] = useState<{ path: string; project: RestorableProject }>();
+  // Bumped by dismiss, so an attempt that fails after it doesn't show its error.
+  const attempt = useRef(0);
   const run = async (action: () => Promise<void>) => {
     setError(undefined);
     setLinking(true);
+    const current = attempt.current;
     try {
       await action();
     } catch (e) {
-      setError((e as Error).message);
+      if (attempt.current === current) setError((e as Error).message);
     } finally {
       setLinking(false);
     }
@@ -53,7 +59,12 @@ export function useExistingCloneLinker(): ExistingCloneLinker {
     });
   };
   const dialog = offer && <RestoreOffer project={offer.project} onRestore={() => answer(true)} onNew={() => answer(false)} onCancel={() => setOffer(undefined)} />;
-  return { linking, error, link, dialog };
+  const dismiss = useCallback(() => {
+    attempt.current++;
+    setError(undefined);
+    setOffer(undefined);
+  }, []);
+  return { linking, error, link, dismiss, dialog };
 }
 
 function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: RestorableProject; onRestore: () => void; onNew: () => void; onCancel: () => void }) {
@@ -96,6 +107,9 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
   useEffect(() => {
     api.invoke('projects.check').catch((error: unknown) => console.error('Forge detection failed:', error));
   }, [api]);
+  // An error from adding a Project, or an offer to restore one, goes when the user leaves the page.
+  const { dismiss } = linker;
+  useEffect(() => dismiss, [dismiss]);
 
   const environmentLabel = (id: string) => environments.find((e) => e.id === id)?.label ?? id;
   return (
@@ -110,8 +124,13 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
       </div>
       {linker.dialog}
       {linker.error && (
-        <div className="err" role="alert" style={{ marginTop: 8 }}>
-          {linker.error}
+        <div className="row page-error" style={{ marginTop: 8 }}>
+          <div className="err" role="alert">
+            {linker.error}
+          </div>
+          <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={dismiss}>
+            <X />
+          </button>
         </div>
       )}
       <div className="card" style={{ marginTop: 18 }}>
@@ -201,8 +220,8 @@ function RemoveProject({ project }: { project: Project }) {
   const unsaved = step?.unsaved;
   return (
     <>
-      <button className="icon-btn sm" type="button" title={`Remove ${project.name}`} aria-label={`Remove ${project.name}`} onClick={() => setStep({})}>
-        <FolderMinus />
+      <button className="sm" type="button" title={`Remove ${project.name}`} aria-label={`Remove ${project.name}`} onClick={() => setStep({})}>
+        Remove
       </button>
       {step && (
         <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && close()}>
@@ -254,8 +273,23 @@ function RemoveProject({ project }: { project: Project }) {
   );
 }
 
+/** How the Forge cell shows a Forge status: its colour, its label and, for a normal setup with the features off, why. */
+function forgeLook(forge: ForgeStatus): { look: string; label: string; reason?: string } {
+  if (forge.checking) return { look: 'checking', label: 'checking' };
+  switch (forge.state) {
+    case 'available':
+      return { look: 'available', label: 'available' };
+    case 'unknown':
+      return { look: 'unknown', label: 'not checked' };
+    case 'no-remote':
+      return { look: 'local', label: 'Local only', reason: 'This checkout has no origin remote, so Forge features (issues, Merge requests, Babysit) are off.' };
+    default:
+      return { look: 'off', label: 'off' };
+  }
+}
+
 function ForgeCell({ forge }: { forge: ForgeStatus }) {
-  const look = forge.checking ? 'checking' : forge.state === 'available' || forge.state === 'unknown' ? forge.state : 'off';
+  const { look, label, reason } = forgeLook(forge);
   return (
     <>
       {forge.kind && (
@@ -263,9 +297,10 @@ function ForgeCell({ forge }: { forge: ForgeStatus }) {
           {FORGE_NAME[forge.kind]} {forge.repository && <span className="tech">{forge.repository}</span>}
         </div>
       )}
-      <span className={`row fg-${look}`}>
+      {/* Focusable when it has a reason, so the keyboard can reach its tooltip too. */}
+      <span className={`row fg-${look}`} title={reason} tabIndex={reason ? 0 : undefined}>
         <ForgeIcon forge={forge} />
-        <span>{look === 'unknown' ? 'not checked' : look}</span>
+        <span>{label}</span>
       </span>
     </>
   );
@@ -283,8 +318,8 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
     case 'available':
       return <CircleCheckBig className="sm" />;
     case 'unknown':
-      return null;
     case 'no-remote':
+      return null;
     case 'unsupported':
     case 'cli-missing':
     case 'signed-out':
@@ -294,14 +329,16 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
   }
 }
 
-/** Why the Project's Forge features are off, and what to do about it, if they are. */
+/**
+ * Why the Project's Forge features are off, and what to do about it, if they
+ * are and the user can do something. A checkout with no origin remote is a
+ * normal, local-only setup: its cell says so, and why on hover.
+ */
 function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode {
   const command = forge.kind && FORGE_CLI[forge.kind];
   const cli = <span className="tech">{command}</span>;
   const recheck = 'Loom checks again whenever Projects opens.';
   switch (forge.state) {
-    case 'no-remote':
-      return 'Forge features are off: this checkout has no origin remote.';
     case 'unsupported':
       return (
         <>
@@ -338,29 +375,55 @@ function BranchPrefix({ project }: { project: Project }) {
   const sent = useRef<string>(undefined);
   const save = (event?: FormEvent) => {
     event?.preventDefault();
-    if (value === project.branchPrefix || value === sent.current) return;
-    sent.current = value;
-    setError(undefined);
+    if (value === sent.current) return;
+    if (sent.current === undefined && branchPrefixOf(value) === project.branchPrefix) {
+      // "feat/" for "feat": show what is kept.
+      setValue(project.branchPrefix);
+      setError(undefined);
+      return;
+    }
+    // An invalid value stays in the field, with why, until the user fixes it.
+    const invalid = branchPrefixError(value);
+    setError(invalid);
+    if (invalid) return;
+    const sending = value;
+    sent.current = sending;
     api
-      .invoke('projects.setBranchPrefix', { id: project.id, branchPrefix: value })
-      // Main trims the prefix, which may leave it as it was.
-      .then((saved) => setValue(saved.branchPrefix))
+      .invoke('projects.setBranchPrefix', { id: project.id, branchPrefix: sending })
+      // Main trims the prefix and drops a trailing '/', which may leave it as it was;
+      // a value typed since is the user's, and is left alone.
+      .then((saved) => setValue((typed) => (typed === sending ? saved.branchPrefix : typed)))
       .catch((e: unknown) => setError((e as Error).message))
-      .finally(() => (sent.current = undefined));
+      .finally(() => {
+        if (sent.current === sending) sent.current = undefined;
+      });
   };
+  const change = (next: string) => {
+    setValue(next);
+    // Once shown, the error follows the value, and goes when it is fixed.
+    if (error) setError(branchPrefixError(next));
+  };
+  const prefix = branchPrefixOf(value);
+  const id = `prefix-${project.id}`;
   return (
     <form onSubmit={save}>
       <input
         className="tech prefix"
         aria-label={`Branch prefix for ${project.name}`}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={id}
         value={value}
         spellCheck={false}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => change(event.target.value)}
         onBlur={() => save()}
       />
-      {error && (
-        <div className="err" role="alert">
+      {error ? (
+        <div id={id} className="err" role="alert">
           {error}
+        </div>
+      ) : (
+        <div id={id} className="muted prefix-preview">
+          {branchPrefixError(value) ? 'Not a valid branch prefix' : <span className="tech">{`${prefix}/<session>`}</span>}
         </div>
       )}
     </form>

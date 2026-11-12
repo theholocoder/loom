@@ -42,6 +42,20 @@ export function branchName(branch: ExistingBranch): string {
 }
 
 /**
+ * The branch prefix the user meant by `prefix`: trimmed, without the trailing
+ * `/` Loom adds itself between the prefix and the rest of the branch name.
+ */
+export function branchPrefixOf(prefix: string): string {
+  return prefix.trim().replace(/\/+$/, '');
+}
+
+/** Why `prefix`, as the user typed it, can't be a branch prefix, as a sentence; undefined if it can. */
+export function branchPrefixError(prefix: string): string | undefined {
+  const problem = branchPrefixProblem(branchPrefixOf(prefix));
+  return problem && `"${prefix}" can't be a branch prefix: ${problem}`;
+}
+
+/**
  * Why git would refuse `<prefix>/<slug>` as a branch name, following
  * `git check-ref-format --branch`; undefined if it wouldn't.
  */

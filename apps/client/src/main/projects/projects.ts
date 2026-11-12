@@ -1,7 +1,7 @@
 // The Projects service: the git checkouts the user has added to Loom, kept in
 // the database, and what each one's Environment reports about them.
 import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type Project, type RemovedProject, type RestorableProject } from '../../shared/api';
-import { branchPrefixProblem } from '../../shared/branches';
+import { branchPrefixError, branchPrefixOf } from '../../shared/branches';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { LoomDatabase } from '../storage/database';
@@ -163,9 +163,9 @@ export class Projects {
 
   async setBranchPrefix(id: number, branchPrefix: string): Promise<Project> {
     if (!this.projects.has(id)) throw new Error(`unknown Project ${id}`);
-    const prefix = branchPrefix.trim();
-    const problem = branchPrefixProblem(prefix);
-    if (problem) throw new Error(`"${branchPrefix}" can't be a branch prefix: ${problem}`);
+    const error = branchPrefixError(branchPrefix);
+    if (error) throw new Error(error);
+    const prefix = branchPrefixOf(branchPrefix);
     await this.options.db.updateTable('projects').set({ branch_prefix: prefix }).where('id', '=', id).execute();
     this.update(id, { branchPrefix: prefix });
     return this.projects.get(id)!;

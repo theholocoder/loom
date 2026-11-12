@@ -209,7 +209,6 @@ describe('Projects', () => {
   });
 
   it.each([
-    [{ state: 'no-remote', kind: undefined, host: undefined }, /no origin remote/],
     [{ state: 'unsupported', kind: undefined, host: 'bitbucket.org', remote: 'https://bitbucket.org/acme/x.git' }, /https:\/\/bitbucket\.org\/acme\/x\.git.*isn't on GitHub or GitLab/],
     [{ state: 'cli-missing', kind: 'gitlab', host: 'gitlab.com' }, /glab isn't installed in Native/],
     [{ state: 'signed-out', kind: 'github', host: 'github.com' }, /gh isn't signed in to github\.com.*gh auth login --hostname github\.com/],
@@ -220,6 +219,17 @@ describe('Projects', () => {
     const row = screen.getByRole('row', { name: /loom/ });
     expect(within(row).getByText('off')).toBeTruthy();
     expect(within(row).getByRole('alert').textContent).toMatch(reason);
+  });
+
+  it('shows a checkout with no origin remote as local only, muted, with why on hover', () => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('notes', { state: 'no-remote', kind: undefined, host: undefined })] }));
+
+    const row = screen.getByRole('row', { name: /notes/ });
+    const local = within(row).getByText('Local only').parentElement!;
+    expect(local.className).toMatch('fg-local');
+    expect(local.getAttribute('title')).toMatch(/no origin remote/);
+    expect(within(row).queryByRole('alert')).toBeNull();
+    expect(within(row).queryByText('off')).toBeNull();
   });
 
   it('checks the Forges again when Projects opens', () => {
@@ -271,6 +281,68 @@ describe('Projects', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
   });
 
+  const rejecting = () =>
+    new FakeMain(
+      {},
+      {
+        'dialogs.chooseFolder': () => '/home/dev/notes',
+        'projects.link': () => {
+          throw new Error('/home/dev/notes is not a git repository');
+        },
+      },
+    );
+
+  it('dismisses why a folder was rejected', async () => {
+    openProjects(rejecting());
+    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('forgets why a folder was rejected when leaving Projects', async () => {
+    openProjects(rejecting());
+    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it("doesn't show why a folder was rejected after leaving Projects while it was being linked", async () => {
+    let fail!: (e: Error) => void;
+    const main = openProjects(
+      new FakeMain(
+        {},
+        {
+          'dialogs.chooseFolder': () => '/home/dev/notes',
+          'projects.link': () => new Promise<never>((_, reject) => (fail = reject)),
+        },
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('projects.link'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fail(new Error('/home/dev/notes is not a git repository'));
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Use existing clone…' }).hasAttribute('disabled')).toBe(false));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('labels Remove, with the Project in its tooltip', () => {
+    openProjects(new FakeMain({ projects: [project('loom')] }));
+
+    const remove = within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Remove loom' });
+    expect(remove.textContent).toBe('Remove');
+    expect(remove.getAttribute('title')).toBe('Remove loom');
+  });
+
   it('saves a new branch prefix', async () => {
     const main = openProjects(new FakeMain({ projects: [project('loom')] }));
     const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
@@ -292,23 +364,62 @@ describe('Projects', () => {
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.setBranchPrefix')).toHaveLength(1));
   });
 
-  it('says why a branch prefix was refused', async () => {
+  it('previews the branches a prefix makes, without the trailing / Loom adds itself', () => {
+    openProjects(new FakeMain({ projects: [project('loom')] }));
+    const row = screen.getByRole('row', { name: /loom/ });
+    expect(within(row).getByText('loom/<session>')).toBeTruthy();
+
+    fireEvent.change(within(row).getByRole('textbox', { name: 'Branch prefix for loom' }), { target: { value: 'feat/' } });
+
+    expect(within(row).getByText('feat/<session>')).toBeTruthy();
+  });
+
+  it('saves a branch prefix typed with a trailing /', async () => {
+    const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
+
+    fireEvent.change(input, { target: { value: 'feat/' } });
+    fireEvent.submit(input);
+
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.setBranchPrefix', params: { id: 1, branchPrefix: 'feat/' } }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps an invalid branch prefix in the field, saying why, until it is fixed', () => {
+    const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'a b' } });
+    fireEvent.blur(input);
+
+    expect(input.value).toBe('a b');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('alert').textContent).toMatch(/"a b" can't be a branch prefix: it contains a space/);
+    expect(main.invoked.map((i) => i.command)).not.toContain('projects.setBranchPrefix');
+
+    fireEvent.change(input, { target: { value: 'ab' } });
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText('ab/<session>')).toBeTruthy();
+  });
+
+  it('says why main refused a branch prefix', async () => {
     openProjects(
       new FakeMain(
         { projects: [project('loom')] },
         {
           'projects.setBranchPrefix': () => {
-            throw new Error(`"a b" can't be a branch prefix: it contains a space`);
+            throw new Error('database is locked');
           },
         },
       ),
     );
     const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
 
-    fireEvent.change(input, { target: { value: 'a b' } });
+    fireEvent.change(input, { target: { value: 'feat' } });
     fireEvent.submit(input);
 
-    expect((await screen.findByRole('alert')).textContent).toMatch(/can't be a branch prefix/);
+    expect((await screen.findByRole('alert')).textContent).toMatch('database is locked');
   });
 
   it("doesn't list Projects in the Inbox when they have no Sessions", () => {
