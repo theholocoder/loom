@@ -553,9 +553,10 @@ export function SessionView({
     remove: removeComment,
   };
 
-  /** The review threads resolved here, left out until Babysit's next read has them gone. */
-  const [resolved, setResolved] = useState<ReadonlySet<string>>(new Set());
-  const threads = session.babysit?.threads?.filter((thread) => !resolved.has(thread.id));
+  /** The review threads resolved here, by when Babysit last read them then: left out until it reads them again. */
+  const [resolved, setResolved] = useState<ReadonlyMap<string, number | undefined>>(new Map());
+  const lastPollAt = session.babysit?.lastPollAt;
+  const threads = session.babysit?.threads?.filter((thread) => !resolved.has(thread.id) || resolved.get(thread.id) !== lastPollAt);
   // Replying and resolving work on the Forge from the Project's checkout: the worktree needn't be there.
   const actOnThreads = session.status !== 'archived' && project?.forge.state === 'available';
   const reviewNotes: ReviewNotes | undefined = threads?.length
@@ -568,7 +569,7 @@ export function SessionView({
               reply: (thread, body) => api.invoke('sessions.replyToReviewThread', { id: session.id, thread: thread.id, body }),
               resolve: async (thread) => {
                 await api.invoke('sessions.resolveReviewThread', { id: session.id, thread: thread.id });
-                setResolved((ids) => new Set(ids).add(thread.id));
+                setResolved((ids) => new Map(ids).set(thread.id, lastPollAt));
               },
             }
           : {}),

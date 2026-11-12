@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
@@ -140,7 +140,7 @@ describe("the Merge request's review comments, as notes on the diff", () => {
     expect(within(note).getByRole('button', { name: 'Ask the agent' })).toBeTruthy();
     expect(within(note).getByRole('button', { name: 'Reply' })).toBeTruthy();
     expect(within(note).getByRole('button', { name: 'Resolve' })).toBeTruthy();
-    expect(within(within(changes()).getByRole('navigation', { name: 'Changed files' })).getByLabelText('1 review comment')).toBeTruthy();
+    expect(within(within(changes()).getByRole('navigation', { name: 'Changed files' })).getByLabelText('1 review thread')).toBeTruthy();
   });
 
   it('shows them in the Merge request Panel\'s Diff tab too', async () => {
@@ -211,11 +211,15 @@ describe("the Merge request's review comments, as notes on the diff", () => {
     expect((within(note).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement).value).toBe('Done.');
   });
 
-  it('resolves it on the Forge, the note going at once', async () => {
+  it("resolves it on the Forge, the note going at once, until Babysit's next read says otherwise", async () => {
     const main = renderApp();
     fireEvent.click(within(await noteInChanges()).getByRole('button', { name: 'Resolve' }));
     await waitFor(() => expect(within(changes()).queryByRole('note', { name: noteName })).toBeNull());
     expect(calls(main, 'sessions.resolveReviewThread')).toEqual([{ id: 7, thread: 'PRRT_1' }]);
+
+    // Unresolved on the Forge since: the next read has it again.
+    act(() => main.publish('sessions', [{ ...session, babysit: { stale: false, lastPollAt: 2, threads: [thread] } }]));
+    expect(await within(changes()).findByRole('note', { name: noteName })).toBeTruthy();
   });
 
   it('shows one whose line the diff no longer holds as it was above the file, without Ask the agent', async () => {

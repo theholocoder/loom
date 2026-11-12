@@ -45,14 +45,14 @@ export function askHead(thread: ReviewThread): string {
  * its actions. `where` says where it is when it isn't under its line. Ask the
  * agent shows while `onAsk` is given.
  */
-export function ReviewNote({ thread, notes, where, onAsk }: { thread: ReviewThread; notes: ReviewNotes; where?: string; onAsk?: () => void }) {
+export function ReviewNote({ thread, reviews, where, onAsk }: { thread: ReviewThread; reviews: ReviewNotes; where?: string; onAsk?: () => void }) {
   const now = useNow();
   const [replying, setReplying] = useState(false);
   const [busy, setBusy] = useState<'reply' | 'resolve'>();
   const [error, setError] = useState<string>();
   const [first, ...replies] = thread.comments;
   if (!first) return null;
-  const forge = notes.forge ? FORGE_NAMES[notes.forge] : 'the Forge';
+  const forge = reviews.forge ? FORGE_NAMES[reviews.forge] : 'the Forge';
   const run = async (what: 'reply' | 'resolve', action: () => Promise<void>): Promise<boolean> => {
     setBusy(what);
     setError(undefined);
@@ -66,7 +66,7 @@ export function ReviewNote({ thread, notes, where, onAsk }: { thread: ReviewThre
       setBusy(undefined);
     }
   };
-  const { reply, resolve } = notes;
+  const { reply, resolve } = reviews;
   return (
     <div className="review-note" role="note" aria-label={`Review comment by ${first.author} on ${thread.path}${thread.line ? `:${thread.line}` : ''}`}>
       <div className="note-h">
@@ -77,7 +77,7 @@ export function ReviewNote({ thread, notes, where, onAsk }: { thread: ReviewThre
           {first.at !== undefined && ` · ${ago(first.at, now)}`}
         </span>
         {thread.changesRequested && <span className="chip verdict changes">Changes requested</span>}
-        <button type="button" className="icon-btn xs" title={`Open on ${forge}`} aria-label={`Open the comment by ${first.author} on ${forge}`} onClick={() => notes.onOpen(first.url)}>
+        <button type="button" className="icon-btn xs" title={`Open on ${forge}`} aria-label={`Open the comment by ${first.author} on ${forge}`} onClick={() => reviews.onOpen(first.url)}>
           <ExternalLink />
         </button>
       </div>

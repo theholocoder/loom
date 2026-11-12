@@ -148,7 +148,7 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
     conflicts: pull.mergeable === 'CONFLICTING' ? true : pull.mergeable === 'MERGEABLE' ? false : undefined,
     threads: pull.reviewThreads.nodes.flatMap((thread) => {
       const comments = thread.comments.nodes;
-      if (thread.isResolved || !comments.some((c) => c.author?.login.toLowerCase() !== own)) return [];
+      if (thread.isResolved || !others(comments).length) return [];
       return [
         {
           id: thread.id,
@@ -220,22 +220,22 @@ interface GitLabDiscussion {
 async function readGitLab(call: BridgeCall, repository: string, workingCopy: string, number: number): Promise<MergeRequestActivity> {
   const project = `projects/${encodeURIComponent(repository)}`;
   const run = (args: string[]) => runJson(call, 'gitlab', args, workingCopy);
-  const [request, user, discussions, approvals] = (await Promise.all([
+  const [request, user, notes, discussions, approvals] = (await Promise.all([
     run(['mr', 'view', String(number), '--output', 'json']),
     run(['api', 'user']),
-    // Each with its notes: a comment outside a thread is a discussion of its own.
+    // Newest first, as GitLab returns them by default: a busy Merge request's latest are what matter.
+    run(['api', `${project}/merge_requests/${number}/notes?per_page=100`]),
+    // Oldest first, each with its notes: the review threads.
     run(['api', `${project}/merge_requests/${number}/discussions?per_page=100`]),
     run(['api', `${project}/merge_requests/${number}/approvals`]),
-  ])) as [GitLabMergeRequest, { username: string }, GitLabDiscussion[], { approved_by: { user: { username: string } }[] }];
+  ])) as [GitLabMergeRequest, { username: string }, GitLabNote[], GitLabDiscussion[], { approved_by: { user: { username: string } }[] }];
   const own = user.username.toLowerCase();
   const url = request.web_url;
   const byOthers = (note: GitLabNote) => !note.system && note.author.username.toLowerCase() !== own;
 
-  const feedback: KeyedFeedback[] = discussions
-    .flatMap((discussion) => discussion.notes)
+  const feedback: KeyedFeedback[] = notes
     .filter(byOthers)
-    // Oldest first.
-    .sort((a, b) => a.id - b.id)
+    .reverse()
     .map((note) => {
       const path = note.position?.new_path ?? note.position?.old_path;
       return { key: `note:${note.id}`, item: { kind: 'comment', author: note.author.username, ...(path ? { path } : {}), ...lineOf(note.position?.new_line ?? note.position?.old_line), excerpt: excerptOf(note.body), url: `${url}#note_${note.id}` } };

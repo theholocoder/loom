@@ -404,7 +404,7 @@ function FileTree({ files, searching, threads, onPick }: { files: DiffFile[]; se
 /** How many review threads are on a file, in the file tree: none says nothing. */
 function ThreadCount({ count }: { count: number }) {
   if (!count) return null;
-  const label = `${count} review ${count === 1 ? 'comment' : 'comments'}`;
+  const label = `${count} review ${count === 1 ? 'thread' : 'threads'}`;
   return (
     <span className="thread-count" title={label} aria-label={label}>
       <MessageSquare className="sm" aria-hidden="true" />
@@ -555,7 +555,7 @@ function reviewThreadNotes(file: DiffFile, patch: string, reviews: ReviewNotes |
     const moved = quote !== undefined && thread.code !== undefined && quote.lines[0]!.slice(1) !== thread.code;
     if (!quote || moved) {
       const where = !thread.line ? 'on an outdated diff' : moved ? `on line ${thread.line}, which has changed since` : `on line ${thread.line}, which this diff doesn't show`;
-      elsewhere.push(<ReviewNote key={thread.id} thread={thread} notes={reviews!} where={where} />);
+      elsewhere.push(<ReviewNote key={thread.id} thread={thread} reviews={reviews!} where={where} />);
       continue;
     }
     const { last, ...quoted } = quote;
@@ -563,7 +563,7 @@ function reviewThreadNotes(file: DiffFile, patch: string, reviews: ReviewNotes |
     // Asked once: the comment it made is on its way already, however it was edited or the thread went on since.
     const asked = comments?.pending.some((p) => p.comment.path === comment.path && p.comment.note.startsWith(askHead(thread)));
     const onAsk = comments && !asked ? () => comments.add(comment, range!) : undefined;
-    placed.push({ key: `review:${thread.id}`, at: last, note: <ReviewNote thread={thread} notes={reviews!} onAsk={onAsk} /> });
+    placed.push({ key: `review:${thread.id}`, at: last, note: <ReviewNote thread={thread} reviews={reviews!} onAsk={onAsk} /> });
   }
   return { placed, elsewhere };
 }
