@@ -1,99 +1,242 @@
-import { CircleCheckBig, CircleX, CodeXml, FolderTree, GitPullRequestArrow, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, Sparkles, Timer, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, LoaderCircle, MessagesSquare, Palette, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useCheckoutModels } from './checkout';
 import { effortsOf, ModelPickers } from './ModelPicker';
 import { Select } from './Popover';
-import { ErrorAlert } from './Questions';
+
+/** One setting: its name and what it does on the left, its control on the right, or under them for a wide one. */
+interface SettingEntry {
+  title: string;
+  description?: ReactNode;
+  /** Words to find it by, besides its section's, its name and its description. */
+  keywords?: string;
+  /** The control spans the row, under the name: for a text field that needs the room. */
+  wide?: boolean;
+  /** The control, saving each change and saying how that went; `label` is the setting's name. */
+  Control: ComponentType<{ label: string }>;
+}
+
+/** A section of the Settings page: settings about one thing, or for Environments, a table of them. */
+interface SettingsSection {
+  id: string;
+  title: string;
+  icon: LucideIcon;
+  description?: ReactNode;
+  keywords?: string;
+  settings: SettingEntry[];
+  /** What the section shows besides its settings, found by its title and keywords. */
+  Body?: ComponentType;
+}
 
 // The prototype has no Settings page; it uses the layout of its other full
-// page, the Dashboard: a .dash page with a card holding a data table.
+// page, the Dashboard, a .dash page of cards, with a list of the sections
+// beside them to go to one, and a search over every setting.
 export function Settings() {
   const api = useApi();
-  const environments = useTopic('environments') ?? [];
   // Opening Settings checks the agents again, so what it shows is current.
   useEffect(() => {
     api.invoke('environments.detect').catch((error: unknown) => console.error('agent detection failed:', error));
   }, [api]);
+  const [query, setQuery] = useState('');
+  const shown = useMemo(() => matching(SECTIONS, query), [query]);
+  const page = useRef<HTMLElement>(null);
+  const [current, setCurrent] = useState(SECTIONS[0]!.id);
+  const active = shown.some(({ section }) => section.id === current) ? current : shown[0]?.section.id;
+
+  // A section gone to stays current while it is in sight, though near the bottom the page can't bring it to the top.
+  const goneTo = useRef<string>(undefined);
+  const go = (event: MouseEvent, id: string) => {
+    event.preventDefault();
+    const section = document.getElementById(anchorOf(id));
+    goneTo.current = id;
+    section?.scrollIntoView?.({ block: 'start' });
+    section?.focus({ preventScroll: true });
+    setCurrent(id);
+  };
+  // Otherwise the section current in the list is the last whose top has scrolled up to the page's, or the last one once at the bottom.
+  const followScroll = () => {
+    const element = page.current;
+    if (!element || shown.length === 0) return;
+    const { top, bottom } = element.getBoundingClientRect();
+    const sought = goneTo.current && document.getElementById(anchorOf(goneTo.current))?.getBoundingClientRect();
+    if (sought && sought.top >= top - SECTION_TOP_SLACK && sought.top < bottom) return;
+    goneTo.current = undefined;
+    let at = shown[0]!.section.id;
+    for (const { section } of shown) {
+      const head = document.getElementById(anchorOf(section.id));
+      if (head && head.getBoundingClientRect().top - top <= SECTION_TOP_SLACK) at = section.id;
+    }
+    if (element.scrollTop + element.clientHeight >= element.scrollHeight - 2) at = shown[shown.length - 1]!.section.id;
+    setCurrent(at);
+  };
+  // What the search finds starts at the top of the page.
+  useEffect(() => {
+    if (page.current) page.current.scrollTop = 0;
+  }, [query]);
+  const clearOnEscape = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || !query) return;
+    event.stopPropagation();
+    setQuery('');
+  };
+
   return (
-    <main className="dash" aria-label="Settings">
-      <div className="row">
-        <h1>Settings</h1>
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <Palette className="sm" />
-          <h3>Appearance</h3>
+    <main className="dash settings" aria-label="Settings" ref={page} onScroll={followScroll}>
+      <div className="settings-layout">
+        <div className="settings-head">
+          <h1>Settings</h1>
+          <label className="settings-search">
+            <Search className="sm" />
+            <input type="search" aria-label="Search settings" placeholder="Search settings" value={query} spellCheck={false} onChange={(event) => setQuery(event.target.value)} onKeyDown={clearOnEscape} />
+          </label>
         </div>
-        <AppearancePickers />
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-            <Server className="sm" />
-            <h3>Environments</h3>
-          </div>
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Environment</th>
-                <th>Status</th>
-                <th>Agent</th>
-                <th>Bridge</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {environments.map((env) => (
-                <EnvironmentRow key={env.id} env={env} />
-              ))}
-            </tbody>
-          </table>
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <ShieldAlert className="sm" />
-          <h3>Approvals</h3>
+        <nav className="settings-nav" aria-label="Settings sections">
+          {shown.map(({ section: { id, title, icon: Icon } }) => (
+            <a key={id} href={`#${anchorOf(id)}`} aria-current={id === active ? 'true' : undefined} onClick={(event) => go(event, id)}>
+              <Icon className="sm" />
+              {title}
+            </a>
+          ))}
+        </nav>
+        <div className="settings-sections">
+          {shown.length === 0 ? (
+            <div className="empty">
+              <SearchX className="sm" />
+              No setting matches “{query.trim()}”.
+            </div>
+          ) : (
+            shown.map(({ section, settings }) => <Section key={section.id} section={section} settings={settings} />)
+          )}
         </div>
-        <ApprovalSettings />
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <Timer className="sm" />
-          <h3>Stuck Sessions</h3>
-        </div>
-        <StuckAfter />
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <GitPullRequestArrow className="sm" />
-          <h3>Merge request feedback</h3>
-        </div>
-        <AutoPromptDefault />
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <Sparkles className="sm" />
-          <h3>Session highlights</h3>
-        </div>
-        <HighlightsSetting />
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <FolderTree className="sm" />
-          <h3>Worktrees</h3>
-        </div>
-        <WorktreeRoot />
-      </div>
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <CodeXml className="sm" />
-          <h3>Editor and terminal</h3>
-        </div>
-        <OpenCommands />
       </div>
     </main>
+  );
+}
+
+const anchorOf = (id: string) => `settings-${id}`;
+
+/** How far below the page's top, in pixels, a section's top may be and still count as at the top. */
+const SECTION_TOP_SLACK = 40;
+
+function Section({ section: { id, title, icon: Icon, description, Body }, settings }: { section: SettingsSection; settings: SettingEntry[] }) {
+  return (
+    <section id={anchorOf(id)} className="card settings-section" aria-labelledby={`${anchorOf(id)}-title`} tabIndex={-1}>
+      <div className="card-head">
+        <Icon className="sm" />
+        <h2 id={`${anchorOf(id)}-title`}>{title}</h2>
+      </div>
+      {description && <p className="muted section-description">{description}</p>}
+      {settings.map((setting) => (
+        <SettingRow key={setting.title} setting={setting} />
+      ))}
+      {Body && <Body />}
+    </section>
+  );
+}
+
+function SettingRow({ setting: { title, description, wide, Control } }: { setting: SettingEntry }) {
+  return (
+    <div className={wide ? 'setting wide' : 'setting'}>
+      <div className="setting-text">
+        <div className="setting-title">{title}</div>
+        {description && <div className="setting-description">{description}</div>}
+      </div>
+      <div className="setting-control">
+        <Control label={title} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The sections, and the settings in each, that the query finds: every one
+ * for no query. Each word of it must be in the section's or the setting's
+ * name, description or keywords; a section found by its own shows all of its
+ * settings.
+ */
+function matching(sections: SettingsSection[], query: string): { section: SettingsSection; settings: SettingEntry[] }[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const finds = (...texts: (ReactNode | undefined)[]) => {
+    const text = texts.map(textOf).join(' ').toLowerCase();
+    return words.every((word) => text.includes(word));
+  };
+  return sections.flatMap((section) => {
+    const head = [section.title, section.description, section.keywords];
+    if (finds(...head)) return [{ section, settings: section.settings }];
+    const settings = section.settings.filter((setting) => finds(...head, setting.title, setting.description, setting.keywords));
+    return settings.length > 0 ? [{ section, settings }] : [];
+  });
+}
+
+/** The text in a description, to search it. */
+function textOf(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join('');
+  if (isValidElement(node)) return textOf((node.props as { children?: ReactNode }).children);
+  return '';
+}
+
+/** How long "Saved" shows after a change is saved. */
+const SAVED_FOR_MS = 2000;
+
+/**
+ * Saving a setting's changes, and what to show of it: "Saved" for a moment
+ * once main has kept one, or why main refused it, until the next change. Only
+ * the latest change's outcome shows.
+ */
+function useSaving() {
+  const [outcome, setOutcome] = useState<{ saved?: boolean; error?: string }>({});
+  const latest = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  /** Shows how `sending` went; resolves with its result, or undefined once refused. */
+  const save = useCallback(<T,>(sending: Promise<T>): Promise<T | undefined> => {
+    const id = ++latest.current;
+    clearTimeout(timer.current);
+    setOutcome({});
+    return sending.then(
+      (result) => {
+        if (id === latest.current) {
+          setOutcome({ saved: true });
+          timer.current = setTimeout(() => setOutcome({}), SAVED_FOR_MS);
+        }
+        return result;
+      },
+      (error: unknown) => {
+        if (id === latest.current) setOutcome({ error: (error as Error).message });
+        return undefined;
+      },
+    );
+  }, []);
+  /** Forgets how the last change went, as when the value is put back. */
+  const clear = useCallback(() => {
+    latest.current++;
+    clearTimeout(timer.current);
+    setOutcome({});
+  }, []);
+  return { save, clear, ...outcome };
+}
+
+/** "Saved", announced, for a moment after a change is saved; why it was refused, if it was. */
+function SaveFeedback({ saved, error, errorId }: { saved?: boolean; error?: string; errorId?: string }) {
+  return (
+    <>
+      <span className="saved" role="status">
+        {saved && (
+          <>
+            <Check className="sm" />
+            Saved
+          </>
+        )}
+      </span>
+      {error && (
+        <div className="err" role="alert" id={errorId}>
+          {error}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -101,173 +244,117 @@ const THEME_OPTIONS = (Object.keys(THEMES) as Appearance['theme'][]).map((value)
 const UI_FONT_OPTIONS = (Object.keys(UI_FONTS) as Appearance['uiFont'][]).map((value) => ({ value, label: value }));
 const MONO_FONT_OPTIONS = (Object.keys(MONO_FONTS) as Appearance['monoFont'][]).map((value) => ({ value, label: value }));
 
-/** The theme and fonts, which the window takes on as soon as they're saved. */
-function AppearancePickers() {
+/** A setting picked from a list, saved as soon as an option is picked. */
+function SelectSetting<T extends string>({ label, value, options, className, change }: { label: string; value: T; options: { value: T; label: string }[]; className?: string; change: (api: LoomApi, value: T) => Promise<unknown> }) {
   const api = useApi();
-  const settings = useTopic('settings');
-  const [error, setError] = useState<string>();
-  if (!settings) return null;
-  const save = (change: Partial<Appearance>) => {
-    setError(undefined);
-    api.invoke('settings.setAppearance', change).catch((e: unknown) => setError((e as Error).message));
-  };
+  const { save, saved, error } = useSaving();
   return (
-    <div className="settings-fields">
-      <div className="field-row">
-        <span>Theme</span>
-        <Select label="Theme" value={settings.theme} options={THEME_OPTIONS} onChange={(theme) => save({ theme })} />
-      </div>
-      <div className="field-row">
-        <span>UI font</span>
-        <Select label="UI font" value={settings.uiFont} options={UI_FONT_OPTIONS} onChange={(uiFont) => save({ uiFont })} />
-      </div>
-      <div className="field-row">
-        <span>Monospace font</span>
-        <Select label="Monospace font" className="tech" value={settings.monoFont} options={MONO_FONT_OPTIONS} onChange={(monoFont) => save({ monoFont })} />
-      </div>
-      {error && (
-        <div className="err" role="alert">
-          {error}
-        </div>
-      )}
-    </div>
+    <>
+      <Select label={label} className={className} value={value} options={options} onChange={(next) => void save(change(api, next))} />
+      <SaveFeedback saved={saved} error={error} />
+    </>
   );
+}
+
+/** The theme or a font, which the window takes on as soon as it is saved. */
+function AppearanceSelect<K extends keyof Appearance>({ label, field, options, className }: { label: string; field: K; options: { value: Appearance[K]; label: string }[]; className?: string }) {
+  const settings = useTopic('settings');
+  if (!settings) return null;
+  return <SelectSetting label={label} className={className} value={settings[field]} options={options} change={(api, value) => api.invoke('settings.setAppearance', { [field]: value })} />;
 }
 
 const APPROVAL_OPTIONS: { value: ApprovalSetting; label: string }[] = [
   { value: 'allow', label: 'Allow' },
   { value: 'ask', label: 'Ask' },
 ];
+const APPROVAL_MODE_OPTIONS = (Object.keys(APPROVAL_MODES) as ApprovalMode[]).map((mode) => ({ value: mode, label: APPROVAL_MODES[mode].label }));
 
-/** Whether the agent asks before each category of action beyond its working copy. */
-function ApprovalSettings() {
-  const api = useApi();
-  const settings = useTopic('settings');
-  const approvals = settings?.approvals;
-  const [error, setError] = useState<string>();
-  if (!settings || !approvals) return null;
-  const save = (category: ApprovalCategory, setting: ApprovalSetting) => {
-    setError(undefined);
-    api.invoke('settings.setApproval', { category, setting }).catch((e: unknown) => setError((e as Error).message));
-  };
-  const saveMode = (mode: ApprovalMode) => {
-    setError(undefined);
-    api.invoke('settings.setApprovalModeDefault', { mode }).catch((e: unknown) => setError((e as Error).message));
-  };
-  return (
-    <div className="settings-fields">
-      <div className="field-row approval-row">
-        <span>
-          New Sessions start in
-          <span className="muted approval-description">
-            {APPROVAL_MODES.supervised.label} follows the settings below. {APPROVAL_MODES.full.label} approves everything the agent asks, a push to the default branch included. Each Session picks its own in the New Session composer, for good.
-          </span>
-        </span>
-        <Select
-          label="Default Approval mode"
-          value={settings.approvalModeDefault}
-          options={(Object.keys(APPROVAL_MODES) as ApprovalMode[]).map((mode) => ({ value: mode, label: APPROVAL_MODES[mode].label }))}
-          onChange={saveMode}
-        />
-      </div>
-      <p className="muted" style={{ margin: 0 }}>
-        The agent reads, edits and runs commands in its working copy and the temp directory freely. For the rest, Ask pauses it with an Approval request. Rules match commands and paths on a best-effort basis: a guardrail, not a security boundary. Agents started from now on get the changes.
-      </p>
-      {(Object.keys(APPROVAL_CATEGORIES) as ApprovalCategory[]).map((category) => (
-        <div key={category} className="field-row approval-row">
-          <span>
-            {APPROVAL_CATEGORIES[category].label}
-            <span className="muted approval-description">{APPROVAL_CATEGORIES[category].description}</span>
-          </span>
-          <Select label={APPROVAL_CATEGORIES[category].label} value={approvals[category]} options={APPROVAL_OPTIONS} onChange={(setting) => save(category, setting)} />
-        </div>
-      ))}
-      <ErrorAlert error={error} />
-    </div>
-  );
+/** The Approval mode new Sessions start in. */
+function ApprovalModeDefault() {
+  const mode = useTopic('settings')?.approvalModeDefault;
+  if (!mode) return null;
+  return <SelectSetting label="Default Approval mode" value={mode} options={APPROVAL_MODE_OPTIONS} change={(api, next) => api.invoke('settings.setApprovalModeDefault', { mode: next })} />;
+}
+
+/** Whether the agent asks before one category of action beyond its working copy. */
+function ApprovalCategorySetting({ label, category }: { label: string; category: ApprovalCategory }) {
+  const setting = useTopic('settings')?.approvals[category];
+  if (!setting) return null;
+  return <SelectSetting label={label} value={setting} options={APPROVAL_OPTIONS} change={(api, next) => api.invoke('settings.setApproval', { category, setting: next })} />;
 }
 
 /** How long a Working Session's agent may say nothing before the Session is stuck. */
-function StuckAfter() {
-  const saved = useTopic('settings')?.stuckAfterMinutes;
+function StuckAfter({ label }: { label: string }) {
+  const stored = useTopic('settings')?.stuckAfterMinutes;
   return (
     <TextSetting
-      label="Stuck after (minutes)"
-      saved={saved === undefined ? '' : String(saved)}
+      label={label}
+      stored={stored === undefined ? '' : String(stored)}
       width="8ch"
+      inputMode="numeric"
       save={(api, value) => api.invoke('settings.setStuckAfterMinutes', { minutes: Number(value.trim()) }).then((s) => String(s.stuckAfterMinutes))}
-    >
-      A Working Session whose agent says nothing for this long goes Waiting as stuck. Waiting on your answer or approval never counts.
-    </TextSetting>
+    />
+  );
+}
+
+/** A checkbox setting, saved as soon as it is ticked or unticked. */
+function Toggle({ label, on, disabled, change }: { label: string; on: boolean; disabled?: boolean; change: (api: LoomApi, on: boolean) => Promise<unknown> }) {
+  const api = useApi();
+  const { save, saved, error } = useSaving();
+  return (
+    <>
+      <input type="checkbox" className="toggle" aria-label={label} checked={on} disabled={disabled} onChange={(event) => void save(change(api, event.target.checked))} />
+      <SaveFeedback saved={saved} error={error} />
+    </>
   );
 }
 
 /** Whether new Sessions send their Merge request's feedback straight to the agent. */
-function AutoPromptDefault() {
-  const api = useApi();
+function AutoPromptDefault({ label }: { label: string }) {
   const on = useTopic('settings')?.autoPromptDefault ?? false;
-  const [error, setError] = useState<string>();
-  const change = (next: boolean) => {
-    setError(undefined);
-    api.invoke('settings.setAutoPromptDefault', { on: next }).catch((e: unknown) => setError((e as Error).message));
-  };
+  return <Toggle label={label} on={on} change={(api, next) => api.invoke('settings.setAutoPromptDefault', { on: next })} />;
+}
+
+/** Whether a model checks each turn for Session highlights; only once one is picked. */
+function HighlightsOn({ label }: { label: string }) {
+  const highlights = useTopic('settings')?.highlights;
+  if (!highlights) return null;
   return (
-    <div style={{ padding: '10px 14px' }}>
-      <label className="row">
-        <input type="checkbox" checked={on} onChange={(event) => change(event.target.checked)} />
-        <span>Auto-prompt new Sessions</span>
-      </label>
-      <div className="muted">New feedback on a Session's Merge request goes straight to its agent, up to {MAX_AUTO_PROMPTS} attempts in a row without a message from you. Each Session can change this from its Merge request, in the Glance strip.</div>
-      <ErrorAlert error={error} />
-    </div>
+    <Toggle
+      label={label}
+      on={highlights.on}
+      disabled={!highlights.on && !highlights.model}
+      change={(api, on) => api.invoke('settings.setHighlights', withoutUndefined({ ...highlights, on }))}
+    />
   );
 }
 
-/**
- * Session highlights: whether a model checks each turn for what the user
- * should know, and which, picked from the models the agent offers in the
- * first Project's checkout.
- */
-function HighlightsSetting() {
+/** The model that checks for Session highlights, picked from those the agent offers in the first Project's checkout. */
+function HighlightsModel() {
   const api = useApi();
   const highlights = useTopic('settings')?.highlights;
   const projectId = useTopic('projects')?.[0]?.id;
   const models = useCheckoutModels(projectId);
-  const [error, setError] = useState<string>();
+  const { save, saved, error } = useSaving();
   if (!highlights) return null;
-  const save = (change: Partial<HighlightsSettings>) => {
-    setError(undefined);
-    const next = { ...highlights, ...change };
-    api.invoke('settings.setHighlights', withoutUndefined(next)).catch((e: unknown) => setError((e as Error).message));
-  };
+  if (projectId === undefined) return <span className="muted">Add a Project to pick one from {OPENCODE_NAME}'s models.</span>;
+  const change = (change: Partial<HighlightsSettings>) => void save(api.invoke('settings.setHighlights', withoutUndefined({ ...highlights, ...change })));
   return (
-    <div style={{ padding: '10px 14px' }}>
-      <label className="row">
-        <input type="checkbox" checked={highlights.on} disabled={!highlights.on && !highlights.model} onChange={(event) => save({ on: event.target.checked })} />
-        <span>Note highlights after each turn</span>
-      </label>
-      <div className="row" style={{ marginTop: 8, gap: 6 }}>
-        <span>Model</span>
-        {projectId === undefined ? (
-          <span className="muted">Add a Project to pick one from {OPENCODE_NAME}'s models.</span>
-        ) : (
-          <ModelPickers
-            agent={OPENCODE_NAME}
-            models={models.listed}
-            model={highlights.model}
-            efforts={effortsOf(models.listed, highlights.model)}
-            effort={highlights.effort}
-            onOpen={models.refresh}
-            onModel={(model) => save({ model, effort: undefined })}
-            onEffort={(effort) => save({ effort })}
-          />
-        )}
+    <>
+      <div className="row">
+        <ModelPickers
+          agent={OPENCODE_NAME}
+          models={models.listed}
+          model={highlights.model}
+          efforts={effortsOf(models.listed, highlights.model)}
+          effort={highlights.effort}
+          onOpen={models.refresh}
+          onModel={(model) => change({ model, effort: undefined })}
+          onEffort={(effort) => change({ effort })}
+        />
       </div>
-      <div className="muted" style={{ marginTop: 6 }}>
-        After each turn, this model reads what the turn said and did and notes, in the Session's Highlights Panel, what you should know: what's left for you, what wasn't done, risks, assumptions and decisions. It runs as a conversation of its own, with every tool refused, so a cheap model does. Its tokens count on the dashboard under its model, but not in the Session's own usage.
-      </div>
-      <ErrorAlert error={error} />
-    </div>
+      <SaveFeedback saved={saved} error={error} />
+    </>
   );
 }
 
@@ -276,108 +363,304 @@ function withoutUndefined<T extends object>(value: T): T {
 }
 
 /** Where new worktrees go; `~` is the home in each Project's Environment. */
-function WorktreeRoot() {
-  const saved = useTopic('settings')?.worktreeRoot ?? '';
+function WorktreeRoot({ label }: { label: string }) {
+  const stored = useTopic('settings')?.worktreeRoot ?? '';
+  return <TextSetting label={label} stored={stored} placeholder="~/loom/worktrees" save={(api, worktreeRoot) => api.invoke('settings.setWorktreeRoot', { worktreeRoot }).then((s) => s.worktreeRoot)} />;
+}
+
+/** How Loom runs the user's editor, in each Session's Environment. */
+function EditorCommand({ label }: { label: string }) {
+  const stored = useTopic('settings')?.editorCommand ?? '';
+  return <TextSetting label={label} stored={stored} placeholder="code" save={(api, editorCommand) => api.invoke('settings.setEditorCommand', { editorCommand }).then((s) => s.editorCommand)} />;
+}
+
+/** A terminal command to start from, for the native Environment's system. */
+const TERMINAL_EXAMPLES: Record<string, string> = { windows: 'wt -d {path}', darwin: 'open -a Terminal {path}' };
+
+/** How Loom runs the user's terminal, in each Session's Environment. */
+function TerminalCommand({ label }: { label: string }) {
+  const stored = useTopic('settings')?.terminalCommand ?? '';
+  const os = useTopic('environments')?.find((e) => e.id === 'native')?.bridge?.os;
   return (
-    <TextSetting label="Worktree root" saved={saved} width="32ch" save={(api, worktreeRoot) => api.invoke('settings.setWorktreeRoot', { worktreeRoot }).then((s) => s.worktreeRoot)}>
-      Each worktree Session gets a folder named after its branch: <span className="tech">{`${saved || '<root>'}/<project>/<session>`}</span>.
-    </TextSetting>
+    <TextSetting
+      label={label}
+      stored={stored}
+      placeholder={`For example: ${(os && TERMINAL_EXAMPLES[os]) ?? 'kitty --directory {path}'}`}
+      save={(api, terminalCommand) => api.invoke('settings.setTerminalCommand', { terminalCommand }).then((s) => s.terminalCommand)}
+    />
   );
 }
 
-/** How Loom runs the user's editor and terminal, in each Session's Environment. */
-function OpenCommands() {
-  const settings = useTopic('settings');
+/** The patterns of files the Changes view starts collapsed, one a line. */
+function DiffCollapsedPatterns({ label }: { label: string }) {
+  const stored = (useTopic('settings')?.diffCollapsedPatterns ?? []).join('\n');
   return (
-    <>
-      <TextSetting
-        label="Editor command"
-        saved={settings?.editorCommand ?? ''}
-        width="40ch"
-        save={(api, editorCommand) => api.invoke('settings.setEditorCommand', { editorCommand }).then((s) => s.editorCommand)}
-      >
-        Run in the Session's Environment with your shell's full PATH. <span className="tech">{'{path}'}</span> is the folder or file to open; without it, the path
-        goes last.
-      </TextSetting>
-      <TextSetting
-        label="Terminal command"
-        saved={settings?.terminalCommand ?? ''}
-        width="40ch"
-        save={(api, terminalCommand) => api.invoke('settings.setTerminalCommand', { terminalCommand }).then((s) => s.terminalCommand)}
-      >
-        Runs in the working copy's folder, which it also gets wherever you write <span className="tech">{'{path}'}</span>, as in{' '}
-        <span className="tech">{'wt -d {path}'}</span> or <span className="tech">{'kitty --directory {path}'}</span>.
-      </TextSetting>
-      <TextSetting
-        label="Collapsed in the diff"
-        saved={(settings?.diffCollapsedPatterns ?? []).join(', ')}
-        width="40ch"
-        save={(api, value) =>
-          api.invoke('settings.setDiffCollapsedPatterns', { patterns: value.split(',') }).then((s) => s.diffCollapsedPatterns.join(', '))
-        }
-      >
-        Files the Changes view starts collapsed, besides binaries and very large changes: comma-separated patterns on a file name, or on its path when they
-        have a <span className="tech">/</span>, as in <span className="tech">*.lock</span>.
-      </TextSetting>
-    </>
+    <TextSetting
+      label={label}
+      stored={stored}
+      multiline
+      placeholder="*.lock"
+      save={(api, value) => api.invoke('settings.setDiffCollapsedPatterns', { patterns: value.split(/[\n,]/) }).then((s) => s.diffCollapsedPatterns.join('\n'))}
+    />
   );
 }
 
-/** One text setting, saved on Enter or on leaving the field; shows why main rejected it. */
+/**
+ * One text setting, saved on Enter (Ctrl+Enter in a multi-line one) or on
+ * leaving the field; Escape puts back the saved value. Says when it's saved,
+ * or why main refused it until the field holds a value main takes, or the
+ * saved one again.
+ */
 function TextSetting({
   label,
-  saved,
+  stored,
   width,
+  placeholder,
+  multiline = false,
+  inputMode,
   save: send,
-  children,
 }: {
   label: string;
-  saved: string;
-  width: string;
+  /** The value main has kept. */
+  stored: string;
+  /** A narrow field's width; without it, the field takes the row's. */
+  width?: string;
+  placeholder?: string;
+  multiline?: boolean;
+  inputMode?: 'numeric';
   /** Sends the new value to main; resolves with the value as main kept it. */
   save: (api: LoomApi, value: string) => Promise<string>;
-  children: ReactNode;
 }) {
   const api = useApi();
-  const [value, setValue] = useState(saved);
-  const [error, setError] = useState<string>();
-  useEffect(() => setValue(saved), [saved]);
+  const [value, setValue] = useState(stored);
+  const { save, clear, saved, error } = useSaving();
+  const errorId = useId();
+  useEffect(() => setValue(stored), [stored]);
 
   // Enter submits, then leaving the field blurs it: save each value once.
   const sent = useRef<string>(undefined);
-  const save = (event?: FormEvent) => {
+  const submit = (event?: FormEvent) => {
     event?.preventDefault();
-    if (value === saved || value === sent.current) return;
+    if (value === stored) {
+      // Back to the saved value: a refusal of another no longer holds.
+      if (error) clear();
+      return;
+    }
+    if (value === sent.current) return;
     sent.current = value;
-    setError(undefined);
-    send(api, value)
-      .then(setValue)
-      .catch((e: unknown) => setError((e as Error).message))
+    void save(send(api, value))
+      .then((kept) => kept !== undefined && setValue(kept))
       .finally(() => (sent.current = undefined));
   };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && (value !== stored || error)) {
+      event.stopPropagation();
+      setValue(stored);
+      clear();
+    } else if (multiline && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      submit();
+    }
+  };
+  const field = {
+    className: 'tech text-setting',
+    style: width ? { width } : undefined,
+    'aria-label': label,
+    'aria-invalid': error ? true : undefined,
+    'aria-describedby': error ? errorId : undefined,
+    value,
+    placeholder,
+    spellCheck: false,
+    onKeyDown,
+    onBlur: () => submit(),
+  };
   return (
-    <form onSubmit={save} style={{ padding: '10px 14px' }}>
-      <label className="row">
-        <span>{label}</span>
-        <input
-          className="tech prefix"
-          style={{ width }}
-          aria-label={label}
-          value={value}
-          spellCheck={false}
-          onChange={(event) => setValue(event.target.value)}
-          onBlur={() => save()}
-        />
-      </label>
-      <div className="muted">{children}</div>
-      {error && (
-        <div className="err" role="alert">
-          {error}
-        </div>
+    <form className="setting-form" onSubmit={submit}>
+      {multiline ? (
+        <textarea {...field} rows={3} onChange={(event) => setValue(event.target.value)} />
+      ) : (
+        <input {...field} inputMode={inputMode} onChange={(event) => setValue(event.target.value)} />
       )}
+      <SaveFeedback saved={saved} error={error} errorId={errorId} />
     </form>
   );
 }
+
+/** Each Environment, its bridge and agent, and a way to read the shell's environment again. */
+function EnvironmentsTable() {
+  const environments = useTopic('environments') ?? [];
+  return (
+    <div className="table-scroll">
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Environment</th>
+            <th>Status</th>
+            <th>Agent</th>
+            <th>Bridge</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {environments.map((env) => (
+            <EnvironmentRow key={env.id} env={env} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const SECTIONS: SettingsSection[] = [
+  {
+    id: 'appearance',
+    title: 'Appearance',
+    icon: Palette,
+    keywords: 'look',
+    settings: [
+      { title: 'Theme', description: 'The colours of the whole window.', keywords: 'color dark light', Control: ({ label }) => <AppearanceSelect label={label} field="theme" options={THEME_OPTIONS} /> },
+      { title: 'UI font', description: 'The font of the text around the code.', keywords: 'typeface', Control: ({ label }) => <AppearanceSelect label={label} field="uiFont" options={UI_FONT_OPTIONS} /> },
+      {
+        title: 'Monospace font',
+        description: 'The font of code, diffs, paths and the Terminal.',
+        keywords: 'typeface mono',
+        Control: ({ label }) => <AppearanceSelect label={label} field="monoFont" options={MONO_FONT_OPTIONS} className="tech" />,
+      },
+    ],
+  },
+  {
+    id: 'sessions',
+    title: 'Sessions',
+    icon: MessagesSquare,
+    settings: [
+      {
+        title: 'Stuck after (minutes)',
+        description: 'A Working Session whose agent says nothing for this long goes Waiting as stuck. Waiting on your answer or approval never counts.',
+        keywords: 'timeout idle',
+        Control: StuckAfter,
+      },
+      {
+        title: 'Auto-prompt new Sessions',
+        description: `New feedback on a Session's Merge request goes straight to its agent, up to ${MAX_AUTO_PROMPTS} attempts in a row without a message from you. Each Session can change this from its Merge request, in the Glance strip.`,
+        keywords: 'merge request feedback review ci babysit',
+        Control: AutoPromptDefault,
+      },
+      {
+        title: 'Note highlights after each turn',
+        description:
+          "After each turn, a model reads what the turn said and did and notes, in the Session's Highlights Panel, what you should know: what's left for you, what wasn't done, risks, assumptions and decisions. It turns on once its model is picked.",
+        keywords: 'session highlights',
+        Control: HighlightsOn,
+      },
+      {
+        title: 'Highlights model',
+        description: "It runs as a conversation of its own, with every tool refused, so a cheap model does. Its tokens count on the dashboard under its model, but not in the Session's own usage.",
+        keywords: 'session highlights effort',
+        Control: HighlightsModel,
+      },
+    ],
+  },
+  {
+    id: 'approvals',
+    title: 'Approvals',
+    icon: ShieldAlert,
+    description:
+      'The agent reads, edits and runs commands in its working copy and the temp directory freely. For the rest, Ask pauses it with an Approval request. Rules match commands and paths on a best-effort basis: a guardrail, not a security boundary. Agents started from now on get the changes.',
+    keywords: 'permissions',
+    settings: [
+      {
+        title: 'New Sessions start in',
+        description: `${APPROVAL_MODES.supervised.label} follows the settings below. ${APPROVAL_MODES.full.label} approves everything the agent asks, a push to the default branch included. Each Session picks its own in the New Session composer, for good.`,
+        keywords: 'approval mode default',
+        Control: ApprovalModeDefault,
+      },
+      ...(Object.keys(APPROVAL_CATEGORIES) as ApprovalCategory[]).map(
+        (category): SettingEntry => ({
+          title: APPROVAL_CATEGORIES[category].label,
+          description: APPROVAL_CATEGORIES[category].description,
+          keywords: 'allow ask',
+          Control: ({ label }) => <ApprovalCategorySetting label={label} category={category} />,
+        }),
+      ),
+    ],
+  },
+  {
+    id: 'worktrees',
+    title: 'Worktrees',
+    icon: FolderTree,
+    settings: [
+      {
+        title: 'Worktree root',
+        description: (
+          <>
+            Each worktree Session gets a folder named after its branch: <span className="tech">{'<root>/<project>/<session>'}</span>. <span className="tech">~</span> is your
+            home in the Project's Environment. The folder is made when a worktree first goes there.
+          </>
+        ),
+        keywords: 'folder directory path git',
+        wide: true,
+        Control: WorktreeRoot,
+      },
+    ],
+  },
+  {
+    id: 'editor',
+    title: 'Editor and terminal',
+    icon: CodeXml,
+    keywords: 'open in',
+    settings: [
+      {
+        title: 'Editor command',
+        description: (
+          <>
+            Run in the Session's Environment with your shell's full PATH. <span className="tech">{'{path}'}</span> is the folder or file to open; without it, the path goes last.
+          </>
+        ),
+        wide: true,
+        Control: EditorCommand,
+      },
+      {
+        title: 'Terminal command',
+        description: (
+          <>
+            Runs in the working copy's folder, which it also gets wherever you write <span className="tech">{'{path}'}</span>, as in <span className="tech">{'wt -d {path}'}</span> or{' '}
+            <span className="tech">{'kitty --directory {path}'}</span>.
+          </>
+        ),
+        wide: true,
+        Control: TerminalCommand,
+      },
+    ],
+  },
+  {
+    id: 'changes',
+    title: 'Changes',
+    icon: FileDiff,
+    keywords: 'diff review',
+    settings: [
+      {
+        title: 'Collapsed in the diff',
+        description: (
+          <>
+            Files the Changes view starts collapsed, besides binaries and very large changes: one pattern a line, on a file name, or on its path when it has a{' '}
+            <span className="tech">/</span>, as in <span className="tech">*.lock</span>.
+          </>
+        ),
+        keywords: 'patterns files lockfiles generated',
+        wide: true,
+        Control: DiffCollapsedPatterns,
+      },
+    ],
+  },
+  {
+    id: 'environments',
+    title: 'Environments',
+    icon: Server,
+    keywords: `bridge agent ${OPENCODE_NAME} reload shell`,
+    settings: [],
+    Body: EnvironmentsTable,
+  },
+];
 
 function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
   const api = useApi();

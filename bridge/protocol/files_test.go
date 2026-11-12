@@ -49,6 +49,35 @@ func TestFilesExistSaysWhetherAPathIsTaken(t *testing.T) {
 	}
 }
 
+func TestFilesCheckFolderTakesAFolderOrOneThatCouldBeMadeLeavingNothing(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "there", "file"), "x", 0o644)
+	p := startBridge(t)
+
+	p.call(1, "files.checkFolder", map[string]any{"path": filepath.Join(dir, "there")})
+	p.call(2, "files.checkFolder", map[string]any{"path": filepath.Join(dir, "loom", "worktrees")})
+
+	if _, err := os.Lstat(filepath.Join(dir, "loom")); !os.IsNotExist(err) {
+		t.Fatalf("files.checkFolder left %s behind: %v", filepath.Join(dir, "loom"), err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "there", "file")); err != nil {
+		t.Fatalf("files.checkFolder touched what was there: %v", err)
+	}
+}
+
+func TestFilesCheckFolderUnderAFileIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "taken")
+	write(t, path, "x", 0o644)
+	p := startBridge(t)
+
+	p.send(map[string]any{"id": 1, "method": "files.checkFolder", "params": map[string]any{"path": filepath.Join(path, "worktrees")}})
+
+	errObj, ok := p.response(1)["error"].(map[string]any)
+	if !ok || errObj["code"] != "not_a_folder" {
+		t.Fatalf("reply error = %v, want not_a_folder", errObj)
+	}
+}
+
 func TestFilesCopyCopiesRelativePathsIntoAnotherFolder(t *testing.T) {
 	from, to := t.TempDir(), t.TempDir()
 	write(t, filepath.Join(from, ".env"), "SECRET=1\n", 0o600)
