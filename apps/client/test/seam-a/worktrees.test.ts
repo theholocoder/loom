@@ -193,6 +193,7 @@ describe('the branches a worktree Session can start from', () => {
         { name: 'shared', remote: true },
       ],
       worktrees: [{ path: busyWorktree, branch: 'busy' }, { path: detached }, { path: elsewhere, branch: 'elsewhere' }],
+      checkoutBranch: 'trunk',
     });
   });
 
@@ -214,6 +215,17 @@ describe('the branches a worktree Session can start from', () => {
     const { main, project } = await withProject(machine, linked);
 
     expect((await main.api.invoke('projects.branches', { id: project.id })).worktrees).toEqual([{ path: other, branch: 'other' }]);
+  });
+
+  it("names the branch the Project's checkout is on, and none on a detached HEAD", async () => {
+    const { machine, checkout } = machineWithClone();
+    const linked = machine.folder('linked-wt');
+    git(checkout, 'worktree', 'add', '--quiet', '-b', 'linked', linked);
+    const { main, project } = await withProject(machine, linked);
+    expect((await main.api.invoke('projects.branches', { id: project.id })).checkoutBranch).toBe('linked');
+
+    git(linked, 'switch', '--quiet', '--detach');
+    expect((await main.api.invoke('projects.branches', { id: project.id })).checkoutBranch).toBeUndefined();
   });
 });
 
@@ -469,6 +481,7 @@ describe('a worktree Session without a reachable origin', () => {
       ],
       existing: [{ name: 'drafts', remote: false }],
       worktrees: [],
+      checkoutBranch: 'main',
     });
     const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Tidy up' });
 

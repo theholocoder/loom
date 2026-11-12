@@ -53,6 +53,11 @@ export function SearchPicker<T>({
     setOpen(false);
     setSearch('');
   };
+  const pick = (value: T) => {
+    close();
+    trigger.current?.focus();
+    onChange(value);
+  };
   const listed = options && 'value' in options ? options.value : undefined;
   const wanted = search.trim().toLowerCase();
   const shown = (listed ?? []).filter((option) => `${option.label} ${option.detail ?? ''}`.toLowerCase().includes(wanted));
@@ -72,7 +77,20 @@ export function SearchPicker<T>({
       </button>
       {open && !disabled && (
         <Popover anchor={trigger} role="dialog" label={label} className="search-popover" onClose={close}>
-          <input aria-label={`Search ${noun}`} placeholder={`Search ${noun}…`} data-autofocus value={search} onChange={(event) => setSearch(event.target.value)} />
+          <input
+            aria-label={`Search ${noun}`}
+            placeholder={`Search ${noun}…`}
+            data-autofocus
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              // Enter in the search picks the first option shown, with no ↓ first.
+              event.preventDefault();
+              const first = shown[0];
+              if (first) pick(first.value);
+            }}
+          />
           {options && 'error' in options && (
             <div className="err" role="alert">
               {options.error}
@@ -87,11 +105,8 @@ export function SearchPicker<T>({
                 type="button"
                 role="option"
                 aria-selected={option.key === selected?.key}
-                onClick={() => {
-                  close();
-                  trigger.current?.focus();
-                  onChange(option.value);
-                }}
+                data-enter={option === shown[0] ? '' : undefined}
+                onClick={() => pick(option.value)}
               >
                 <span className="tech ellipsis">{option.label}</span>
                 {option.detail && <span className="muted ellipsis">{option.detail}</span>}

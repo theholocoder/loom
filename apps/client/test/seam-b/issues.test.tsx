@@ -78,6 +78,38 @@ describe('starting a Session from an issue', () => {
     expect(main.invoked.find((i) => i.command === 'projects.issues')?.params).toEqual({ id: 1 });
   });
 
+  it('goes from Ctrl+Shift+N to a started Session with the keyboard alone: Enter picks the first issue listed, then sends', async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project] }, {
+        'projects.issues': ({ search }) => [loginBug, darkMode].filter((i) => !search || i.title.toLowerCase().includes(search.toLowerCase())),
+        'sessions.create': () => {
+          main.publish('sessions', [fromIssue]);
+          return fromIssue;
+        },
+      }),
+    );
+
+    fireEvent.keyDown(document.body, { key: 'N', ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter Projects' }), { key: 'Enter' });
+    const search = screen.getByRole('textbox', { name: 'Search issues' });
+    expect(document.activeElement).toBe(search);
+    await screen.findByRole('option', { name: '#7 Dark mode' });
+    // The first listed, the one Enter picks, shows it.
+    expect(screen.getAllByRole('option')[0]!.hasAttribute('data-enter')).toBe(true);
+    // Pressed before the search's own list comes, Enter picks from that list, not the one shown.
+    fireEvent.change(search, { target: { value: 'login' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+
+    const pane = screen.getByRole('main', { name: 'New Session' });
+    expect((await within(pane).findByTitle(loginBug.url)).textContent).toContain('#31 Fix the login bug');
+    const prompt = within(pane).getByRole('textbox', { name: 'Prompt' });
+    expect(document.activeElement).toBe(prompt);
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+
+    await waitFor(() => expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy());
+    expect(main.invoked.find((i) => i.command === 'sessions.create')?.params).toMatchObject({ issue: loginBug, prompt: '' });
+  });
+
   it('can be unlinked before starting, going back to the branch from the prompt', async () => {
     renderApp(new FakeMain({ projects: [project] }, { 'projects.issues': () => [loginBug] }));
     const pane = startNewSession();

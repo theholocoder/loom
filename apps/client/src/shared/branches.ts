@@ -40,3 +40,30 @@ export function issueBranch(prefix: string, issue: { number: number; title: stri
 export function branchName(branch: ExistingBranch): string {
   return branch.remote ? `origin/${branch.name}` : branch.name;
 }
+
+/**
+ * Why git would refuse `<prefix>/<slug>` as a branch name, following
+ * `git check-ref-format --branch`; undefined if it wouldn't.
+ */
+export function branchPrefixProblem(prefix: string): string | undefined {
+  if (!prefix) return 'it is empty';
+  if (prefix.startsWith('-')) return "it starts with '-'";
+  if (prefix === '@') return "it is '@'";
+  // Control characters and DEL, then the characters git reserves.
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(prefix)) return 'it contains a space, a control character or one of ~ ^ : ? * [ \\';
+  if (prefix.includes('..')) return "it contains '..'";
+  if (prefix.includes('@{')) return "it contains '@{'";
+  const parts = prefix.split('/');
+  if (parts.some((part) => part === '')) return "it starts or ends with '/', or contains '//'";
+  if (parts.some((part) => part.startsWith('.'))) return "a part of it starts with '.'";
+  if (parts.some((part) => part.endsWith('.lock'))) return "a part of it ends with '.lock'";
+  return undefined;
+}
+
+/**
+ * Why git would refuse `name` as a branch name, following
+ * `git check-ref-format --branch`; undefined if it wouldn't.
+ */
+export function branchNameProblem(name: string): string | undefined {
+  return branchPrefixProblem(name) ?? (name.endsWith('.') ? "it ends with '.'" : undefined);
+}

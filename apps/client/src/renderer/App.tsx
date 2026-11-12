@@ -96,7 +96,8 @@ function Workspace() {
   /** Whether the open Session's last prompt failed, so it can be sent again. */
   const [retryable, setRetryable] = useState(false);
   /** The Project picked for the New Session view; each pick starts it afresh. */
-  const [newSession, setNewSession] = useState<{ projectId?: number; fromIssue?: boolean; workingCopy?: NewSessionWorkingCopy; generation: number }>({ generation: 0 });
+  /** `from` is the view it was started from, which Cancel goes back to. */
+  const [newSession, setNewSession] = useState<{ projectId?: number; fromIssue?: boolean; workingCopy?: NewSessionWorkingCopy; from: View; generation: number }>({ from: 'session', generation: 0 });
   const [picking, setPicking] = useState<Picking>();
   /** The palette, while open, and where focus was before it. */
   const [palette, setPalette] = useState<{ returnFocus: HTMLElement | null }>();
@@ -113,15 +114,14 @@ function Workspace() {
     select(session);
     setReplyRequest((n) => n + 1);
   };
-  const startNewSession = (project: Project | undefined, fromIssue = false) => {
-    setNewSession((n) => ({ projectId: project?.id, fromIssue, generation: n.generation + 1 }));
+  /** Starts the New Session view afresh, Cancel going back to the view before it. */
+  const openNewSession = (start: { projectId?: number; fromIssue?: boolean; workingCopy?: NewSessionWorkingCopy }) => {
+    setNewSession((n) => ({ ...start, from: view === 'new-session' ? n.from : view, generation: n.generation + 1 }));
     setView('new-session');
   };
+  const startNewSession = (project: Project | undefined, fromIssue = false) => openNewSession({ projectId: project?.id, fromIssue });
   /** New Session on a Project's working copy, from another Session's menu. */
-  const startNewSessionOn = (projectId: number, workingCopy: NewSessionWorkingCopy) => {
-    setNewSession((n) => ({ projectId, workingCopy, generation: n.generation + 1 }));
-    setView('new-session');
-  };
+  const startNewSessionOn = (projectId: number, workingCopy: NewSessionWorkingCopy) => openNewSession({ projectId, workingCopy });
   /** New Session asks for the Project first, when there is one to pick. */
   const pickProject = (returnFocus: HTMLElement | null, fromIssue = false) => {
     if (fromIssue || projects.length) setPicking({ fromIssue, returnFocus });
@@ -280,7 +280,14 @@ function Workspace() {
         ) : view === 'projects' ? (
           <Projects linker={linker} />
         ) : view === 'new-session' ? (
-          <NewSession key={newSession.generation} initialProjectId={newSession.projectId} pickIssue={newSession.fromIssue} initialWorkingCopy={newSession.workingCopy} onStarted={select} />
+          <NewSession
+            key={newSession.generation}
+            initialProjectId={newSession.projectId}
+            pickIssue={newSession.fromIssue}
+            initialWorkingCopy={newSession.workingCopy}
+            onStarted={select}
+            onCancel={() => setView(newSession.from)}
+          />
         ) : selected ? (
           <SessionView
             key={selected.id}
@@ -298,6 +305,7 @@ function Workspace() {
         {picking && (
           <ProjectPicker
             projects={picking.fromIssue ? forgeProjects : projects}
+            highlightedId={currentProjectId(selected, sessions)}
             onClose={() => {
               setPicking(undefined);
               picking.returnFocus?.focus();
@@ -438,6 +446,12 @@ function paletteActions(app: {
 function shortcutAction(name: ShortcutName, icon: LucideIcon, run: PaletteAction['run']): PaletteAction {
   const { label, shortcut } = SHORTCUTS[name];
   return { label, icon, shortcut, run };
+}
+
+/** The Project a new Session most likely goes in: the open Session's, else that of the Session most recently active. */
+function currentProjectId(selected: Session | undefined, sessions: Session[]): number | undefined {
+  if (selected) return selected.projectId;
+  return sessions.reduce<Session | undefined>((latest, s) => (!latest || s.updatedAt > latest.updatedAt ? s : latest), undefined)?.projectId;
 }
 
 /** The + button's menu of things to start: a Session or a Project. */

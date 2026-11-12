@@ -3,6 +3,8 @@
 .popover [role="option"], .popover [role="menuitem"] { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text); background: none; border: 0; border-radius: 6px; padding: 6px 10px; font-weight: 400; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .popover [role="option"]:hover, .popover [role="menuitem"]:hover, .popover [role="option"]:focus-visible, .popover [role="menuitem"]:focus-visible { background: var(--hover); outline: none; }
 .popover [role="option"][aria-selected="true"] { color: var(--accent); }
+/* The option Enter in the search box picks, while the search box has the focus. */
+.popover:has(input:focus) [role="option"][data-enter] { background: var(--hover); }
 .popover input { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; outline: none; }
 .popover input:focus { border-color: var(--accent); }
 .popover [role="listbox"] { display: flex; flex-direction: column; gap: 2px; }

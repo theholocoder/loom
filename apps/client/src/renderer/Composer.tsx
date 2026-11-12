@@ -25,6 +25,7 @@ export function Composer({
   onSend,
   onDraftChange,
   canSendEmpty = false,
+  held = false,
   canAttach = true,
   dock,
   clearKey,
@@ -53,6 +54,8 @@ export function Composer({
   onDraftChange?: (draft: string) => void;
   /** Whether an empty prompt can be sent. */
   canSendEmpty?: boolean;
+  /** Whether sending waits for something outside the prompt box to be put right, such as a branch name; the prompt stays editable. */
+  held?: boolean;
   /** Whether files can go with the message: not with an answer to a question. */
   canAttach?: boolean;
   /** What sits on the prompt box, part of it: the panel of a question it answers. */
@@ -103,7 +106,7 @@ export function Composer({
   const attachable = canAttach && !disabled;
   const attached = attachable ? files : [];
   const [sending, setSending] = useState(false);
-  const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '' || attached.length > 0 || comments.length > 0);
+  const canSend = !disabled && !held && !sending && (canSendEmpty || draft.trim() !== '' || attached.length > 0 || comments.length > 0);
   const picker = useRef<HTMLInputElement>(null);
   const attach = (added: Iterable<File>) => {
     const list = [...added];

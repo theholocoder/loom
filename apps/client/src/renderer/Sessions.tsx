@@ -1,9 +1,9 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
-import { branchName, issueBranch, suggestBranch } from '../shared/branches';
+import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -31,6 +31,7 @@ import { ContextGauge, effortsOf, ModelMarker, ModelPickers } from './ModelPicke
 import { AttachmentList, CommentNoteForm, Composer } from './Composer';
 import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
+import { isFreeEscape } from './escape';
 import { addToContextMenu, selectedText } from './ContextMenu';
 
 /** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
@@ -127,29 +128,42 @@ function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: Ex
 }
 
 /** Starting a Session: which Project, which working copy, and the first prompt. */
-/** `pickIssue` opens the issue picker at once, for starting from an issue; `initialWorkingCopy` picks the working copy. */
+/**
+ * `pickIssue` opens the issue picker at once, for starting from an issue;
+ * `initialWorkingCopy` picks the working copy. Cancel gives up through
+ * `onCancel`, as does Escape that nothing open on it took, while nothing is
+ * typed.
+ */
 export function NewSession({
   initialProjectId,
   pickIssue,
   initialWorkingCopy,
   onStarted,
+  onCancel,
 }: {
   initialProjectId?: number;
   pickIssue?: boolean;
   initialWorkingCopy?: NewSessionWorkingCopy;
   onStarted: (session: Session) => void;
+  onCancel: () => void;
 }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
   const [projectId, setProjectId] = useState(initialProjectId);
   const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
-  const [workingCopy, setWorkingCopy] = useState<WorkingCopyChoice>(initialWorkingCopy?.workingCopy ?? 'worktree');
+  const [pickedWorkingCopy, setPickedWorkingCopy] = useState<WorkingCopyChoice>(initialWorkingCopy?.workingCopy ?? 'worktree');
   // The branch picked to branch from; until then, the default base.
   const [pickedBase, setPickedBase] = useState<ExistingBranch>();
   const [existing, setExisting] = useState<ExistingPick | undefined>(initialWorkingCopy?.workingCopy === 'existing' ? initialWorkingCopy.existing : undefined);
-  const { listed, refresh, refreshing } = useBranches(workingCopy === 'checkout' ? undefined : chosen?.id);
+  // Listed whatever the working copy, for what each choice offers.
+  const { listed, refresh, refreshing } = useBranches(chosen?.id);
   const branches = listed && 'value' in listed ? listed.value : undefined;
   const unlisted = listed && 'error' in listed ? listed : undefined;
+  // Existing worktree, while there is a worktree or a branch for one, or until the list says there isn't.
+  const offersExisting = !branches || !!existing || existingOptions(branches).length > 0;
+  const workingCopy = pickedWorkingCopy === 'existing' && !offersExisting ? 'worktree' : pickedWorkingCopy;
+  // The prompt waits for the worktree to work in.
+  const needsWorktree = workingCopy === 'existing' && !existing;
   // Why origin's branches may be out of date, for the pickers that list them.
   const stale = workingCopy === 'checkout' ? undefined : branches?.fetchError;
   const base = pickedBase ?? branches?.defaultBase;
@@ -160,6 +174,11 @@ export function NewSession({
   // The issue picked to start from, while Forge features are on.
   const [pickedIssue, setIssue] = useState<Issue>();
   const issue = chosen?.forge.state === 'available' ? pickedIssue : undefined;
+  // Why git wouldn't take the branch name typed, said as it is typed; main says it again on start.
+  const typedBranch = workingCopy === 'worktree' ? editedBranch?.trim() : undefined;
+  const branchProblem = typedBranch ? branchNameProblem(typedBranch) : undefined;
+  const branchError = branchProblem && `"${typedBranch}" can't be a branch name: ${branchProblem}`;
+  const branchErrorId = useId();
   const suggested = !chosen ? '' : issue ? issueBranch(chosen.branchPrefix, issue) : draft.trim() ? suggestBranch(chosen.branchPrefix, draft) : '';
   // The model and Effort picked; until then, the agent's own.
   const models = useCheckoutModels(chosen?.id);
@@ -171,6 +190,20 @@ export function NewSession({
   const approvalModeDefault = useTopic('settings')?.approvalModeDefault ?? 'supervised';
   const [pickedMode, setApprovalMode] = useState<ApprovalMode>();
   const approvalMode = pickedMode ?? approvalModeDefault;
+  // Esc gives up, but for what was typed: only Cancel throws that away.
+  const escape = useRef<() => void>(undefined);
+  escape.current = () => !draft.trim() && editedBranch === undefined && onCancel();
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isFreeEscape(event)) return;
+      event.preventDefault();
+      escape.current?.();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+  // The prompt takes the focus from the start, unless the issue picker opens first; then once an issue is picked.
+  const [focusRequest, setFocusRequest] = useState(pickIssue ? 0 : 1);
 
   const start = async (prompt: string, attachments: NewAttachment[]) => {
     if (!chosen) return false;
@@ -190,6 +223,10 @@ export function NewSession({
     <main className="main" aria-label="New Session">
       <div className="main-head">
         <h1>New Session</h1>
+        <span className="grow" />
+        <button type="button" title="Cancel (Esc)" onClick={onCancel}>
+          Cancel
+        </button>
       </div>
       <div className="chat">
         {projects.length === 0 && <div className="empty">Add a Project before starting a Session.</div>}
@@ -197,17 +234,24 @@ export function NewSession({
       {chosen && (
         <Composer
           agent={OPENCODE_NAME}
-          placeholder={`Tell ${OPENCODE_NAME} what to do…`}
-          tips
+          placeholder={needsWorktree ? 'Pick the worktree to work in first.' : `Tell ${OPENCODE_NAME} what to do…`}
+          tips={!needsWorktree}
+          focusRequest={focusRequest}
           onSend={start}
           onDraftChange={setDraft}
           loadFiles={() => api.invoke('projects.files', { id: chosen.id, ...filesRef(workingCopy, { existing, base }) })}
           commands={commands}
           canSendEmpty={!!issue}
-          disabled={workingCopy === 'existing' && !existing}
+          disabled={needsWorktree}
+          held={!!branchError}
           remarks={
-            (error || stale) && (
+            (error || stale || branchError) && (
               <>
+                {branchError && (
+                  <div className="err" role="alert" id={branchErrorId}>
+                    {branchError}
+                  </div>
+                )}
                 {stale && (
                   <div className="muted" role="status" title={stale}>
                     Couldn't refresh origin, using what's here.
@@ -242,6 +286,9 @@ export function NewSession({
                   // Another checkout may offer other models.
                   setModel(undefined);
                   setEffort(undefined);
+                  // Why the old Project's Session couldn't start says nothing of this one.
+                  setError(undefined);
+                  setFocusRequest((n) => n + 1);
                 }}
               />
               <ModelPickers
@@ -273,10 +320,10 @@ export function NewSession({
                 value={workingCopy}
                 options={[
                   { value: 'worktree', label: 'New worktree' },
-                  { value: 'existing', label: 'Existing worktree' },
-                  { value: 'checkout', label: 'Stay on current branch' },
+                  ...(offersExisting ? [{ value: 'existing' as const, label: 'Existing worktree' }] : []),
+                  { value: 'checkout', label: branches?.checkoutBranch ? `Stay on ${branches.checkoutBranch}` : 'Stay on current branch' },
                 ]}
-                onChange={setWorkingCopy}
+                onChange={setPickedWorkingCopy}
               />
               <IssuePicker
                 project={chosen}
@@ -285,6 +332,7 @@ export function NewSession({
                 onChange={(picked) => {
                   setIssue(picked);
                   setEditedBranch(undefined);
+                  if (picked) setFocusRequest((n) => n + 1);
                 }}
               />
               {workingCopy === 'existing' && (
@@ -321,6 +369,8 @@ export function NewSession({
                     aria-label="Branch"
                     placeholder={`${chosen.branchPrefix}/…`}
                     value={editedBranch ?? suggested}
+                    aria-invalid={branchError ? true : undefined}
+                    aria-describedby={branchError ? branchErrorId : undefined}
                     onChange={(event) => setEditedBranch(event.target.value)}
                   />
                 </label>
@@ -334,7 +384,7 @@ export function NewSession({
 }
 
 /**
- * What a worktree Session on the Project `projectId` can start from, listed
+ * What a Session on the Project `projectId` can start from or work in, listed
  * by main (fetching origin) when the Project is chosen and again on
  * `refresh`, the last list staying until the new one comes (`refreshing`
  * meanwhile); nothing while `projectId` is undefined.
