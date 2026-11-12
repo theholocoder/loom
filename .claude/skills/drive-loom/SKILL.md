@@ -34,7 +34,7 @@ description: Drive the real Loom app headless in a sandbox (seeded repos, script
 
 ## The sandbox
 
-- **Repos** (`state.repos`): `billing` is on GitHub through the `gh` stand-in, with branch `loom/12-invoices-show-the-wrong-currency` holding Merge request #40 (a failing check, a review asking for changes); its `origin` is unreachable, so fetches fail. `web` has a local bare `origin`, so fetches work. `docs` has no `origin`. They are real git repos: change files or run git in them to set up a case.
+- **Repos** (`state.repos`): `billing` is on GitHub through the `gh` stand-in, with branch `loom/12-invoices-show-the-wrong-currency` holding Merge request #40 (a failing check, a review asking for changes, a description with a mermaid diagram); its `origin` is unreachable, so fetches fail. `web` has a local bare `origin`, so fetches work. `docs` has no `origin`. They are real git repos: change files or run git in them to set up a case.
 - **The agent** is scripted: each agent process plays one turn per prompt, in order: (1) thinking, tool calls including a failed one, an edit and a Markdown reply; (2) an Approval request, then a two-part question; (3) a run that stays Working until stopped; (4) a provider error. Past the end it says nothing. A reopened or restarted Session starts a new process at turn 1. Judge how Loom shows these turns, not their wording.
 - **Native dialogs** can't show headless: stub them before the click, e.g. `await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, state.repos.web)`, and `dialog.showMessageBox` the same way.
 - **The app's PATH** is a minimal sandbox one: its terminal lacks tools such as `ls`.

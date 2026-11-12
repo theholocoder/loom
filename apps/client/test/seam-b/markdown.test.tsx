@@ -147,6 +147,17 @@ describe('Markdown in chat messages', () => {
     expect(clipboard.at(-1)).toBe('plain');
   });
 
+  it("keeps a mermaid block in a reply as code, and an HTML comment as text: only a Forge's Markdown draws and hides them", async () => {
+    const { chat, show } = openSession();
+    show(user('Draw it'), agent('<!-- note -->\n\n```mermaid\nflowchart LR\n  a --> b\n```'));
+
+    const figure = within(chat()).getByRole('figure');
+    expect(within(figure).getByText('mermaid')).toBeTruthy();
+    expect(chat().textContent).toContain('<!-- note -->');
+    await act(async () => {});
+    expect(within(chat()).queryByRole('img', { name: 'Diagram' })).toBeNull();
+  });
+
   it('renders a reply as it streams, with a code fence not yet closed', () => {
     const { chat, show } = openSession();
 

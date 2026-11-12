@@ -32,7 +32,7 @@ Seam A never runs the real `gh` or `glab`: it puts scripted stand-ins on the Env
 
 ### Forge contract suite
 
-An opt-in suite (`apps/client/test/forge-contract`) checks those stand-ins against the real CLIs. It runs your own signed-in `gh` and `glab` against sandbox repositories (read-only, each with at least one open issue), checks Loom reads their output, records it under `apps/client/test/forge-contract/recordings/`, and checks the stand-in prints the same shape. It is skipped unless `LOOM_FORGE_CONTRACT=1`; each Forge also needs its sandbox as `host/owner/repo`:
+An opt-in suite (`apps/client/test/forge-contract`) checks those stand-ins against the real CLIs. It runs your own signed-in `gh` and `glab` against sandbox repositories (read-only, each with at least one open issue and one Merge request in any state), checks Loom reads their output (the issue picker's list, and the Merge request Panel's read), records it under `apps/client/test/forge-contract/recordings/`, and checks the stand-in prints the same shape. It is skipped unless `LOOM_FORGE_CONTRACT=1`; each Forge also needs its sandbox as `host/owner/repo`:
 
 ```sh
 LOOM_FORGE_CONTRACT=1 \

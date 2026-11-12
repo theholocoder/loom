@@ -20,8 +20,9 @@
 // …/approvals` and `api …/jobs` for glab. They all fail, as an unreachable
 // Forge would, while the script's `offline` is set.
 // And the Merge request Panel's read of one: the same `api graphql` for gh,
-// with its title, branches, author, commits and changes; `mr view`, `api
-// …/commits` and `api …/diffs` for glab.
+// with its title, branches, author, description, reviewers asked (`reviewers`,
+// a name with a slash being a team on GitHub), commits and changes; `mr
+// view`, `api …/commits` and `api …/diffs` for glab.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
@@ -102,9 +103,9 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
 }
 
 /** A scripted Merge request as `gh` or `glab` prints it in JSON. */
-function asCli({ number, url, branch, state = 'open', conflicts, pipeline, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main' }) {
+function asCli({ number, url, branch, state = 'open', conflicts, pipeline, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', description = '', reviewers = [] }) {
   return basename(scriptPath, '.json') === 'glab'
-    ? { id: 5000 + number, iid: number, web_url: url, title, draft, author: { username: author }, source_branch: branch, target_branch: target, state: state === 'open' ? 'opened' : state, has_conflicts: conflicts ?? false, head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null }
+    ? { id: 5000 + number, iid: number, web_url: url, title, description, draft, author: { username: author }, reviewers: reviewers.map((username) => ({ username })), source_branch: branch, target_branch: target, state: state === 'open' ? 'opened' : state, has_conflicts: conflicts ?? false, head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null }
     : { number, url, headRefName: branch, state: state.toUpperCase() };
 }
 
@@ -126,11 +127,13 @@ function rollupOf(checks) {
 }
 
 /** A scripted Merge request as Loom's GraphQL query gets it from GitHub. */
-function asPullRequest({ number, url, branch, state = 'open', reviews = [], comments = [], checks = [], conflicts, oid = 'commit-1', rollupState, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', commits = 1, additions = 0, deletions = 0, changedFiles = 0 }) {
+function asPullRequest({ number, url, branch, state = 'open', reviews = [], comments = [], checks = [], conflicts, oid = 'commit-1', rollupState, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', commits = 1, additions = 0, deletions = 0, changedFiles = 0, description = '', reviewers = [] }) {
   return {
     number,
     url,
     title,
+    body: description,
+    reviewRequests: { nodes: reviewers.map((name) => ({ requestedReviewer: name.includes('/') ? { __typename: 'Team', combinedSlug: name } : { __typename: 'User', login: name } })) },
     isDraft: draft,
     headRefName: branch,
     baseRefName: target,

@@ -1,10 +1,10 @@
 // The Merge request Panel (docs/prototypes/side-panels.html): the Session's
 // Merge request as its Forge has it, read when the Panel shows and again
-// after each Babysit poll. Its state, branches, title, author, commits and
-// changes; the Babysit and Auto-prompt switches; its checks; its reviews and
-// comments; and, at the foot, opening it on the Forge, asking the agent to
-// update it, or linking another. With none linked, it offers to create or
-// link one.
+// after each Babysit poll. Its state, branches, title, author, reviewers,
+// commits and changes; the Babysit and Auto-prompt switches; its checks; its
+// reviews and comments; its description; and, at the foot, opening it on
+// the Forge, asking the agent to update it, or linking another. With none
+// linked, it offers to create or link one.
 import { Bot, ExternalLink, Eye, GitBranch, GitCommitHorizontal, GitPullRequest, GitPullRequestCreate, GitPullRequestDraft, Link, MessageSquare, RotateCw, User } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type MergeRequestDetails, type MergeRequestReview, type Project, type ReviewVerdict, type Session } from '../shared/api';
@@ -147,6 +147,17 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
                 <User className="sm" />
                 by {details.author}
               </span>
+              {details.reviewers.length > 0 && (
+                <span className="row reviewers">
+                  {details.reviewers.length === 1 ? 'Reviewer' : 'Reviewers'}
+                  {details.reviewers.map((reviewer) => (
+                    <span key={reviewer} className="row">
+                      <Avatar name={reviewer} />
+                      {reviewer}
+                    </span>
+                  ))}
+                </span>
+              )}
               <span className="row">
                 <GitCommitHorizontal className="sm" />
                 {countText(details.commits, 'commit', details.moreCommits)}
@@ -238,6 +249,10 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
           </h3>
           {details && <Discussion details={details} onOpen={(url) => attempt(onError, () => api.invoke('links.open', { url }))} />}
         </section>
+        <section className="mr-sec mr-desc" aria-labelledby={`${ids}-description`}>
+          <h3 id={`${ids}-description`}>Description</h3>
+          {details && (details.description.trim() ? <Markdown text={details.description} flavour="forge" /> : <p className="muted">No description.</p>)}
+        </section>
       </div>
       <footer className="mr-foot">
         <button type="button" onClick={() => attempt(onError, () => api.invoke('links.open', { url: mergeRequest.url }))}>
@@ -305,9 +320,7 @@ function Discussion({ details, onOpen }: { details: MergeRequestDetails; onOpen:
         return (
           <li key={item.url} className="review-card" aria-label={label}>
             <div className="rh">
-              <span className="avatar" aria-hidden="true">
-                {item.author.slice(0, 2).toUpperCase()}
-              </span>
+              <Avatar name={item.author} />
               <b>{item.author}</b>
               {verdict ? <span className={verdict.className}>{verdict.label}</span> : <MessageSquare className="sm muted" aria-hidden="true" />}
               <span className="grow" />
@@ -325,7 +338,7 @@ function Discussion({ details, onOpen }: { details: MergeRequestDetails; onOpen:
             ) : (
               item.body.trim() && (
                 <div className="rb">
-                  <Markdown text={item.body} />
+                  <Markdown text={item.body} flavour="forge" />
                 </div>
               )
             )}
@@ -347,9 +360,18 @@ function CodeComment({ comment, onOpen }: { comment: MergeRequestComment; onOpen
         </button>
       </div>
       <div className="qt">
-        <Markdown text={comment.body} />
+        <Markdown text={comment.body} flavour="forge" />
       </div>
     </div>
+  );
+}
+
+/** Someone's initials, standing in for their picture. */
+function Avatar({ name }: { name: string }) {
+  return (
+    <span className="avatar" aria-hidden="true">
+      {name.slice(0, 2).toUpperCase()}
+    </span>
   );
 }
 

@@ -1,6 +1,7 @@
 // A Merge request as its Panel shows it, read through the Forge's CLI and the
 // user's login (ADR 0002) when the Panel asks: its title, state, branches,
-// commits and changes, its checks, and everyone's reviews and comments.
+// commits and changes, its description and reviewers, its checks, and
+// everyone's reviews and comments.
 import type { ForgeStatus, MergeRequestComment, MergeRequestDetails, MergeRequestReview, ReviewVerdict } from '../../shared/api';
 import type { BridgeCall } from '../environments/exec';
 import { authorOf, gitHubCi, gitHubState, gitLabCi, gitLabState, lineOf, runJson, type GitHubAuthored, type GitHubContext, type GitLabMergeRequest } from './merge-request-activity';
@@ -19,7 +20,8 @@ export async function readMergeRequestDetails(call: BridgeCall, forge: ForgeStat
 const GITHUB_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      number url title state isDraft headRefName baseRefName author { login }
+      number url title body state isDraft headRefName baseRefName author { login }
+      reviewRequests(first: 100) { nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { combinedSlug } } } }
       additions deletions changedFiles
       totalCommits: commits { totalCount }
       reviews(last: 100) { nodes { state body url submittedAt author { login } comments(first: 100) { nodes { path line originalLine body url createdAt author { login } } } } }
@@ -45,6 +47,7 @@ interface GitHubPullRequest extends GitHubAuthored {
   number: number;
   url: string;
   title: string;
+  body: string;
   state: string;
   isDraft: boolean;
   headRefName: string;
@@ -53,6 +56,8 @@ interface GitHubPullRequest extends GitHubAuthored {
   deletions: number;
   changedFiles: number;
   totalCommits: { totalCount: number };
+  /** Those asked to review it who haven't yet: GitHub drops a request once its reviewer has reviewed. */
+  reviewRequests: { nodes: { requestedReviewer: { __typename: string; login?: string; combinedSlug?: string } | null }[] };
   reviews: { nodes: (GitHubAuthored & { state: string; body: string; url: string; submittedAt?: string | null; comments: { nodes: GitHubComment[] } })[] };
   comments: { nodes: GitHubComment[] };
   commits: { nodes: { commit: { oid: string; statusCheckRollup: { state: string; contexts: { nodes: GitHubContext[] } } | null } }[] };
@@ -83,6 +88,11 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
     if (verdict === 'commented' && !review.body.trim() && !comments.length) return [];
     return [{ author: authorOf(review), verdict, body: review.body, ...timeOf(review.submittedAt), url: review.url, comments }];
   });
+  const author = authorOf(pull);
+  const requested = pull.reviewRequests.nodes.flatMap(({ requestedReviewer: r }) => {
+    const name = r?.login ?? r?.combinedSlug;
+    return name ? [name] : [];
+  });
   return {
     number: pull.number,
     url: pull.url,
@@ -91,7 +101,10 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
     draft: pull.isDraft,
     sourceBranch: pull.headRefName,
     targetBranch: pull.baseRefName,
-    author: authorOf(pull),
+    author,
+    description: pull.body,
+    // Those who reviewed, then those still asked to.
+    reviewers: reviewersOf(author, [...reviews.map((review) => review.author), ...requested]),
     commits: pull.totalCommits.totalCount,
     files: pull.changedFiles,
     added: pull.additions,
@@ -111,6 +124,8 @@ interface GitLabView extends GitLabMergeRequest {
   source_branch: string;
   target_branch: string;
   author?: { username: string } | null;
+  description?: string | null;
+  reviewers?: { username: string }[] | null;
 }
 interface GitLabNote {
   body: string;
@@ -143,6 +158,8 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     }
   }
   const url = request.web_url;
+  const author = request.author?.username ?? 'ghost';
+  const approvers = approvals.approved_by.map(({ user }) => user.username);
   const comments: MergeRequestComment[] = notes
     .filter((note) => !note.system)
     // Newest first, as GitLab returns them by default.
@@ -159,7 +176,10 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     draft: !!(request.draft ?? request.work_in_progress),
     sourceBranch: request.source_branch,
     targetBranch: request.target_branch,
-    author: request.author?.username ?? 'ghost',
+    author,
+    description: request.description ?? '',
+    // Those asked to review it, then those who approved it without being asked.
+    reviewers: reviewersOf(author, [...(request.reviewers ?? []).map((reviewer) => reviewer.username), ...approvers]),
     commits: commits.length,
     ...(commits.length >= PER_PAGE ? { moreCommits: true } : {}),
     files: diffs.length,
@@ -169,9 +189,14 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     ...(ci.status ? { ci: ci.status } : {}),
     checks: ci.checks,
     // GitLab's reviews are its approvals.
-    reviews: approvals.approved_by.map(({ user }) => ({ author: user.username, verdict: 'approved', body: '', url, comments: [] })),
+    reviews: approvers.map((approver) => ({ author: approver, verdict: 'approved', body: '', url, comments: [] })),
     comments,
   };
+}
+
+/** `names` once each, in order, without the Merge request's `author`: replying to a thread makes them a reviewer on GitHub. */
+function reviewersOf(author: string, names: string[]): string[] {
+  return [...new Set(names)].filter((name) => name !== author);
 }
 
 function timeOf(iso: string | null | undefined): { at?: number } {

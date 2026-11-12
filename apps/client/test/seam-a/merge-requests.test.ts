@@ -179,7 +179,7 @@ describe('Link Merge request, by hand', () => {
 });
 
 describe("the Merge request Panel's read of it", () => {
-  it('reads its state, branches, commits, changes, checks and everyone\'s reviews and comments from GitHub', async () => {
+  it('reads its state, branches, description, reviewers, commits, changes, checks and everyone\'s reviews and comments from GitHub', async () => {
     const { machine, checkout } = machineOn('gh', GITHUB, {
       mergeRequests: [
         {
@@ -189,6 +189,9 @@ describe("the Merge request Panel's read of it", () => {
           title: 'Fix the login bug',
           draft: true,
           author: 'octocat',
+          description: '## What\n\n```mermaid\nflowchart LR\n  a --> b\n```',
+          // Still asked: a user, a team, and alice again, who has reviewed since.
+          reviewers: ['dave', 'acme/billing', 'alice'],
           commits: 3,
           additions: 67,
           deletions: 1,
@@ -220,6 +223,9 @@ describe("the Merge request Panel's read of it", () => {
       sourceBranch: 'loom/fix-login',
       targetBranch: 'main',
       author: 'octocat',
+      description: '## What\n\n```mermaid\nflowchart LR\n  a --> b\n```',
+      // Those who reviewed, then those still asked to; the author replying to a thread isn't one.
+      reviewers: ['alice', 'dave', 'acme/billing'],
       commits: 3,
       files: 3,
       added: 67,
@@ -246,7 +252,7 @@ describe("the Merge request Panel's read of it", () => {
     expect(query).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'owner=theholocoder', 'name=loom', 'number=12']));
   });
 
-  it('reads it from GitLab through glab, in the working copy, approvals as its reviews', async () => {
+  it('reads it from GitLab through glab, in the working copy, approvals as its reviews and approvers among its reviewers', async () => {
     const { machine, checkout } = machineOn('glab', GITLAB, {
       mergeRequests: [
         {
@@ -255,6 +261,8 @@ describe("the Merge request Panel's read of it", () => {
           branch: 'loom/fix-login',
           title: 'Fix the login bug',
           author: 'dave',
+          description: 'Fixes the **login**.',
+          reviewers: ['frank', 'erin'],
           target: 'develop',
           commits: 2,
           diffs: [
@@ -262,7 +270,7 @@ describe("the Merge request Panel's read of it", () => {
             { new_path: 'lib/b.rb', diff: '@@ -1 +0,0 @@\n-gone' },
           ],
           pipeline: { id: 77, status: 'success', jobs: [{ id: 1, name: 'rspec', status: 'success', url: 'https://ci/1' }] },
-          approvedBy: ['erin'],
+          approvedBy: ['erin', 'grace'],
           comments: [
             { id: 1, author: 'erin', body: 'On the code', path: 'lib/a.rb', line: 2, createdAt: '2026-11-01T10:00:00Z' },
             { id: 2, author: 'gitlab', body: 'added 1 commit', system: true },
@@ -282,13 +290,18 @@ describe("the Merge request Panel's read of it", () => {
       sourceBranch: 'loom/fix-login',
       targetBranch: 'develop',
       author: 'dave',
+      description: 'Fixes the **login**.',
+      reviewers: ['frank', 'erin', 'grace'],
       commits: 2,
       files: 2,
       added: 2,
       removed: 2,
       ci: 'passed',
       checks: [{ name: 'rspec', state: 'passed', url: 'https://ci/1' }],
-      reviews: [{ author: 'erin', verdict: 'approved', body: '', url: mr(87), comments: [] }],
+      reviews: [
+        { author: 'erin', verdict: 'approved', body: '', url: mr(87), comments: [] },
+        { author: 'grace', verdict: 'approved', body: '', url: mr(87), comments: [] },
+      ],
       comments: [{ author: 'erin', body: 'On the code', path: 'lib/a.rb', line: 2, at: Date.parse('2026-11-01T10:00:00Z'), url: `${mr(87)}#note_1` }],
     });
     const at = machine.forgeCliInvocations('glab').findLastIndex((args) => args[0] === 'api' && /\/diffs/.test(args[1]!));
