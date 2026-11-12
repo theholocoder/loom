@@ -71,6 +71,8 @@ export class Babysit {
   private readonly flushing = new Set<number>();
   /** The Sessions the user has stopped watching: what was seen is kept, so turning back on catches up. */
   private readonly off = new Set<number>();
+  /** Those to poll again as soon as the poll under way ends. */
+  private readonly pollAgain = new Set<number>();
   private writes: Promise<unknown> = Promise.resolve();
   private stopped = false;
 
@@ -145,6 +147,19 @@ export class Babysit {
     for (const [id, record] of this.records) void (record.ended ? this.flush(id) : this.poll(id));
   }
 
+  /**
+   * Polls one Session's Merge request now, just after the user merged it
+   * from its Panel; again once a poll under way ends, as that one may have
+   * read it before. False if Babysit isn't watching it.
+   */
+  pollNow(id: number): boolean {
+    const record = this.records.get(id);
+    if (this.stopped || !record || this.off.has(id)) return false;
+    if (this.polling.has(`${id}:${record.url}`)) this.pollAgain.add(id);
+    else void this.poll(id);
+    return true;
+  }
+
   /** Stops watching, and resolves once what was seen is written. */
   async stop(): Promise<void> {
     this.stopped = true;
@@ -169,6 +184,8 @@ export class Babysit {
     } finally {
       this.polling.delete(pollKey);
     }
+    // What it read may be out of date already: the next read takes it in instead.
+    if (this.pollAgain.delete(id)) return this.poll(id);
     if (this.stopped || this.records.get(id) !== record || this.off.has(id)) return;
     if (activity) this.takeIn(id, record, activity);
     else record.stale = true;

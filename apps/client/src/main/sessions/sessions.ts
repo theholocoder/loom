@@ -11,7 +11,7 @@ import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { FeedbackDelivery } from './babysit';
 import { diffCommentBlocks } from './diff-comment-prompt';
 import { feedbackPrompt } from './feedback-prompt';
-import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
+import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, squashAndMerge, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import { readMergeRequestDetails } from '../projects/merge-request-details';
 import { readMergeRequestDiff } from '../projects/merge-request-diff';
 import type { LoomDatabase } from '../storage/database';
@@ -861,6 +861,29 @@ export class Sessions {
   async mergeRequestDiff({ id }: { id: number }): Promise<MergeRequestDiff> {
     const { call, forge, workingCopy, number } = this.mergeRequestRead(this.get(id));
     return readMergeRequestDiff(call, forge, workingCopy, number);
+  }
+
+  /**
+   * Squashes and merges the Session's Merge request, as the user confirmed in
+   * its Panel: no Approval request, the user asked for it themselves. Then
+   * says its state as the Forge has it, for whoever records it (Babysit, if
+   * it watches the Merge request).
+   */
+  async squashAndMerge({ id, title, head }: { id: number; title: string; head: string }): Promise<{ state?: MergeRequestState }> {
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    // A commit title is one line.
+    const subject = title.replace(/\s+/g, ' ').trim();
+    if (!subject) throw new Error('The squash commit needs a title.');
+    if (!head) throw new Error("Loom doesn't know which commit the Merge request is at: read it again first.");
+    const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
+    await squashAndMerge(call, forge, workingCopy, number, { title: subject, head });
+    try {
+      return { state: (await viewMergeRequest(call, forge, workingCopy, number)).state };
+    } catch {
+      // Merged all the same: the next read says how it stands.
+      return {};
+    }
   }
 
   /** What reading the Session's Merge request takes: its Environment, its Project's Forge, where glab runs and its number. */

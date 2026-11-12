@@ -297,6 +297,12 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
     'sessions.mergeRequest': (params) => sessionService.mergeRequest(params),
     'sessions.mergeRequestDiff': (params) => sessionService.mergeRequestDiff(params),
+    'sessions.squashAndMerge': async (params) => {
+      const result = await sessionService.squashAndMerge(params);
+      // Babysit archives the Session once it sees it merged, so it looks now; without Babysit, the merge is just recorded.
+      if (!babysitter.pollNow(params.id) && result.state && result.state !== 'open') sessionService.setMergeRequestState(params.id, result.state);
+      return result;
+    },
     'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
     'sessions.setAutoPrompt': (params) => sessionService.setAutoPrompt(params),
     'sessions.setBabysitting': (params) => sessionService.setBabysitting(params),

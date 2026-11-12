@@ -140,7 +140,7 @@ export interface ForgeCliScript {
   repoView?: { stdout?: string | object; stderr?: string; exitCode?: number };
   /** The open issues `issue list` lists. */
   issues?: { number: number; title: string; body: string; url: string }[];
-  /** The Merge requests `pr`/`mr list` and `view` know of; `state` defaults to open. */
+  /** The Merge requests `pr`/`mr list` and `view` know of; `state` defaults to open, and `pr`/`mr merge` makes it merged. */
   mergeRequests?: ({ number: number; url: string; branch: string; state?: 'open' | 'merged' | 'closed' } & ScriptedActivity)[];
   /** The account signed in, whose comments are the user's own (default: `octocat`). */
   viewer?: string;
@@ -185,6 +185,12 @@ export interface ScriptedActivity {
   diffs?: { old_path?: string; new_path: string; diff: string; new_file?: boolean; renamed_file?: boolean; deleted_file?: boolean; too_large?: boolean }[];
   /** GitHub's list of its files, each with its patch, without file headers. */
   files?: { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; patch?: string }[];
+  /** Those of its `reviewers` asking for changes, on GitLab. */
+  requestedChanges?: string[];
+  /** What `pr merge` / `mr merge` fails with, as a Forge refusing to merge it would. */
+  mergeRefusal?: string;
+  /** Set when a merge leaves it open, to be merged later (a merge queue, or once its pipeline passes). */
+  mergeLater?: boolean;
 }
 
 export type ForgeCli = 'gh' | 'glab';
