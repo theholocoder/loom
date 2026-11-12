@@ -1896,11 +1896,13 @@ export class Sessions {
   /** Adds tokens and cost to the Session's bucket for today and the model its run went with. */
   private recordUsage(id: number, tokens: TokenCounts, cost: number): void {
     const session = this.get(id);
+    const model = this.runModels.get(id) ?? this.modelOf(id);
     const turn = {
       sessionId: id,
       projectId: session.projectId,
       projectName: this.options.project(session.projectId)?.name ?? `Project ${session.projectId}`,
-      model: this.runModels.get(id) ?? this.modelOf(id),
+      model,
+      modelName: session.agentConfig?.models.find((m) => m.id === model)?.name,
       endedAt: this.options.clock.now(),
       tokens,
       cost,

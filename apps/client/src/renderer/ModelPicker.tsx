@@ -1,6 +1,6 @@
 // The composer's model and Effort pickers and its context gauge, and the
-// timeline marker of a change. Models show as `provider/model`, as the agent
-// names them.
+// timeline marker of a change. Models show by the names their providers give
+// them, with `provider/model`, as the agent names them, in a tooltip.
 import { Brain, Cpu, Gauge } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { DEFAULT_EFFORT, type ContextUsage, type ModelChoice, type TranscriptItem } from '../shared/api';
@@ -15,6 +15,7 @@ export function ModelPickers({
   model,
   efforts,
   effort,
+  placeholder,
   disabled = false,
   onOpen,
   onModel,
@@ -30,22 +31,28 @@ export function ModelPickers({
   efforts: string[];
   /** The Effort level shown; `default` while absent. */
   effort?: string;
+  /** What shows while no model is; by default, the agent's default model, named once the models listed say which. */
+  placeholder?: string;
   disabled?: boolean;
   /** Called when the model list opens. */
   onOpen?: () => void;
   onModel: (model: string) => void;
   onEffort: (effort: string) => void;
 }) {
+  const listed = listedModels(models);
+  const fallback = placeholder === undefined ? defaultModelOf(listed) : undefined;
   return (
     <>
       <SearchPicker
         label="Model"
-        placeholder="Default model"
+        placeholder={placeholder ?? (fallback ? `${modelName(listed, fallback.id)} (default)` : 'Default model')}
+        tooltip={model !== undefined ? model : fallback ? `${agent}'s default model: ${fallback.id}` : undefined}
+        tech={false}
         icon={<Cpu className="sm" />}
         noun="models"
         loading={`Asking ${agent} for its models…`}
-        options={models && 'value' in models ? { value: models.value.map((m) => ({ key: m.id, label: m.id, detail: m.name, value: m.id })) } : models}
-        selected={model === undefined ? undefined : { key: model, label: model }}
+        options={models && 'value' in models ? { value: models.value.map((m) => ({ key: m.id, label: modelName(listed, m.id), ...(m.name && m.name !== m.id && { detail: m.id }), value: m.id })) } : models}
+        selected={model === undefined ? undefined : { key: model, label: modelName(listed, model) }}
         disabled={disabled}
         onOpen={onOpen}
         onChange={onModel}
@@ -62,6 +69,31 @@ export function ModelPickers({
         />
       )}
     </>
+  );
+}
+
+/** The models listed; none while they aren't, or when they couldn't be. */
+export function listedModels(listed: Loaded<ModelChoice[]>): ModelChoice[] | undefined {
+  return listed && 'value' in listed ? listed.value : undefined;
+}
+
+/** The model `id` by the name its provider gives it, among `models`; its id when they don't name it. */
+export function modelName(models: readonly ModelChoice[] | undefined, id: string): string {
+  return models?.find((m) => m.id === id)?.name || id;
+}
+
+/** The model the agent runs without one picked, when `models` say which. */
+export function defaultModelOf(models: readonly ModelChoice[] | undefined): ModelChoice | undefined {
+  return models?.find((m) => m.default);
+}
+
+/** A model by `name`, `provider/model` in its tooltip; its id, as code, without a name. */
+export function ModelName({ id, name }: { id: string; name: string | undefined }) {
+  const named = name && name !== id ? name : undefined;
+  return (
+    <span className={named ? undefined : 'tech'} title={id}>
+      {named ?? id}
+    </span>
   );
 }
 
@@ -97,11 +129,11 @@ export function ContextGauge({ context }: { context: ContextUsage }) {
 }
 
 /** Where the user changed the model or Effort, applying from the next prompt. */
-export function ModelMarker({ item }: { item: Extract<TranscriptItem, { kind: 'model' }> }) {
+export function ModelMarker({ item, models }: { item: Extract<TranscriptItem, { kind: 'model' }>; models: readonly ModelChoice[] | undefined }) {
   const parts = [
     item.model !== undefined && (
       <span key="model">
-        Model <span className="tech">{item.model}</span>
+        Model <ModelName id={item.model} name={modelName(models, item.model)} />
       </span>
     ),
     item.effort !== undefined && (

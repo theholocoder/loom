@@ -79,19 +79,21 @@ export interface CheckoutOffer {
  * What OpenCode offers in the checkout `directory`, from a private
  * `opencode serve --stdio`: its models as `provider/model`, with their Effort
  * levels as its ACP bridge offers them (their variants, then `default`),
- * leaving out the models the user turned off; then its commands and skills,
+ * leaving out the models the user turned off, its default one marked when it
+ * says which; then its commands and skills,
  * none if it didn't list them, each skill with where it comes from as the
  * bridge tells.
  */
 export async function probeOpenCodeCheckout(call: BridgeCall, directory: string): Promise<CheckoutOffer> {
-  const { models, commands, skills } = await call<{ models?: ApiModel[]; commands?: unknown; skills?: unknown }>('opencode.probe', PROBE_REQUEST_TIMEOUT_MS, { directory });
+  const { models, defaultModel, commands, skills } = await call<{ models?: ApiModel[]; defaultModel?: { providerID?: unknown; id?: unknown }; commands?: unknown; skills?: unknown }>('opencode.probe', PROBE_REQUEST_TIMEOUT_MS, { directory });
   if (!Array.isArray(models)) throw new Error('OpenCode listed no models');
+  const defaultId = typeof defaultModel?.providerID === 'string' && typeof defaultModel.id === 'string' ? `${defaultModel.providerID}/${defaultModel.id}` : undefined;
   return {
     models: models.flatMap((model) => {
       if (typeof model?.providerID !== 'string' || typeof model.id !== 'string' || model.enabled === false) return [];
       const variants = (Array.isArray(model.variants) ? model.variants : []).flatMap((v) => (typeof v?.id === 'string' ? [v.id] : []));
       const id = `${model.providerID}/${model.id}`;
-      return [{ id, name: typeof model.name === 'string' && model.name ? model.name : id, efforts: variants.length ? [...new Set([...variants, DEFAULT_EFFORT])] : [] }];
+      return [{ id, name: typeof model.name === 'string' && model.name ? model.name : id, efforts: variants.length ? [...new Set([...variants, DEFAULT_EFFORT])] : [], ...(id === defaultId && { default: true as const }) }];
     }),
     commands: [...agentCommandsOf('command', commands), ...agentCommandsOf('skill', skills)],
   };

@@ -308,6 +308,8 @@ export class Highlights {
       projectId: session.projectId,
       projectName: this.options.projectName(session.projectId),
       model,
+      // The check's agent offers what the Session's does.
+      modelName: session.agentConfig?.models.find((m) => m.id === model)?.name,
       endedAt: this.options.clock.now(),
       tokens: tokens ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
       cost,

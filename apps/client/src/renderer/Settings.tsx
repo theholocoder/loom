@@ -353,6 +353,8 @@ function HighlightsModel() {
           model={highlights.model}
           efforts={effortsOf(models.listed, highlights.model)}
           effort={highlights.effort}
+          // A model is needed to check: none is no default.
+          placeholder="Pick a model"
           onOpen={models.refresh}
           onModel={(model) => change({ model, effort: undefined })}
           onEffort={(effort) => change({ effort })}

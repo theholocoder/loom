@@ -6,7 +6,7 @@
 // It fakes what Loom's detection uses: `opencode --version`, and
 // `opencode serve --stdio`, which prints {"url": ...} on stdout, serves
 // `GET /api/integration`, `GET /api/model` (the script's `models`, in
-// OpenCode's shape), `GET /api/command` and `GET /api/skill` (none until
+// OpenCode's shape), `GET /api/model/default` (the first of them, 404 with none), `GET /api/command` and `GET /api/skill` (none until
 // `/api/model` was asked, as OpenCode loads them with the checkout) behind Basic auth with OPENCODE_SERVER_PASSWORD, and
 // exits when its stdin closes. Each request is appended to
 // <script.json>.http.log as {method, path, directory}, `directory` being its
@@ -79,6 +79,16 @@ function serve() {
       const data = req.url === '/api/command' ? (script.commands ?? []) : loaded ? (script.skills ?? []).map((skill) => ({ path: `/home/dev/.agents/skills/${skill.id}/SKILL.md`, ...skill, content: `# ${skill.name}\n` })) : [];
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ data, location }));
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/api/model/default') {
+      const first = script.models?.[0];
+      if (!first) {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: apiModel(first), location }));
       return;
     }
     if (req.method === 'GET' && req.url === '/api/model') {

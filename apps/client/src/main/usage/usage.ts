@@ -12,6 +12,8 @@ export interface TurnUsage {
   projectName: string;
   /** The model Loom ran the turn with. */
   model: string;
+  /** Its name, as the agent gives it, when known. */
+  modelName?: string;
   /** Clock time the turn ended: its day is the one it is filed under. */
   endedAt: number;
   tokens: TokenCounts;
@@ -32,6 +34,7 @@ export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage, tabl
       session_id: turn.sessionId,
       day: dayOf(turn.endedAt),
       model: turn.model,
+      model_name: turn.modelName ?? null,
       project_id: turn.projectId,
       project_name: turn.projectName,
       input_tokens: tokens.input,
@@ -46,6 +49,7 @@ export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage, tabl
         const column = (name: 'input_tokens' | 'output_tokens' | 'cache_read_tokens' | 'cache_write_tokens' | 'reasoning_tokens' | 'cost') => eb(`${table as 'usage_buckets'}.${name}`, '+', eb.ref(`excluded.${name}`));
         return {
           project_name: eb.ref('excluded.project_name'),
+          model_name: eb.fn.coalesce('excluded.model_name', `${table as 'usage_buckets'}.model_name`),
           input_tokens: column('input_tokens'),
           output_tokens: column('output_tokens'),
           cache_read_tokens: column('cache_read_tokens'),
@@ -103,6 +107,8 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   /** Each Project's name, as of the latest day its usage was recorded. */
   const projectNames = new Map<number, { name: string; day: string }>();
   const perModel = new Map<string, number>();
+  /** Each model's name, as of the latest day the agent gave it. */
+  const modelNames = new Map<string, { name: string; day: string }>();
   const perSession = new Map<number, { tokens: number; projectId: number; byModel: Map<string, number> }>();
   // Session highlights' checks count as usage like any other, but are no Session's own: left out of the top Sessions.
   const buckets = [...sessionBuckets.map((b) => ({ ...b, own: true })), ...highlightBuckets.map((b) => ({ ...b, own: false }))];
@@ -121,6 +127,8 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     const named = projectNames.get(b.project_id);
     if (!named || named.day < b.day) projectNames.set(b.project_id, { name: b.project_name, day: b.day });
     add(perModel, b.model, tokens);
+    const modelNamed = modelNames.get(b.model);
+    if (b.model_name !== null && (!modelNamed || modelNamed.day < b.day)) modelNames.set(b.model, { name: b.model_name, day: b.day });
     if (!b.own) continue;
     let s = perSession.get(b.session_id);
     if (!s) perSession.set(b.session_id, (s = { tokens: 0, projectId: b.project_id, byModel: new Map() }));
@@ -147,6 +155,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     .slice(0, TOP_SESSIONS)
     .map(([sessionId, usage]) => {
       const row = byId.get(sessionId);
+      const model = byTokens(usage.byModel)[0]!.key;
       return withoutUndefined({
         sessionId,
         // Only a deleted Session has no row: its usage still counts.
@@ -156,7 +165,8 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
         projectRemoved: removedFlag(usage.projectId),
         issue: row ? linkOf(row.issue_number, row.issue_url) : undefined,
         mergeRequest: row ? linkOf(row.merge_request_number, row.merge_request_url) : undefined,
-        model: byTokens(usage.byModel)[0]!.key,
+        model,
+        modelName: modelNames.get(model)?.name,
         tokens: usage.tokens,
         workingMs: workingMs.get(sessionId) ?? 0,
         outcome: row ? outcomeOfRow(row) : 'archived',
@@ -174,7 +184,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     medianRunMs: median(runs.map((s) => s.ended_at - s.started_at)),
     medianWaitMs: median(waits.map((s) => s.ended_at - s.started_at)),
     perProject: byTokens(perProject).map(({ key: projectId, tokens }) => withoutUndefined({ projectId, project: projectNames.get(projectId)!.name, tokens, removed: removedFlag(projectId) })),
-    perModel: byTokens(perModel).map(({ key: model, tokens }) => ({ model, tokens })),
+    perModel: byTokens(perModel).map(({ key: model, tokens }) => withoutUndefined({ model, name: modelNames.get(model)?.name, tokens })),
     mix,
     cacheHitRate: prompt > 0 ? mix.cacheRead / prompt : undefined,
     outcomes,

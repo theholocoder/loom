@@ -9,7 +9,8 @@ import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
 import { baseName, copyable } from './ContextMenu';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
-import { contextPercent } from './ModelPicker';
+import { contextPercent, defaultModelOf, listedModels, ModelName, modelName } from './ModelPicker';
+import { useSessionModels } from './checkout';
 import { Popover } from './Popover';
 
 /** Session details show whole, room allowing, rather than scroll like a menu. */
@@ -46,6 +47,8 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
   const removedProject = useRemovedProject(session.projectId);
   const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal') => attempt(onError, () => api.invoke(command, { id: session.id }));
   const model = session.model ?? session.agentConfig?.model;
+  const models = listedModels(useSessionModels(session, project?.id).listed);
+  const fallback = model === undefined ? defaultModelOf(models) : undefined;
   const effort = session.effort ?? session.agentConfig?.effort;
   const { workingCopy } = session;
 
@@ -92,7 +95,18 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
       </Group>
       <Group label="Agent">
         <Fact label="Agent">{session.agent}</Fact>
-        <Fact label="Model">{model ? <span className="tech">{model}</span> : <span className="muted">The agent's default</span>}</Fact>
+        <Fact label="Model">
+          {model ? (
+            <ModelName id={model} name={modelName(models, model)} />
+          ) : fallback ? (
+            <>
+              <ModelName id={fallback.id} name={fallback.name} />
+              <span className="muted">, the agent's default</span>
+            </>
+          ) : (
+            <span className="muted">The agent's default</span>
+          )}
+        </Fact>
         <Fact label="Effort">{effort ? <span className="tech">{effort}</span> : <span className="muted">Default</span>}</Fact>
         <Fact label="Approvals">{APPROVAL_MODES[session.fullAccess ? 'full' : 'supervised'].label}</Fact>
         <Fact label="Agent session" actions={session.agentSessionId && <CopyAction text={session.agentSessionId} label="Copy agent session id" />}>

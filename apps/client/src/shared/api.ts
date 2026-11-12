@@ -79,6 +79,11 @@ export interface ModelChoice {
    * current model's are known (see AgentConfig.efforts).
    */
   efforts?: string[];
+  /**
+   * The model the agent runs when none is picked: at most one of a
+   * checkout's models (`projects.models`), when the agent says which.
+   */
+  default?: true;
 }
 
 /** A model, `provider/model`, and an Effort level to run with; what is absent stays as it is, or is the agent's own. */
@@ -1261,8 +1266,10 @@ export interface TopSession {
   projectRemoved?: true;
   issue?: ForgeLink;
   mergeRequest?: ForgeLink;
-  /** The model it used the most tokens with in the range. */
+  /** The model it used the most tokens with in the range, `provider/model`. */
   model: string;
+  /** Its name, as the agent last gave it; absent when it never did. */
+  modelName?: string;
   tokens: number;
   /** How long it was Working in the range, in ms. */
   workingMs: number;
@@ -1291,7 +1298,8 @@ export interface UsageDashboard {
   medianWaitMs?: number;
   /** By tokens, most first; `project` is its name as its usage was last recorded. */
   perProject: Array<{ projectId: number; project: string; tokens: number; removed?: true }>;
-  perModel: Array<{ model: string; tokens: number }>;
+  /** By tokens, most first: `model` as `provider/model`, `name` as the agent last gave it (absent when it never did). */
+  perModel: Array<{ model: string; name?: string; tokens: number }>;
   mix: TokenCounts;
   /** Cache reads out of all prompt tokens (input, cache read and cache write), 0 to 1; absent with none. */
   cacheHitRate?: number;
@@ -1408,7 +1416,8 @@ export interface Commands {
    * The models the agent offers in the Project's checkout, for starting a
    * Session: asked of a private agent probe (never `opencode models`), once
    * per checkout until the agent is checked again (`environments.detect`).
-   * Models the user turned off are left out.
+   * Models the user turned off are left out; the one the agent runs without
+   * one picked is marked `default`, when it says which.
    */
   'projects.models': { params: { id: number }; result: ModelChoice[] };
   /**

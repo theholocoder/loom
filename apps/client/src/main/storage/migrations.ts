@@ -266,4 +266,8 @@ export const migrations: Migration[] = [
       .execute();
     await db.schema.createIndex('highlight_usage_day').on('highlight_usage').column('day').execute();
   },
+  async (db) => {
+    // Each model's name as the agent gave it, so the dashboard names models as the rest of the Client does.
+    for (const table of ['usage_buckets', 'highlight_usage']) await db.schema.alterTable(table).addColumn('model_name', 'text').execute();
+  },
 ];
