@@ -33,23 +33,35 @@ export function ApprovalCard({ item, onDecide }: { item: Approval; onDecide: (de
       {asked && (
         <>
           <ErrorAlert error={error} />
-          <input
-            className="approval-message"
-            aria-label="Message to the agent"
-            placeholder="Message to the agent, if you deny it (optional)"
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-          />
-          <div className="opts">
+          {/* The approvals first; Deny last, with the message that goes with it. */}
+          <div className="opts approval-actions">
             <button className="primary" type="button" disabled={busy} onClick={() => void decide('once')}>
               Approve once
             </button>
             {category && !item.defaultBranch && (
-              <button type="button" disabled={busy} onClick={() => void decide('session')}>
-                {`Approve for this Session: ${category.label}`}
+              // The category is said above the buttons; the name says it again for a screen reader.
+              <button type="button" aria-label={`Approve for this Session: ${category.label}`} title={`Approve every “${category.label}” request for the rest of this Session`} disabled={busy} onClick={() => void decide('session')}>
+                Approve for this Session
               </button>
             )}
-            <button type="button" disabled={busy} onClick={() => void decide('deny')}>
+          </div>
+          <div className="approval-deny">
+            <input
+              className="approval-message"
+              type="text"
+              aria-label="Message to the agent if you deny it"
+              placeholder="Tell the agent why (optional)"
+              value={message}
+              disabled={busy}
+              onChange={(event) => setMessage(event.target.value)}
+              // Enter denies with the message, rather than sending anything else.
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                if (!busy) void decide('deny');
+              }}
+            />
+            <button className="deny" type="button" disabled={busy} onClick={() => void decide('deny')}>
               Deny
             </button>
           </div>

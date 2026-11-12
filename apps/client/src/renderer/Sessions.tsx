@@ -561,8 +561,12 @@ export function SessionView({
   const offeredModels = listedModels(sessionModels.listed);
   const shownModel = session.model ?? agentConfig?.model;
   const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(sessionModels.listed, shownModel);
-  const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
-    api.invoke('sessions.answer', { id: session.id, itemId, answer }),
+  /** What is typed in the composer, which the question's Next and Answer take as an answer of one's own. */
+  const [typed, setTyped] = useState('');
+  const { panel, freeAnswer, stepKey } = useQuestionPanel(
+    firstAsked?.kind === 'question' ? firstAsked : undefined,
+    (itemId, answer) => api.invoke('sessions.answer', { id: session.id, itemId, answer }),
+    typed,
   );
 
   useEffect(() => {
@@ -833,7 +837,8 @@ export function SessionView({
               ) : item.kind === 'plan' ? (
                 <PlanCard key={item.id} item={item} />
               ) : item.kind === 'question' ? (
-                <QuestionCard key={item.id} item={item} />
+                // The question asked is shown once, in its panel on the composer, until it is answered.
+                item !== firstAsked && <QuestionCard key={item.id} item={item} />
               ) : item.kind === 'approval' ? (
                 <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
               ) : item.kind === 'trust' ? (
@@ -895,7 +900,9 @@ export function SessionView({
             tips={situation === undefined}
             disabled={composerDisabled}
             dock={panel}
+            answering={!!panel}
             clearKey={stepKey}
+            onDraftChange={setTyped}
             focusRequest={replyRequest}
             onSend={send}
             canAttach={!freeAnswer}

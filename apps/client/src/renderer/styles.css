@@ -149,8 +149,20 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tool.ask .tool-head, .tool.plan .tool-head, .tool.feedback .tool-head { cursor: default; }
 .ask-message { margin: 0 0 8px; white-space: pre-wrap; }
 .ask-hint { font-size: 12px; margin: 4px 0 0; }
-.approval-detail { margin: 0 0 4px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; background: var(--panel2); border-radius: 4px; }
-.approval-message { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+.approval-detail { margin: 0 0 4px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; background: var(--panel2); border-radius: 4px; max-height: 10em; overflow: auto; }
+/* An Approval request's decisions: the approvals on a row, then the message to the agent beside Deny. */
+.approval-actions { margin-top: 10px; }
+.approval-actions button, .approval-deny button { white-space: nowrap; min-height: 30px; justify-content: center; }
+/* Wrapped, the approvals share the width evenly rather than leaving a ragged edge. */
+.approval-actions button { flex: 1 1 auto; }
+.approval-deny { display: flex; gap: 6px; align-items: stretch; margin-top: 6px; }
+.approval-message { flex: 1; min-width: 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+.approval-message::placeholder { color: var(--muted); }
+.approval-message:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+button.deny { color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, var(--line)); font-weight: 600; }
+button.deny:hover { background: color-mix(in srgb, var(--err) 12%, var(--panel2)); }
+/* A button of an asked card or the question's panel that can't be pressed yet looks it. */
+.tool.ask button:not(.primary):disabled, .ask-panel button:not(.primary):disabled { opacity: .55; cursor: default; }
 .ask-step input[type='number']:focus-visible, .ask-choice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ask-choices { display: grid; gap: 6px; }
 .ask-choice { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); cursor: pointer; }
@@ -160,6 +172,9 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .ask-choice-text { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
 .ask-choice-label { font-weight: 600; }
 /* the asked question's panel, docked on the composer */
+/* The prompt box giving the question's answer of one's own: part of the panel, its buttons going on. */
+.composer.answering textarea { min-height: 44px; padding-bottom: 12px; }
+.composer.answering textarea:disabled { display: none; }
 .composer.docked { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent), 0 2px 12px var(--shadow); }
 .ask-panel { padding: 10px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; max-height: 45vh; overflow: auto; }
 .ask-panel-head { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--wait); }
