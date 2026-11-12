@@ -46,7 +46,7 @@ export function createTerminalScreen(options: ScreenOptions): TerminalScreen {
     if (matchesShortcut(SHORTCUTS.toggleTerminal.shortcut, event)) return false;
     const ctrlShift = (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey;
     if (ctrlShift && event.code === 'KeyC') {
-      // Kept from the menu's own copy and paste, which would act as well.
+      // Kept from the window's own copy and paste (macOS's Edit menu), which would act as well.
       event.preventDefault();
       const selection = terminal.getSelection();
       if (selection) void navigator.clipboard.writeText(selection).catch(() => {});

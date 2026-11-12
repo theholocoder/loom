@@ -1,6 +1,6 @@
 // The Electron entry point: wires createLoom to the window and IPC.
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
 import { THEMES, type Theme } from '../shared/appearance';
 import { MIN_WINDOW } from '../shared/window';
 import { systemClock } from './clock';
@@ -10,11 +10,13 @@ import { createLoom, type Loom } from './loom';
 import { isWebLink } from '../shared/links';
 import { guardQuit, quitQuestion } from './quit';
 import type { Session } from '../shared/api';
+import { applicationMenu, windowShortcut, type MenuContext, type WindowAction } from './window-menu';
 
 // Lets tests run the app against a temporary userData.
 if (process.env.LOOM_USER_DATA_DIR) app.setPath('userData', process.env.LOOM_USER_DATA_DIR);
 
 let window: BrowserWindow | undefined;
+const menuContext: MenuContext = { platform: process.platform, dev: !app.isPackaged };
 let loom: Loom | undefined;
 
 function createWindow(theme: Theme): BrowserWindow {
@@ -41,6 +43,18 @@ function createWindow(theme: Theme): BrowserWindow {
   win.webContents.on('will-navigate', (event, url) => {
     event.preventDefault();
     openOutside(url);
+  });
+  // With no menu bar, the window keeps reloading and the developer tools in development.
+  const actions: Record<WindowAction, () => void> = {
+    reload: () => win.webContents.reload(),
+    forceReload: () => win.webContents.reloadIgnoringCache(),
+    toggleDevTools: () => win.webContents.toggleDevTools(),
+  };
+  win.webContents.on('before-input-event', (event, input) => {
+    const action = windowShortcut(input, menuContext);
+    if (!action) return;
+    event.preventDefault();
+    actions[action]();
   });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadFile(join(import.meta.dirname, '../renderer/index.html'));
@@ -73,6 +87,8 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(async () => {
+    const menu = applicationMenu(menuContext);
+    Menu.setApplicationMenu(menu && Menu.buildFromTemplate(menu));
     try {
       loom = await createLoom({
         userDataDir: app.getPath('userData'),
