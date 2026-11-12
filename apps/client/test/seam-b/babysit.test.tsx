@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { Project, Session, TranscriptItem } from '../../src/shared/api';
+import type { DiffSummary, Project, Session, TranscriptItem } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -48,23 +48,46 @@ const feedback: Extract<TranscriptItem, { kind: 'feedback' }> = {
 const calls = (main: FakeMain, command: string) => main.invoked.filter((i) => i.command === command).map((i) => i.params);
 
 describe('the feedback card', () => {
-  it('lists the items and CI status, sends them to the agent and opens the Merge request', async () => {
+  it('lists each item on one line, sends them to the agent and opens the Merge request', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session()] });
     main.publish('transcript', [feedback], { sessionId: 1 });
     const card = within(open(main)).getByRole('group', { name: 'Feedback on Merge request #12' });
 
-    expect(card.textContent).toContain('alice requested changes');
-    expect(card.textContent).toContain('Needs work');
-    expect(card.textContent).toContain('src/a.ts:10');
-    expect(card.textContent).toContain('bob commented');
-    expect(card.textContent).toContain('unit');
-    expect(card.textContent).toContain('Conflicts with its target branch');
-    expect(card.textContent).toContain('CI failed');
+    expect(card.querySelector('.tool-head')?.textContent).toBe('babysitNew feedback on Merge request #12');
+    expect(within(card).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'alice requested changes: 1 comment on src/a.ts:10',
+      'bob commented: Add a test',
+      'CI failed: unit',
+      'Conflicts with its target branch',
+    ]);
 
+    fireEvent.click(within(card).getByRole('button', { name: 'unit' }));
+    await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url: 'https://ci/1' }]));
     fireEvent.click(within(card).getByRole('button', { name: 'Send to agent' }));
     await waitFor(() => expect(calls(main, 'sessions.sendFeedback')).toEqual([{ id: 1, itemId: 0 }]));
     fireEvent.click(within(card).getByRole('button', { name: 'Open on Forge' }));
-    await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url }]));
+    await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url: 'https://ci/1' }, { url }]));
+  });
+
+  it('takes a comment on the code to its file in Changes', async () => {
+    const scrolled: Element[] = [];
+    // jsdom has no scrolling: what is scrolled to is recorded instead.
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      const summary: DiffSummary = { available: true, readOnly: false, base: 'origin/main', files: [{ path: 'src/a.ts', status: 'committed', added: 1, removed: 0, binary: false }] };
+      const main = new FakeMain({ projects: [project], sessions: [session()] }, { 'sessions.diff': () => summary });
+      main.publish('transcript', [feedback], { sessionId: 1 });
+      const card = within(open(main)).getByRole('group', { name: 'Feedback on Merge request #12' });
+
+      fireEvent.click(within(card).getByRole('button', { name: 'src/a.ts:10' }));
+      expect(screen.getByRole('tab', { name: /Changes/ }).getAttribute('aria-selected')).toBe('true');
+      await waitFor(() => expect(scrolled.some((el) => el.id.includes(encodeURIComponent('src/a.ts')))).toBe(true));
+      expect(calls(main, 'links.open')).toEqual([]);
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it('says it was sent once it has been, with nothing left to send', () => {

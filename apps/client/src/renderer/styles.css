@@ -111,8 +111,7 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tools { margin-left: 42px; }
 .tool { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 6px 0; overflow: hidden; }
 .tool-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; font-size: 13px; }
-.tool-head .name { font-family: var(--mono); font-size: 12px; color: var(--accent); }
-.tool-body { border-top: 1px solid var(--line); padding: 8px 10px; }
+.tool-head .name, .tool-body { border-top: 1px solid var(--line); padding: 8px 10px; }
 .fold > .tool-head { width: 100%; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; }
 .fold > .tool-head:hover { background: var(--hover); }
 .fold > .tool-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -124,10 +123,30 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tool-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-label { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 4px 0; }
 .tool-output { margin: 0 0 8px; max-height: 320px; overflow: auto; background: var(--code); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; }
+/* A tool call's line: its tool in mono (.tool-name), what it worked on, its status at the end. */
+.tool.tool-call.failed .tool-name { color: var(--err); }
+.tool-diff { margin: 0 0 8px; }
+.tool-diff-path { font-size: 12px; color: var(--muted); margin: 4px 0; overflow-wrap: anywhere; }
+.tool-diff .file-diff { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; max-height: 420px; overflow-y: auto; }
+.msg.agent .body > .tool { margin: 0 0 6px; }
+/* The agent's plan: open, each step with where it is. */
+.plan-steps { list-style: none; margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.plan-step { display: flex; gap: 8px; align-items: flex-start; }
+.plan-status { display: inline-flex; flex: none; padding-top: 2px; color: var(--muted); }
+.plan-step.in_progress .plan-status { color: var(--work); } .plan-step.completed .plan-status { color: var(--ok); }
+.plan-step.completed, .plan-step.cancelled { color: var(--muted); } .plan-step.cancelled > span:last-child { text-decoration: line-through; }
+/* Babysit's feedback, in the same style: each item on one line. */
+.tool.feedback { border-color: color-mix(in srgb, var(--wait) 45%, var(--line)); }
+.tool.feedback.asked { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent); }
+.tool.feedback .tool-name { color: var(--wait); }
+.feedback-lines { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.feedback-lines li { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.feedback-lines li > svg { flex: none; }
+.feedback-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool.question { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent); }
 .tool.question .name { color: var(--wait); }
 .opts { display: flex; gap: 6px; flex-wrap: wrap; }
-.tool.ask .tool-head { cursor: default; }
+.tool.ask .tool-head, .tool.plan .tool-head, .tool.feedback .tool-head { cursor: default; }
 .ask-message { margin: 0 0 8px; white-space: pre-wrap; }
 .ask-hint { font-size: 12px; margin: 4px 0 0; }
 .approval-detail { margin: 0 0 4px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; background: var(--panel2); border-radius: 4px; }
@@ -636,12 +655,8 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .ci-checks .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-checks .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: right; }
 .ci-checks .link:hover { text-decoration: underline; }
-.feedback-items { margin: 0 0 8px; padding: 0 0 0 16px; }
-.feedback-items .feedback-items { margin: 4px 0 0; }
-.feedback-items li { margin-bottom: 4px; }
 .feedback-link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
 .feedback-link:hover { text-decoration: underline; }
-.feedback-excerpt { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .context { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .context .bar { display: block; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
 .context .bar > span { display: block; height: 100%; background: var(--accent); }

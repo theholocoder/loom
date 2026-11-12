@@ -23,7 +23,7 @@ import { useDelete } from './Delete';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
-import { ThinkingBlock, ToolCard } from './WorkCards';
+import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
 import { useAgentCommands, useCheckoutModels } from './checkout';
 import { isSnoozed, wakeTime } from './Snooze';
 import { useNow } from './now';
@@ -443,6 +443,12 @@ export function SessionView({
   // Until the agent says what it offers (it hasn't started since the Client did), the checkout's models.
   const checkoutModels = useCheckoutModels(agentConfig ? undefined : project?.id);
   const shownModel = session.model ?? agentConfig?.model;
+  /** A model's name as the agent gives it, or else its id. */
+  const modelName = (model: string | undefined) => {
+    if (model === undefined) return undefined;
+    const offered = agentConfig?.models ?? (checkoutModels.listed && 'value' in checkoutModels.listed ? checkoutModels.listed.value : []);
+    return offered.find((m) => m.id === model)?.name || model;
+  };
   const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(checkoutModels.listed, shownModel);
   const { panel, freeAnswer, stepKey } = useQuestionPanel(firstAsked?.kind === 'question' ? firstAsked : undefined, (itemId, answer) =>
     api.invoke('sessions.answer', { id: session.id, itemId, answer }),
@@ -593,7 +599,7 @@ export function SessionView({
       }
     : undefined;
 
-  /** Where Changes was last asked to take the user: a file a Highlight names. */
+  /** Where Changes was last asked to take the user: a file a Highlight or a review comment names. */
   const [changesFocus, setChangesFocus] = useState<ChangesFocus>();
   /**
    * Scrolls the conversation to the turn `itemId` is in: to the user's
@@ -605,6 +611,11 @@ export function SessionView({
     const messages = [...document.querySelectorAll<HTMLElement>('[data-item-id]')];
     const target = messages.filter((m) => Number(m.dataset.itemId) <= itemId).at(-1) ?? messages[0];
     target?.scrollIntoView?.({ block: 'start' });
+  };
+  /** Shows Changes, at `path`. */
+  const showFile = (path: string) => {
+    setChangesFocus((was) => ({ path, n: (was?.n ?? 0) + 1 }));
+    panels.show('changes');
   };
   /** Ask the agent, on a Highlight: it goes to the composer as a comment quoting it, its note to edit. */
   const askAboutHighlight = (highlight: Highlight) =>
@@ -636,10 +647,7 @@ export function SessionView({
           <HighlightsPanel
             session={session}
             onShowTurn={showTurn}
-            onShowFile={(path) => {
-              setChangesFocus((was) => ({ path, n: (was?.n ?? 0) + 1 }));
-              panels.show('changes');
-            }}
+            onShowFile={showFile}
             onAsk={composerDisabled || freeAnswer ? undefined : askAboutHighlight}
             onError={setError}
           />
@@ -678,8 +686,10 @@ export function SessionView({
       <div className={panels.review ? 'session-body reviewing' : 'session-body'}>
         <div className="convo">
           <div className="chat" role="log" aria-label="Conversation" onContextMenu={commentOnSelection}>
-            {items.map((item) =>
-              item.kind === 'user' ? (
+            {turnParts(items).map((item) =>
+              'said' in item ? (
+                <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={modelName(item.said.find((i) => i.model)?.model)} />
+              ) : item.kind === 'user' ? (
                 <div key={item.id} className="msg user" data-item-id={item.id}>
                   <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <div className="bubble">
@@ -688,22 +698,10 @@ export function SessionView({
                     </div>
                   </div>
                 </div>
-              ) : item.kind === 'agent' ? (
-                <div key={item.id} className="msg agent">
-                  <div className="who">
-                    <Bot />
-                  </div>
-                  <div className="body">
-                    <div className="name">{session.agent}</div>
-                    <div className="bubble">
-                      <Markdown text={item.text} />
-                    </div>
-                  </div>
-                </div>
-              ) : item.kind === 'thinking' ? (
-                <ThinkingBlock key={item.id} item={item} />
               ) : item.kind === 'tool' ? (
                 <ToolCard key={item.id} item={item} />
+              ) : item.kind === 'plan' ? (
+                <PlanCard key={item.id} item={item} />
               ) : item.kind === 'question' ? (
                 <QuestionCard key={item.id} item={item} />
               ) : item.kind === 'approval' ? (
@@ -731,6 +729,7 @@ export function SessionView({
                   readOnly={session.status === 'archived' || !!session.worktreeMissing}
                   onOpen={openLink}
                   onSend={() => api.invoke('sessions.sendFeedback', { id: session.id, itemId: item.id })}
+                  onShowPlace={showFile}
                 />
               ) : item.kind === 'feedback-info' ? (
                 <FeedbackInfoCard key={item.id} item={item} onOpen={() => openLink(item.url)} />
@@ -956,5 +955,60 @@ function Snoozed({ session, onError }: { session: Session; onError: (message: st
         <AlarmClockOff />
       </button>
     </>
+  );
+}
+
+/** Something the agent said: its thinking, or its words. */
+type Said = Extract<TranscriptItem, { kind: 'agent' | 'thinking' }>;
+
+/**
+ * The conversation as shown: what the agent said in a row by the same model,
+ * its thinking and then its words, gathered under one name line; every other
+ * item as it is.
+ */
+function turnParts(items: TranscriptItem[]): Array<Exclude<TranscriptItem, Said> | { said: Said[] }> {
+  const parts: Array<Exclude<TranscriptItem, Said> | { said: Said[] }> = [];
+  for (const item of items) {
+    if (item.kind !== 'agent' && item.kind !== 'thinking') {
+      parts.push(item);
+      continue;
+    }
+    const last = parts.at(-1);
+    // Thinking after words starts the agent's next step.
+    const joins = last && 'said' in last && last.said[0]!.model === item.model && !(item.kind === 'thinking' && last.said.at(-1)!.kind === 'agent');
+    if (joins) last.said.push(item);
+    else parts.push({ said: [item] });
+  }
+  return parts;
+}
+
+/** The agent's name, and the model that spoke when known ("OpenCode · Claude Sonnet 5.5"), over its thinking and its words. */
+function AgentWords({ agent, said, model }: { agent: string; said: Said[]; model: string | undefined }) {
+  return (
+    <div className="msg agent">
+      <div className="who">
+        <Bot />
+      </div>
+      <div className="body">
+        <div className="name">
+          {agent}
+          {model && (
+            <>
+              {' · '}
+              <span className="tech">{model}</span>
+            </>
+          )}
+        </div>
+        {said.map((item) =>
+          item.kind === 'thinking' ? (
+            <ThinkingBlock key={item.id} item={item} />
+          ) : (
+            <div key={item.id} className="bubble">
+              <Markdown text={item.text} />
+            </div>
+          ),
+        )}
+      </div>
+    </div>
   );
 }

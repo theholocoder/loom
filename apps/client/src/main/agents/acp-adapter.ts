@@ -1,8 +1,8 @@
 // An AgentAdapter for any agent that speaks ACP v1 over stdio, one process per
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
-import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type QuestionField, type QuestionOption, type TokenCounts, type ToolStatus } from '../../shared/api';
-import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions } from './adapter';
+import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type PlanEntry, type PlanStatus, type QuestionField, type QuestionOption, type TokenCounts, type ToolStatus } from '../../shared/api';
+import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions, type ToolCall } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection, AcpError } from './acp';
 import { agentCommandsOf } from './commands';
@@ -16,6 +16,11 @@ export interface AcpProfile {
   env?: (options: Pick<OpenOptions, 'approvals' | 'workingCopy' | 'tempDir' | 'toolsOff'>) => Record<string, string>;
   /** The agent's own tools; any other is from the user's MCP servers or plugins. */
   ownTools: ReadonlySet<string>;
+  /**
+   * The agent's tool that writes its plan, as `todos` in its input, if it
+   * has one rather than ACP's plan updates: its calls are the plan, not tool calls.
+   */
+  planTool?: string;
 }
 
 const PROTOCOL_VERSION = 1;
@@ -93,9 +98,11 @@ export class AcpAdapter implements AgentAdapter {
         onEvent(event(requestId));
       });
     };
+    /** What translating this session's updates needs. */
+    const context: UpdateContext = { calls: new Map(), workingCopy, planTool: this.profile.planTool };
     /** Reports what Loom shows of a session update, if anything. */
     const report = (update: SessionUpdate) => {
-      const event = translate(update);
+      const event = translate(update, context);
       if (event) onEvent(event);
     };
     const connection = new AcpConnection(channel, {
@@ -262,7 +269,16 @@ function fileUri(path: string): string {
   return `file://${slashed.startsWith('/') ? '' : '/'}${encodeURI(slashed).replaceAll('?', '%3F').replaceAll('#', '%23')}`;
 }
 
-function translate(update: SessionUpdate): AgentEvent | undefined {
+/** What translating a session's updates needs. */
+interface UpdateContext {
+  /** The name and kind of each tool call, by its id, as the agent reported them first: its updates leave them out. */
+  calls: Map<string, { name?: string; kind?: string }>;
+  workingCopy: string;
+  /** See AcpProfile.planTool. */
+  planTool?: string;
+}
+
+function translate(update: SessionUpdate, { calls, workingCopy, planTool }: UpdateContext): AgentEvent | undefined {
   switch (update.sessionUpdate) {
     case 'available_commands_update': {
       const listed = (update as { availableCommands?: unknown }).availableCommands;
@@ -283,16 +299,35 @@ function translate(update: SessionUpdate): AgentEvent | undefined {
       if (!text) return undefined;
       return { type: update.sessionUpdate === 'agent_message_chunk' ? 'text-delta' : 'thinking-delta', text };
     }
+    case 'plan': {
+      const { entries } = update as { entries?: unknown };
+      return Array.isArray(entries) ? { type: 'plan', entries: planOf(entries) } : undefined;
+    }
     case 'tool_call':
     case 'tool_call_update': {
       const call = update as AcpToolCall;
       if (typeof call.toolCallId !== 'string') return undefined;
+      const known = calls.get(call.toolCallId) ?? {};
+      // OpenCode names its tool beside ACP's fields, on the call's start only.
+      const name = known.name ?? (typeof call.name === 'string' && call.name ? call.name : undefined);
+      const reportedKind = typeof call.kind === 'string' ? call.kind : undefined;
+      const kind = reportedKind ?? known.kind;
+      calls.set(call.toolCallId, { ...(name ? { name } : {}), ...(kind ? { kind } : {}) });
+      if (planTool !== undefined && name === planTool) {
+        const todos = (call.rawInput as { todos?: unknown } | undefined)?.todos;
+        return Array.isArray(todos) ? { type: 'plan', entries: planOf(todos) } : undefined;
+      }
+      const command = kind === 'execute' ? (call.rawInput as { command?: unknown } | undefined)?.command : undefined;
       const fields = {
         toolCallId: call.toolCallId,
-        toolKind: typeof call.kind === 'string' ? call.kind : undefined,
+        toolKind: reportedKind,
+        name: update.sessionUpdate === 'tool_call' ? name : undefined,
+        command: typeof command === 'string' && command ? command : undefined,
+        subject: subjectOf(call, workingCopy),
         status: STATUSES[call.status as string],
         input: call.rawInput === undefined ? undefined : stringOf(call.rawInput),
         output: outputOf(call),
+        diffs: diffsOf(call, workingCopy),
       };
       const title = typeof call.title === 'string' && call.title.trim() ? call.title : undefined;
       // ACP leaves out what didn't change; so does the event.
@@ -383,6 +418,9 @@ interface ContentChunk {
 
 interface AcpToolCall {
   toolCallId?: unknown;
+  /** OpenCode's own: the tool's name. */
+  name?: unknown;
+  locations?: unknown;
   title?: unknown;
   kind?: unknown;
   status?: unknown;
@@ -393,9 +431,13 @@ interface AcpToolCall {
 
 const STATUSES: Record<string, ToolStatus> = { pending: 'running', in_progress: 'running', completed: 'completed', failed: 'failed' };
 
-/** The tool's output as text: its content blocks, or else its raw output. */
+/** The tool's output as text: its content blocks but its diffs, or else its raw output. */
 function outputOf({ content, rawOutput }: AcpToolCall): string | undefined {
-  if (Array.isArray(content) && content.length > 0) return content.map(contentText).join('\n');
+  if (Array.isArray(content) && content.length > 0) {
+    const blocks = content.filter((block) => !isDiff(block));
+    // A call that only changed files has nothing else to say.
+    return blocks.length ? blocks.map(contentText).join('\n') : undefined;
+  }
   if (rawOutput === undefined || rawOutput === null) return undefined;
   // OpenCode puts the text a tool returned in `output`, beside its metadata.
   const output = (rawOutput as { output?: unknown }).output;
@@ -404,10 +446,62 @@ function outputOf({ content, rawOutput }: AcpToolCall): string | undefined {
 
 /** One tool call content block as text; what isn't text is summarised. */
 function contentText(block: unknown): string {
-  const { type, content, path } = (block ?? {}) as { type?: unknown; content?: { type?: unknown; text?: unknown }; path?: unknown };
+  const { type, content } = (block ?? {}) as { type?: unknown; content?: { type?: unknown; text?: unknown } };
   if (type === 'content') return content?.type === 'text' && typeof content.text === 'string' ? content.text : `[${String(content?.type ?? 'content')}]`;
-  if (type === 'diff') return `[diff of ${String(path ?? 'a file')}]`;
   return `[${String(type ?? 'content')}]`;
+}
+
+const PLAN_STATUSES = new Set<string>(['pending', 'in_progress', 'completed', 'cancelled']);
+
+/** A plan's steps, as ACP's entries or OpenCode's todos give them: those with text, a status Loom doesn't know read as pending. */
+function planOf(entries: unknown[]): PlanEntry[] {
+  return entries.flatMap((entry) => {
+    const { content, status } = (entry ?? {}) as { content?: unknown; status?: unknown };
+    if (typeof content !== 'string' || !content.trim()) return [];
+    return [{ content, status: typeof status === 'string' && PLAN_STATUSES.has(status) ? (status as PlanStatus) : 'pending' }];
+  });
+}
+
+/**
+ * What the call worked on: what it searched for or fetched, as its input
+ * says, or else the files and folders it names, the working copy itself left
+ * out. Undefined when it says neither.
+ */
+function subjectOf({ rawInput, locations }: AcpToolCall, workingCopy: string): string | undefined {
+  const input = (rawInput ?? {}) as { pattern?: unknown; query?: unknown; url?: unknown };
+  const sought = [input.pattern, input.query, input.url].find((value): value is string => typeof value === 'string' && value !== '');
+  if (sought) return sought;
+  const paths = Array.isArray(locations) ? locations.flatMap((l: { path?: unknown }) => (typeof l?.path === 'string' ? [inWorkingCopy(l.path, workingCopy)] : [])) : [];
+  const named = paths.filter((path) => path !== '' && path !== workingCopy);
+  return named.length ? named.join(', ') : undefined;
+}
+
+/** ACP's diff content block: a file's text before (null for a new file) and after. */
+interface AcpDiff {
+  type: 'diff';
+  path: string;
+  oldText?: string | null;
+  newText: string;
+}
+
+function isDiff(block: unknown): block is AcpDiff {
+  const { type, path, oldText, newText } = (block ?? {}) as Record<string, unknown>;
+  return type === 'diff' && typeof path === 'string' && typeof newText === 'string' && (oldText === undefined || oldText === null || typeof oldText === 'string');
+}
+
+/** The files the call changed, as its diff blocks say; undefined when it has none. */
+function diffsOf({ content }: AcpToolCall, workingCopy: string): ToolCall['diffs'] {
+  if (!Array.isArray(content)) return undefined;
+  const diffs = content.filter(isDiff).map(({ path, oldText, newText }) => ({ path: inWorkingCopy(path, workingCopy), ...(typeof oldText === 'string' ? { oldText } : {}), newText }));
+  return diffs.length ? diffs : undefined;
+}
+
+/** `path` from the working copy when it is in there (`src/app.ts`), else as it is. */
+function inWorkingCopy(path: string, workingCopy: string): string {
+  const slashed = (p: string) => p.replaceAll('\\', '/');
+  const root = slashed(workingCopy).replace(/\/+$/, '');
+  const file = slashed(path);
+  return file.startsWith(`${root}/`) ? file.slice(root.length + 1) : path;
 }
 
 function stringOf(value: unknown): string {
@@ -417,7 +511,7 @@ function stringOf(value: unknown): string {
 // ACP v1's permission request: the tool call the agent wants to make, and the options to answer with.
 interface PermissionRequest {
   sessionId?: unknown;
-  toolCall?: AcpToolCall & { name?: unknown; locations?: unknown };
+  toolCall?: AcpToolCall;
   options?: unknown;
 }
 
