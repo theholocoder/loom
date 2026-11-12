@@ -3,7 +3,7 @@
 // them, with `provider/model`, as the agent names them, in a tooltip.
 import { Brain, Cpu, Gauge } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { DEFAULT_EFFORT, type ContextUsage, type ModelChoice, type TranscriptItem } from '../shared/api';
+import { DEFAULT_EFFORT, modelNameIn, type ContextUsage, type ModelChoice, type TranscriptItem } from '../shared/api';
 import { useApi } from './api';
 import { Select } from './Popover';
 import { SearchPicker, type Loaded } from './SearchPicker';
@@ -31,7 +31,7 @@ export function ModelPickers({
   efforts: string[];
   /** The Effort level shown; `default` while absent. */
   effort?: string;
-  /** What shows while no model is; by default, the agent's default model, named once the models listed say which. */
+  /** What shows while no model is; by default, the agent's default model, named once the models listed say which. Given, there is no default to name, as for Session highlights, which need one picked. */
   placeholder?: string;
   disabled?: boolean;
   /** Called when the model list opens. */
@@ -40,13 +40,13 @@ export function ModelPickers({
   onEffort: (effort: string) => void;
 }) {
   const listed = listedModels(models);
-  const fallback = placeholder === undefined ? defaultModelOf(listed) : undefined;
+  const agentDefault = placeholder === undefined ? defaultModelOf(listed) : undefined;
   return (
     <>
       <SearchPicker
         label="Model"
-        placeholder={placeholder ?? (fallback ? `${modelName(listed, fallback.id)} (default)` : 'Default model')}
-        tooltip={model !== undefined ? model : fallback ? `${agent}'s default model: ${fallback.id}` : undefined}
+        placeholder={placeholder ?? (agentDefault ? `${modelName(listed, agentDefault.id)} (default)` : 'Default model')}
+        tooltip={model !== undefined ? model : agentDefault ? `${agent}'s default model: ${agentDefault.id}` : undefined}
         tech={false}
         icon={<Cpu className="sm" />}
         noun="models"
@@ -79,7 +79,7 @@ export function listedModels(listed: Loaded<ModelChoice[]>): ModelChoice[] | und
 
 /** The model `id` by the name its provider gives it, among `models`; its id when they don't name it. */
 export function modelName(models: readonly ModelChoice[] | undefined, id: string): string {
-  return models?.find((m) => m.id === id)?.name || id;
+  return modelNameIn(models, id) ?? id;
 }
 
 /** The model the agent runs without one picked, when `models` say which. */
@@ -89,17 +89,16 @@ export function defaultModelOf(models: readonly ModelChoice[] | undefined): Mode
 
 /** A model by `name`, `provider/model` in its tooltip; its id, as code, without a name. */
 export function ModelName({ id, name }: { id: string; name: string | undefined }) {
-  const named = name && name !== id ? name : undefined;
   return (
-    <span className={named ? undefined : 'tech'} title={id}>
-      {named ?? id}
+    <span className={name ? undefined : 'tech'} title={id}>
+      {name ?? id}
     </span>
   );
 }
 
 /** The Effort levels of `model` among the models listed; none while they aren't. */
 export function effortsOf(listed: Loaded<ModelChoice[]>, model: string | undefined): string[] {
-  return (listed && 'value' in listed ? listed.value.find((m) => m.id === model)?.efforts : undefined) ?? [];
+  return listedModels(listed)?.find((m) => m.id === model)?.efforts ?? [];
 }
 
 const tokens = new Intl.NumberFormat('en');
@@ -133,7 +132,7 @@ export function ModelMarker({ item, models }: { item: Extract<TranscriptItem, { 
   const parts = [
     item.model !== undefined && (
       <span key="model">
-        Model <ModelName id={item.model} name={modelName(models, item.model)} />
+        Model <ModelName id={item.model} name={modelNameIn(models, item.model)} />
       </span>
     ),
     item.effort !== undefined && (

@@ -2,7 +2,7 @@
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderOpen, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, type ModelChoice, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, modelNameIn, type ModelChoice, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
@@ -28,7 +28,7 @@ import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed, wakeTime } from './Snooze';
 import { useNow } from './now';
-import { ContextGauge, effortsOf, listedModels, ModelMarker, ModelName, modelName, ModelPickers } from './ModelPicker';
+import { ContextGauge, effortsOf, listedModels, ModelMarker, ModelName, ModelPickers } from './ModelPicker';
 import { AttachmentList, CommentNoteForm, Composer } from './Composer';
 import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
@@ -1178,7 +1178,7 @@ function AgentWords({ agent, said, model, models }: { agent: string; said: Said[
           {model && (
             <>
               {' · '}
-              <ModelName id={model} name={modelName(models, model)} />
+              <ModelName id={model} name={modelNameIn(models, model)} />
             </>
           )}
         </div>

@@ -86,6 +86,12 @@ export interface ModelChoice {
   default?: true;
 }
 
+/** The name `models` give the model `id`; none when they give it none but its id. */
+export function modelNameIn(models: readonly ModelChoice[] | undefined, id: string): string | undefined {
+  const name = models?.find((m) => m.id === id)?.name;
+  return name && name !== id ? name : undefined;
+}
+
 /** A model, `provider/model`, and an Effort level to run with; what is absent stays as it is, or is the agent's own. */
 export interface ModelPick {
   model?: string;

@@ -205,6 +205,12 @@ describe('Session details', () => {
     renderApp({ ...full, model: undefined }, models);
     fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
     await waitFor(() => expect(value(group('Agent'), 'Model')).toBe("Pulse Free, the agent's default"));
+    cleanup();
+
+    // Running, the agent says which it runs with.
+    renderApp({ ...full, model: undefined, agentConfig: { model: 'anthropic/claude-sonnet-5-5', models: [{ id: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }], efforts: [] } });
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+    expect(value(group('Agent'), 'Model')).toBe("Claude Sonnet 5.5, the agent's default");
   });
 
   it('shows a Full access Session as such', () => {

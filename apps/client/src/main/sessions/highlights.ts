@@ -6,7 +6,7 @@
 // after it. Checks never hold up the Session; one that fails leaves its turns
 // for the next. The checks' usage counts on the dashboard, but isn't the
 // Session's own.
-import { DEFAULT_APPROVALS, type Highlight, type HighlightCounts, type HighlightsSettings, type Session, type SessionHighlights, type TokenCounts, type TranscriptItem } from '../../shared/api';
+import { DEFAULT_APPROVALS, modelNameIn, type Highlight, type HighlightCounts, type HighlightsSettings, type Session, type SessionHighlights, type TokenCounts, type TranscriptItem } from '../../shared/api';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import type { BridgeCall } from '../environments/exec';
@@ -309,7 +309,7 @@ export class Highlights {
       projectName: this.options.projectName(session.projectId),
       model,
       // The check's agent offers what the Session's does.
-      modelName: session.agentConfig?.models.find((m) => m.id === model)?.name,
+      modelName: modelNameIn(session.agentConfig?.models, model),
       endedAt: this.options.clock.now(),
       tokens: tokens ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
       cost,

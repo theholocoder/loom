@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -808,7 +808,7 @@ export class Sessions {
     const found = offered.find((m) => m.id === model);
     const name = this.options.adapter.name;
     if (!found) throw new Error(`${name} doesn't offer ${model} in this Project.`);
-    if (effort !== undefined && !(found.efforts ?? []).includes(effort)) throw new Error(`${name} offers no Effort ${effort} for ${model}.`);
+    if (effort !== undefined && !(found.efforts ?? []).includes(effort)) throw new Error(`${name} offers no Effort ${effort} for ${modelNameIn(offered, model) ?? model}.`);
   }
 
   /** Puts a message at the end of the Session's queue. */
@@ -1902,7 +1902,7 @@ export class Sessions {
       projectId: session.projectId,
       projectName: this.options.project(session.projectId)?.name ?? `Project ${session.projectId}`,
       model,
-      modelName: session.agentConfig?.models.find((m) => m.id === model)?.name,
+      modelName: modelNameIn(session.agentConfig?.models, model),
       endedAt: this.options.clock.now(),
       tokens,
       cost,

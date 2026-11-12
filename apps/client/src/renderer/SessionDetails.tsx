@@ -4,12 +4,12 @@
 // rather than kept on screen. An archived Session's are read-only.
 import { Check, CodeXml, Copy, Info, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { useEffect, useState, type ReactNode, type RefObject } from 'react';
-import { APPROVAL_MODES, type EnvironmentStatus, type Project, type Session } from '../shared/api';
+import { APPROVAL_MODES, modelNameIn, type EnvironmentStatus, type Project, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
 import { baseName, copyable } from './ContextMenu';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
-import { contextPercent, defaultModelOf, listedModels, ModelName, modelName } from './ModelPicker';
+import { contextPercent, defaultModelOf, listedModels, ModelName } from './ModelPicker';
 import { useSessionModels } from './checkout';
 import { Popover } from './Popover';
 
@@ -48,7 +48,8 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
   const run = (command: 'sessions.openInEditor' | 'sessions.openInTerminal') => attempt(onError, () => api.invoke(command, { id: session.id }));
   const model = session.model ?? session.agentConfig?.model;
   const models = listedModels(useSessionModels(session, project?.id).listed);
-  const fallback = model === undefined ? defaultModelOf(models) : undefined;
+  // Not picked, the model is the agent's default: the one it runs with, once it has said, or else the one the checkout's models mark.
+  const agentDefault = session.model === undefined ? (session.agentConfig?.model ?? defaultModelOf(models)?.id) : undefined;
   const effort = session.effort ?? session.agentConfig?.effort;
   const { workingCopy } = session;
 
@@ -96,13 +97,13 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
       <Group label="Agent">
         <Fact label="Agent">{session.agent}</Fact>
         <Fact label="Model">
-          {model ? (
-            <ModelName id={model} name={modelName(models, model)} />
-          ) : fallback ? (
+          {agentDefault ? (
             <>
-              <ModelName id={fallback.id} name={fallback.name} />
+              <ModelName id={agentDefault} name={modelNameIn(models, agentDefault)} />
               <span className="muted">, the agent's default</span>
             </>
+          ) : model ? (
+            <ModelName id={model} name={modelNameIn(models, model)} />
           ) : (
             <span className="muted">The agent's default</span>
           )}
