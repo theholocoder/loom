@@ -90,8 +90,7 @@ function SessionDiff({ session, comments }: { session: Session; comments?: DiffC
           </>
         ) : null}
         <span className="grow" />
-        <StateToggle label="Wrap long lines" pressed={view.wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => changeView({ wrap: !view.wrap })} />
-        <StateToggle label="Side by side" pressed={view.sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => changeView({ sideBySide: !view.sideBySide })} />
+        <DiffViewToggles view={view} onChange={changeView} />
         <button className="icon-btn sm" type="button" title="Refresh" aria-label="Refresh changes" onClick={refresh}>
           <RefreshCw />
         </button>
@@ -118,17 +117,16 @@ function SessionDiff({ session, comments }: { session: Session; comments?: DiffC
         </div>
       ) : (
         <DiffFiles
-          session={session}
           files={loaded.summary.files}
-          readOnly={readOnly}
+          read={(file) => api.invoke('sessions.diffFile', { id: session.id, path: file.path, scope })}
+          onOpenInEditor={readOnly ? undefined : (file) => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error))}
           comments={readOnly ? undefined : comments}
-          scope={scope}
           wide={wide}
           patterns={settings?.diffCollapsedPatterns ?? []}
           theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
           view={view}
           onViewChange={changeView}
-          version={`${refreshes}:${turnEnded}:${changed}`}
+          version={`${scope}:${refreshes}:${turnEnded}:${changed}`}
         />
       )}
     </div>
@@ -226,26 +224,44 @@ export function comparedText(base: string, source: DiffBaseSource | undefined, s
   return source ? `${what} ${why[source]}` : what;
 }
 
-function DiffFiles(props: {
-  session: Session;
+/** The Wrap long lines and Side by side toggles of a diff's toolbar. */
+export function DiffViewToggles({ view, onChange }: { view: DiffViewSettings; onChange: (change: Partial<DiffViewSettings>) => void }) {
+  return (
+    <>
+      <StateToggle label="Wrap long lines" pressed={view.wrap} onIcon={WrapText} offIcon={ArrowRightToLine} onToggle={() => onChange({ wrap: !view.wrap })} />
+      <StateToggle label="Side by side" pressed={view.sideBySide} onIcon={Columns2} offIcon={Rows2} onToggle={() => onChange({ sideBySide: !view.sideBySide })} />
+    </>
+  );
+}
+
+/**
+ * A diff's files: a file tree to filter and jump from (above the diffs, or
+ * beside them when `wide`), and each file's diff, read with `read` as it is
+ * expanded or scrolled to, and read again when `version` changes. Its lines
+ * can be commented on while `comments` is given; each file opens in the
+ * editor while `onOpenInEditor` is.
+ */
+export function DiffFiles(props: {
   files: DiffFile[];
-  readOnly: boolean;
+  read: (file: DiffFile) => Promise<FileDiff>;
+  version: string;
   comments: DiffComments | undefined;
-  scope: DiffScope;
+  onOpenInEditor?: (file: DiffFile) => void;
   wide: boolean;
   patterns: string[];
   theme: Theme;
   view: DiffViewSettings;
   onViewChange: (change: Partial<DiffViewSettings>) => void;
-  version: string;
 }) {
   const { files, patterns, view, wide, onViewChange } = props;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
   const toggle = (file: DiffFile, open = !isExpanded(file)) => setExpanded((e) => ({ ...e, [file.path]: open }));
+  // Each diff on the page has its own ids: Changes and a Merge request's may show at once.
+  const prefix = useId();
   const show = (file: DiffFile) => {
     toggle(file, true);
-    document.getElementById(fileId(file.path))?.scrollIntoView?.({ block: 'start' });
+    document.getElementById(fileId(prefix, file.path))?.scrollIntoView?.({ block: 'start' });
   };
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
@@ -291,7 +307,7 @@ function DiffFiles(props: {
         {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
         {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
         {files.map((file) => (
-          <FileSection key={file.path} {...props} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
+          <FileSection key={file.path} {...props} id={fileId(prefix, file.path)} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
         ))}
       </div>
     </div>
@@ -403,32 +419,34 @@ function Counts({ lines }: { lines: ChangedLines }) {
 type FileText = { state: 'idle' } | { state: 'loading' } | { state: 'error'; message: string } | ({ state: 'done' } & FileDiff);
 
 function FileSection({
-  session,
+  id,
   file,
   hidden,
-  readOnly,
+  read,
+  onOpenInEditor,
   comments,
-  scope,
   expanded,
   onToggle,
   view,
   theme,
   version,
 }: {
-  session: Session;
+  id: string;
   file: DiffFile;
   hidden: boolean;
-  readOnly: boolean;
+  read: (file: DiffFile) => Promise<FileDiff>;
+  onOpenInEditor?: (file: DiffFile) => void;
   /** Absent when the diff can't be commented on. */
   comments: DiffComments | undefined;
-  scope: DiffScope;
   expanded: boolean;
   onToggle: () => void;
   view: DiffViewSettings;
   theme: Theme;
   version: string;
 }) {
-  const api = useApi();
+  // The latest `read`, so that a new one doesn't read the diff again: `version` says when to.
+  const reading = useRef(read);
+  reading.current = read;
   const ref = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined');
   const [text, setText] = useState<FileText>({ state: 'idle' });
@@ -443,7 +461,7 @@ function FileSection({
     let current = true;
     // A diff shown stays until the new one comes: a comment being written on it isn't lost meanwhile.
     setText((t) => (t.state === 'done' ? t : { state: 'loading' }));
-    api.invoke('sessions.diffFile', { id: session.id, path: file.path, scope }).then(
+    reading.current(file).then(
       (diff) => current && setText({ state: 'done', ...diff }),
       (error: unknown) => current && setText({ state: 'error', message: (error as Error).message }),
     );
@@ -451,13 +469,12 @@ function FileSection({
       current = false;
     };
     // `file` is compared by what identifies its diff.
-  }, [api, session.id, file.path, file.oldPath, file.status, file.added, file.removed, file.change, scope, expanded, visible, version]);
+  }, [file.path, file.oldPath, file.status, file.added, file.removed, file.change, expanded, visible, version]);
 
   const commenting = useCommenting(file.path, text.state === 'done' ? text.text : undefined, comments);
 
-  const openInEditor = () => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error));
   return (
-    <section className="diff-file" id={fileId(file.path)} ref={ref} aria-label={file.path} hidden={hidden}>
+    <section className="diff-file" id={id} ref={ref} aria-label={file.path} hidden={hidden}>
       <h4>
         <button type="button" className="diff-file-toggle" aria-expanded={expanded} onClick={onToggle}>
           {expanded ? <ChevronDown /> : <ChevronRight />}
@@ -467,8 +484,8 @@ function FileSection({
         </button>
         <StatusBadge file={file} />
         <Counts lines={file} />
-        {readOnly ? null : (
-          <button className="icon-btn sm" type="button" title="Open in editor" aria-label={`Open ${file.path} in the editor`} onClick={openInEditor}>
+        {onOpenInEditor && (
+          <button className="icon-btn sm" type="button" title="Open in editor" aria-label={`Open ${file.path} in the editor`} onClick={() => onOpenInEditor(file)}>
             <SquarePen />
           </button>
         )}
@@ -624,8 +641,8 @@ function hasHunks(patch: string): boolean {
   return patch.startsWith('@@') || patch.includes('\n@@');
 }
 
-function fileId(path: string): string {
-  return `diff-file-${encodeURIComponent(path)}`;
+function fileId(prefix: string, path: string): string {
+  return `diff-file-${prefix.replace(/:/g, '')}-${encodeURIComponent(path)}`;
 }
 
 /** Whether a file starts collapsed: a binary, a large change, or one the patterns name. */
@@ -649,7 +666,7 @@ function globToRegExp(pattern: string): RegExp {
  * until settings hold the same. A change settings refuse is undone, unless a
  * later one has replaced it.
  */
-function useDiffView(stored: DiffViewSettings | undefined): [DiffViewSettings, (change: Partial<DiffViewSettings>) => void] {
+export function useDiffView(stored: DiffViewSettings | undefined): [DiffViewSettings, (change: Partial<DiffViewSettings>) => void] {
   const api = useApi();
   const [local, setLocal] = useState<DiffViewSettings>();
   useEffect(() => {
@@ -675,7 +692,7 @@ function sameDiffView(a: DiffViewSettings, b: DiffViewSettings): boolean {
  * Whether the element is at least `px` wide, as it is resized; false until
  * measured.
  */
-function useWide(ref: RefObject<HTMLElement | null>, px: number): boolean {
+export function useWide(ref: RefObject<HTMLElement | null>, px: number): boolean {
   const [wide, setWide] = useState(false);
   useEffect(() => {
     const el = ref.current;
