@@ -1,6 +1,7 @@
 // Every keyboard shortcut, in one place: the palette shows them next to their
 // actions, the window's key handler runs them, and Ctrl+? lists them all,
-// the composer's own Enter and Shift+Enter too.
+// the composer's own Enter and Shift+Enter too. (Reloading and the developer
+// tools in development are the main process's: see main/window-menu.ts.)
 
 /**
  * A key and the modifiers held with it. A Ctrl shortcut (Cmd works too) runs

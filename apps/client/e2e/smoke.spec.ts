@@ -85,6 +85,18 @@ test('a second launch exits and leaves the first window in place', async () => {
   expect(await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 });
 
+test('the window has no menu bar, and only macOS keeps an application menu', async () => {
+  const window = await launch();
+  await expect(window.getByRole('complementary', { name: 'Inbox' })).toBeVisible();
+  const menu = await app!.evaluate(({ Menu, BrowserWindow }) => ({
+    items: Menu.getApplicationMenu()?.items.map((item) => item.role ?? item.label) ?? null,
+    barShown: BrowserWindow.getAllWindows()[0]!.isMenuBarVisible(),
+  }));
+  // macOS's menu sits in its own bar at the top of the screen, never in the window.
+  if (process.platform === 'darwin') expect(menu.items).not.toBeNull();
+  else expect(menu).toEqual({ items: null, barShown: false });
+});
+
 test('the composer pickers open inside the window, themed', async () => {
   // A throwaway clone to link as the Project, removed once the app has exited.
   const repo = join(userDataDir, 'picker-repo');

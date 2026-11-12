@@ -688,3 +688,12 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 /* At the conversation's least width, the pickers show only their icons, their names in their tooltips. */
 .ctoolbar { container-type: inline-size; }
 @container (max-width: 360px) { .ctoolbar .pick b { display: none; } }
+
+/* Scrollbars in the theme's colours rather than the OS's grey: a slim thumb
+   over no track, brighter under the pointer. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 35%, transparent); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; min-height: 24px; }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+::-webkit-scrollbar-thumb:active { background-color: var(--muted); }
+::-webkit-scrollbar-button { display: none; }
