@@ -29,7 +29,8 @@
 // gh, as GitLab discussions in `api …/discussions` for glab (each of the
 // script's `comments` a discussion of its own); replying to one (`api
 // graphql` with addPullRequestReviewThreadReply, `api …/discussions/<id>/notes
-// --method POST`) adds the viewer's comment to it, resolving one (`api graphql`
+// --method POST`) adds the viewer's comment to it, its body read from the
+// file `-F body=@<file>` names, resolving one (`api graphql`
 // with resolveReviewThread, `api …/discussions/<id> --method PUT`) marks it
 // resolved, both written back to the script; one not in the script fails.
 // And Squash and merge: `pr merge <n>` / `mr merge <n>`, which fail like the
@@ -83,7 +84,7 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
     process.exit(1);
   }
   if (query.includes('resolveReviewThread')) thread.resolved = true;
-  else thread.comments.push({ author: script.viewer ?? 'octocat', body: args.find((a) => a.startsWith('body=')).slice('body='.length) });
+  else thread.comments.push({ author: script.viewer ?? 'octocat', body: fieldValue('body') });
   writeFileSync(scriptPath, JSON.stringify(script));
   process.stdout.write(JSON.stringify({ data: {} }));
 } else if (args[0] === 'api' && /\/merge_requests\/\d+\/discussions\/[^/?]+(\/notes)?$/.test(args[1])) {
@@ -93,7 +94,7 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
     process.stderr.write('404 Not found\n');
     process.exit(1);
   }
-  if (notes) thread.comments.push({ author: script.viewer ?? 'octocat', body: args[args.indexOf('-f') + 1].slice('body='.length) });
+  if (notes) thread.comments.push({ author: script.viewer ?? 'octocat', body: fieldValue('body') });
   else thread.resolved = true;
   writeFileSync(scriptPath, JSON.stringify(script));
   process.stdout.write('{}');
@@ -169,6 +170,13 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
 } else {
   process.stderr.write(`forge CLI stand-in: unscripted command ${JSON.stringify(args)}\n`);
   process.exit(1);
+}
+
+/** The value of field `name` (`-f`/`-F name=value`), read from the file a `-F name=@file` names, as both CLIs do. */
+function fieldValue(name) {
+  const at = args.findIndex((a, i) => (args[i - 1] === '-f' || args[i - 1] === '-F') && a.startsWith(`${name}=`));
+  const value = args[at].slice(name.length + 1);
+  return args[at - 1] === '-F' && value.startsWith('@') ? readFileSync(value.slice(1), 'utf8') : value;
 }
 
 /** A scripted Merge request as `gh` or `glab` prints it in JSON. */

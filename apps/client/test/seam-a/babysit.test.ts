@@ -958,7 +958,9 @@ describe('review threads, as notes on the diff', () => {
 
     await main.api.invoke('sessions.replyToReviewThread', { id, thread: 'PRRT_1', body: '  Good catch:\nfixed in a & b  ' });
     const mutation = graphql(machine).find((args) => args.some((a) => a.includes('addPullRequestReviewThreadReply')))!;
-    expect(mutation).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'thread=PRRT_1', 'body=Good catch:\nfixed in a & b']));
+    expect(mutation).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'thread=PRRT_1', '-F', expect.stringMatching(/^body=@.*loom-replies\/[\w-]+\.md$/)]));
+    // The reply goes in a file: an argument with a newline or an & wouldn't pass through cmd.exe whole.
+    expect(mutation.filter((arg) => /[\n&]/.test(arg))).toEqual([]);
     const replied = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.[0]?.comments.length === 2);
     expect(sessionOf(replied, id).babysit!.threads![0]!.comments[1]).toMatchObject({ author: 'octocat', body: 'Good catch:\nfixed in a & b' });
 
@@ -989,7 +991,7 @@ describe('review threads, as notes on the diff', () => {
     const invocations = machine.forgeCliInvocations('glab');
     const discussion = 'projects/acme%2Floom/merge_requests/12/discussions';
     const reply = invocations.findIndex((args) => args[1] === `${discussion}/abc123/notes`);
-    expect(invocations[reply]).toEqual(['api', `${discussion}/abc123/notes`, '--method', 'POST', '-f', 'body=Renamed']);
+    expect(invocations[reply]).toEqual(['api', `${discussion}/abc123/notes`, '--method', 'POST', '-F', expect.stringMatching(/^body=@.*loom-replies\/[\w-]+\.md$/)]);
     expect(invocations).toContainEqual(['api', `${discussion}/def456`, '--method', 'PUT', '-F', 'resolved=true']);
     expect(machine.forgeCliCwds('glab')[reply]).toBe(checkout);
     const after = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.length === 1 && sessionOf(list, id).babysit!.threads![0]!.comments.length === 2);

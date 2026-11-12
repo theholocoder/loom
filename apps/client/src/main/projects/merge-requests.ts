@@ -5,12 +5,15 @@
 // squashing and merging one when the user asks (`gh pr merge`, `glab mr
 // merge`); and replying to or resolving one of its review threads, as the
 // user asks from a note on the diff. Loom never creates a Merge request itself.
+import { randomUUID } from 'node:crypto';
 import { FORGE_CLI, type ForgeKind, type ForgeLink, type ForgeStatus, type MergeRequestState } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 
 const MERGE_REQUEST_TIMEOUT_MS = 20_000;
 /** Merging waits on the Forge, which may take a while over a big Merge request. */
 const MERGE_TIMEOUT_MS = 60_000;
+/** Writing a reply's file into the Environment. */
+const WRITE_TIMEOUT_MS = 30_000;
 
 /** A Merge request as the Forge has it now. */
 export interface FoundMergeRequest extends ForgeLink {
@@ -63,14 +66,23 @@ export async function squashAndMerge(call: BridgeCall, forge: ForgeStatus | unde
 /** What a review thread is named by: a GitHub node id, or a GitLab discussion id. */
 const THREAD_ID = /^[\w=-]+$/;
 
-/** Posts `body` as a reply in review thread `thread` of Merge request `number`; rejects with what the Forge said when it won't. */
-export async function replyToReviewThread(call: BridgeCall, forge: ForgeStatus | undefined, workingCopy: string, number: number, thread: string, body: string): Promise<void> {
+/**
+ * Posts `body` as a reply in review thread `thread` of Merge request
+ * `number`; rejects with what the Forge said when it won't. The reply is the
+ * user's own text, newlines, & and all, and maybe long: the CLI reads it from
+ * a file written under `tempDir` in the Environment, as no argument may hold
+ * it whole (a .cmd shim runs through cmd.exe, which stops at a newline and
+ * splits at an &, and a command line has a length limit).
+ */
+export async function replyToReviewThread(call: BridgeCall, forge: ForgeStatus | undefined, workingCopy: string, tempDir: string, number: number, thread: string, body: string): Promise<void> {
   const { kind, host, repository } = threadForge(forge, thread);
-  // The reply is the user's own text, newlines, & and all: gh and glab install as executables, not .cmd shims.
+  const file = `${tempDir}/loom-replies/${randomUUID()}.md`;
+  await call('files.write', WRITE_TIMEOUT_MS, { path: file, data: Buffer.from(body, 'utf8').toString('base64') });
+  // `-F name=@file`: both CLIs read the field's value from the file.
   const args =
     kind === 'github'
-      ? ['api', 'graphql', '--hostname', host, '-f', `query=${GITHUB_REPLY}`, '-f', `thread=${thread}`, '-f', `body=${body}`]
-      : ['api', `${gitLabDiscussion(repository, number, thread)}/notes`, '--method', 'POST', '-f', `body=${body}`];
+      ? ['api', 'graphql', '--hostname', host, '-f', `query=${GITHUB_REPLY}`, '-f', `thread=${thread}`, '-F', `body=@${file}`]
+      : ['api', `${gitLabDiscussion(repository, number, thread)}/notes`, '--method', 'POST', '-F', `body=@${file}`];
   await runCli(call, kind, args, workingCopy, MERGE_REQUEST_TIMEOUT_MS);
 }
 

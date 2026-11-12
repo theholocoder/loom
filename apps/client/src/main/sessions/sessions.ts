@@ -892,7 +892,7 @@ export class Sessions {
     if (session.status === 'archived') throw new Error('This Session is archived.');
     if (typeof body !== 'string' || !body.trim()) throw new Error('The reply is empty.');
     const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
-    await replyToReviewThread(call, forge, workingCopy, number, String(thread), body.trim());
+    await replyToReviewThread(call, forge, workingCopy, this.environmentOf(session).tempDir(), number, String(thread), body.trim());
   }
 
   /** Resolves a review thread of the Session's Merge request, as the user asked from its note on the diff. */
