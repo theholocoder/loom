@@ -298,6 +298,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
     'sessions.mergeRequest': (params) => sessionService.mergeRequest(params),
+    'sessions.mergeRequestDiff': (params) => sessionService.mergeRequestDiff(params),
     'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
     'sessions.setAutoPrompt': (params) => sessionService.setAutoPrompt(params),
     'sessions.setBabysitting': (params) => sessionService.setBabysitting(params),

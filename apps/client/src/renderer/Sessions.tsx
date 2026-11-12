@@ -10,7 +10,7 @@ import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
 import { ChangesView, type DiffComments } from './Changes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
-import { MergeRequestPanel, type MergeRequestFocus } from './MergeRequestPanel';
+import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from './MergeRequestPanel';
 import { canRunTerminals, PanelArea, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
 import { Select } from './Popover';
@@ -394,14 +394,25 @@ export function SessionView({
   const [popover, setPopover] = useState<HeaderPopover>();
   /** Where the Merge request Panel was last asked to take the user. */
   const [mergeRequestFocus, setMergeRequestFocus] = useState<MergeRequestFocus>();
+  /** The Merge request Panel's tab: its overview, or its diff, which alone can take Review mode. */
+  const [mergeRequestTab, setMergeRequestTab] = useState<MergeRequestTab>('overview');
   const runsTerminals = canRunTerminals(session);
   const terminals = useTopic('terminals', { sessionId: session.id });
   const panels = usePanels(session.id, terminals);
   /** Shows the Merge request Panel, at its link form or its reviews when asked. */
   const showMergeRequest = (to?: MergeRequestFocus['to']) => {
     panels.show('merge-request');
+    // The reviews are on the Overview, which leaves Review mode.
+    if (to === 'reviews') showMergeRequestTab('overview');
     if (to) setMergeRequestFocus((was) => ({ to, n: (was?.n ?? 0) + 1 }));
   };
+  /** Switches the Merge request Panel's tab: off its diff, it leaves Review mode. */
+  const showMergeRequestTab = (tab: MergeRequestTab) => {
+    setMergeRequestTab(tab);
+    if (tab !== 'diff' && panels.review === 'merge-request') panels.leaveReview();
+  };
+  /** Whether `panel` can take Review mode now: the Merge request Panel only on its Diff tab. */
+  const canReview = (panel: PanelId) => kindOf(panel) !== 'merge-request' || mergeRequestTab === 'diff';
   const { side, dock } = panels.state;
   const sideShown = panels.sideShown;
   // The Dock holds Terminals, and whatever Panels were moved there, which any Session can show.
@@ -560,7 +571,18 @@ export function SessionView({
       case 'changes':
         return <ChangesView session={session} comments={diffComments} />;
       case 'merge-request':
-        return <MergeRequestPanel session={session} project={project} focus={mergeRequestFocus} onError={setError} />;
+        return (
+          <MergeRequestPanel
+            session={session}
+            project={project}
+            focus={mergeRequestFocus}
+            tab={mergeRequestTab}
+            onTab={showMergeRequestTab}
+            // As on Changes: comments go with the next message, which an archived Session's diff doesn't take.
+            comments={session.status === 'archived' || session.worktreeMissing ? undefined : diffComments}
+            onError={setError}
+          />
+        );
       case 'terminal': {
         const terminal = terminals?.find((t) => t.id === terminalOf(panel));
         return terminal && <TerminalView key={terminal.id} terminal={terminal} focusPending={panels.focus === panel} onFocused={panels.onFocused} />;
@@ -722,7 +744,7 @@ export function SessionView({
           />
         </div>
         {panels.ready && (sideShown || panels.review) && (
-          <PanelArea area="side" session={session} terminals={terminals} control={panels} render={renderPanel} />
+          <PanelArea area="side" session={session} terminals={terminals} control={panels} canReview={canReview} render={renderPanel} />
         )}
       </div>
       {panels.ready && hasDock && dock.open && (

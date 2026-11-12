@@ -321,6 +321,89 @@ describe("the Merge request Panel's read of it", () => {
   });
 });
 
+describe("the Merge request Panel's Diff tab", () => {
+  it('reads each file of the pull request from GitHub with its patch, under the headers git would give it', async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, {
+      mergeRequests: [
+        {
+          number: 12,
+          url: pr(12),
+          branch: 'loom/fix-login',
+          files: [
+            { filename: 'src/a.ts', status: 'modified', additions: 1, deletions: 1, patch: '@@ -1,2 +1,2 @@\n-old\n+new\n context' },
+            { filename: 'src/new.ts', status: 'added', additions: 1, deletions: 0, patch: '@@ -0,0 +1 @@\n+fresh' },
+            { filename: 'src/gone.ts', status: 'removed', additions: 0, deletions: 1, patch: '@@ -1 +0,0 @@\n-gone' },
+            { filename: 'src/moved.ts', previous_filename: 'src/was.ts', status: 'renamed', additions: 0, deletions: 0 },
+            // No patch: binary, when it changes no line; too large to show, when it does.
+            { filename: 'logo.png', status: 'added', additions: 0, deletions: 0 },
+            { filename: 'pnpm-lock.yaml', status: 'modified', additions: 30000, deletions: 2 },
+          ],
+        },
+      ],
+    });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 12));
+
+    expect(await main.api.invoke('sessions.mergeRequestDiff', { id })).toEqual({
+      files: [
+        { path: 'src/a.ts', status: 'committed', added: 1, removed: 1, binary: false, truncated: false, text: 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,2 @@\n-old\n+new\n context\n' },
+        { path: 'src/new.ts', status: 'committed', added: 1, removed: 0, binary: false, truncated: false, text: 'diff --git a/src/new.ts b/src/new.ts\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+fresh\n' },
+        { path: 'src/gone.ts', status: 'committed', change: 'deleted', added: 0, removed: 1, binary: false, truncated: false, text: 'diff --git a/src/gone.ts b/src/gone.ts\n--- a/src/gone.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n' },
+        { path: 'src/moved.ts', oldPath: 'src/was.ts', status: 'committed', change: 'renamed', added: 0, removed: 0, binary: false, truncated: false, text: 'diff --git a/src/was.ts b/src/moved.ts\n--- a/src/was.ts\n+++ b/src/moved.ts\n' },
+        { path: 'logo.png', status: 'committed', added: 0, removed: 0, binary: true, truncated: false, text: '' },
+        { path: 'pnpm-lock.yaml', status: 'committed', added: 30000, removed: 2, binary: false, truncated: true, text: '' },
+      ],
+    });
+    const call = machine.forgeCliInvocations('gh').findLast((args) => args[0] === 'api' && args.some((a) => a.includes('/files')));
+    expect(call).toEqual(['api', '--hostname', 'github.com', 'repos/theholocoder/loom/pulls/12/files?per_page=100']);
+  });
+
+  it('reads it from GitLab through glab, in the working copy', async () => {
+    const { machine, checkout } = machineOn('glab', GITLAB, {
+      mergeRequests: [
+        {
+          number: 87,
+          url: mr(87),
+          branch: 'loom/fix-login',
+          diffs: [
+            { old_path: 'lib/a.rb', new_path: 'lib/a.rb', diff: '@@ -1,2 +1,2 @@\n-old\n+new\n+more\n context\n' },
+            { old_path: 'lib/old.rb', new_path: 'lib/b.rb', renamed_file: true, diff: '' },
+            { old_path: 'lib/c.rb', new_path: 'lib/c.rb', new_file: true, diff: '@@ -0,0 +1 @@\n+c\n' },
+            { old_path: 'big.sql', new_path: 'big.sql', diff: '', too_large: true },
+          ],
+        },
+      ],
+    });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 87));
+
+    expect(await main.api.invoke('sessions.mergeRequestDiff', { id })).toEqual({
+      files: [
+        { path: 'lib/a.rb', status: 'committed', added: 2, removed: 1, binary: false, truncated: false, text: 'diff --git a/lib/a.rb b/lib/a.rb\n--- a/lib/a.rb\n+++ b/lib/a.rb\n@@ -1,2 +1,2 @@\n-old\n+new\n+more\n context\n' },
+        { path: 'lib/b.rb', oldPath: 'lib/old.rb', status: 'committed', change: 'renamed', added: 0, removed: 0, binary: false, truncated: false, text: 'diff --git a/lib/old.rb b/lib/b.rb\n--- a/lib/old.rb\n+++ b/lib/b.rb\n' },
+        { path: 'lib/c.rb', status: 'committed', added: 1, removed: 0, binary: false, truncated: false, text: 'diff --git a/lib/c.rb b/lib/c.rb\n--- /dev/null\n+++ b/lib/c.rb\n@@ -0,0 +1 @@\n+c\n' },
+        { path: 'big.sql', status: 'committed', added: 0, removed: 0, binary: false, truncated: true, text: '' },
+      ],
+    });
+    const at = machine.forgeCliInvocations('glab').findLastIndex((args) => args[0] === 'api' && /\/merge_requests\/87\/diffs\?per_page=100$/.test(args[1]!));
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(machine.forgeCliCwds('glab')[at]).toBe(checkout);
+  });
+
+  it('says there are more files when the Forge lists as many as it lists at once, and why it could not read them', async () => {
+    const files = Array.from({ length: 100 }, (_, i) => ({ filename: `f${i}.ts`, status: 'modified', additions: 1, deletions: 0, patch: '@@ -1 +1,2 @@\n a\n+b' }));
+    const { machine, checkout, forge } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 12, url: pr(12), branch: 'loom/fix-login', files }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 12));
+    const diff = await main.api.invoke('sessions.mergeRequestDiff', { id });
+    expect(diff.files).toHaveLength(100);
+    expect(diff.moreFiles).toBe(true);
+
+    forge([]);
+    await expect(main.api.invoke('sessions.mergeRequestDiff', { id })).rejects.toThrow('Not Found (HTTP 404)');
+  });
+});
+
 describe("the agent's Link merge request tool", () => {
   it("is Loom's MCP server, the bridge run as `mcp`, given to the agent's session", async () => {
     const { machine, checkout } = machineOn('gh', GITHUB);

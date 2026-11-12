@@ -73,6 +73,8 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
     ...PANEL_SPECS['merge-request'],
     label: 'Merge request',
     icon: GitPullRequest,
+    // On its Diff tab: see PanelArea's `canReview`.
+    reviewable: true,
     // It means nothing on a Session without one (ADR 0009); one open when it goes says so.
     offered: (session) => !!session.mergeRequest,
     badge: ({ babysit }) => {
@@ -487,6 +489,7 @@ export function PanelArea({
   session,
   terminals,
   control,
+  canReview = () => true,
   render,
 }: {
   area: PanelAreaName;
@@ -494,6 +497,8 @@ export function PanelArea({
   /** The Session's Terminals, for their tabs' titles. */
   terminals: TerminalInfo[] | undefined;
   control: PanelsControl;
+  /** Whether a reviewable Panel can take Review mode as it is now: the Merge request Panel only on its Diff tab. */
+  canReview?: (panel: PanelId) => boolean;
   render: (panel: PanelId) => ReactNode;
 }) {
   const state = control.state[area];
@@ -534,7 +539,7 @@ export function PanelArea({
   const menuFor = (panel: PanelId): ContextMenuSection[] => [
     [
       { label: `Move to the ${AREA_LABELS[other]}`, icon: other === 'dock' ? PanelBottom : PanelRight, run: () => control.move(panel) },
-      ...(area === 'side' && PANELS[kindOf(panel)].reviewable
+      ...(area === 'side' && PANELS[kindOf(panel)].reviewable && canReview(panel)
         ? [
             {
               label: 'Review mode',
@@ -554,7 +559,7 @@ export function PanelArea({
   useReview(!!reviewing, element, control.leaveReview);
   const Element = area === 'side' ? 'aside' : 'section';
   // Review mode takes the Side area's place: a Panel in the Dock stays there.
-  const reviewable = area === 'side' && !reviewing && state.shown && PANELS[kindOf(state.shown)].reviewable ? state.shown : undefined;
+  const reviewable = area === 'side' && !reviewing && state.shown && PANELS[kindOf(state.shown)].reviewable && canReview(state.shown) ? state.shown : undefined;
   const reviewShortcut = shortcutLabel(SHORTCUTS.reviewChanges.shortcut);
   return (
     <>

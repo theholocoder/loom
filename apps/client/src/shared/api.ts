@@ -351,6 +351,15 @@ export interface MergeRequestDetails extends ForgeLink {
   comments: MergeRequestComment[];
 }
 
+/** One file of a Merge request's diff, as its Forge has it: committed, with its unified diff. */
+export interface MergeRequestDiffFile extends DiffFile, FileDiff {}
+
+/** What a Merge request changes, file by file, as its Forge has it; `moreFiles` when the Forge listed only the first of them. */
+export interface MergeRequestDiff {
+  files: MergeRequestDiffFile[];
+  moreFiles?: boolean;
+}
+
 /** A comment on a place in the code. */
 export interface FeedbackComment {
   path: string;
@@ -1412,6 +1421,8 @@ export interface Commands {
    * off or out of reach.
    */
   'sessions.mergeRequest': { params: { id: number }; result: MergeRequestDetails };
+  /** The Session's Merge request's diff as its Forge has it now, for its Panel's Diff tab: rejects as `sessions.mergeRequest` does. */
+  'sessions.mergeRequestDiff': { params: { id: number }; result: MergeRequestDiff };
   /**
    * Sends the agent the feedback on card `itemId`, as one message, queued if
    * the Session is Working. Rejects when the card has been sent already.

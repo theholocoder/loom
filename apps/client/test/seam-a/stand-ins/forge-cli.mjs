@@ -22,7 +22,8 @@
 // And the Merge request Panel's read of one: the same `api graphql` for gh,
 // with its title, branches, author, description, reviewers asked (`reviewers`,
 // a name with a slash being a team on GitHub), commits and changes; `mr
-// view`, `api …/commits` and `api …/diffs` for glab.
+// view`, `api …/commits` and `api …/diffs` for glab. And its Diff tab's:
+// `api …/pulls/<n>/files` for gh (the script's `files`), `api …/diffs` for glab.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
@@ -65,6 +66,14 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
   const number = args.find((a) => a.startsWith('number=')).slice('number='.length);
   const found = (script.mergeRequests ?? []).find((m) => String(m.number) === number);
   process.stdout.write(JSON.stringify({ data: { viewer: { login: script.viewer ?? 'octocat' }, repository: { pullRequest: found ? asPullRequest(found) : null } } }));
+} else if (args[0] === 'api' && args.some((a) => /\/pulls\/\d+\/files(\?|$)/.test(a))) {
+  const number = /\/pulls\/(\d+)\/files/.exec(args.find((a) => /\/pulls\/\d+\/files/.test(a)))[1];
+  const found = (script.mergeRequests ?? []).find((m) => String(m.number) === number);
+  if (!found) {
+    process.stderr.write('gh: Not Found (HTTP 404)\n');
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify(found.files ?? []));
 } else if (args[0] === 'api' && args[1] === 'user') {
   process.stdout.write(JSON.stringify({ username: script.viewer ?? 'octocat' }));
 } else if (args[0] === 'api' && /\/merge_requests\/\d+\/notes(\?|$)/.test(args[1])) {
