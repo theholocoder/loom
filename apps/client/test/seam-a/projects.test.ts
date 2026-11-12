@@ -249,7 +249,7 @@ describe("a Project's branch prefix", () => {
     expect((await second.api.invoke('projects.list'))[0]?.branchPrefix).toBe('feat/loom');
   });
 
-  it.each(['', '  ', 'my prefix', 'feat..x', 'feat/', '/feat', 'feat~1', 'a:b', '.hidden', 'x.lock', 'a@{b', '@', '-feat'])(
+  it.each(['', '  ', 'my prefix', 'feat..x', '/', '/feat', 'feat~1', 'a:b', '.hidden', 'x.lock', 'a@{b', '@', '-feat'])(
     'refuses %j, which git would not accept at the start of a branch name',
     async (branchPrefix) => {
       const machine = tempMachine();
@@ -260,6 +260,14 @@ describe("a Project's branch prefix", () => {
       expect((await main.api.invoke('projects.list'))[0]?.branchPrefix).toBe('loom');
     },
   );
+
+  it.each(['feat/', 'feat//', ' feat/ '])('takes %j as "feat": Loom adds the / itself', async (branchPrefix) => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const { id } = await main.api.invoke('projects.link', { path: machine.gitRepo('loom') });
+
+    expect((await main.api.invoke('projects.setBranchPrefix', { id, branchPrefix })).branchPrefix).toBe('feat');
+  });
 
   it('rejects an unknown Project', async () => {
     const main = await started();

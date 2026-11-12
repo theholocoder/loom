@@ -319,8 +319,11 @@ button.search { border: 0; width: 100%; text-align: left; }
 .warn { color: var(--wait); font-size: 12px; max-width: 46ch; margin-top: 2px; }
 .ag-ready { color: var(--ok); } .ag-checking { color: var(--work); } .ag-signed-out, .ag-unsupported { color: var(--wait); }
 .ag-missing, .ag-error { color: var(--err); } .ag-unknown { color: var(--muted); }
-.fg-available { color: var(--ok); } .fg-checking { color: var(--work); } .fg-off { color: var(--wait); } .fg-unknown { color: var(--muted); }
+.fg-available { color: var(--ok); } .fg-checking { color: var(--work); } .fg-off { color: var(--wait); } .fg-unknown { color: var(--muted); } .fg-local { color: var(--muted); cursor: help; }
 input.prefix { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; width: 16ch; }
+input.prefix[aria-invalid] { border-color: var(--err); }
+.prefix-preview { font-size: 12px; margin-top: 2px; }
+.page-error { gap: 6px; }
 .pick .issue-title { max-width: 28ch; }
 .popover.issue-popover { width: 360px; gap: 4px; }
 .st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }
