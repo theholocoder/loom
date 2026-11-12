@@ -90,16 +90,17 @@ describe('the Inbox', () => {
     expect(why).toEqual(['Finished', 'Stopped', 'Asked a question', 'Needs approval', 'Stuck', 'Error', 'Interrupted', 'Feedback']);
   });
 
-  it('shows the title, an unread marker, when it went Waiting and its branch', () => {
+  it('shows the title, an unread marker, how long ago it went Waiting and its branch', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: NOW });
     renderApp(
       new FakeMain({
         projects: [loom],
         sessions: [
           session({ title: 'Just now', unread: true, updatedAt: NOW - 10_000, branch: 'loom/31-mr-button' }),
+          session({ title: 'Minutes ago', updatedAt: NOW - 4 * 60_000 }),
           session({ title: 'This morning', updatedAt: new Date(2026, 10, 2, 9, 5).getTime() }),
-          session({ title: 'Last night', updatedAt: new Date(2026, 10, 1, 23, 30).getTime() }),
-          session({ title: 'Last week', updatedAt: new Date(2026, 9, 26, 15, 0).getTime() }),
+          session({ title: 'Last night', updatedAt: new Date(2026, 10, 1, 7, 30).getTime() }),
+          session({ title: 'Last month', updatedAt: new Date(2026, 9, 6, 15, 0).getTime() }),
         ],
       }),
     );
@@ -109,9 +110,10 @@ describe('the Inbox', () => {
     expect(within(row('Just now')).getByRole('img', { name: 'Unread' })).toBeTruthy();
     expect(within(row('This morning')).queryByRole('img', { name: 'Unread' })).toBeNull();
     expect(within(row('Just now')).getByText('now')).toBeTruthy();
-    expect(within(row('This morning')).getByText(/^0?9.05/)).toBeTruthy();
-    expect(within(row('Last night')).getByText('Yesterday')).toBeTruthy();
-    expect(within(row('Last week')).getByText(/26/)).toBeTruthy();
+    expect(within(row('Minutes ago')).getByText('4m')).toBeTruthy();
+    expect(within(row('This morning')).getByText('1h')).toBeTruthy();
+    expect(within(row('Last night')).getByText('1d')).toBeTruthy();
+    expect(within(row('Last month')).getByText(/6/)).toBeTruthy();
     expect(within(row('Just now')).getByTitle('Branch').textContent).toBe('loom/31-mr-button');
     expect(within(row('This morning')).queryByTitle('Branch')).toBeNull();
   });
@@ -169,6 +171,83 @@ describe('the Inbox', () => {
     // Each is still collapsible.
     fireEvent.click(heads[0]!);
     expect(within(bottom as HTMLElement).getByRole('listitem', { name: 'Later' })).toBeTruthy();
+  });
+
+  it('shows Snoozed, Working and Archived cards with their Project, issue, Merge request and branch, and when each wakes, how long it has run, or when it was archived', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    const refs = { branch: 'billing/21-pdf-renderer-v4', issue: { number: 21, url: 'https://gitlab.com/acme/billing-api/-/issues/21' }, mergeRequest: { number: 38, url: 'https://gitlab.com/acme/billing-api/-/merge_requests/38' } };
+    renderApp(
+      new FakeMain({
+        projects: [loom, billing],
+        sessions: [
+          session({ title: 'Later', projectId: billing.id, snoozedUntil: new Date(2026, 10, 2, 16, 0).getTime(), ...refs }),
+          session({ title: 'Busy', projectId: billing.id, status: 'working', waitingReason: undefined, updatedAt: NOW - 4 * 60_000, ...refs }),
+          session({ title: 'Done long ago', projectId: billing.id, status: 'archived', waitingReason: undefined, updatedAt: new Date(2026, 9, 26, 15, 0).getTime(), ...refs }),
+        ],
+      }),
+    );
+    for (const section of ['Snoozed', 'Working', 'Archived']) fireEvent.click(within(inbox()).getByRole('button', { name: section }));
+    const card = (title: string) => within(within(inbox()).getByRole('listitem', { name: title }));
+
+    for (const title of ['Later', 'Busy', 'Done long ago']) {
+      expect(card(title).getByTitle('Project').textContent).toBe('billing-api');
+      expect(['Issue', 'Merge request', 'Branch'].map((what) => card(title).getByTitle(what).textContent)).toEqual(['#21', '!38', 'billing/21-pdf-renderer-v4']);
+    }
+    expect(card('Later').getByRole('time').textContent).toMatch(/^until 0?4:00|^until 16:00/);
+    expect(card('Busy').getByRole('time').textContent).toBe('4m');
+    expect(card('Done long ago').getByRole('time').textContent).toMatch(/26/);
+  });
+
+  it('brings relative times up to date as time passes', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'], now: NOW });
+    renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [session({ title: 'Just in', updatedAt: NOW }), session({ title: 'Busy', status: 'working', waitingReason: undefined, updatedAt: NOW - 4 * 60_000 })],
+      }),
+    );
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Working' }));
+    const time = (title: string) => within(within(inbox()).getByRole('listitem', { name: title })).getByRole('time').textContent;
+    expect([time('Just in'), time('Busy')]).toEqual(['now', '4m']);
+
+    act(() => vi.advanceTimersByTime(3 * 60_000));
+
+    expect([time('Just in'), time('Busy')]).toEqual(['3m', '7m']);
+  });
+
+  it('makes a Session waiting on the user, for an approval or a question, stand out from a Finished one', () => {
+    renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [session({ title: 'Asks', waitingReason: 'question' }), session({ title: 'Blocked', waitingReason: 'approval' }), session({ title: 'Done', waitingReason: 'finished' })],
+      }),
+    );
+    const needsYou = (title: string) => within(inbox()).getByRole('listitem', { name: title }).classList.contains('needs-you');
+
+    expect([needsYou('Asks'), needsYou('Blocked'), needsYou('Done')]).toEqual([true, true, false]);
+  });
+
+  it('opens the section the viewed Session moves into, its card selected', () => {
+    const waiting = session({ title: 'Mine' });
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [waiting, session({ title: 'Other', status: 'working', waitingReason: undefined })] }));
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Mine' }));
+    expect(within(inbox()).getByRole('button', { name: 'Working' }).getAttribute('aria-expanded')).toBe('false');
+
+    act(() => main.publish('sessions', [{ ...waiting, status: 'working', waitingReason: undefined, updatedAt: waiting.updatedAt + 1 }, main.value('sessions')[1]!]));
+
+    expect(within(inbox()).getByRole('button', { name: 'Working' }).getAttribute('aria-expanded')).toBe('true');
+    expect(within(inbox()).getByRole('button', { name: 'Mine' }).getAttribute('aria-current')).toBe('true');
+  });
+
+  it("reserves room for a card's hover actions, one per action", () => {
+    renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Waiting' }), session({ title: 'Busy', status: 'working', waitingReason: undefined })] }));
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Working' }));
+    const card = (title: string) => within(inbox()).getByRole('listitem', { name: title });
+
+    // Reply, Create Merge request, Snooze, Archive and Mark unread.
+    expect(within(card('Waiting').querySelector('.hover-actions') as HTMLElement).getAllByRole('button')).toHaveLength(5);
+    expect(card('Waiting').style.getPropertyValue('--actions')).toBe('5');
+    expect(card('Busy').querySelector('.hover-actions')).toBeNull();
   });
 
   it('labels the search box "Search…", its full name in the tooltip', () => {
@@ -252,9 +331,10 @@ describe('the Inbox', () => {
     fireEvent.change(prompt, { target: { value: 'Yes, go ahead' } });
     fireEvent.keyDown(prompt, { key: 'Enter' });
 
-    await waitFor(() => expect(within(inbox()).queryByRole('listitem', { name: 'Asked me something' })).toBeNull());
-    expect(within(inbox()).queryByRole('group')).toBeNull();
+    await waitFor(() => expect(within(inbox()).queryByRole('group')).toBeNull());
     expect(within(inbox()).getByRole('button', { name: 'Working' }).textContent).toContain('1');
+    // Still viewed, it stays in sight, under Working.
+    expect(within(within(inbox()).getByRole('list', { name: 'Working' })).getByRole('button', { name: 'Asked me something' }).getAttribute('aria-current')).toBe('true');
   });
 
   it('shows the linked issue and Merge request before the branch, numbered the way each Forge does', () => {

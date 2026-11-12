@@ -77,7 +77,6 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .item.sel { background: var(--sel); }
 .item .hover-actions { display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: inherit; gap: 0; }
 .item:hover .hover-actions, .item.menu-open .hover-actions, .item:focus-within .hover-actions { display: flex; background: var(--hover); }
-.item:hover .time { visibility: hidden; }
 .unread .title { font-weight: 700; }
 .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
 .elapsed { font-family: var(--mono); font-size: 12px; color: var(--work); white-space: nowrap; text-transform: none; letter-spacing: 0; }
@@ -93,8 +92,6 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .B-item .l2 { display: flex; gap: 8px; margin-top: 1px; color: var(--muted); font-size: 12px; }
 .section-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; color: var(--muted); cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; border-top: 1px solid var(--line); }
 .section-head:hover { color: var(--text); }
-.mini { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
-.mini:hover { background: var(--hover); } .mini.sel { background: var(--sel); }
 
 /* ---- main ---- */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -308,8 +305,6 @@ button.search { border: 0; width: 100%; text-align: left; }
 input.prefix { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; width: 16ch; }
 .pick .issue-title { max-width: 28ch; }
 .popover.issue-popover { width: 360px; gap: 4px; }
-/* Sidebar rows and status are buttons here. */
-button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-align: left; }
 .st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }
 .st-waiting-approval, .st-waiting-feedback, .st-waiting-unsaved-work { color: var(--wait); }
 .bubble { overflow-wrap: anywhere; }
@@ -320,6 +315,22 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .B-item > button.open { display: block; width: 100%; background: none; border: 0; border-radius: 0; padding: 7px 12px; text-align: left; }
 .B-item > button.open:hover { background: none; }
 .row-error { padding: 0 12px 7px; }
+/* A card's second line: the Project (outside the Inbox), the issue and the
+   Merge request keep their room; the branch gives way, with an ellipsis. */
+.B-item .l2 { min-width: 0; align-items: center; }
+.B-item .l2 .proj { font-weight: 600; font-size: 12px; white-space: nowrap; flex: 0 1 auto; max-width: 40%; }
+.B-item .l2 .ref, .B-item .l2 .chip { flex: none; }
+/* A Waiting Session the agent can't go on without (an Approval request, a question)
+   stands out from a Finished one. */
+.B-item.needs-you { background: color-mix(in srgb, var(--wait) 9%, transparent); box-shadow: inset 2px 0 0 var(--wait); }
+.B-item.needs-you .time { color: var(--wait); }
+.B-item.needs-you.sel { background: var(--sel); }
+/* The hover actions sit on the first line, at its end: the title gives them
+   their room (an .icon-btn.sm, 26px, for each of the --actions), and the time
+   steps aside for them. A card without actions keeps its time. */
+.B-item .hover-actions { top: 3px; transform: none; }
+.B-item:has(.hover-actions):is(:hover, .menu-open, :focus-within) .l1 { padding-right: calc(var(--actions) * 26px - 4px); }
+.B-item:has(.hover-actions):is(:hover, .menu-open, :focus-within) .l1 .time { display: none; }
 .scrim { position: fixed; inset: 0; background: var(--shadow); display: grid; place-items: center; z-index: 50; }
 .modal { width: min(440px, calc(100vw - 32px)); box-shadow: 0 12px 40px var(--shadow); }
 .modal p { margin: 0 0 12px; color: var(--muted); }
