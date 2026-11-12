@@ -49,6 +49,7 @@ import { PageWindow, type Page } from './PageWindow';
 import { ProjectPicker } from './ProjectPicker';
 import { Dashboard } from './Dashboard';
 import { Projects, useExistingCloneLinker } from './Projects';
+import { DraftsProvider } from './drafts';
 import { NewSession, SessionView, type NewSessionWorkingCopy, type SessionCommand } from './Sessions';
 import { NewSessionContext } from './SessionMenu';
 import { ContextMenuHost } from './ContextMenu';
@@ -70,7 +71,9 @@ export function App() {
   if (database.state === 'damaged') return <DatabaseProblem status={database} />;
   return (
     <ToastHost>
-      <Workspace />
+      <DraftsProvider>
+        <Workspace />
+      </DraftsProvider>
     </ToastHost>
   );
 }
