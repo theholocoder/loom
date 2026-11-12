@@ -144,7 +144,8 @@ describe('a snoozed Session', () => {
     const list = within(inbox()).getByRole('list', { name: 'Snoozed' });
     expect(within(list).getAllByRole('listitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Later', 'Next week']);
     const later = within(row('Later'));
-    expect(later.getByRole('time').textContent).toBe(`Tomorrow ${clock(9, 0)}`);
+    expect(later.getByRole('time').textContent).toBe(`until Tomorrow ${clock(9, 0)}`);
+    expect(later.getByTitle('Project').textContent).toBe('loom');
     expect(later.getByTitle('Branch').textContent).toBe('loom/later');
   });
 
