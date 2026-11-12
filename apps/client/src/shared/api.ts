@@ -1585,6 +1585,14 @@ export interface Commands {
    */
   'sessions.archive': { params: CloseSessionParams; result: ArchiveResult };
   /**
+   * Undoes an archive: the Session is reopened as a message to it would
+   * reopen it (a worktree Session's worktree made again on its kept branch),
+   * but none is sent, so it is Waiting again for the reason it was before,
+   * or Stopped if it was archived mid-run or while it waited on an answer.
+   * Rejects, leaving it archived, when it can't be reopened.
+   */
+  'sessions.unarchive': { params: { id: number }; result: void };
+  /**
    * Deletes a Session for good, whatever its status: its agent is stopped
    * and its worktree removed as `sessions.archive` would (its local branch
    * kept, held back by unsaved work unless `discard`), then its record, its

@@ -7,7 +7,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { matchesShortcut, SHORTCUTS } from './shortcuts';
+import { isTerminalShortcut } from './shortcuts';
 
 export interface TerminalScreen {
   /** What it draws into: moved to another parent, it keeps what it shows. */
@@ -42,8 +42,8 @@ export function createTerminalScreen(options: ScreenOptions): TerminalScreen {
   terminal.loadAddon(new WebLinksAddon((_event, url) => options.openLink(url)));
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown') return true;
-    // The one Loom shortcut that works in a terminal: the window's handler runs it.
-    if (matchesShortcut(SHORTCUTS.toggleTerminal.shortcut, event)) return false;
+    // The Loom shortcuts that work in a terminal: the window's handler runs them.
+    if (isTerminalShortcut(event)) return false;
     const ctrlShift = (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey;
     if (ctrlShift && event.code === 'KeyC') {
       // Kept from the window's own copy and paste (macOS's Edit menu), which would act as well.

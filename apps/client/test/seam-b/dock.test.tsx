@@ -220,17 +220,26 @@ describe('the dock', () => {
     expect(within(dock()!).getByRole('tabpanel').contains(screens[0]!.element)).toBe(true);
   });
 
-  it('keeps Loom shortcuts away from a focused terminal, all but Ctrl+`, which hides the dock', async () => {
+  it('keeps Loom shortcuts away from a focused terminal, all but Ctrl+K, Ctrl+? and Ctrl+`, which hides the dock', async () => {
     renderApp(fakeMain());
     openSession('Fix login');
     toggleTerminal();
     await waitFor(() => expect(document.activeElement).toBe(focusedInput()));
 
-    fireEvent.keyDown(focusedInput(), { key: 'k', ctrlKey: true });
     fireEvent.keyDown(focusedInput(), { key: 'b', ctrlKey: true });
+    fireEvent.keyDown(focusedInput(), { key: 'e' });
     expect(screen.queryByRole('dialog')).toBeNull();
     // Ctrl+B left the Side area as it was.
     expect(screen.getByRole('complementary', { name: 'Side area' })).toBeTruthy();
+
+    fireEvent.keyDown(focusedInput(), { key: 'k', ctrlKey: true });
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(document.activeElement).toBe(focusedInput());
+    fireEvent.keyDown(focusedInput(), { key: '?', ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(document.activeElement).toBe(focusedInput());
 
     toggleTerminal(focusedInput());
     expect(dock()).toBeNull();

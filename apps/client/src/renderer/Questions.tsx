@@ -17,7 +17,8 @@ const TRUST_STATES: Record<TrustState, string | undefined> = { asked: undefined,
 export function AskCard({ label, icon, name, asked, hint = 'The agent is asking you', state, children }: { label: string; icon: ReactNode; name: string; asked: boolean; hint?: string; state?: string; children: ReactNode }) {
   return (
     <div className="tools">
-      <div className={`tool ask${asked ? ' question' : ''}`} role="group" aria-label={label}>
+      {/* While asked, the focus can be kept on it (see SessionView): the composer is disabled. */}
+      <div className={`tool ask${asked ? ' question' : ''}`} role="group" aria-label={label} tabIndex={asked ? -1 : undefined} data-asked={asked || undefined}>
         <div className="tool-head">
           {icon}
           <span className="name">{name}</span>
@@ -206,7 +207,7 @@ export function useQuestionPanel(
 
   const problem = step && stepProblem(step, flow.draft);
   const panel = (
-    <div className="ask-panel" role="group" aria-label="Question">
+    <div className="ask-panel" role="group" aria-label="Question" tabIndex={-1} data-asked>
       <div className="ask-panel-head">
         <MessageCircleQuestionMark className="sm" />
         <span className="grow ask-message">{item.message}</span>

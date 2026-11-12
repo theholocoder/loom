@@ -146,6 +146,8 @@ export class Sessions {
   private readonly deleted = new Set<number>();
   /** Archived Sessions being reopened, by Session. */
   private readonly reopening = new Map<number, Promise<void>>();
+  /** Why each Session archived since the Client started was Waiting, or would be once stopped: what undoing the archive brings back. */
+  private readonly archivedFrom = this.perSession<WaitingReason>();
   /** Projects being removed, which no new Session may start on. */
   private readonly removing = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
@@ -250,7 +252,7 @@ export class Sessions {
     }
     for (const session of sessions.list()) {
       // A Session waiting on a question or an Approval request, or stuck, was mid-run too: what the agent asked went with its process.
-      if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval' || session.waitingReason === 'stuck'))) continue;
+      if (!inRunOrAsking(session)) continue;
       await sessions.loadTranscript(session.id);
       sessions.endRun(session.id);
       sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
@@ -498,9 +500,14 @@ export class Sessions {
       await running.catch(() => {});
       return this.send({ id, prompt, attachments: attached, comments });
     }
+    await this.reopen(id, () => this.prompt(id, text, newAttachments, { reopening: true }));
+  }
+
+  /** Reopens the archived Session (see `prepareReopen`), then runs `then` on it, tracked as one reopen. */
+  private async reopen(id: number, then: () => Promise<void> | void): Promise<void> {
     const reopening = (async () => {
       await this.prepareReopen(id);
-      await this.prompt(id, text, newAttachments, { reopening: true });
+      await then();
     })();
     this.reopening.set(id, reopening);
     try {
@@ -508,6 +515,29 @@ export class Sessions {
     } finally {
       if (this.reopening.get(id) === reopening) this.reopening.delete(id);
     }
+  }
+
+  /**
+   * Undoes an archive: reopens the Session as a message would (see
+   * `prepareReopen`), but sends none, so that it is Waiting again, as it was
+   * before; Stopped if it was archived mid-run or while it waited on an
+   * answer, which archiving denied.
+   */
+  async unarchive({ id }: { id: number }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    const running = this.reopening.get(id);
+    if (running) {
+      await running.catch(() => {});
+      if (this.get(id).status !== 'archived') return;
+    }
+    if (this.get(id).status !== 'archived') throw new Error('This Session is not archived.');
+    await this.reopen(id, () => {
+      // Asked again: the Project may have started being removed meanwhile.
+      this.assertCanReopen(id);
+      this.setStatus(id, { status: 'waiting', waitingReason: this.archivedFrom.get(id) ?? 'finished' });
+      this.archivedFrom.delete(id);
+    });
   }
 
   /** Sends a prompt to the Session, or queues it; `reopening`, to an archived Session made ready by `prepareReopen`. */
@@ -1298,7 +1328,10 @@ export class Sessions {
 
   private markArchived(id: number): void {
     // Also guards a concurrent archive of the same Session: it was archived while this one waited.
-    if (this.get(id).status === 'archived') return;
+    const was = this.get(id);
+    if (was.status === 'archived') return;
+    // Asked again, a run or a question doesn't come back: the agent is stopped, and what it asked denied.
+    this.archivedFrom.set(id, inRunOrAsking(was) ? 'stopped' : (was.waitingReason ?? 'finished'));
     this.endRun(id);
     this.denyMessages.delete(id);
     if (this.get(id).queue) {
@@ -2484,6 +2517,11 @@ export class Sessions {
  * a `wait` for the user while Waiting on a question or Approval request, or
  * finished and unanswered; none otherwise.
  */
+/** Whether the Session's agent is mid-run: Working, or Waiting on what it asked (a question, an Approval request) or stuck. */
+function inRunOrAsking({ status, waitingReason }: Pick<Session, 'status' | 'waitingReason'>): boolean {
+  return status === 'working' || (status === 'waiting' && (waitingReason === 'question' || waitingReason === 'approval' || waitingReason === 'stuck'));
+}
+
 function spanOf(status: SessionStatus, waitingReason: WaitingReason | undefined): OpenSpan['kind'] | undefined {
   if (status === 'working') return 'run';
   if (status === 'waiting' && (waitingReason === 'question' || waitingReason === 'approval' || waitingReason === 'finished')) return 'wait';
