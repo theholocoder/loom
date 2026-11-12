@@ -1,17 +1,20 @@
 // The toast at the foot of the window: a word on what an action just did,
 // with Undo for the ones that can be taken back (Archive, Mark unread), which
-// Ctrl+Z runs too outside text fields. One at a time: a new one takes the
-// place of the last.
-import { Undo2, X } from 'lucide-react';
+// Ctrl+Z runs too outside text fields, or why an action failed, in view
+// wherever the action was. One at a time: a new one takes the place of the
+// last.
+import { OctagonX, Undo2, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-/** How long a toast stays. */
+/** How long a toast stays, unless it says why an action failed. */
 export const TOAST_MS = 8000;
 
 export interface ToastContent {
   message: string;
   /** Takes the action back; rejects with why it couldn't. */
   undo?: () => Promise<unknown>;
+  /** The message is why an action failed, rather than what it did: it stays until dismissed or replaced, so as not to be missed. */
+  failed?: boolean;
 }
 
 interface Toaster {
@@ -61,7 +64,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
   }, []);
   const holding = held.pointer || held.focus;
   useEffect(() => {
-    if (!toast || holding) return;
+    if (!toast || holding || toast.failed) return;
     const timer = setTimeout(toaster.close, TOAST_MS);
     return () => clearTimeout(timer);
   }, [toast?.key, holding]);
@@ -73,15 +76,18 @@ export function ToastHost({ children }: { children: ReactNode }) {
         {toast && (
           <div
             key={toast.key}
-            className="toast"
+            className={toast.failed ? 'toast failed' : 'toast'}
             role="group"
-            aria-label="What was done"
+            aria-label={toast.failed ? 'What went wrong' : 'What was done'}
             onMouseEnter={() => setHeld((h) => ({ ...h, pointer: true }))}
             onMouseLeave={() => setHeld((h) => ({ ...h, pointer: false }))}
             onFocus={() => setHeld((h) => ({ ...h, focus: true }))}
             onBlur={(event) => !event.currentTarget.contains(event.relatedTarget as Node | null) && setHeld((h) => ({ ...h, focus: false }))}
           >
-            <span className="grow">{toast.message}</span>
+            {toast.failed && <OctagonX className="sm" />}
+            <span className="grow" role={toast.failed ? 'alert' : undefined}>
+              {toast.message}
+            </span>
             {toast.undo && (
               <button type="button" className="link" title="Undo (Ctrl Z)" onClick={toaster.undo}>
                 <Undo2 className="sm" />

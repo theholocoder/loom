@@ -234,3 +234,46 @@ describe('a run in flight when Loom quit', () => {
     await expect(main.api.invoke('sessions.continue', { id })).rejects.toThrow(/nothing to continue/i);
   });
 });
+
+describe('a run that ended early', () => {
+  /** The prompts the agent was sent, in order. */
+  const prompts = (machine: Machine) =>
+    machine
+      .acpMessages()
+      .filter((m) => m.message.method === 'session/prompt')
+      .map((m) => (m.message.params?.prompt as Array<{ text: string }>)[0]!.text);
+
+  it('goes on when Stopped: Continue has the agent carry on where it was stopped', async () => {
+    const { machine, checkout } = machineWith({ turns: [{ chunks: ['Halfway'], hold: 'never' }, { chunks: ['Carrying on.'] }] });
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Go' });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
+    await main.api.invoke('sessions.stop', { id });
+    await waitFor(main.api, 'sessions', session(id, waiting('stopped')));
+
+    await main.api.invoke('sessions.continue', { id });
+
+    await waitFor(main.api, 'sessions', session(id, waiting('finished')));
+    expect(prompts(machine)).toEqual(['Go', 'I stopped you partway. Continue where you left off.']);
+    expect(texts(await waitFor(main.api, 'transcript', (items) => items.length === 5, { sessionId: id })).at(-1)).toEqual(['agent', 'Carrying on.']);
+  });
+
+  it('goes on after an error partway through the answer: Continue has the agent carry on, saying what failed', async () => {
+    const { machine, main, id } = await finishedSession({ turns: [{ chunks: ['Done.'] }, { chunks: ['Halfway'], error: 'Provider overloaded' }, { chunks: ['Carrying on.'] }] });
+    await main.api.invoke('sessions.send', { id, prompt: 'Next' });
+    await waitFor(main.api, 'sessions', session(id, waiting('error')));
+
+    await main.api.invoke('sessions.continue', { id });
+
+    await waitFor(main.api, 'sessions', session(id, waiting('finished')));
+    expect(prompts(machine).at(-1)).toMatch(/^Your last run failed \(.*Provider overloaded.*\)\. Continue where you left off\.$/);
+  });
+
+  it('leaves an unanswered prompt to Retry, not Continue', async () => {
+    const { main, id } = await finishedSession({ turns: [{ chunks: ['Done.'] }, { error: 'Provider overloaded' }] });
+    await main.api.invoke('sessions.send', { id, prompt: 'Next' });
+    await waitFor(main.api, 'sessions', session(id, waiting('error')));
+
+    await expect(main.api.invoke('sessions.continue', { id })).rejects.toThrow(/nothing to continue/i);
+  });
+});

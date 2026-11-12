@@ -91,7 +91,7 @@ describe('a Session Waiting on an error', () => {
     await waitFor(() => expect(chat.getAllByRole('alert').some((a) => a.textContent === 'Native is not connected')).toBe(true));
   });
 
-  it('offers no Retry once the agent has answered: the next prompt carries on', () => {
+  it('offers no Retry once the agent has answered: Continue carries on instead', () => {
     const restarted: Session = { ...failed, error: 'Environment restarted' };
     const main = new FakeMain({ projects: [project], sessions: [restarted], environments: [environment('connected')] });
     const chat = openSession(main, restarted, [
@@ -102,5 +102,20 @@ describe('a Session Waiting on an error', () => {
 
     expect(chat.getByRole('alert').textContent).toContain('Environment restarted');
     expect(chat.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(chat.getByRole('button', { name: 'Continue' })).toBeTruthy();
+  });
+
+  it('offers neither once the run had finished before the Environment restarted', () => {
+    const restarted: Session = { ...failed, error: 'Environment restarted' };
+    const main = new FakeMain({ projects: [project], sessions: [restarted], environments: [environment('connected')] });
+    const chat = openSession(main, restarted, [
+      { kind: 'user', id: 1, text: 'Say hello' },
+      { kind: 'agent', id: 2, text: 'Hello', streaming: false },
+      { kind: 'error', id: 3, message: 'Environment restarted', betweenRuns: true },
+    ]);
+
+    expect(chat.getByRole('alert').textContent).toContain('Environment restarted');
+    expect(chat.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(chat.queryByRole('button', { name: 'Continue' })).toBeNull();
   });
 });

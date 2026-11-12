@@ -211,7 +211,7 @@ describe('running palette actions', () => {
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: 1 }, { id: 1, discard: true }]));
   });
 
-  it('shows in the Session why an action on it failed', async () => {
+  it('shows in a toast why an action on the Session failed', async () => {
     renderApp(
       new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Fix login' })] }, {
         'sessions.requestMergeRequest': () => {
@@ -222,7 +222,7 @@ describe('running palette actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
 
     runAction('Create Merge request for this Session');
-    expect((await within(screen.getByRole('main', { name: 'Session' })).findByRole('alert')).textContent).toBe('The agent is not running');
+    expect(within(await screen.findByRole('group', { name: 'What went wrong' })).getByRole('alert').textContent).toBe('The agent is not running');
   });
 
   it('shows the linked Merge request instead of asking for one, Ctrl+Shift+M hiding it again, and opens it on the Forge', async () => {

@@ -1,8 +1,9 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderOpen, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderOpen, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, Play, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, modelNameIn, type ModelChoice, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { goingOn } from '../shared/going-on';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
@@ -438,6 +439,9 @@ function useBranches(projectId: number | undefined): { listed: Loaded<Branches>;
   return { listed: shown?.result, refresh, refreshing: !!shown && shown.generation !== generation };
 }
 
+/** How near its foot the conversation counts as scrolled to it, in pixels: a fraction of a line off is still there. */
+const AT_FOOT_PX = 8;
+
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */
 export type SessionCommand =
   | 'archive'
@@ -461,8 +465,8 @@ export type SessionCommand =
  * in the Side area beside them and the Dock under them. Showing it
  * marks it read, as does a status change while it is shown. Changing
  * `replyRequest` focuses the composer. A `command` is run once, showing what
- * went wrong in the conversation like the header's own actions, then handed
- * back through `onCommandDone`. `onRetryableChange` says whether `retry`
+ * went wrong in a toast like the header's own actions, then handed back
+ * through `onCommandDone`. `onRetryableChange` says whether `retry`
  * would do anything: whether the last prompt failed.
  */
 export function SessionView({
@@ -516,6 +520,14 @@ export function SessionView({
   const archiver = useArchive();
   const deleter = useDelete();
   const toast = useToast();
+  /**
+   * Shows why an action on the Session failed, in a toast: in view wherever
+   * it was clicked, rather than at the foot of a conversation that may be
+   * scrolled up. What the composer sends fails there, by the composer.
+   */
+  const actionFailed = (message: string | undefined) => {
+    if (message !== undefined) toast.show({ message, failed: true });
+  };
   const conversation = useRef<HTMLDivElement>(null);
   /**
    * Where the focus goes when the composer can't keep it, disabled while the
@@ -526,7 +538,7 @@ export function SessionView({
     // A question is answered in its panel on the composer, rather than on its card.
     (main?.querySelector<HTMLElement>('.ask-panel[data-asked]') ?? main?.querySelector<HTMLElement>('[data-asked]') ?? conversation.current)?.focus();
   };
-  const menu = useSessionMenu(session, setError);
+  const menu = useSessionMenu(session, actionFailed);
   const status = statusOf(session);
   const working = session.status === 'working';
   // The conversation lives only while the Client runs; the error is stored.
@@ -534,8 +546,9 @@ export function SessionView({
   const environment = useTopic('environments')?.find((e) => e.id === project?.checkout.environmentId);
   // Disconnected: the bridge died and is about to be started again.
   const starting = working && (environment?.state === 'starting' || environment?.state === 'disconnected');
-  // The last prompt went unanswered, so it can be sent again.
-  const retryable = session.status === 'waiting' && session.waitingReason === 'error' && items.at(-2)?.kind === 'user' && items.at(-1)?.kind === 'error' && !session.worktreeMissing;
+  // A run that ended early goes on from the card that ends the conversation: Retry sends an unanswered prompt again, Continue has the agent carry on.
+  const going = goingOn(session, items);
+  const retryable = going === 'retry';
   // The agent waits on an answer. A question is answered in a panel on the composer, one question
   // at a time, the composer giving its answers of one's own; a trust or Approval request, on its card.
   const firstAsked = session.status === 'waiting' ? items.find((i) => (i.kind === 'question' || i.kind === 'trust' || i.kind === 'approval') && i.state === 'asked') : undefined;
@@ -579,7 +592,7 @@ export function SessionView({
         if (runsTerminals) panels.toggleTerminal();
       },
     };
-    runs[command]().catch((e: unknown) => setError((e as Error).message));
+    runs[command]().catch((e: unknown) => actionFailed((e as Error).message));
     // Run once per command: onCommandDone clears it, so asking again runs it again.
   }, [command]);
   useEffect(() => {
@@ -592,6 +605,19 @@ export function SessionView({
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: 'end' });
   }, [items]);
+  /** Whether the user had the conversation scrolled to its foot, as of its last scroll. */
+  const atFoot = useRef(true);
+  const scrolled = () => {
+    const chat = conversation.current;
+    // Following the agent scrolls to the end of what was said, which leaves the bottom padding below.
+    if (chat) atFoot.current = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= (parseFloat(getComputedStyle(chat).paddingBottom) || 0) + AT_FOOT_PX;
+  };
+  // The queue on the composer takes height from the conversation, which stays at its foot if it was: the agent's last line in view.
+  const queued = session.queue?.map((m) => m.id).join() ?? '';
+  useLayoutEffect(() => {
+    const chat = conversation.current;
+    if (chat && atFoot.current) chat.scrollTop = chat.scrollHeight - chat.clientHeight;
+  }, [queued]);
 
   // Not on `unread` itself, so that Mark unread sticks while the Session is shown.
   useEffect(() => {
@@ -638,10 +664,11 @@ export function SessionView({
       return false;
     }
   };
-  const openLink = (url: string) => void api.invoke('links.open', { url }).catch((e: unknown) => setError((e as Error).message));
+  const openLink = (url: string) => void api.invoke('links.open', { url }).catch((e: unknown) => actionFailed((e as Error).message));
   const retry = () => runCommand(() => api.invoke('sessions.retry', { id: session.id }));
-  // Loom quit or crashed during the run, which the agent can go on with.
-  const continuable = session.status === 'waiting' && session.waitingReason === 'interrupted' && !session.worktreeMissing;
+  const goOn = () => void runCommand(() => api.invoke('sessions.continue', { id: session.id }));
+  /** What the card ending the conversation offers, if `item` is that card. */
+  const offeredOn = (item: TranscriptItem) => (item === items.at(-1) ? going : undefined);
 
   // Comments can go with the next message: not while the composer takes none, nor with an answer to a question.
   const composerDisabled = readOnly || (asked && !freeAnswer) || !!session.worktreeMissing;
@@ -740,11 +767,11 @@ export function SessionView({
             // As on Changes: comments go with the next message, which an archived Session's diff doesn't take.
             comments={session.status === 'archived' || session.worktreeMissing ? undefined : diffComments}
             reviewNotes={reviewNotes}
-            onError={setError}
+            onError={actionFailed}
           />
         );
       case 'issue':
-        return <IssuePanel session={session} project={project} onUnlinked={() => panels.close('issue')} onError={setError} />;
+        return <IssuePanel session={session} project={project} onUnlinked={() => panels.close('issue')} onError={actionFailed} />;
       case 'highlights':
         return (
           <HighlightsPanel
@@ -752,7 +779,7 @@ export function SessionView({
             onShowTurn={showTurn}
             onShowFile={showFile}
             onAsk={composerDisabled || freeAnswer ? undefined : askAboutHighlight}
-            onError={setError}
+            onError={actionFailed}
           />
         );
       case 'terminal': {
@@ -771,7 +798,7 @@ export function SessionView({
         project={project}
         removedProject={removedProject}
         status={{ ...status, icon: working ? <span className="spin">{statusIcon}</span> : statusIcon }}
-        flags={isSnoozed(session) && <Snoozed session={session} onError={setError} />}
+        flags={isSnoozed(session) && <Snoozed session={session} onError={actionFailed} />}
         popover={popover}
         onPopover={setPopover}
         side={{ shown: sideShown, onToggle: () => panels.toggleArea('side') }}
@@ -780,7 +807,7 @@ export function SessionView({
         onShowChanges={() => panels.show('changes')}
         onShowMergeRequest={showMergeRequest}
         onShowIssue={() => panels.show('issue')}
-        onError={setError}
+        onError={actionFailed}
       >
         {archiver.dialog}
         {deleter.dialog}
@@ -788,7 +815,7 @@ export function SessionView({
       </SessionHeader>
       <div className={panels.review ? 'session-body reviewing' : 'session-body'}>
         <div className="convo">
-          <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onContextMenu={commentOnSelection}>
+          <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnSelection}>
             {turnParts(items).map((item) =>
               'said' in item ? (
                 <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
@@ -812,7 +839,7 @@ export function SessionView({
               ) : item.kind === 'trust' ? (
                 <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
               ) : item.kind === 'interruption' ? (
-                <Interruption key={item.id} item={item} onContinue={continuable && item === items.at(-1) ? () => void runCommand(() => api.invoke('sessions.continue', { id: session.id })) : undefined} />
+                <Interruption key={item.id} item={item} onContinue={offeredOn(item) === 'continue' ? goOn : undefined} />
               ) : item.kind === 'model' ? (
                 <ModelMarker key={item.id} item={item} models={offeredModels} />
               ) : item.kind === 'merge-request-refused' ? (
@@ -839,7 +866,7 @@ export function SessionView({
               ) : item.kind === 'merge-request-ended' ? (
                 <MergeRequestEndedCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
               ) : (
-                <ErrorCard key={item.id} message={item.message} onRetry={retryable && item === items.at(-1) ? retry : undefined} />
+                <ErrorCard key={item.id} message={item.message} onRetry={offeredOn(item) === 'retry' ? retry : undefined} onContinue={offeredOn(item) === 'continue' ? goOn : undefined} />
               ),
             )}
             {unshownError && <ErrorCard message={unshownError} />}
@@ -1091,8 +1118,8 @@ function QueuedMessageEditor({ message, onSave, onCancel }: { message: QueuedMes
   );
 }
 
-/** A run that failed, with the agent's message, and Retry when `onRetry` is given. */
-function ErrorCard({ message, onRetry }: { message: string; onRetry?: () => void }) {
+/** A run that failed, with the agent's message: Retry when `onRetry` is given, Continue when `onContinue` is. */
+function ErrorCard({ message, onRetry, onContinue }: { message: string; onRetry?: () => void; onContinue?: () => void }) {
   return (
     <div className="tools">
       <div className="tool failed">
@@ -1106,6 +1133,12 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry?: () => void
             <button type="button" onClick={onRetry}>
               <RotateCw className="sm" />
               Retry
+            </button>
+          )}
+          {onContinue && (
+            <button type="button" onClick={onContinue}>
+              <Play className="sm" />
+              Continue
             </button>
           )}
         </div>

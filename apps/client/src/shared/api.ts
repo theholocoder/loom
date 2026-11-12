@@ -1207,8 +1207,12 @@ export type TranscriptItem =
       state: ApprovalState;
       message?: string;
     }
-  /** A run that failed, with the agent's message. */
-  | { kind: 'error'; id: number; message: string }
+  /**
+   * A run that failed, with the agent's message; `betweenRuns` when it
+   * came after the run had ended (its Environment restarted under a
+   * finished Session), leaving no run to go on with.
+   */
+  | { kind: 'error'; id: number; message: string; betweenRuns?: true }
   /** The run was interrupted: by the user, with Stop or to send a queued message now, or by Loom quitting or crashing. */
   | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' | 'quit' }
   /**
@@ -1726,9 +1730,13 @@ export interface Commands {
    */
   'sessions.retry': { params: { id: number }; result: void };
   /**
-   * Has the agent go on with the run Loom quit or crashed during: the
-   * Session, Waiting as interrupted, becomes Working, and its agent is sent
-   * CONTINUE_PROMPT in its resumed conversation. Rejects for any other Session.
+   * Has the agent go on with a run that ended early: one Loom quit or crashed
+   * during (Waiting as interrupted), one the user stopped (Waiting as
+   * stopped, the Stopped note ending the conversation), or one that failed
+   * partway through its answer (Waiting on an error the agent had said
+   * something before). The Session becomes Working, and its agent is sent a
+   * prompt to carry on, saying which, in its resumed conversation. Rejects
+   * for any other Session, an unanswered prompt being Retry's (see goingOn).
    */
   'sessions.continue': { params: { id: number }; result: void };
   /**

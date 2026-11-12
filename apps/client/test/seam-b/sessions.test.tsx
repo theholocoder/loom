@@ -614,6 +614,54 @@ describe('a Session', () => {
     expect(screen.getByRole('alert').textContent).toBe('Native is not connected');
   });
 
+  describe('as the queue grows', () => {
+    /**
+     * The conversation's scroll, which jsdom doesn't lay out: `scrolledTo` as
+     * the user scrolled it, its content 1000px tall in a view `height` tall.
+     */
+    function scrollable(scrolledTo: number) {
+      const chat = screen.getByRole('log', { name: 'Conversation' });
+      const view = { height: 300, top: scrolledTo };
+      Object.defineProperty(chat, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(chat, 'clientHeight', { configurable: true, get: () => view.height });
+      Object.defineProperty(chat, 'scrollTop', { configurable: true, get: () => view.top, set: (top: number) => (view.top = top) });
+      fireEvent.scroll(chat);
+      return view;
+    }
+
+    it('keeps the conversation at its foot when the user was there, the queue taking room from it', () => {
+      const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
+      const view = scrollable(700);
+
+      // The queue on the composer leaves the conversation less height.
+      view.height = 240;
+      act(() => main.publish('sessions', [{ ...working, queue: [{ id: 3, text: 'Then add tests' }] }]));
+
+      expect(view.top).toBe(760);
+    });
+
+    it('counts the conversation at its foot with only its bottom padding below, as following the agent leaves it', () => {
+      const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
+      screen.getByRole('log', { name: 'Conversation' }).style.paddingBottom = '20px';
+      const view = scrollable(680);
+
+      view.height = 240;
+      act(() => main.publish('sessions', [{ ...working, queue: [{ id: 3, text: 'Then add tests' }] }]));
+
+      expect(view.top).toBe(760);
+    });
+
+    it('leaves the conversation where it was when the user had scrolled up', () => {
+      const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
+      const view = scrollable(200);
+
+      view.height = 240;
+      act(() => main.publish('sessions', [{ ...working, queue: [{ id: 3, text: 'Then add tests' }] }]));
+
+      expect(view.top).toBe(200);
+    });
+  });
+
   it('lists the queue, each message with Remove and Send now', async () => {
     const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);
@@ -760,6 +808,50 @@ describe('a Session', () => {
     expect(chat.queryByRole('button', { name: 'Continue' })).toBeNull();
   });
 
+  it('offers Continue on the Stopped note that ends the conversation', async () => {
+    const stopped: Session = { ...working, status: 'waiting', waitingReason: 'stopped' };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [stopped] })), stopped);
+    act(() =>
+      main.publish(
+        'transcript',
+        [
+          { kind: 'user', id: 0, text: 'Say hello' },
+          { kind: 'agent', id: 1, text: 'Hel', streaming: false },
+          { kind: 'interruption', id: 2, by: 'stop' },
+        ],
+        { sessionId: 7 },
+      ),
+    );
+    const note = within(screen.getByRole('log', { name: 'Conversation' })).getByRole('note');
+
+    expect(note.textContent).toContain('Stopped');
+    fireEvent.click(within(note).getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.continue')).toEqual([{ command: 'sessions.continue', params: { id: 7 } }]));
+  });
+
+  it('offers Continue, not Retry, on an error partway through the answer', async () => {
+    const failed: Session = { ...working, status: 'waiting', waitingReason: 'error', error: 'Provider overloaded' };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [failed] })), failed);
+    act(() =>
+      main.publish(
+        'transcript',
+        [
+          { kind: 'user', id: 0, text: 'Say hello' },
+          { kind: 'agent', id: 1, text: 'Hel', streaming: false },
+          { kind: 'error', id: 2, message: 'Provider overloaded' },
+        ],
+        { sessionId: 7 },
+      ),
+    );
+    const chat = within(screen.getByRole('log', { name: 'Conversation' }));
+
+    expect(chat.queryByRole('button', { name: 'Retry' })).toBeNull();
+    fireEvent.click(chat.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.continue')).toEqual([{ command: 'sessions.continue', params: { id: 7 } }]));
+  });
+
   it('sends a reply once the agent has finished', async () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [finished] })), finished);
     expect(screen.getByRole('status', { name: 'Session status' }).textContent).toBe('Finished');
@@ -839,7 +931,37 @@ describe('open in editor and terminal', () => {
 
     fireEvent.click(within(header()).getByRole('button', { name: 'Open in editor' }));
 
-    expect((await screen.findByRole('alert')).textContent).toContain("code isn't installed in Native");
+    // A toast, in view however far up the conversation is scrolled: not at its foot.
+    const toast = await screen.findByRole('group', { name: 'What went wrong' });
+    expect(within(toast).getByRole('alert').textContent).toContain("code isn't installed in Native");
+    expect(within(screen.getByRole('log', { name: 'Conversation' })).queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps why an action failed until it is dismissed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const main = new FakeMain(
+        { projects: [project], sessions: [finished] },
+        {
+          'sessions.openInTerminal': () => {
+            throw new Error('Set a terminal command in Settings to open one.');
+          },
+        },
+      );
+      open(renderApp(main), finished);
+      fireEvent.click(within(header()).getByRole('button', { name: 'Open in terminal' }));
+      await act(async () => {});
+      const failed = () => screen.queryByRole('group', { name: 'What went wrong' });
+      expect(failed()).toBeTruthy();
+
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(failed()).toBeTruthy();
+
+      fireEvent.click(within(failed()!).getByRole('button', { name: 'Dismiss' }));
+      expect(failed()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('drops the open actions once the Session is archived', () => {

@@ -22,6 +22,7 @@ import { WorkingCopyDiff } from './diff';
 import { createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
 import { capToolDiffs, capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
+import { goingOn } from '../../shared/going-on';
 import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict } from './approvals';
 import { checkAttachments, type Attachments } from './attachments';
 import { recordSpan, recordTurn } from '../usage/usage';
@@ -82,6 +83,12 @@ export const CHECKPOINT_MS = 1000;
 
 /** What Continue sends the agent of a run Loom quit or crashed during. */
 export const CONTINUE_PROMPT = 'Loom stopped while you were working. Continue where you left off.';
+
+/** What Continue sends the agent after the user stopped its run. */
+export const CONTINUE_AFTER_STOP_PROMPT = 'I stopped you partway. Continue where you left off.';
+
+/** What Continue sends the agent after its run failed partway through, with `error`. */
+export const continueAfterErrorPrompt = (error: string) => `Your last run failed (${error}). Continue where you left off.`;
 
 /** How long a Session waits with nothing in flight before its agent's process is stopped; its next prompt resumes it. */
 export const IDLE_STOP_MS = 10 * 60_000;
@@ -845,11 +852,9 @@ export class Sessions {
     const items = (await this.loadTranscript(id)).value;
     await this.switched(id);
     const session = this.get(id);
-    const [prompt, error] = items.slice(-2);
-    if (session.status !== 'waiting' || session.waitingReason !== 'error' || prompt?.kind !== 'user' || error?.kind !== 'error') {
-      throw new Error('There is nothing to retry: send a new prompt instead.');
-    }
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
+    const prompt = items.at(-2);
+    if (goingOn(session, items) !== 'retry' || prompt?.kind !== 'user') throw new Error('There is nothing to retry: send a new prompt instead.');
     this.assertCanPrompt(id);
     const environment = this.environmentOf(session);
     this.setStatus(id, { status: 'working' });
@@ -858,14 +863,23 @@ export class Sessions {
     void this.run(id, messageOf(prompt));
   }
 
-  /** Has the agent go on with the run Loom quit during: sends it CONTINUE_PROMPT, resuming its conversation. */
+  /**
+   * Has the agent go on with the run that ended early, resuming its
+   * conversation: one Loom quit during (CONTINUE_PROMPT), the user stopped
+   * (CONTINUE_AFTER_STOP_PROMPT), or that failed partway through its answer
+   * (continueAfterErrorPrompt).
+   */
   async continue({ id }: { id: number }): Promise<void> {
     this.get(id);
-    await this.loadTranscript(id);
+    const items = (await this.loadTranscript(id)).value;
     await this.switched(id);
     const session = this.get(id);
-    if (session.status !== 'waiting' || session.waitingReason !== 'interrupted') throw new Error('There is nothing to continue: send a new prompt instead.');
-    this.reply(id, { text: CONTINUE_PROMPT });
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
+    if (goingOn(session, items) !== 'continue') throw new Error('There is nothing to continue: send a new prompt instead.');
+    const last = items.at(-1);
+    const text =
+      session.waitingReason === 'stopped' ? CONTINUE_AFTER_STOP_PROMPT : session.waitingReason === 'error' && last?.kind === 'error' ? continueAfterErrorPrompt(last.message) : CONTINUE_PROMPT;
+    this.reply(id, { text });
   }
 
   /** Sends the agent the Merge request prompt shortcut. */
@@ -2212,10 +2226,11 @@ export class Sessions {
   /** Puts a Working Session (or, `evenIfWaiting`, a Waiting one) in Waiting (error), showing why in its conversation. */
   private fail(id: number, error: string, { evenIfWaiting = false } = {}): void {
     const { status } = this.get(id);
-    if (!this.inRun(id) && !(evenIfWaiting && status === 'waiting')) return;
+    const inRun = this.inRun(id);
+    if (!inRun && !(evenIfWaiting && status === 'waiting')) return;
     this.endRun(id);
     this.denyMessages.delete(id);
-    this.addItem(id, { kind: 'error', message: error });
+    this.addItem(id, { kind: 'error', message: error, ...(inRun ? {} : { betweenRuns: true as const }) });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });
   }
 
