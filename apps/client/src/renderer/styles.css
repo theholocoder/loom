@@ -62,7 +62,13 @@ pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px
 .search kbd { margin-left: auto; }
 kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--muted); background: var(--panel); }
 .compose { align-self: flex-start; padding: 10px 18px; border-radius: 14px; font-weight: 600; }
-.side-list { flex: 1; overflow: auto; }
+.side-list { flex: 1; min-height: 0; overflow: auto; }
+.side-list > .section-head:first-child { border-top: 0; cursor: default; }
+/* Snoozed, Working and Archived sit together under the Inbox, just above the
+   footer; opened, they take up to about half the height (the prototype's 48%)
+   and scroll, leaving the Inbox the rest. */
+.side-bottom { flex: none; max-height: 48%; overflow: auto; border-top: 1px solid var(--line); }
+.side-bottom .section-head:first-child { border-top: 0; }
 .side-foot { border-top: 1px solid var(--line); padding: 6px 8px; display: flex; gap: 2px; }
 
 /* inbox rows (shared) */
@@ -87,7 +93,7 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .B-item .l2 { display: flex; gap: 8px; margin-top: 1px; color: var(--muted); font-size: 12px; }
 .section-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; color: var(--muted); cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; border-top: 1px solid var(--line); }
 .section-head:hover { color: var(--text); }
-.mini { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 16px; cursor: pointer; font-size: 13px; }
+.mini { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
 .mini:hover { background: var(--hover); } .mini.sel { background: var(--sel); }
 
 /* ---- main ---- */
@@ -311,9 +317,9 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .composer-wrap button.send:disabled { opacity: .5; cursor: default; filter: none; }
 /* Inbox rows open their Session from a button, beside the hover actions. */
 .B-item { padding: 0; }
-.B-item > button.open { display: block; width: 100%; background: none; border: 0; border-radius: 0; padding: 7px 12px 7px 46px; text-align: left; }
+.B-item > button.open { display: block; width: 100%; background: none; border: 0; border-radius: 0; padding: 7px 12px; text-align: left; }
 .B-item > button.open:hover { background: none; }
-.B-item .row-error { padding: 0 12px 7px 46px; }
+.row-error { padding: 0 12px 7px; }
 .scrim { position: fixed; inset: 0; background: var(--shadow); display: grid; place-items: center; z-index: 50; }
 .modal { width: min(440px, calc(100vw - 32px)); box-shadow: 0 12px 40px var(--shadow); }
 .modal p { margin: 0 0 12px; color: var(--muted); }
@@ -629,7 +635,7 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
    the width the App works out (shared/window.ts), the conversation the rest. */
 .app { grid-template-columns: var(--inbox-width, 360px) minmax(0, 1fr) auto; position: relative; overflow: hidden; }
 .side { position: relative; min-width: 0; }
-.side-top .search { white-space: nowrap; } .side-top .search span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; } .side-top .search kbd { flex: none; }
+.side-top .search { white-space: nowrap; } .side-top .search span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; } .side-top .search kbd { flex: none; white-space: nowrap; }
 /* The collapsed Inbox: a rail of its actions. */
 .side.rail { align-items: center; gap: 4px; padding: 10px 0 6px; }
 .side.rail > .icon-btn { position: relative; }

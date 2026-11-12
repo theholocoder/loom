@@ -1,6 +1,7 @@
 // The sidebar's Inbox, following docs/prototypes/ui-layout.html (variant B):
 // Waiting Sessions grouped by Project, with Snoozed Sessions (the same cards,
-// in one list), Working and Archived Sessions in collapsed sections below.
+// in one list), Working and Archived Sessions in collapsed sections together
+// at the bottom, as docs/prototypes/side-panels.html draws it.
 import { AlarmClock, AlarmClockOff, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
@@ -34,27 +35,32 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
   const cards = { now, selectedId, onSelect, onReply };
   return (
     <>
-      <div className="section-head" style={{ borderTop: 0, cursor: 'default' }}>
-        <InboxIcon className="sm" /> Inbox<span className="grow" />
-        {waiting.length}
-      </div>
-      {groups.length === 0 && <div className="empty">Nothing needs you right now.</div>}
-      <ProjectGroups groups={groups} {...cards} />
-      <Section label="Snoozed" icon={AlarmClock} sessions={snoozed}>
-        <div role="list" aria-label="Snoozed">
-          {[...snoozed]
-            .sort((a, b) => a.snoozedUntil! - b.snoozedUntil!)
-            .map((session) => (
-              <InboxRow key={session.id} session={session} project={projectOf(session.projectId, projects)} now={now} selected={session.id === selectedId} onSelect={onSelect} onReply={onReply} />
-            ))}
+      {/* The Inbox scrolls in the space between the search box and the sections below. */}
+      <div className="side-list">
+        <div className="section-head">
+          <InboxIcon className="sm" /> Inbox<span className="grow" />
+          {waiting.length}
         </div>
-      </Section>
-      <Section label="Working" icon={LoaderCircle} sessions={working}>
-        <SessionRows sessions={working} {...rows} />
-      </Section>
-      <Section label="Archived" icon={Archive} sessions={archived}>
-        <SessionRows sessions={archived} {...rows} />
-      </Section>
+        {groups.length === 0 && <div className="empty">Nothing needs you right now.</div>}
+        <ProjectGroups groups={groups} {...cards} />
+      </div>
+      <div className="side-bottom">
+        <Section label="Snoozed" icon={AlarmClock} sessions={snoozed}>
+          <div role="list" aria-label="Snoozed">
+            {[...snoozed]
+              .sort((a, b) => a.snoozedUntil! - b.snoozedUntil!)
+              .map((session) => (
+                <InboxRow key={session.id} session={session} project={projectOf(session.projectId, projects)} now={now} selected={session.id === selectedId} onSelect={onSelect} onReply={onReply} />
+              ))}
+          </div>
+        </Section>
+        <Section label="Working" icon={LoaderCircle} sessions={working}>
+          <SessionRows sessions={working} {...rows} />
+        </Section>
+        <Section label="Archived" icon={Archive} sessions={archived}>
+          <SessionRows sessions={archived} {...rows} />
+        </Section>
+      </div>
     </>
   );
 }
