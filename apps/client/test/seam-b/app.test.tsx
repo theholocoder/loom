@@ -35,7 +35,8 @@ describe('the window', () => {
     for (const section of ['Working', 'Archived']) {
       expect(within(inbox).getByRole('button', { name: section }).getAttribute('aria-expanded')).toBe('false');
     }
-    expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy();
+    // No Project yet: the welcome, in the main pane.
+    expect(screen.getByRole('main', { name: 'Welcome' })).toBeTruthy();
     // No Session selected: no header, so no diff toggle, and no panel or rail taking space.
     expect(screen.queryByRole('button', { name: /changes/i })).toBeNull();
     expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
@@ -246,10 +247,10 @@ describe('Projects', () => {
     expect(main.invoked.map((i) => i.command)).toContain('sessions.check');
   });
 
-  it('links the folder chosen with "Use existing clone…"', async () => {
+  it('links the folder chosen with "Add a Project…"', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => project('loom') }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
   });
@@ -257,7 +258,7 @@ describe('Projects', () => {
   it('links nothing when the folder picker is cancelled', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => null }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
 
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));
     expect(main.invoked.map((i) => i.command)).not.toContain('projects.link');
@@ -276,7 +277,7 @@ describe('Projects', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
 
     expect((await screen.findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
   });
@@ -294,7 +295,7 @@ describe('Projects', () => {
 
   it('dismisses why a folder was rejected', async () => {
     openProjects(rejecting());
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
     await screen.findByRole('alert');
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
@@ -304,7 +305,7 @@ describe('Projects', () => {
 
   it('forgets why a folder was rejected when leaving Projects', async () => {
     openProjects(rejecting());
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
     await screen.findByRole('alert');
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
@@ -324,14 +325,14 @@ describe('Projects', () => {
         },
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('projects.link'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     fail(new Error('/home/dev/notes is not a git repository'));
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Use existing clone…' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }).hasAttribute('disabled')).toBe(false));
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -449,7 +450,7 @@ describe('the + menu', () => {
   it('adds a Project from an existing clone, then shows Projects', async () => {
     const main = openMenu(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => linked }));
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add a Project…' }));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
     expect(screen.getByRole('dialog', { name: 'Projects' })).toBeTruthy();
@@ -469,7 +470,7 @@ describe('the + menu', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add a Project…' }));
 
     const page = screen.getByRole('dialog', { name: 'Projects' });
     expect((await within(page).findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
@@ -488,7 +489,7 @@ describe('the + menu', () => {
   it('closes when clicking elsewhere', () => {
     openMenu(new FakeMain());
 
-    fireEvent.mouseDown(screen.getByRole('main', { name: 'Session' }));
+    fireEvent.mouseDown(screen.getByRole('main', { name: 'Welcome' }));
 
     expect(screen.queryByRole('menu')).toBeNull();
   });
@@ -583,7 +584,7 @@ describe('Settings: sections, search and feedback', () => {
     openSettings();
 
     expect(sectionNames()).toEqual(['Appearance', 'Sessions', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Environments']);
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(sectionNames());
+    expect(within(screen.getByRole('dialog', { name: 'Settings' })).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(sectionNames());
     expect(sections().filter((link) => link.getAttribute('aria-current') === 'true').map((link) => link.textContent)).toEqual(['Appearance']);
     const worktrees = screen.getByRole('region', { name: 'Worktrees' });
     expect(within(worktrees).getByRole('textbox', { name: 'Worktree root' })).toBeTruthy();

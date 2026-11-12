@@ -712,6 +712,50 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
   );
 }
 
+/**
+ * The welcome's short check: each Environment, its state and its agent's,
+ * and what to fix; the full table, with Reload, is in Settings.
+ */
+export function EnvironmentCheck() {
+  const environments = useTopic('environments') ?? [];
+  return (
+    <ul className="environment-check" aria-label="Environments">
+      {environments.map((env) => {
+        const warnings = [shellWarning(env), env.agent && agentWarning(env.agent)].filter((w): w is string => !!w);
+        return (
+          <li key={env.id}>
+            <div className="row">
+              <b>{env.label}</b>
+              <span className={`row st-${env.state}`}>
+                <StateIcon state={env.state} />
+                <span>{env.state}</span>
+              </span>
+              {env.agent && (
+                <>
+                  <span className="muted">·</span>
+                  <span className="tech" title={env.agent.path}>
+                    {env.agent.version ? `${env.agent.name} ${env.agent.version}` : env.agent.name}
+                  </span>
+                  <span className={`row ag-${env.agent.checking ? 'checking' : env.agent.state}`}>
+                    <AgentIcon agent={env.agent} />
+                    <span>{env.agent.checking ? 'checking' : env.agent.state}</span>
+                  </span>
+                </>
+              )}
+            </div>
+            {env.error && <div className="err">{env.error}</div>}
+            {warnings.map((warning) => (
+              <div key={warning} className="warn" role="alert">
+                {warning}
+              </div>
+            ))}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function AgentCell({ agent }: { agent: AgentStatus }) {
   const label = agent.checking ? 'checking' : agent.state;
   return (

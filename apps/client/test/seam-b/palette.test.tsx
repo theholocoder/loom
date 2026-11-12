@@ -80,7 +80,7 @@ describe('palette actions', () => {
     // No Session open, none waiting, no Project on a Forge.
     expect(actionNames()).toEqual([
       'New Session',
-      'Add Project from existing clone…',
+      'Add a Project…',
       'Toggle the Inbox',
       'Theme: Midnight',
       'Theme: Paper',
@@ -94,7 +94,7 @@ describe('palette actions', () => {
     ]);
     const keys = (name: string) => within(within(palette()).getByRole('option', { name })).queryByText((_, el) => el?.tagName === 'KBD')?.textContent;
     expect(keys('New Session')).toBe('Ctrl N');
-    expect(keys('Add Project from existing clone…')).toBe('Ctrl O');
+    expect(keys('Add a Project…')).toBe('Ctrl O');
     expect(keys('Open Settings')).toBe('Ctrl ,');
     expect(keys('Toggle the Inbox')).toBe('Ctrl Shift B');
   });
@@ -107,7 +107,7 @@ describe('palette actions', () => {
     expect(actionNames()).toEqual([
       'New Session',
       'New Session from an issue…',
-      'Add Project from existing clone…',
+      'Add a Project…',
       'Go to next Waiting Session',
       'Go to previous Waiting Session',
       'Reply to this Session',
@@ -258,7 +258,7 @@ describe('running palette actions', () => {
 
   it('adds a Project from an existing clone through the folder dialog', async () => {
     const main = renderApp(new FakeMain());
-    runAction('Add Project from existing clone…');
+    runAction('Add a Project…');
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));
     expect(screen.getByRole('button', { name: 'Projects' }).getAttribute('aria-current')).toBe('page');
   });
