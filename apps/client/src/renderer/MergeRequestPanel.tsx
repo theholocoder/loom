@@ -1,14 +1,17 @@
 // The Merge request Panel (docs/prototypes/side-panels.html): the Session's
 // Merge request as its Forge has it, read when the Panel shows and again
 // after each Babysit poll. Its state, branches, title, author, reviewers,
-// commits and changes; the Babysit and Auto-prompt switches; its checks; its
-// reviews and comments; its description; and, at the foot, opening it on
+// commits and changes; the Babysit and Auto-prompt switches; then, on its
+// Overview tab, its checks, its reviews and comments and its description, or
+// on its Diff tab what it changes; and, at the foot, opening it on
 // the Forge, asking the agent to update it, or linking another. With none
 // linked, it offers to create or link one.
 import { Bot, ExternalLink, Eye, GitBranch, GitCommitHorizontal, GitPullRequest, GitPullRequestCreate, GitPullRequestDraft, Link, MessageSquare, RotateCw, User } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type MergeRequestDetails, type MergeRequestReview, type Project, type ReviewVerdict, type Session } from '../shared/api';
 import { useApi } from './api';
+import type { DiffComments } from './Changes';
+import { MergeRequestDiffView } from './MergeRequestDiff';
 import { Markdown } from './Markdown';
 import { useNow } from './now';
 import { attempt } from './SessionDetails';
@@ -20,6 +23,10 @@ export interface MergeRequestFocus {
   n: number;
 }
 
+/** The Panel's tabs: its checks, reviews and description, or its diff. */
+export type MergeRequestTab = 'overview' | 'diff';
+const TABS: MergeRequestTab[] = ['overview', 'diff'];
+
 const VERDICTS: Record<ReviewVerdict, { label: string; className: string }> = {
   approved: { label: 'Approved', className: 'chip verdict approved' },
   'changes-requested': { label: 'Changes requested', className: 'chip verdict changes' },
@@ -28,17 +35,37 @@ const VERDICTS: Record<ReviewVerdict, { label: string; className: string }> = {
 };
 
 /**
- * The Merge request Panel of `session`. What goes wrong running an action
- * goes to `onError`; a new `focus` opens the link form or scrolls to the
- * reviews and comments.
+ * The Merge request Panel of `session`, showing `tab`; `onTab` switches it.
+ * What goes wrong running an action goes to `onError`; a new `focus` opens
+ * the link form or scrolls to the reviews and comments. The Diff tab's lines
+ * can be commented on while `comments` is given.
  */
-export function MergeRequestPanel({ session, project, focus, onError }: { session: Session; project: Project | undefined; focus?: MergeRequestFocus; onError: (message: string | undefined) => void }) {
+export function MergeRequestPanel({
+  session,
+  project,
+  focus,
+  tab,
+  onTab,
+  comments,
+  onError,
+}: {
+  session: Session;
+  project: Project | undefined;
+  focus?: MergeRequestFocus;
+  tab: MergeRequestTab;
+  onTab: (tab: MergeRequestTab) => void;
+  comments?: DiffComments;
+  onError: (message: string | undefined) => void;
+}) {
   const api = useApi();
   const [linking, setLinking] = useState(false);
   const reviews = useRef<HTMLHeadingElement>(null);
   const { mergeRequest } = session;
   const canAct = canActOnForge(session, project);
-  const read = useDetails(session);
+  /** Moves on each refresh: the overview and the diff are read again. */
+  const [generation, setGeneration] = useState(0);
+  const refresh = () => setGeneration((n) => n + 1);
+  const read = useDetails(session, generation);
   const ids = useId();
   /** Set while the reviews are to be scrolled to: again once read, as what comes above them pushes them down. */
   const toReviews = useRef(false);
@@ -52,7 +79,7 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
     reviews.current?.focus({ preventScroll: true });
     reviews.current?.scrollIntoView?.({ block: 'start' });
     if (read.details) toReviews.current = false;
-  }, [focus?.n, read.details]);
+  }, [focus?.n, read.details, tab]);
   const ask = () => attempt(onError, () => api.invoke('sessions.requestMergeRequest', { id: session.id }));
   const linkForm = canAct && linking && <LinkMergeRequestForm session={session} onLinked={() => setLinking(false)} onCancel={() => setLinking(false)} />;
   const linkButton = canAct && (
@@ -118,9 +145,20 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
       )
     );
 
+  /** The arrow keys, Home and End move between the tabs. */
+  const step = (event: KeyboardEvent) => {
+    const at = TABS.indexOf(tab);
+    const to = event.key === 'ArrowRight' ? at + 1 : event.key === 'ArrowLeft' ? at - 1 : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : undefined;
+    if (to === undefined) return;
+    event.preventDefault();
+    const next = TABS[(to + TABS.length) % TABS.length]!;
+    onTab(next);
+    event.currentTarget.querySelector<HTMLElement>(`#${CSS.escape(`${ids}-tab-${next}`)}`)?.focus();
+  };
+
   return (
     <div className="mr-panel">
-      <div className="mr-scroll">
+      <div className={tab === 'diff' ? 'mr-scroll on-diff' : 'mr-scroll'}>
         <header className="mr-head">
           <div className="mr-meta">
             {stateChip}
@@ -136,7 +174,7 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
                 Stale
               </span>
             )}
-            <button className="icon-btn sm refresh" type="button" title="Read it again from the Forge" aria-label="Refresh the Merge request" disabled={read.loading} onClick={read.refresh}>
+            <button className="icon-btn sm refresh" type="button" title="Read it again from the Forge" aria-label="Refresh the Merge request" disabled={read.loading} onClick={refresh}>
               <RotateCw />
             </button>
           </div>
@@ -187,7 +225,7 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
           {read.error && (
             <p className="err" role="alert">
               {`Couldn't read it from ${forgeName}: ${read.error}`}{' '}
-              <button type="button" className="link" onClick={read.refresh}>
+              <button type="button" className="link" onClick={refresh}>
                 Try again
               </button>
             </p>
@@ -216,6 +254,37 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
             )}
           </div>
         )}
+        <div className="mr-tabs" role="tablist" aria-label="Merge request" onKeyDown={step}>
+          {TABS.map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              id={`${ids}-tab-${t}`}
+              aria-selected={t === tab}
+              aria-controls={`${ids}-${t}`}
+              tabIndex={t === tab ? 0 : -1}
+              className={t === tab ? 'on' : undefined}
+              aria-label={t === 'overview' ? 'Overview' : 'Diff'}
+              aria-description={t === 'diff' && details ? countText(details.files, 'file', details.moreFiles) : undefined}
+              onClick={() => onTab(t)}
+            >
+              {t === 'overview' ? 'Overview' : 'Diff'}
+              {t === 'diff' && details && (
+                <span className="badge" aria-hidden="true" title={countText(details.files, 'file', details.moreFiles)}>
+                  {details.files}
+                  {more}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        {tab === 'diff' ? (
+          <div className="mr-tab-view" role="tabpanel" id={`${ids}-diff`} aria-labelledby={`${ids}-tab-diff`}>
+            <MergeRequestDiffView session={session} forge={project?.forge.kind} generation={generation} comments={comments} onRefresh={refresh} />
+          </div>
+        ) : (
+        <div role="tabpanel" id={`${ids}-overview`} aria-labelledby={`${ids}-tab-overview`}>
         <section className="mr-sec" aria-labelledby={`${ids}-checks`}>
           <h3 id={`${ids}-checks`}>
             Checks
@@ -253,6 +322,8 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
           <h3 id={`${ids}-description`}>Description</h3>
           {details && (details.description.trim() ? <Markdown text={details.description} flavour="forge" /> : <p className="muted">No description.</p>)}
         </section>
+        </div>
+        )}
       </div>
       <footer className="mr-foot">
         <button type="button" onClick={() => attempt(onError, () => api.invoke('links.open', { url: mergeRequest.url }))}>
@@ -272,13 +343,12 @@ export function MergeRequestPanel({ session, project, focus, onError }: { sessio
   );
 }
 
-/** What the Panel last read of the Session's Merge request, read again on a new link, after each Babysit poll, and on `refresh`. */
-function useDetails(session: Session): { details?: MergeRequestDetails; error?: string; loading: boolean; at?: number; refresh: () => void } {
+/** What the Panel last read of the Session's Merge request, read again on a new link, after each Babysit poll, and on a new `generation`. */
+function useDetails(session: Session, generation: number): { details?: MergeRequestDetails; error?: string; loading: boolean; at?: number } {
   const api = useApi();
   const url = session.mergeRequest?.url;
   const [read, setRead] = useState<{ url: string; details?: MergeRequestDetails; error?: string; at?: number }>();
   const [loading, setLoading] = useState(false);
-  const [generation, setGeneration] = useState(0);
   useEffect(() => {
     if (!url) return void setLoading(false);
     let current = true;
@@ -297,7 +367,7 @@ function useDetails(session: Session): { details?: MergeRequestDetails; error?: 
   }, [api, session.id, url, session.babysit?.lastPollAt, generation]);
   // Not what was read of a Merge request linked before.
   const mine = read?.url === url ? read : undefined;
-  return { details: mine?.details, error: mine?.error, at: mine?.at, loading, refresh: () => setGeneration((n) => n + 1) };
+  return { details: mine?.details, error: mine?.error, at: mine?.at, loading };
 }
 
 /** One entry of the reviews and comments: a review, or a comment outside one. */

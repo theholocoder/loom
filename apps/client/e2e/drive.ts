@@ -109,6 +109,11 @@ machine.installForgeCli('gh', {
       additions: 67,
       deletions: 1,
       changedFiles: 3,
+      files: [
+        { filename: 'src/currency.ts', status: 'added', additions: 9, deletions: 0, patch: "@@ -0,0 +1,9 @@\n+export const FALLBACK_CURRENCY = 'EUR';\n+\n+export function currencyFor(account: { billingCurrency?: string }): string {\n+  return account.billingCurrency ?? FALLBACK_CURRENCY;\n+}\n+\n+export function formatAmount(cents: number, currency: string): string {\n+  return `${(cents / 100).toFixed(2)} ${currency}`;\n+}" },
+        { filename: 'src/invoices/show.ts', status: 'modified', additions: 3, deletions: 1, patch: "@@ -1,3 +1,5 @@\n+import { currencyFor, formatAmount } from '../currency';\n+\n export function showInvoice(invoice: Invoice, account: Account): string {\n-  return `€${(invoice.total / 100).toFixed(2)}`;\n+  return formatAmount(invoice.total, currencyFor(account));\n }\n" },
+        { filename: 'docs/logo.png', status: 'added', additions: 0, deletions: 0 },
+      ],
       comments: [{ id: 1, author: 'alice', body: 'Can we keep the old helper around for one release?', url: 'https://github.com/acme/billing-api/pull/40#c1', createdAt: '2026-11-01T10:30:00Z' }],
       reviews: [{ id: 2, author: 'bob', state: 'CHANGES_REQUESTED', body: 'A few things', url: 'https://github.com/acme/billing-api/pull/40#r2', submittedAt: '2026-11-01T10:00:00Z', comments: [{ path: 'src/currency.ts', line: 3, body: 'This should use `Intl.NumberFormat`', url: 'https://github.com/acme/billing-api/pull/40#c3', createdAt: '2026-11-01T10:00:00Z' }] }],
       checks: [

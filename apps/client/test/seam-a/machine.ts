@@ -182,7 +182,9 @@ export interface ScriptedActivity {
   deletions?: number;
   changedFiles?: number;
   /** GitLab's diffs of its files, without file headers. */
-  diffs?: { new_path: string; diff: string }[];
+  diffs?: { old_path?: string; new_path: string; diff: string; new_file?: boolean; renamed_file?: boolean; deleted_file?: boolean; too_large?: boolean }[];
+  /** GitHub's list of its files, each with its patch, without file headers. */
+  files?: { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; patch?: string }[];
 }
 
 export type ForgeCli = 'gh' | 'glab';
