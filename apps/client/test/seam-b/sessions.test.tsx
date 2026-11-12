@@ -340,7 +340,7 @@ describe('a Session', () => {
     expect((within(sessionMenu()).getByRole('menuitem', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.keyDown(sessionMenu(), { key: 'Escape' });
     // Its Project is still there, so a new message reopens it.
-    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Reply to OpenCode…');
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Reply to OpenCode… @ to mention a file');
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false);
   });
 

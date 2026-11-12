@@ -18,6 +18,7 @@ const MAX_SUGGESTED = 50;
 export function Composer({
   agent,
   placeholder,
+  tips = false,
   disabled = false,
   tools,
   focusRequest = 0,
@@ -40,6 +41,8 @@ export function Composer({
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
   placeholder: string;
+  /** Whether the placeholder goes on to say what @ and / do: for a new message, not an answer. */
+  tips?: boolean;
   disabled?: boolean;
   tools?: ReactNode;
   /** Changing it focuses the prompt box. */
@@ -105,6 +108,11 @@ export function Composer({
   };
 
   const menu = useMenu({ draft, caret, commands, loadFiles });
+  const fullPlaceholder = withTips(placeholder, {
+    mentions: tips && !!loadFiles,
+    commands: tips && commands.length > 0,
+    diffComments: disabled ? 0 : comments.filter((c) => !isConversationComment(c)).length,
+  });
 
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -262,7 +270,7 @@ export function Composer({
           aria-controls={menu.open ? listId : undefined}
           aria-activedescendant={menu.open?.options.length ? optionId(menu.open.active) : undefined}
           rows={2}
-          placeholder={placeholder}
+          placeholder={fullPlaceholder}
           disabled={disabled}
           value={draft}
           onChange={(event) => setDraft(event.target.value, event.target.selectionStart ?? event.target.value.length)}
@@ -311,24 +319,19 @@ export function Composer({
           </button>
         </div>
       </div>
-      <div className="hint">
-        <span>
-          <kbd>Enter</kbd> send
-        </span>
-        <span>
-          <kbd>Shift Enter</kbd> newline
-        </span>
-        <span>
-          <kbd>@</kbd> mention a file
-        </span>
-        {commands.length > 0 && (
-          <span>
-            <kbd>/</kbd> skills and commands
-          </span>
-        )}
-      </div>
     </form>
   );
+}
+
+/**
+ * The placeholder, then what @ and / do, if they're to say, then how many
+ * comments on the diff go with the message: "Reply to OpenCode… @ to mention
+ * a file, / for commands. Your 1 diff comment goes with it."
+ */
+function withTips(placeholder: string, { mentions, commands, diffComments }: { mentions: boolean; commands: boolean; diffComments: number }): string {
+  const keys = [mentions && '@ to mention a file', commands && '/ for commands'].filter(Boolean).join(', ');
+  const comments = diffComments && `Your ${diffComments} diff ${diffComments === 1 ? 'comment goes' : 'comments go'} with it.`;
+  return [placeholder, keys && (comments ? `${keys}.` : keys), comments].filter(Boolean).join(' ');
 }
 
 /** What the menu over the prompt offers, while open: the skills and commands `/` finds, or the files an @-mention finds. */

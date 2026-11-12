@@ -740,6 +740,23 @@ describe('commenting on the diff', () => {
     expect(composer().getByRole('button', { name: `Edit comment on ${loginTs}:1-2` }).getAttribute('title')).toContain('Keep the old name.');
   });
 
+  it('says in the placeholder how many comments go with the next message', async () => {
+    await open();
+    const prompt = () => composer().getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+    expect(prompt().placeholder).toBe('Reply to OpenCode… @ to mention a file');
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    expect(prompt().placeholder).toBe('Reply to OpenCode… @ to mention a file. Your 1 diff comment goes with it.');
+    await comment({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' }, 'Why drop this?');
+    expect(prompt().placeholder).toBe('Reply to OpenCode… @ to mention a file. Your 2 diff comments go with it.');
+  });
+
+  it('says so while the agent works too, the message queued', async () => {
+    const main = await open();
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    act(() => main.publish('sessions', [{ ...session, status: 'working' }]));
+    expect((composer().getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).placeholder).toBe('Queue a message for when OpenCode finishes… Your 1 diff comment goes with it.');
+  });
+
   it('keeps each comment as a note on its line until sent, removable from there too', async () => {
     const main = await open();
     await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');

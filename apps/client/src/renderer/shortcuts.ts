@@ -1,5 +1,6 @@
 // Every keyboard shortcut, in one place: the palette shows them next to their
-// actions, the window's key handler runs them, and Ctrl+? lists them all.
+// actions, the window's key handler runs them, and Ctrl+? lists them all,
+// the composer's own Enter and Shift+Enter too.
 
 /**
  * A key and the modifiers held with it. A Ctrl shortcut (Cmd works too) runs
@@ -41,6 +42,8 @@ export interface ShortcutEntry {
   shortcut: Shortcut;
   /** How the list shows it, when that isn't shortcutLabel's. */
   display?: string;
+  /** Typed in the prompt box, which handles it itself: no window shortcut, only listed. */
+  composer?: boolean;
 }
 
 /** The shortcuts, in the order Ctrl+? lists them. */
@@ -68,6 +71,8 @@ export const SHORTCUTS = {
   markUnread: { label: 'Mark this Session unread', shortcut: { key: 'u' } },
   archive: { label: 'Archive this Session', shortcut: { key: 'e' } },
   settings: { label: 'Open Settings', shortcut: { key: ',', ctrl: true } },
+  send: { label: 'Send the message', shortcut: { key: 'enter' }, composer: true },
+  newline: { label: 'Add a line to the message', shortcut: { key: 'enter', shift: true }, composer: true },
 } satisfies Record<string, ShortcutEntry>;
 
 export type ShortcutName = keyof typeof SHORTCUTS;

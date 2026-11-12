@@ -584,6 +584,20 @@ describe('the keyboard shortcuts list', () => {
     expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).toBeNull();
   });
 
+  it("lists the composer's keys, which no longer show under it", () => {
+    renderApp();
+    ctrlQuestion();
+    const searchBox = within(help()).getByRole('searchbox', { name: 'Search shortcuts' });
+    fireEvent.change(searchBox, { target: { value: 'enter' } });
+    expect(rows()).toEqual([
+      ['Retry the last prompt', 'Ctrl Shift Enter'],
+      ['Send the message', 'Enter'],
+      ['Add a line to the message', 'Shift Enter'],
+    ]);
+    expect(within(help()).getByText('In the composer')).toBeTruthy();
+    expect(within(help()).queryByText('Outside text fields')).toBeNull();
+  });
+
   it('opens from the composer too, and puts focus back there', () => {
     renderApp(new FakeMain({ sessions: [session(1, { title: 'One' })] }));
     press('j');
