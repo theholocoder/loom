@@ -222,6 +222,7 @@ describe("the Merge request Panel's read of it", () => {
       draft: true,
       sourceBranch: 'loom/fix-login',
       targetBranch: 'main',
+      head: 'commit-1',
       author: 'octocat',
       description: '## What\n\n```mermaid\nflowchart LR\n  a --> b\n```',
       // Those who reviewed, then those still asked to; the author replying to a thread isn't one.
@@ -252,7 +253,7 @@ describe("the Merge request Panel's read of it", () => {
     expect(query).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'owner=theholocoder', 'name=loom', 'number=12']));
   });
 
-  it('reads it from GitLab through glab, in the working copy, approvals as its reviews and approvers among its reviewers', async () => {
+  it('reads it from GitLab through glab, in the working copy, approvals and reviewers asking for changes as its reviews, and approvers among its reviewers', async () => {
     const { machine, checkout } = machineOn('glab', GITLAB, {
       mergeRequests: [
         {
@@ -263,6 +264,7 @@ describe("the Merge request Panel's read of it", () => {
           author: 'dave',
           description: 'Fixes the **login**.',
           reviewers: ['frank', 'erin'],
+          requestedChanges: ['frank'],
           target: 'develop',
           commits: 2,
           diffs: [
@@ -289,6 +291,7 @@ describe("the Merge request Panel's read of it", () => {
       draft: false,
       sourceBranch: 'loom/fix-login',
       targetBranch: 'develop',
+      head: 'commit-1',
       author: 'dave',
       description: 'Fixes the **login**.',
       reviewers: ['frank', 'erin', 'grace'],
@@ -301,6 +304,7 @@ describe("the Merge request Panel's read of it", () => {
       reviews: [
         { author: 'erin', verdict: 'approved', body: '', url: mr(87), comments: [] },
         { author: 'grace', verdict: 'approved', body: '', url: mr(87), comments: [] },
+        { author: 'frank', verdict: 'changes-requested', body: '', url: mr(87), comments: [] },
       ],
       comments: [{ author: 'erin', body: 'On the code', path: 'lib/a.rb', line: 2, at: Date.parse('2026-11-01T10:00:00Z'), url: `${mr(87)}#note_1` }],
     });
@@ -318,6 +322,76 @@ describe("the Merge request Panel's read of it", () => {
     await main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: '12' });
     forge([]);
     await expect(main.api.invoke('sessions.mergeRequest', { id })).rejects.toThrow('GitHub has no pull request #12 in theholocoder/loom.');
+  });
+});
+
+describe('Squash and merge, from the Merge request Panel', () => {
+  const endedCards = (items: TranscriptItem[]) => items.filter((i) => i.kind === 'merge-request-ended');
+
+  it('squashes and merges the pull request with gh into one commit titled as the user confirmed, only at the head they saw; Babysit then archives the Session', async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 12, url: pr(12), branch: 'loom/fix-login', title: 'Fix the login bug', oid: 'abc123' }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 12 && s.status === 'waiting'));
+    expect((await main.api.invoke('sessions.mergeRequest', { id })).head).toBe('abc123');
+
+    // The title is one line, however it was typed.
+    expect(await main.api.invoke('sessions.squashAndMerge', { id, title: '  Fix the login bug\n (#12) ', head: 'abc123' })).toEqual({ state: 'merged' });
+    const merge = machine.forgeCliInvocations('gh').find((args) => args[0] === 'pr' && args[1] === 'merge');
+    expect(merge).toEqual(['pr', 'merge', '12', '--repo', 'github.com/theholocoder/loom', '--squash', '--subject', 'Fix the login bug (#12)', '--match-head-commit', 'abc123']);
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'archived' && s.mergeRequestState === 'merged'));
+    const items = await waitFor(main.api, 'transcript', (list) => endedCards(list).length > 0, { sessionId: id });
+    expect(endedCards(items)).toEqual([{ kind: 'merge-request-ended', id: expect.any(Number), number: 12, url: pr(12), state: 'merged', archived: true }]);
+  });
+
+  it("refuses when the branch moved since, when the Forge won't merge it, and without a title, leaving it open", async () => {
+    const { machine, checkout, forge } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 12, url: pr(12), branch: 'loom/fix-login', oid: 'new-push' }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 12 && s.status === 'waiting'));
+
+    await expect(main.api.invoke('sessions.squashAndMerge', { id, title: 'Fix it', head: 'abc123' })).rejects.toThrow('Head branch was modified. Review and try the merge again.');
+    forge([{ number: 12, url: pr(12), branch: 'loom/fix-login', mergeRefusal: 'X Pull request theholocoder/loom#12 is not mergeable: the base branch policy prohibits the merge.' }]);
+    await expect(main.api.invoke('sessions.squashAndMerge', { id, title: 'Fix it', head: 'commit-1' })).rejects.toThrow('is not mergeable: the base branch policy prohibits the merge.');
+    await expect(main.api.invoke('sessions.squashAndMerge', { id, title: ' \n ', head: 'commit-1' })).rejects.toThrow('The squash commit needs a title.');
+
+    const now = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!;
+    expect([now.status, now.mergeRequestState]).toEqual(['waiting', 'open']);
+    expect(machine.forgeCliInvocations('gh').filter((args) => args[1] === 'merge')).toHaveLength(2);
+  });
+
+  it('says it is still open when the Forge merges it later, as a merge queue does', async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 12, url: pr(12), branch: 'loom/fix-login', mergeLater: true }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 12 && s.status === 'waiting'));
+
+    expect(await main.api.invoke('sessions.squashAndMerge', { id, title: 'Fix it', head: 'commit-1' })).toEqual({ state: 'open' });
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)!.status).toBe('waiting');
+  });
+
+  it('merges on GitLab through glab, in the working copy; with Babysit off, it records the merge and leaves the Session as it is', async () => {
+    const { machine, checkout } = machineOn('glab', GITLAB, { mergeRequests: [{ number: 87, url: mr(87), branch: 'loom/fix-login', oid: 'def456' }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 87 && s.status === 'waiting'));
+    expect((await main.api.invoke('sessions.mergeRequest', { id })).head).toBe('def456');
+    await main.api.invoke('sessions.setBabysitting', { id, on: false });
+
+    expect(await main.api.invoke('sessions.squashAndMerge', { id, title: 'Fix the login bug', head: 'def456' })).toEqual({ state: 'merged' });
+    const at = machine.forgeCliInvocations('glab').findIndex((args) => args[0] === 'mr' && args[1] === 'merge');
+    expect(machine.forgeCliInvocations('glab')[at]).toEqual(['mr', 'merge', '87', '--squash', '--squash-message', 'Fix the login bug', '--sha', 'def456', '--yes']);
+    expect(machine.forgeCliCwds('glab')[at]).toBe(checkout);
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequestState === 'merged'));
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)!.status).toBe('waiting');
+  });
+
+  it('refuses an archived Session', async () => {
+    const { machine, checkout } = machineOn('gh', GITHUB, { mergeRequests: [{ number: 12, url: pr(12), branch: 'loom/fix-login' }] });
+    const { main, id } = await withSession(machine, checkout);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.mergeRequest?.number === 12 && s.status === 'waiting'));
+    await main.api.invoke('sessions.archive', { id });
+
+    await expect(main.api.invoke('sessions.squashAndMerge', { id, title: 'Fix it', head: 'commit-1' })).rejects.toThrow('This Session is archived.');
+    expect(machine.forgeCliInvocations('gh').some((args) => args[1] === 'merge')).toBe(false);
   });
 });
 

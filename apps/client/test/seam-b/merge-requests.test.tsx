@@ -66,6 +66,7 @@ function details(fields: Partial<MergeRequestDetails> = {}): MergeRequestDetails
     draft: false,
     sourceBranch: 'loom/fix-login',
     targetBranch: 'main',
+    head: 'abc123',
     author: 'dave',
     description: '',
     reviewers: [],
@@ -326,5 +327,97 @@ describe("the Session's Merge request", () => {
     const shown = screen.getByRole('tabpanel', { name: 'Merge request' });
     expect(within(shown).getByRole('form', { name: 'Link Merge request' })).toBeTruthy();
     expect(document.activeElement).toBe(within(shown).getByRole('textbox', { name: 'Merge request number or URL' }));
+  });
+});
+
+describe('Squash and merge, from the Merge request Panel', () => {
+  const github: Project = { ...gitlab, forge: { state: 'available', checking: false, kind: 'github', host: 'github.com', repository: 'acme/billing-api' } };
+  const dialog = () => screen.getByRole('alertdialog', { name: 'Squash and merge !12?' });
+
+  it("asks first, naming the squash commit's title, which can be changed, and how many commits it squashes, warning of failed checks and changes asked for", async () => {
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] }, { 'sessions.mergeRequest': () => details(), 'sessions.squashAndMerge': () => ({ state: 'merged' }) });
+    open(main);
+    const shown = panel();
+    await within(shown).findByRole('heading', { name: 'Fix the login bug' });
+    // Next to it, opening it on the Forge.
+    const foot = shown.querySelector('.mr-foot')!;
+    expect([...foot.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Squash and merge', 'Open on GitLab', 'Update Merge request', 'Link Merge request…']);
+
+    fireEvent.click(within(shown).getByRole('button', { name: 'Squash and merge' }));
+    const asked = dialog();
+    expect(asked.querySelector('p')!.textContent).toBe('3 commits will be squashed into one commit on main:');
+    const title = within(asked).getByRole('textbox', { name: 'Squash commit title' }) as HTMLInputElement;
+    expect(title.value).toBe('Fix the login bug');
+    expect([...asked.querySelectorAll('.warnline')].map((line) => line.textContent)).toEqual(['CI failed on test.', 'erin asked for changes.', 'Merge anyway?']);
+    expect(document.activeElement).toBe(within(asked).getByRole('button', { name: 'Cancel' }));
+    expect(calls(main, 'sessions.squashAndMerge')).toEqual([]);
+
+    fireEvent.change(title, { target: { value: 'fix(login): Fix the login bug' } });
+    fireEvent.click(within(asked).getByRole('button', { name: 'Squash and merge' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(calls(main, 'sessions.squashAndMerge')).toEqual([{ id: 1, title: 'fix(login): Fix the login bug', head: 'abc123' }]);
+    // Read again, to show it merged.
+    await waitFor(() => expect(calls(main, 'sessions.mergeRequest')).toHaveLength(2));
+  });
+
+  it("gives GitHub's title with the number, warns of nothing once checks pass and the reviewer approved since, and closes on Cancel or Esc", async () => {
+    const reviews = [
+      { author: 'erin', verdict: 'changes-requested' as const, body: 'Needs work', at: 1000, url: `${url}#r1`, comments: [] },
+      { author: 'erin', verdict: 'commented' as const, body: 'Thanks', at: 1500, url: `${url}#r2`, comments: [] },
+      { author: 'erin', verdict: 'approved' as const, body: '', at: 2000, url: `${url}#r3`, comments: [] },
+    ];
+    const main = new FakeMain({ projects: [github], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] }, { 'sessions.mergeRequest': () => details({ commits: 1, ci: 'passed', checks: [{ name: 'test', state: 'passed' }], reviews }) });
+    open(main);
+    const shown = panel();
+    await within(shown).findByRole('heading', { name: 'Fix the login bug' });
+
+    fireEvent.click(within(shown).getByRole('button', { name: 'Squash and merge' }));
+    const asked = screen.getByRole('alertdialog', { name: 'Squash and merge #12?' });
+    expect(asked.querySelector('p')!.textContent).toBe('1 commit will be squashed into one commit on main:');
+    expect((within(asked).getByRole('textbox', { name: 'Squash commit title' }) as HTMLInputElement).value).toBe('Fix the login bug (#12)');
+    expect(asked.querySelector('.warnline')).toBeNull();
+    fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    fireEvent.click(within(shown).getByRole('button', { name: 'Squash and merge' }));
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    // Esc closed the dialog only, not the Panel.
+    expect(screen.getByRole('tabpanel', { name: 'Merge request' })).toBeTruthy();
+    expect(calls(main, 'sessions.squashAndMerge')).toEqual([]);
+  });
+
+  it('shows why the Forge refused, keeping the dialog open, and says when the Forge will merge it later', async () => {
+    let merge: () => { state?: 'open' | 'merged' } = () => {
+      throw new Error('gh pr merge exited with code 1: GraphQL: Head branch was modified. Review and try the merge again.');
+    };
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] }, { 'sessions.mergeRequest': () => details(), 'sessions.squashAndMerge': () => merge() });
+    open(main);
+    const shown = panel();
+    await within(shown).findByRole('heading', { name: 'Fix the login bug' });
+    fireEvent.click(within(shown).getByRole('button', { name: 'Squash and merge' }));
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Squash and merge' }));
+    expect((await within(dialog()).findByRole('alert')).textContent).toBe('gh pr merge exited with code 1: GraphQL: Head branch was modified. Review and try the merge again.');
+
+    merge = () => ({ state: 'open' });
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Squash and merge' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(within(shown).getByRole('status').textContent).toBe('GitLab will merge !12 once it can.');
+  });
+
+  it('is offered on an open Merge request only, and waits for a draft to be marked ready', async () => {
+    let read = details({ draft: true });
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] }, { 'sessions.mergeRequest': () => read });
+    open(main);
+    const shown = panel();
+    await within(shown).findByRole('heading', { name: 'Fix the login bug' });
+    const button = within(shown).getByRole('button', { name: 'Squash and merge' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe('!12 is a draft: mark it ready on GitLab first.');
+
+    read = details({ state: 'merged' });
+    fireEvent.click(within(shown).getByRole('button', { name: 'Refresh the Merge request' }));
+    await waitFor(() => expect(shown.querySelector('.mr-meta')!.textContent).toContain('Merged'));
+    expect(within(shown).queryByRole('button', { name: 'Squash and merge' })).toBeNull();
   });
 });

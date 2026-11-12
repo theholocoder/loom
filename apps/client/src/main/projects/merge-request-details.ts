@@ -101,6 +101,7 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
     draft: pull.isDraft,
     sourceBranch: pull.headRefName,
     targetBranch: pull.baseRefName,
+    ...(commit?.oid ? { head: commit.oid } : {}),
     author,
     description: pull.body,
     // Those who reviewed, then those still asked to.
@@ -123,6 +124,8 @@ interface GitLabView extends GitLabMergeRequest {
   work_in_progress?: boolean;
   source_branch: string;
   target_branch: string;
+  /** The commit its source branch is at. */
+  sha?: string | null;
   author?: { username: string } | null;
   description?: string | null;
   reviewers?: { username: string }[] | null;
@@ -140,13 +143,14 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
   const project = `projects/${encodeURIComponent(repository)}`;
   const run = (args: string[]) => runJson(call, 'gitlab', args, workingCopy);
   const path = `${project}/merge_requests/${number}`;
-  const [request, notes, approvals, commits, diffs] = (await Promise.all([
+  const [request, notes, approvals, reviewerStates, commits, diffs] = (await Promise.all([
     run(['mr', 'view', String(number), '--output', 'json']),
     run(['api', `${path}/notes?per_page=${PER_PAGE}`]),
     run(['api', `${path}/approvals`]),
+    run(['api', `${path}/reviewers`]),
     run(['api', `${path}/commits?per_page=${PER_PAGE}`]),
     run(['api', `${path}/diffs?per_page=${PER_PAGE}`]),
-  ])) as [GitLabView, GitLabNote[], { approved_by: { user: { username: string } }[] }, unknown[], { diff: string }[]];
+  ])) as [GitLabView, GitLabNote[], { approved_by: { user: { username: string } }[] }, { user: { username: string }; state?: string }[], unknown[], { diff: string }[]];
   const ci = await gitLabCi(run, project, request.head_pipeline ?? undefined);
   let added = 0;
   let removed = 0;
@@ -176,6 +180,7 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     draft: !!(request.draft ?? request.work_in_progress),
     sourceBranch: request.source_branch,
     targetBranch: request.target_branch,
+    ...(request.sha ? { head: request.sha } : {}),
     author,
     description: request.description ?? '',
     // Those asked to review it, then those who approved it without being asked.
@@ -188,8 +193,11 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     removed,
     ...(ci.status ? { ci: ci.status } : {}),
     checks: ci.checks,
-    // GitLab's reviews are its approvals.
-    reviews: approvers.map((approver) => ({ author: approver, verdict: 'approved', body: '', url, comments: [] })),
+    // GitLab's reviews are its approvals, and its reviewers asking for changes.
+    reviews: [
+      ...approvers.map((approver): MergeRequestReview => ({ author: approver, verdict: 'approved', body: '', url, comments: [] })),
+      ...reviewerStates.filter(({ state }) => state === 'requested_changes').map(({ user }): MergeRequestReview => ({ author: user.username, verdict: 'changes-requested', body: '', url, comments: [] })),
+    ],
     comments,
   };
 }

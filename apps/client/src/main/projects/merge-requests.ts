@@ -1,12 +1,15 @@
 // Finding a Session's Merge request on its Project's Forge, through the
 // Forge's CLI and the user's login (ADR 0002): the open one whose source
 // branch is a given branch (`gh pr list --head`, `glab mr list
-// --source-branch`), or one by its number (`gh pr view`, `glab mr view`).
-// Loom never creates or changes a Merge request itself.
+// --source-branch`), or one by its number (`gh pr view`, `glab mr view`);
+// and squashing and merging one when the user asks (`gh pr merge`, `glab mr
+// merge`). Loom never creates a Merge request itself.
 import { FORGE_CLI, type ForgeKind, type ForgeLink, type ForgeStatus, type MergeRequestState } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 
 const MERGE_REQUEST_TIMEOUT_MS = 20_000;
+/** Merging waits on the Forge, which may take a while over a big Merge request. */
+const MERGE_TIMEOUT_MS = 60_000;
 
 /** A Merge request as the Forge has it now. */
 export interface FoundMergeRequest extends ForgeLink {
@@ -40,6 +43,23 @@ export async function viewMergeRequest(call: BridgeCall, forge: ForgeStatus | un
 }
 
 /**
+ * Squashes and merges Merge request `number` into one commit titled `title`,
+ * only while its source branch is at `head`: what the user saw when they
+ * confirmed. Whether the source branch goes too is the Forge's own setting;
+ * the working copy is left as it is. Rejects with what the Forge said when
+ * it won't.
+ */
+export async function squashAndMerge(call: BridgeCall, forge: ForgeStatus | undefined, workingCopy: string, number: number, { title, head }: { title: string; head: string }): Promise<void> {
+  const { kind, repo } = mergeRequestForge(forge);
+  // The title is the user's own text, & and all: gh and glab install as executables, not the .cmd shims cmd.exe would split it in.
+  const args =
+    kind === 'github'
+      ? ['pr', 'merge', String(number), ...repo, '--squash', '--subject', title, '--match-head-commit', head]
+      : ['mr', 'merge', String(number), '--squash', '--squash-message', title, '--sha', head, '--yes'];
+  await runCli(call, kind, args, workingCopy, MERGE_TIMEOUT_MS);
+}
+
+/**
  * The Project's Forge, for Merge requests: its kind, and the `--repo` gh
  * needs. Rejects a Forge not checked yet, or off.
  */
@@ -52,15 +72,20 @@ export function mergeRequestForge(forge: ForgeStatus | undefined): { kind: Forge
 
 /** Runs the Forge's CLI, in the working copy for glab, and parses the JSON it prints. */
 async function run(call: BridgeCall, kind: ForgeKind, args: string[], workingCopy: string): Promise<unknown> {
-  const cli = FORGE_CLI[kind];
-  const result = await exec(call, cli, args, MERGE_REQUEST_TIMEOUT_MS, kind === 'gitlab' ? workingCopy : undefined);
-  const what = `${cli} ${args[0]} ${args[1]}`;
-  if (result.exitCode !== 0) throw new Error(`${what} exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);
+  const stdout = await runCli(call, kind, args, workingCopy, MERGE_REQUEST_TIMEOUT_MS);
   try {
-    return JSON.parse(result.stdout || 'null');
+    return JSON.parse(stdout || 'null');
   } catch {
-    throw new Error(`${what} printed something other than JSON: ${result.stdout.slice(0, 200)}`);
+    throw new Error(`${FORGE_CLI[kind]} ${args[0]} ${args[1]} printed something other than JSON: ${stdout.slice(0, 200)}`);
   }
+}
+
+/** Runs the Forge's CLI, in the working copy for glab, and gives what it printed; rejects with what it said when it fails. */
+async function runCli(call: BridgeCall, kind: ForgeKind, args: string[], workingCopy: string, timeoutMs: number): Promise<string> {
+  const cli = FORGE_CLI[kind];
+  const result = await exec(call, cli, args, timeoutMs, kind === 'gitlab' ? workingCopy : undefined);
+  if (result.exitCode !== 0) throw new Error(`${cli} ${args[0]} ${args[1]} exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);
+  return result.stdout;
 }
 
 /** A Merge request in the JSON `gh` or `glab` prints; undefined if Loom couldn't link to it. */

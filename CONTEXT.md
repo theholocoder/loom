@@ -43,7 +43,7 @@ A file or image the user sends with a message. Loom keeps it with the **Session*
 _Avoid_: Upload
 
 **Approval request**:
-The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary.
+The agent paused before an action that reaches beyond its **Session**'s own branch and working copy, until the user approves or denies it. A guardrail against mistakes, not a security boundary. Only the agent's actions ask: one the user starts in Loom themselves, such as squashing and merging the **Merge request** from its **Panel**, is confirmed in its own dialog instead.
 _Avoid_: Permission prompt, confirmation
 
 **Archived** (Session status):

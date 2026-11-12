@@ -295,6 +295,9 @@ button.mini { width: 100%; background: none; border: 0; border-radius: 0; text-a
 .modal { width: min(440px, calc(100vw - 32px)); box-shadow: 0 12px 40px var(--shadow); }
 .modal p { margin: 0 0 12px; color: var(--muted); }
 .modal-actions { justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.merge-dialog input { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
+.merge-dialog .warnings { margin-top: 10px; }
+.merge-dialog .warnline { color: var(--wait); font-size: 12.5px; display: flex; gap: 6px; align-items: center; margin: 4px 0 0; }
 .danger { background: var(--err); color: var(--bg); border-color: var(--err); }
 .warn-icon, .flag-missing { color: var(--err); }
 
@@ -542,6 +545,7 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .chip.verdict.changes { color: var(--wait); background: color-mix(in srgb, var(--wait) 15%, transparent); }
 .mr-foot { flex: none; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); }
 .mr-foot button { white-space: nowrap; font-size: 12.5px; }
+.mr-foot .queued { flex-basis: 100%; margin: 0; font-size: 12px; }
 .mr-link { flex: none; padding: 0 14px 12px; background: var(--panel); }
 .mr-link .acts, .mr-none .acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .mr-none { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 20px; text-align: center; }

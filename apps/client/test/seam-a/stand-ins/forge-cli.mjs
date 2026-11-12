@@ -22,9 +22,14 @@
 // And the Merge request Panel's read of one: the same `api graphql` for gh,
 // with its title, branches, author, description, reviewers asked (`reviewers`,
 // a name with a slash being a team on GitHub), commits and changes; `mr
-// view`, `api …/commits` and `api …/diffs` for glab. And its Diff tab's:
+// view`, `api …/reviewers` (those of its `reviewers` in `requestedChanges`
+// asking for changes), `api …/commits` and `api …/diffs` for glab. And its Diff tab's:
 // `api …/pulls/<n>/files` for gh (the script's `files`), `api …/diffs` for glab.
-import { appendFileSync, readFileSync } from 'node:fs';
+// And Squash and merge: `pr merge <n>` / `mr merge <n>`, which fail like the
+// real CLI when the head commit given isn't the Merge request's `oid` or the
+// script has a `mergeRefusal`, and otherwise mark it merged in the script
+// (left open with `mergeLater`, as a merge queue would).
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 const [scriptPath, ...args] = process.argv.slice(2);
@@ -82,6 +87,9 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
 } else if (args[0] === 'api' && /\/merge_requests\/\d+\/approvals$/.test(args[1])) {
   const found = mergeRequestIn(args[1]);
   process.stdout.write(JSON.stringify({ approved_by: (found.approvedBy ?? []).map((username) => ({ user: { username } })) }));
+} else if (args[0] === 'api' && /\/merge_requests\/\d+\/reviewers$/.test(args[1])) {
+  const found = mergeRequestIn(args[1]);
+  process.stdout.write(JSON.stringify((found.reviewers ?? []).map((username) => ({ user: { username }, state: (found.requestedChanges ?? []).includes(username) ? 'requested_changes' : 'unreviewed' }))));
 } else if (args[0] === 'api' && /\/merge_requests\/\d+\/commits(\?|$)/.test(args[1])) {
   const found = mergeRequestIn(args[1]);
   process.stdout.write(JSON.stringify(Array.from({ length: found.commits ?? 1 }, (_, i) => ({ id: `commit-${i + 1}` }))));
@@ -99,6 +107,24 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
   const branch = args[args.indexOf(flag) + 1];
   const listed = (script.mergeRequests ?? []).filter((m) => m.branch === branch && (m.state ?? 'open') === 'open');
   process.stdout.write(JSON.stringify(listed.map(asCli)));
+} else if ((args[0] === 'pr' || args[0] === 'mr') && args[1] === 'merge') {
+  const found = (script.mergeRequests ?? []).find((m) => String(m.number) === args[2]);
+  const head = args[args.indexOf(args[0] === 'pr' ? '--match-head-commit' : '--sha') + 1];
+  if (!found) {
+    process.stderr.write(args[0] === 'pr' ? `GraphQL: Could not resolve to a PullRequest with the number of ${args[2]}.\n` : '404 Not Found\n');
+    process.exit(1);
+  }
+  if (found.mergeRefusal) {
+    process.stderr.write(`${found.mergeRefusal}\n`);
+    process.exit(1);
+  }
+  if (head !== (found.oid ?? 'commit-1')) {
+    process.stderr.write(args[0] === 'pr' ? 'GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)\n' : 'ERROR: 409 Conflict: SHA does not match HEAD of source branch\n');
+    process.exit(1);
+  }
+  if (!found.mergeLater) found.state = 'merged';
+  writeFileSync(scriptPath, JSON.stringify(script));
+  process.stdout.write(args[0] === 'pr' ? `✓ Squashed and merged pull request #${found.number}\n` : `✓ Merged!\n`);
 } else if ((args[0] === 'pr' || args[0] === 'mr') && args[1] === 'view') {
   const found = (script.mergeRequests ?? []).find((m) => String(m.number) === args[2]);
   if (!found) {
@@ -112,9 +138,9 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
 }
 
 /** A scripted Merge request as `gh` or `glab` prints it in JSON. */
-function asCli({ number, url, branch, state = 'open', conflicts, pipeline, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', description = '', reviewers = [] }) {
+function asCli({ number, url, branch, state = 'open', conflicts, pipeline, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', description = '', reviewers = [], oid = 'commit-1' }) {
   return basename(scriptPath, '.json') === 'glab'
-    ? { id: 5000 + number, iid: number, web_url: url, title, description, draft, author: { username: author }, reviewers: reviewers.map((username) => ({ username })), source_branch: branch, target_branch: target, state: state === 'open' ? 'opened' : state, has_conflicts: conflicts ?? false, head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null }
+    ? { id: 5000 + number, iid: number, web_url: url, sha: oid, title, description, draft, author: { username: author }, reviewers: reviewers.map((username) => ({ username })), source_branch: branch, target_branch: target, state: state === 'open' ? 'opened' : state, has_conflicts: conflicts ?? false, head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null }
     : { number, url, headRefName: branch, state: state.toUpperCase() };
 }
 
