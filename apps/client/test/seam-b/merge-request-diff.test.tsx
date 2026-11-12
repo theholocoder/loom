@@ -59,6 +59,7 @@ const details: MergeRequestDetails = {
   draft: false,
   sourceBranch: 'loom/fix-login',
   targetBranch: 'main',
+  head: 'abc123',
   author: 'octocat',
   description: 'What it does.',
   reviewers: [],

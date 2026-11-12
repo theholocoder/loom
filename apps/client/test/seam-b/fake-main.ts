@@ -168,6 +168,9 @@ export class FakeMain implements LoomApi {
       'sessions.mergeRequestDiff': () => {
         throw new Error('sessions.mergeRequestDiff is not scripted');
       },
+      'sessions.squashAndMerge': () => {
+        throw new Error('sessions.squashAndMerge is not scripted');
+      },
       'sessions.sendFeedback': () => {},
       'sessions.setAutoPrompt': () => {},
       'sessions.setBabysitting': () => {},

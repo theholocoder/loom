@@ -3,10 +3,10 @@
 // after each Babysit poll. Its state, branches, title, author, reviewers,
 // commits and changes; the Babysit and Auto-prompt switches; then, on its
 // Overview tab, its checks, its reviews and comments and its description, or
-// on its Diff tab what it changes; and, at the foot, opening it on
-// the Forge, asking the agent to update it, or linking another. With none
-// linked, it offers to create or link one.
-import { Bot, ExternalLink, Eye, GitBranch, GitCommitHorizontal, GitPullRequest, GitPullRequestCreate, GitPullRequestDraft, Link, MessageSquare, RotateCw, User } from 'lucide-react';
+// on its Diff tab what it changes; and, at the foot, squashing and merging
+// it, opening it on the Forge, asking the agent to update it, or linking
+// another. With none linked, it offers to create or link one.
+import { Bot, ExternalLink, Eye, GitBranch, GitCommitHorizontal, GitMerge, GitPullRequest, GitPullRequestCreate, GitPullRequestDraft, Link, MessageSquare, RotateCw, User } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type MergeRequestDetails, type MergeRequestReview, type Project, type ReviewVerdict, type Session } from '../shared/api';
 import { useApi } from './api';
@@ -16,6 +16,7 @@ import { useMergeRequestRead } from './merge-request-read';
 import { Markdown } from './Markdown';
 import { useNow } from './now';
 import { attempt } from './SessionDetails';
+import { SquashAndMergeDialog } from './SquashAndMerge';
 import { canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
 
 /** Where the Panel is asked to take the user: the link form, or the reviews and comments. `n` tells one ask from the next. */
@@ -60,6 +61,10 @@ export function MergeRequestPanel({
 }) {
   const api = useApi();
   const [linking, setLinking] = useState(false);
+  /** Whether the Squash and merge dialog is open. */
+  const [merging, setMerging] = useState(false);
+  /** Set once the Forge took the merge but left it open, to merge it later: the URL it was taken for. */
+  const [queued, setQueued] = useState<string>();
   const reviews = useRef<HTMLHeadingElement>(null);
   const { mergeRequest } = session;
   const canAct = canActOnForge(session, project);
@@ -124,6 +129,9 @@ export function MergeRequestPanel({
   const watchable = session.status !== 'archived' && project?.forge.state === 'available' && state === 'open';
   const watching = !session.babysitOff;
   const forgeName = project?.forge.kind ? FORGE_NAMES[project.forge.kind] : 'the Forge';
+  // Offered on an open one; held back until it is read, and while it is a draft, which the Forge won't merge.
+  const mergeable = canAct && state === 'open';
+  const mergeBlockedBy = !details ? `Reading it from ${forgeName}…` : details.draft ? `${ref} is a draft: mark it ready on ${forgeName} first.` : !details.head ? `${forgeName} didn't say which commit ${ref} is at.` : undefined;
   // GitLab's +/− counts only the files it listed.
   const more = details?.moreFiles ? '+' : '';
   const stateChip =
@@ -327,6 +335,12 @@ export function MergeRequestPanel({
         )}
       </div>
       <footer className="mr-foot">
+        {mergeable && (
+          <button type="button" className="primary" disabled={!!mergeBlockedBy} title={mergeBlockedBy} onClick={() => setMerging(true)}>
+            <GitMerge className="sm" />
+            Squash and merge
+          </button>
+        )}
         <button type="button" onClick={() => attempt(onError, () => api.invoke('links.open', { url: mergeRequest.url }))}>
           <ExternalLink className="sm" />
           Open on {forgeName}
@@ -338,8 +352,27 @@ export function MergeRequestPanel({
           </button>
         )}
         {linkButton}
+        {queued === mergeRequest.url && state === 'open' && (
+          <p className="muted queued" role="status">
+            {`${forgeName} will merge ${ref} once it can.`}
+          </p>
+        )}
       </footer>
       {linkForm && <div className="mr-link">{linkForm}</div>}
+      {merging && mergeable && details && (
+        <SquashAndMergeDialog
+          session={session}
+          kind={project?.forge.kind}
+          details={details}
+          checks={checks ?? []}
+          onCancel={() => setMerging(false)}
+          onMerged={(after) => {
+            setMerging(false);
+            setQueued(after === 'open' ? mergeRequest.url : undefined);
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

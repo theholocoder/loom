@@ -330,6 +330,8 @@ export interface MergeRequestDetails extends ForgeLink {
   /** Its source branch, and the one it merges into. */
   sourceBranch: string;
   targetBranch: string;
+  /** The commit its source branch is at, when the Forge says: Squash and merge merges only while it still is. */
+  head?: string;
   author: string;
   /** Markdown, as its author wrote it; empty when there is none. */
   description: string;
@@ -1423,6 +1425,16 @@ export interface Commands {
   'sessions.mergeRequest': { params: { id: number }; result: MergeRequestDetails };
   /** The Session's Merge request's diff as its Forge has it now, for its Panel's Diff tab: rejects as `sessions.mergeRequest` does. */
   'sessions.mergeRequestDiff': { params: { id: number }; result: MergeRequestDiff };
+  /**
+   * Squashes and merges the Session's Merge request on its Forge, as the user
+   * confirmed in its Panel: one commit titled `title`, merged only while its
+   * source branch is still at `head`. The user's own confirmation stands for
+   * an Approval request. Resolves to its state just after: still open when
+   * the Forge merges it later (a merge queue, or once its pipeline passes).
+   * Rejects with what the Forge said when it won't merge it, and as
+   * `sessions.mergeRequest` does.
+   */
+  'sessions.squashAndMerge': { params: { id: number; title: string; head: string }; result: { state?: MergeRequestState } };
   /**
    * Sends the agent the feedback on card `itemId`, as one message, queued if
    * the Session is Working. Rejects when the card has been sent already.
