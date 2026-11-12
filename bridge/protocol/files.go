@@ -32,6 +32,39 @@ func pathExists(params existsParams) (*existsResult, *Error) {
 	return &existsResult{Exists: true}, nil
 }
 
+type folderParams struct {
+	Path string `json:"path"`
+}
+
+// checkFolder says whether a folder is there, or could be made with the
+// folders it needs: it makes them as `mkdir -p` does, then removes those it
+// made, so it leaves nothing behind. A file in the way is an error.
+func checkFolder(params folderParams) (*struct{}, *Error) {
+	if params.Path == "" {
+		return nil, &Error{Code: "bad_params", Message: "files.checkFolder needs a path"}
+	}
+	path := filepath.Clean(params.Path)
+	var missing []string
+	for dir := path; ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(dir); err == nil || !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		missing = append(missing, dir)
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	err := os.MkdirAll(path, 0o755)
+	// Deepest first, each one empty but for the next.
+	for _, dir := range missing {
+		os.Remove(dir)
+	}
+	if err != nil {
+		return nil, &Error{Code: "not_a_folder", Message: err.Error()}
+	}
+	return &struct{}{}, nil
+}
+
 type copyParams struct {
 	From string `json:"from"`
 	To   string `json:"to"`

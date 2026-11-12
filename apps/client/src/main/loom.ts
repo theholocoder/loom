@@ -16,6 +16,7 @@ import { openIn, type Opener } from './sessions/open-in';
 import { Panels } from './sessions/panels';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Terminals } from './sessions/terminals';
+import { checkWorktreeRootFolder } from './sessions/working-copies';
 import { Settings } from './settings';
 import { DATABASE_FILE, DatabaseDamagedError, openDatabase, type LoomDatabase } from './storage/database';
 import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
@@ -144,10 +145,15 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   removedProjects.set(projectService.listRemoved());
 
   let highlights: Highlights | undefined;
-  const settingsService = await Settings.load(db, (value) => {
-    settings.set(value);
-    highlights?.settingsChanged();
-  });
+  const settingsService = await Settings.load(
+    db,
+    (value) => {
+      settings.set(value);
+      highlights?.settingsChanged();
+    },
+    // Checked where worktrees go, when Loom can: an Environment not up yet tells at the next worktree Session.
+    { checkWorktreeRootFolder: (root) => (native.status.state === 'connected' ? checkWorktreeRootFolder(nativeForSessions, root) : Promise.resolve()) },
+  );
   const settings = new Topic<SettingsValues>(settingsService.value);
 
   const nativeForSessions: SessionEnvironment = {

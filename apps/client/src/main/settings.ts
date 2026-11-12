@@ -6,15 +6,21 @@ import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
 
+export interface SettingsOptions {
+  /** Rejects, saying why, a worktree root no worktree could go under. */
+  checkWorktreeRootFolder?: (root: string) => Promise<void>;
+}
+
 export class Settings {
   private constructor(
     private readonly db: LoomDatabase,
     private current: SettingsValues,
     private readonly onChange: (settings: SettingsValues) => void,
+    private readonly options: SettingsOptions,
   ) {}
 
   /** The settings in the database, defaults for those never set. */
-  static async load(db: LoomDatabase, onChange: (settings: SettingsValues) => void): Promise<Settings> {
+  static async load(db: LoomDatabase, onChange: (settings: SettingsValues) => void, options: SettingsOptions = {}): Promise<Settings> {
     const rows = await db.selectFrom('settings').selectAll().execute();
     const stored = Object.fromEntries(rows.map((row) => [row.key, JSON.parse(row.value) as unknown]));
     const current = { ...DEFAULT_SETTINGS };
@@ -55,7 +61,7 @@ export class Settings {
     if (isTheme(stored.theme)) current.theme = stored.theme;
     if (isUiFont(stored.uiFont)) current.uiFont = stored.uiFont;
     if (isMonoFont(stored.monoFont)) current.monoFont = stored.monoFont;
-    return new Settings(db, current, onChange);
+    return new Settings(db, current, onChange, options);
   }
 
   get value(): SettingsValues {
@@ -63,7 +69,9 @@ export class Settings {
   }
 
   async setWorktreeRoot(worktreeRoot: string): Promise<SettingsValues> {
-    return this.set('worktreeRoot', checkWorktreeRoot(worktreeRoot));
+    const root = checkWorktreeRoot(worktreeRoot);
+    await this.options.checkWorktreeRootFolder?.(root);
+    return this.set('worktreeRoot', root);
   }
 
   async setEditorCommand(editorCommand: string): Promise<SettingsValues> {

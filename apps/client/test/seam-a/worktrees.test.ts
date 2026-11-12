@@ -157,6 +157,23 @@ describe('a worktree Session', () => {
     const created = await again.api.invoke('sessions.create', { projectId: project!.id, workingCopy: 'worktree', prompt: 'Go' });
     expect(created.workingCopy.path).toBe(`${root}/billing-api/go`);
   });
+
+});
+
+describe('the worktree root setting', () => {
+  it('takes a folder that could be made, without making it, and refuses one that could not be', async () => {
+    const { machine, checkout } = machineWithClone();
+    const { main } = await withProject(machine, checkout);
+    const root = `${machine.folder('roots')}/new/worktrees`;
+    const taken = join(machine.folder('roots-taken'), 'a-file');
+    writeFileSync(taken, 'not a folder\n');
+
+    expect(await main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: root })).toMatchObject({ worktreeRoot: root });
+    expect(existsSync(`${machine.folder('roots')}/new`)).toBe(false);
+
+    await expect(main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: `${taken}/worktrees` })).rejects.toThrow(`"${taken}/worktrees" can't be the worktree root: there can't be a folder there in Native`);
+    expect((await waitFor(main.api, 'settings', () => true)).worktreeRoot).toBe(root);
+  });
 });
 
 describe('the branches a worktree Session can start from', () => {

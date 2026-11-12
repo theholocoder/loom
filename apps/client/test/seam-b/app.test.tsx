@@ -566,3 +566,134 @@ describe('Settings: stuck Sessions', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('a whole number of minutes');
   });
 });
+
+describe('Settings: sections, search and feedback', () => {
+  const openSettings = (main = new FakeMain()) => {
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    return main;
+  };
+  const sections = () => within(screen.getByRole('navigation', { name: 'Settings sections' })).queryAllByRole('link');
+  const sectionNames = () => sections().map((link) => link.textContent);
+  const search = (query: string) => fireEvent.change(screen.getByRole('searchbox', { name: 'Search settings' }), { target: { value: query } });
+  /** The setting row holding the named control. */
+  const rowOf = (control: HTMLElement) => control.closest('.setting') as HTMLElement;
+
+  it('groups the settings in sections, listed beside them, the first one current', () => {
+    openSettings();
+
+    expect(sectionNames()).toEqual(['Appearance', 'Sessions', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Environments']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(sectionNames());
+    expect(sections().filter((link) => link.getAttribute('aria-current') === 'true').map((link) => link.textContent)).toEqual(['Appearance']);
+    const worktrees = screen.getByRole('region', { name: 'Worktrees' });
+    expect(within(worktrees).getByRole('textbox', { name: 'Worktree root' })).toBeTruthy();
+  });
+
+  it('goes to the section picked in the list', () => {
+    openSettings();
+
+    fireEvent.click(sections().find((link) => link.textContent === 'Editor and terminal')!);
+
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Editor and terminal' }));
+    expect(sections().filter((link) => link.getAttribute('aria-current') === 'true').map((link) => link.textContent)).toEqual(['Editor and terminal']);
+  });
+
+  it('finds a setting by its name or what it does, keeping only its section, and clears on Escape', () => {
+    openSettings();
+
+    search('terminal');
+    expect(sectionNames()).toEqual(['Appearance', 'Editor and terminal']);
+    expect(screen.getByRole('button', { name: 'Monospace font' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Theme' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Worktree root' })).toBeNull();
+
+    search('stuck');
+    expect(sectionNames()).toEqual(['Sessions']);
+    expect(screen.getByRole('textbox', { name: 'Stuck after (minutes)' })).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Auto-prompt new Sessions' })).toBeNull();
+
+    search('sudo approvals');
+    expect(screen.getByRole('button', { name: 'sudo and global installs' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'MCP and extension tools' })).toBeNull();
+
+    // A section's own name finds all of it.
+    search('appearance');
+    expect(['Theme', 'UI font', 'Monospace font'].map((name) => !!screen.queryByRole('button', { name }))).toEqual([true, true, true]);
+
+    search('nothing like this');
+    expect(sections()).toEqual([]);
+    expect(screen.getByText(/No setting matches “nothing like this”/)).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Search settings' }), { key: 'Escape' });
+    expect(sections()).toHaveLength(7);
+  });
+
+  it('says Saved once main kept a change', async () => {
+    openSettings();
+    const input = screen.getByRole('textbox', { name: 'Editor command' }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'zed' } });
+    fireEvent.submit(input);
+
+    expect((await within(rowOf(input)).findByRole('status')).textContent).toBe('Saved');
+  });
+
+  it('says Saved for a picked option or a ticked box', async () => {
+    openSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Theme' }));
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Theme' })).getByRole('option', { name: 'Nord' }));
+    const box = screen.getByRole('checkbox', { name: 'Auto-prompt new Sessions' });
+    fireEvent.click(box);
+
+    await waitFor(() => expect(within(rowOf(screen.getByRole('button', { name: 'Theme' }))).getByRole('status').textContent).toBe('Saved'));
+    await waitFor(() => expect(within(rowOf(box)).getByRole('status').textContent).toBe('Saved'));
+  });
+
+  it('forgets a refusal once the field holds the saved value again, and Escape puts it back', async () => {
+    const main = openSettings(
+      new FakeMain({}, {
+        'settings.setStuckAfterMinutes': ({ minutes }) => {
+          if (minutes < 1) throw new Error('A Session is stuck after a whole number of minutes, at least 1.');
+          return main.value('settings');
+        },
+      }),
+    );
+    const input = screen.getByRole('textbox', { name: 'Stuck after (minutes)' }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.submit(input);
+    await screen.findByRole('alert');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+
+    fireEvent.change(input, { target: { value: '15' } });
+    fireEvent.blur(input);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+
+    fireEvent.change(input, { target: { value: '-3' } });
+    fireEvent.submit(input);
+    await screen.findByRole('alert');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input.value).toBe('15');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows the patterns collapsed in the diff one a line, all of them, and saves them', async () => {
+    const main = openSettings();
+    const field = screen.getByRole('textbox', { name: 'Collapsed in the diff' }) as HTMLTextAreaElement;
+    expect(field.tagName).toBe('TEXTAREA');
+    expect(field.value.split('\n')).toEqual(main.value('settings').diffCollapsedPatterns);
+
+    fireEvent.change(field, { target: { value: '*.lock\ndist/**' } });
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true });
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'settings.setDiffCollapsedPatterns').map((i) => i.params)).toEqual([{ patterns: ['*.lock', 'dist/**'] }]));
+  });
+
+  it("gives the terminal command an example for the Environment's system", () => {
+    openSettings(new FakeMain({ environments: [{ ...connectedNative, bridge: { ...connectedNative.bridge!, os: 'windows' } }] }));
+
+    expect(screen.getByRole('textbox', { name: 'Terminal command' }).getAttribute('placeholder')).toBe('For example: wt -d {path}');
+  });
+});

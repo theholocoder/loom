@@ -166,6 +166,12 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(pathExists(params))
+	case "files.checkFolder":
+		var params folderParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(checkFolder(params))
 	case "files.copy":
 		var params copyParams
 		if err := decodeParams(req.Params, &params); err != nil {

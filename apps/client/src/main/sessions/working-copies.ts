@@ -251,6 +251,20 @@ function missingBranch({ name, remote }: ExistingBranch, fetched: Fetched): Erro
   return new Error(fetched.state === 'failed' ? `origin has no branch "${name}" here, and couldn't be fetched: ${fetched.error}` : `origin has no branch "${name}"`);
 }
 
+/**
+ * Rejects, saying why, unless the worktree root is a folder in the
+ * Environment, or one that could be made there, so a root no worktree could go
+ * under is refused when it is set. Nothing is made.
+ */
+export async function checkWorktreeRootFolder(environment: GitEnvironment, root: string): Promise<void> {
+  const path = expandRoot(environment, root);
+  try {
+    await environment.request('files.checkFolder', GIT_TIMEOUT_MS, { path });
+  } catch (error) {
+    throw new Error(`"${root.trim()}" can't be the worktree root: there can't be a folder there in ${environment.label} (${(error as Error).message})`);
+  }
+}
+
 /** The root with a leading `~` replaced by the Environment's home. */
 function expandRoot(environment: GitEnvironment, root: string): string {
   const checked = checkWorktreeRoot(root).replace(/[/\\]+$/, '');
