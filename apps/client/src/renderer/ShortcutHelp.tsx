@@ -7,6 +7,10 @@ import { SHORTCUTS, shortcutLabel, type ShortcutEntry } from './shortcuts';
 
 const keysOf = (entry: ShortcutEntry) => entry.display ?? shortcutLabel(entry.shortcut);
 
+/** The list's groups, in order. */
+const GROUPS = ['Even while typing', 'Outside text fields', 'In the composer'] as const;
+const groupOf = (entry: ShortcutEntry): (typeof GROUPS)[number] => (entry.composer ? 'In the composer' : entry.shortcut.ctrl ? 'Even while typing' : 'Outside text fields');
+
 /** Escape or a click on the backdrop closes it; the caller puts focus back. */
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState('');
@@ -17,16 +21,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
     return words.every((word) => text.includes(word));
   });
   // No shortcut runs while a dialog or menu is open, bar Ctrl+K and Ctrl+?.
-  const groups = [
-    {
-      label: 'Even while typing',
-      entries: shown.filter((e) => e.shortcut.ctrl),
-    },
-    {
-      label: 'Outside text fields',
-      entries: shown.filter((e) => !e.shortcut.ctrl),
-    },
-  ].filter((group) => group.entries.length);
+  const groups = GROUPS.map((label) => ({ label, entries: shown.filter((e) => groupOf(e) === label) })).filter((group) => group.entries.length);
 
   return (
     <SearchDialog

@@ -277,6 +277,8 @@ describe('commenting on the conversation', () => {
 
     const chips = within(screen.getByRole('list', { name: 'Comments' }));
     expect(chips.getByRole('listitem').textContent).toContain('“The login form retries twice.”');
+    // Not a comment on the diff.
+    expect(screen.getByRole('textbox', { name: 'Prompt' }).getAttribute('placeholder')).toBe('Reply to OpenCode… @ to mention a file');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(invoked(main, 'sessions.send')).toEqual([{ id: fix.id, prompt: '', comments: [{ quote: 'The login form retries twice.', note: 'Why twice?' }] }]));
   });

@@ -204,6 +204,7 @@ export function NewSession({
         <Composer
           agent={OPENCODE_NAME}
           placeholder={`Tell ${OPENCODE_NAME} what to do…`}
+          tips
           onSend={start}
           onDraftChange={setDraft}
           loadFiles={() => api.invoke('projects.files', { id: chosen.id, ...filesRef(workingCopy, { existing, base }) })}
@@ -506,16 +507,17 @@ export function SessionView({
     }
   };
 
-  /** What the composer is for right now. */
-  const composerPlaceholder = (): string => {
+  /** What the composer is for right now, when it isn't for a reply. */
+  const composerSituation = (): string | undefined => {
     if (working) return `Queue a message for when ${session.agent} finishes…`;
     if (freeAnswer) return freeAnswer.placeholder;
     if (firstAsked?.kind === 'approval') return 'Approve or deny the request above to go on.';
     if (asked) return 'Answer the question above to go on.';
     if (readOnly) return removedProject ? "This Session's Project was removed." : 'This Session is archived.';
     if (session.worktreeMissing) return "This Session's worktree is missing; it can only be archived.";
-    return `Reply to ${session.agent}…`;
+    return undefined;
   };
+  const situation = composerSituation();
 
   /** Runs a command on the Session, showing why if it fails. */
   const runCommand = async (run: () => Promise<unknown>) => {
@@ -756,7 +758,8 @@ export function SessionView({
           </div>
           <Composer
             agent={session.agent}
-            placeholder={composerPlaceholder()}
+            placeholder={situation ?? `Reply to ${session.agent}…`}
+            tips={situation === undefined}
             disabled={composerDisabled}
             dock={panel}
             clearKey={stepKey}

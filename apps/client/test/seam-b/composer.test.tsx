@@ -169,6 +169,28 @@ describe('@-mentions', () => {
   });
 });
 
+describe("the composer's placeholder", () => {
+  it('tips @ for a file, and / once there are skills or commands, with no help line under the prompt', async () => {
+    const { composer, prompt } = openSession(new FakeMain({ projects: [project], sessions: [finished] }));
+    expect(prompt.placeholder).toBe('Reply to OpenCode… @ to mention a file');
+    expect(composer.queryByText(/Shift Enter|newline/)).toBeNull();
+    cleanup();
+
+    const commands: AgentCommand[] = [{ kind: 'skill', name: 'tdd' }];
+    const withCommands = openSession(new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => commands }));
+    await waitFor(() => expect(withCommands.prompt.placeholder).toBe('Reply to OpenCode… @ to mention a file, / for commands'));
+  });
+
+  it('tips them when starting a Session too', async () => {
+    renderApp(new FakeMain({ projects: [project] }, { 'projects.commands': () => [{ kind: 'command', name: 'init' }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter Projects' }), { key: 'Enter' });
+    const prompt = within(screen.getByRole('main', { name: 'New Session' })).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+    await waitFor(() => expect(prompt.placeholder).toBe('Tell OpenCode what to do… @ to mention a file, / for commands'));
+  });
+});
+
 describe('/ skills and commands', () => {
   const checkoutCommands: AgentCommand[] = [
     { kind: 'command', name: 'init', description: 'guided AGENTS.md setup' },
