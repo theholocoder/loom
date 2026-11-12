@@ -135,4 +135,20 @@ describe('Approval requests', () => {
     expect(main.invoked.filter((i) => i.command === 'settings.setApproval').map((i) => i.params)).toEqual([{ category: 'mcp', setting: 'ask' }]);
     expect(toggle('MCP and extension tools').textContent).toContain('Ask');
   });
+
+  it('Settings picks the Approval mode new Sessions start in', async () => {
+    const main = new FakeMain({ settings: DEFAULT_SETTINGS });
+    render(
+      <ApiProvider api={main}>
+        <App />
+      </ApiProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const picker = () => screen.getByRole('button', { name: 'Default Approval mode' });
+    expect(picker().textContent).toContain('Supervised');
+    await act(async () => fireEvent.click(picker()));
+    await act(async () => fireEvent.click(within(screen.getByRole('listbox', { name: 'Default Approval mode' })).getByRole('option', { name: 'Full access' })));
+    expect(main.invoked.filter((i) => i.command === 'settings.setApprovalModeDefault').map((i) => i.params)).toEqual([{ mode: 'full' }]);
+    expect(picker().textContent).toContain('Full access');
+  });
 });

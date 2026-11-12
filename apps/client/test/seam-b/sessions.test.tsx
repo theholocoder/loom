@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { Project, Session } from '../../src/shared/api';
+import { DEFAULT_SETTINGS, type Project, type Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -97,7 +97,7 @@ describe('starting a Session', () => {
 
     await waitFor(() =>
       expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
-        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', base: 'release/1.2', prompt: 'Backport the fix' } },
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', base: 'release/1.2', approvalMode: 'supervised', prompt: 'Backport the fix' } },
       ]),
     );
   });
@@ -153,8 +153,8 @@ describe('starting a Session', () => {
 
     await waitFor(() =>
       expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
-        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existing: { worktree: '/home/dev/loom-worktrees/49' }, prompt: 'Carry on' } },
-        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existing: { branch: { name: 'feature/login', remote: true } }, prompt: 'Carry on' } },
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existing: { worktree: '/home/dev/loom-worktrees/49' }, approvalMode: 'supervised', prompt: 'Carry on' } },
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', existing: { branch: { name: 'feature/login', remote: true } }, approvalMode: 'supervised', prompt: 'Carry on' } },
       ]),
     );
   });
@@ -211,7 +211,7 @@ describe('starting a Session', () => {
 
     await waitFor(() => expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy());
     expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
-      { command: 'sessions.create', params: { projectId: 1, workingCopy: 'checkout', prompt: 'Say hello' } },
+      { command: 'sessions.create', params: { projectId: 1, workingCopy: 'checkout', approvalMode: 'supervised', prompt: 'Say hello' } },
     ]);
     expect(screen.getByRole('heading', { name: 'Say hello' })).toBeTruthy();
   });
@@ -240,8 +240,23 @@ describe('starting a Session', () => {
 
     await waitFor(() => expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy());
     expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
-      { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', branch: 'loom/login', prompt: 'Fix the login bug, please' } },
+      { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', branch: 'loom/login', approvalMode: 'supervised', prompt: 'Fix the login bug, please' } },
     ]);
+  });
+
+  it('starts in the default Approval mode from Settings, and with the mode picked', async () => {
+    const main = renderApp(new FakeMain({ projects: [project], settings: { ...DEFAULT_SETTINGS, approvalModeDefault: 'full' } }, { 'sessions.create': () => inWorktree }));
+    const pane = startNewSession();
+    const picker = () => within(pane).getByRole('button', { name: 'Approvals' });
+    expect(picker().textContent).toContain('Full access');
+
+    fireEvent.click(picker());
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Approvals' })).getByRole('option', { name: 'Supervised' }));
+    expect(picker().textContent).toContain('Supervised');
+    fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Fix the login bug' } });
+    fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.create').map((i) => (i.params as { approvalMode?: string }).approvalMode)).toEqual(['supervised']));
   });
 
   it('leaves the branch to main when the user did not edit it', async () => {
@@ -253,7 +268,7 @@ describe('starting a Session', () => {
 
     await waitFor(() =>
       expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([
-        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', prompt: 'Fix the login bug' } },
+        { command: 'sessions.create', params: { projectId: 1, workingCopy: 'worktree', approvalMode: 'supervised', prompt: 'Fix the login bug' } },
       ]),
     );
   });

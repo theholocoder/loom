@@ -1,5 +1,5 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
-import { clampSidebarWidth, DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isSidebarView, type ApprovalCategory, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues, type SidebarSettings } from '../shared/api';
+import { clampSidebarWidth, DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, isSidebarView, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues, type SidebarSettings } from '../shared/api';
 import { splitCommandLine } from './command-line';
 import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
@@ -24,6 +24,7 @@ export class Settings {
     }
     if (isStuckAfterMinutes(stored.stuckAfterMinutes)) current.stuckAfterMinutes = stored.stuckAfterMinutes;
     if (typeof stored.autoPromptDefault === 'boolean') current.autoPromptDefault = stored.autoPromptDefault;
+    if (isApprovalMode(stored.approvalModeDefault)) current.approvalModeDefault = stored.approvalModeDefault;
     // Categories stored are kept; one Loom no longer has is dropped, and a new one gets its default.
     if (typeof stored.approvals === 'object' && stored.approvals !== null) {
       const approvals = { ...DEFAULT_APPROVALS };
@@ -86,6 +87,11 @@ export class Settings {
   async setAutoPromptDefault(on: boolean): Promise<SettingsValues> {
     if (typeof on !== 'boolean') throw new Error('Whether auto-prompt is on must be true or false.');
     return this.set('autoPromptDefault', on);
+  }
+
+  async setApprovalModeDefault(mode: ApprovalMode): Promise<SettingsValues> {
+    if (!isApprovalMode(mode)) throw new Error(`"${String(mode)}" is not an Approval mode`);
+    return this.set('approvalModeDefault', mode);
   }
 
   /** Sets whether the agent asks before actions of `category`; rejects an unknown category or setting. */

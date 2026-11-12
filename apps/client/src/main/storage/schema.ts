@@ -1,6 +1,6 @@
 // The database's typed schema, as of the latest migration.
 import type { Generated } from 'kysely';
-import type { MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
+import type { ApprovalMode, MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
 
 export interface SettingsTable {
   key: string;
@@ -52,6 +52,8 @@ export interface SessionsTable {
   auto_prompt: number;
   /** How many auto-prompts have gone since the user's last message. */
   auto_prompts_in_a_row: number;
+  /** Whether its Approval requests ask the user, or Loom approves them all. */
+  approval_mode: ApprovalMode;
   /** 1 while the Session has news the user hasn't opened, else 0. */
   unread: number;
   /** Clock time it comes back from being Snoozed; null while it isn't. */

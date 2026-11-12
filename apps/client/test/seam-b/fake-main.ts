@@ -96,6 +96,11 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setApprovalModeDefault': ({ mode }) => {
+        const settings = { ...this.value('settings'), approvalModeDefault: mode };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setDiffCollapsedPatterns': ({ patterns }) => {
         const settings = { ...this.value('settings'), diffCollapsedPatterns: patterns };
         this.publish('settings', settings);

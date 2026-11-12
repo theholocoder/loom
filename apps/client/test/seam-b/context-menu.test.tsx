@@ -173,7 +173,7 @@ describe("a Session's right-click menu", () => {
     fireEvent.change(within(composer).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Also this' } });
     fireEvent.click(within(composer).getByRole('button', { name: 'Send' }));
     await waitFor(() =>
-      expect(invoked(main, 'sessions.create')).toEqual([{ projectId: loom.id, workingCopy: 'worktree', existing: { worktree: '/wt/fix-login' }, prompt: 'Also this' }]),
+      expect(invoked(main, 'sessions.create')).toEqual([{ projectId: loom.id, workingCopy: 'worktree', existing: { worktree: '/wt/fix-login' }, approvalMode: 'supervised', prompt: 'Also this' }]),
     );
   });
 

@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -43,6 +43,8 @@ export interface SessionsOptions {
   };
   /** Whether a Session started now has auto-prompt on. */
   autoPromptDefault: () => boolean;
+  /** The Approval mode of a Session started now without one picked. */
+  approvalModeDefault: () => ApprovalMode;
   /** The approval settings, as they are now. */
   approvals: () => ApprovalPolicy;
   /** How long a Working Session's agent may say nothing before the Session is stuck, as the setting is now. */
@@ -350,6 +352,7 @@ export class Sessions {
     if (workingCopy !== 'checkout' && workingCopy !== 'worktree') throw new Error(`unsupported working copy "${workingCopy as string}"`);
     if (issue) checkIssue(issue);
     checkPick(params);
+    if (params.approvalMode !== undefined && !isApprovalMode(params.approvalMode)) throw new Error(`"${String(params.approvalMode)}" is not an Approval mode`);
     const { existing } = params;
     if (existing !== undefined) {
       checkExisting(existing);
@@ -421,6 +424,7 @@ export class Sessions {
       auto_prompt: this.options.autoPromptDefault() ? 1 : 0,
       auto_prompts_in_a_row: 0,
       babysit_off: 0,
+      approval_mode: params.approvalMode ?? this.options.approvalModeDefault(),
     };
     let id: number;
     try {
@@ -938,13 +942,15 @@ export class Sessions {
 
   /**
    * The agent asks approval for `action`. Loom answers it itself, once, when
-   * its policy allows it: the category is set to Allow or approved for the
-   * Session, or it is part of a tool call already approved. Otherwise it is
-   * an Approval request card: Waiting (approval), with no timeout.
+   * its policy allows it: the Session has Full access, the category is set
+   * to Allow or approved for the Session, or it is part of a tool call
+   * already approved. Otherwise it is an Approval request card: Waiting
+   * (approval), with no timeout.
    */
   private async askApproval(id: number, requestId: string, action: ApprovalAction): Promise<void> {
     const agent = this.live.get(id);
     const session = this.get(id);
+    if (session.fullAccess) return agent?.answer(requestId, { kind: 'approval', approved: true });
     const environment = this.environmentOf(session);
     const context: ApprovalContext = {
       workingCopy: session.workingCopy.path,
@@ -2432,6 +2438,7 @@ function fromRow(row: Omit<SessionsTable, 'id'> & { id: number }): Session {
     updatedAt: row.updated_at,
     autoPrompt: row.auto_prompt !== 0 || undefined,
     babysitOff: row.babysit_off !== 0 || undefined,
+    fullAccess: row.approval_mode === 'full' || undefined,
   });
 }
 

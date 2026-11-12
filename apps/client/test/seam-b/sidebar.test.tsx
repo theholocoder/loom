@@ -381,10 +381,16 @@ describe('the Session info view', () => {
     expect(value(agent, 'Agent')).toBe('OpenCode');
     expect(value(agent, 'Model')).toBe('anthropic/claude-sonnet-5-5');
     expect(value(agent, 'Effort')).toBe('high');
+    expect(value(agent, 'Approvals')).toBe('Supervised');
     expect(value(agent, 'Agent session')).toBe('ses_abc123');
     fireEvent.click(within(agent).getByRole('button', { name: 'Copy agent session id' }));
     expect(writeText).toHaveBeenCalledWith('ses_abc123');
     expect(value(agent, 'Queued messages')).toBe('2');
+  });
+
+  it('shows a Full access Session as such', () => {
+    renderInfo({ ...full, fullAccess: true });
+    expect(value(group('Agent'), 'Approvals')).toBe('Full access');
   });
 
   it("shows the context used with a bar, the Session's tokens, Reported cost and Working time", () => {

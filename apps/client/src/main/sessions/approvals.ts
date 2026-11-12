@@ -25,7 +25,8 @@ export interface ApprovalContext {
 
 /**
  * - `allowed`: Loom's policy lets it through whatever the settings say:
- *   reading files elsewhere, or a `gh`/`glab` command that changes nothing.
+ *   reading files elsewhere, or a `gh`/`glab` command that changes nothing
+ *   (with plain commands around it, such as `cd` or `| head`).
  * - otherwise, its category, absent when Loom can't tell (the user's own
  *   rules asked); `defaultBranch` names the default branch a push goes to,
  *   which always asks.
@@ -65,8 +66,8 @@ function classifyCommand(command: string, cwd: string, context: ApprovalContext)
   const rank = (v: ApprovalVerdict) => (v.allowed || !v.category ? RANK.length : RANK.indexOf(v.category) - (v.defaultBranch ? RANK.length : 0));
   const categorised = verdicts.filter((v) => !v.allowed && v.category).sort((a, b) => rank(a) - rank(b));
   if (categorised.length) return categorised;
-  // Every part is one Loom lets through: a read-only Forge command.
-  if (verdicts.length > 0 && verdicts.every((v) => v.allowed)) return [{ allowed: true }];
+  // A read-only Forge command is what made the agent ask: plain commands around it (`cd`, `| head`) don't change that.
+  if (verdicts.some((v) => v.allowed)) return [{ allowed: true }];
   return [{}];
 }
 
@@ -90,9 +91,13 @@ function classifyWords(input: string[], cwd: string, context: ApprovalContext): 
   return {};
 }
 
+/** Device files a command may read or write anywhere, as `2>/dev/null` does: never elsewhere. */
+const DEVICES = new Set(['/dev/null', '/dev/stdin', '/dev/stdout', '/dev/stderr', '/dev/tty']);
+
 /** A word as a path, when it looks like one: absolute, from `~`, or out of `cwd` with `..`; redirections included. */
 function pathOf(word: string, cwd: string, home: string | undefined): string {
-  const bare = word.replace(/^(?:\d*[<>]+&?|--?[A-Za-z0-9-]+=)/, '');
+  const bare = word.replace(/^(?:&?\d*[<>]+&?|--?[A-Za-z0-9-]+=)/, '');
+  if (DEVICES.has(bare)) return '';
   if (bare.startsWith('~') && home && (bare === '~' || bare[1] === '/')) return home + bare.slice(1);
   if (bare.startsWith('/') || /^[A-Za-z]:[/\\]/.test(bare)) return bare;
   if (bare === '..' || bare.startsWith('../')) return `${cwd}/${bare}`;
@@ -307,6 +312,10 @@ export function commandsOf(line: string): string[][] {
       i = j;
     } else if (c === '\\' && i + 1 < line.length) {
       word += line[++i];
+      inWord = true;
+    } else if (c === '&' && (line[i - 1] === '>' || line[i - 1] === '<' || line[i + 1] === '>')) {
+      // A redirection, `2>&1` or `&>file`, not a command's end.
+      word += c;
       inWord = true;
     } else if (c === ';' || c === '|' || c === '&' || c === '\n' || c === '(' || c === ')') {
       endCommand();

@@ -152,4 +152,8 @@ export const migrations: Migration[] = [
   async (db) => {
     await db.schema.alterTable('sessions').addColumn('snoozed_until', 'integer').execute();
   },
+  async (db) => {
+    // A Session from before asked the user, as Supervised does.
+    await db.schema.alterTable('sessions').addColumn('approval_mode', 'text', (c) => c.notNull().defaultTo('supervised')).execute();
+  },
 ];

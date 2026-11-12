@@ -261,7 +261,19 @@ describe('Approval requests', () => {
       ['echo hi > /etc/motd', 'writeElsewhere'],
     ];
     // Allowed by Loom's policy, whatever the settings: answered without a card.
-    const allowed = ['gh pr view 3', 'gh api repos/acme/billing-api/pulls', 'glab mr list', 'gh pr checks', 'gh auth status && glab ci status'];
+    // Plain commands around them, and redirections, don't stop that.
+    const allowed = [
+      'gh pr view 3',
+      'gh api repos/acme/billing-api/pulls',
+      'glab mr list',
+      'gh pr checks',
+      'gh auth status && glab ci status',
+      'glab mr list | head -20',
+      'cd sub && glab mr view 3',
+      'gh pr view 3 --comments 2>&1',
+      'glab issue view 5 2>/dev/null | cat',
+      'glab api projects/1/merge_requests &>/dev/null | jq .',
+    ];
     const setup = machineWith((checkout) => [...asks.map(([command]) => ({ chunks: [shell(command, checkout)] })), { chunks: allowed.map((command, i) => shell(command, checkout, `call_ok${i}`)) }]);
     const main = await started(setup.machine);
     // Ask for every category, so the ones allowed by default show too.
@@ -296,6 +308,42 @@ describe('Approval requests', () => {
     await main.api.invoke('sessions.approve', { id, itemId: approvals(items)[0]!.id, decision: 'once' });
     await waitFor(main.api, 'sessions', waitingOn(id, 'finished'));
     expect(permissionAnswers(setup.machine)).toEqual(['once', 'once']);
+  });
+
+  it('approves everything the agent asks in a Full access Session, a push to the default branch included, with no card', async () => {
+    const setup = machineWith((checkout) => [{ chunks: [shell('git push origin HEAD:main', checkout, 'call_1'), shell('sudo make install', checkout, 'call_2'), write('/srv/elsewhere/notes.md'), 'Done.'] }]);
+    const userDataDir = tempDir('loom-user-data-');
+    const main = await started(setup.machine, userDataDir);
+    const project = await main.api.invoke('projects.link', { path: setup.checkout });
+    const { id, fullAccess } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Ship it', approvalMode: 'full' });
+    expect(fullAccess).toBe(true);
+    await waitFor(main.api, 'sessions', waitingOn(id, 'finished'));
+    expect(approvals(await waitFor(main.api, 'transcript', () => true, { sessionId: id }))).toEqual([]);
+    expect(permissionAnswers(setup.machine)).toEqual(['once', 'once', 'once']);
+    await main.close();
+    // Kept with the Session.
+    const again = await started(setup.machine, userDataDir);
+    expect((await waitFor(again.api, 'sessions', session(id, () => true))).find((s) => s.id === id)?.fullAccess).toBe(true);
+  });
+
+  it('starts Sessions in the default Approval mode from Settings, Supervised until changed', async () => {
+    const setup = machineWith([{ chunks: ['Done.'] }, { chunks: ['Done.'] }, { chunks: ['Done.'] }]);
+    const userDataDir = tempDir('loom-user-data-');
+    const main = await started(setup.machine, userDataDir);
+    expect((await waitFor(main.api, 'settings', () => true)).approvalModeDefault).toBe('supervised');
+    const project = await main.api.invoke('projects.link', { path: setup.checkout });
+    const first = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'One' });
+    expect(first.fullAccess).toBeUndefined();
+    expect((await main.api.invoke('settings.setApprovalModeDefault', { mode: 'full' })).approvalModeDefault).toBe('full');
+    const second = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Two' });
+    expect(second.fullAccess).toBe(true);
+    // A mode picked wins over the default.
+    const third = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Three', approvalMode: 'supervised' });
+    expect(third.fullAccess).toBeUndefined();
+    await expect(main.api.invoke('settings.setApprovalModeDefault', { mode: 'yolo' as never })).rejects.toThrow('not an Approval mode');
+    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Four', approvalMode: 'yolo' as never })).rejects.toThrow('not an Approval mode');
+    await main.close();
+    expect((await waitFor((await started(setup.machine, userDataDir)).api, 'settings', () => true)).approvalModeDefault).toBe('full');
   });
 
   it("works freely in a checkout Session's checkout folder, its working copy", async () => {

@@ -1,8 +1,8 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, PanelRight, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
-import { mergeRequestRef, OPENCODE_NAME, type Branches, type Commands, type ExistingBranch, type MessageComment, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Commands, type ExistingBranch, type MessageComment, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -163,6 +163,10 @@ export function NewSession({
   const [effort, setEffort] = useState<string>();
   const efforts = effortsOf(models.listed, model);
   const commands = useAgentCommands(chosen?.id);
+  // The Approval mode picked; until then, the default from Settings.
+  const approvalModeDefault = useTopic('settings')?.approvalModeDefault ?? 'supervised';
+  const [pickedMode, setApprovalMode] = useState<ApprovalMode>();
+  const approvalMode = pickedMode ?? approvalModeDefault;
 
   const start = async (prompt: string, attachments: NewAttachment[]) => {
     if (!chosen) return false;
@@ -170,7 +174,7 @@ export function NewSession({
     const params = workingCopyParams(workingCopy, { existing, branch: editedBranch, base: pickedBase });
     try {
       const pick = { ...(model !== undefined && { model }), ...(effort !== undefined && efforts.includes(effort) && { effort }) };
-      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, ...params, ...(issue ? { issue } : {}), ...pick, prompt, ...(attachments.length ? { attachments } : {}) }));
+      onStarted(await api.invoke('sessions.create', { projectId: chosen.id, ...params, ...(issue ? { issue } : {}), ...pick, approvalMode, prompt, ...(attachments.length ? { attachments } : {}) }));
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -234,6 +238,15 @@ export function NewSession({
                   setEffort(undefined);
                 }}
                 onEffort={setEffort}
+              />
+              <Select<ApprovalMode>
+                variant="compact"
+                label="Approvals"
+                icon={approvalMode === 'full' ? <ShieldOff className="sm" /> : <ShieldCheck className="sm" />}
+                className={approvalMode === 'full' ? 'full-access' : undefined}
+                value={approvalMode}
+                options={(Object.keys(APPROVAL_MODES) as ApprovalMode[]).map((mode) => ({ value: mode, label: APPROVAL_MODES[mode].label }))}
+                onChange={setApprovalMode}
               />
               <Select<WorkingCopyChoice>
                 variant="compact"
