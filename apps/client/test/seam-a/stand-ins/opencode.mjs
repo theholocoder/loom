@@ -31,7 +31,10 @@
 // ACP's (unstable) `usage`, cancelled turns included, as OpenCode does. `session/resume` and
 // `session/load` take up the session they name (see `refuse`); a load first
 // replays its history as `session/update`s, as OpenCode does, and a process
-// that took one up plays `resumedTurns`, if given, instead of `turns`.
+// that took one up plays `resumedTurns`, if given, instead of `turns`. A
+// process with every tool denied (a Session highlights check) plays the next
+// of `highlightTurns` instead, counted across processes; past their end, an
+// answer with nothing to add.
 // Every message it receives is appended to
 // <script.json>.acp.log as {pid, cwd, config, message}, `config` being its
 // OPENCODE_CONFIG_CONTENT. It exits when its stdin closes.
@@ -114,6 +117,20 @@ function acp() {
   let resumed = false;
   const turns = () => (resumed && script.acp?.resumedTurns) || script.acp?.turns || [];
   let prompts = 0;
+  const checksHighlights = (() => {
+    try {
+      return JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')?.permission?.['*'] === 'deny';
+    } catch {
+      return false;
+    }
+  })();
+  /** The next of `highlightTurns`, counted in a file beside the script so that each check's process takes its own. */
+  const nextHighlightTurn = () => {
+    const counter = `${scriptPath}.highlights`;
+    const played = existsSync(counter) ? Number(readFileSync(counter, 'utf8')) : 0;
+    writeFileSync(counter, String(played + 1));
+    return script.acp?.highlightTurns?.[played] ?? { chunks: ['{"add":[],"resolve":[]}'] };
+  };
   let sessionId;
   // The model and variant the session runs with, as OpenCode's ACP bridge keeps them.
   const models = (script.models ?? []).filter((m) => m.enabled !== false);
@@ -187,7 +204,7 @@ function acp() {
       }
     } else if (method === 'session/prompt') {
       if (running) return send({ id, error: { code: -32603, message: 'session is busy' } });
-      const turn = turns()[prompts++] ?? { chunks: [] };
+      const turn = checksHighlights ? nextHighlightTurn() : (turns()[prompts++] ?? { chunks: [] });
       const current = { cancelled: false };
       current.stopped = new Promise((resolve) => (current.stop = resolve));
       running = current;

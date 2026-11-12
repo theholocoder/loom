@@ -1,5 +1,5 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
-import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type Settings as SettingsValues } from '../shared/api';
+import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type HighlightsSettings, type Settings as SettingsValues } from '../shared/api';
 import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, readLayout, type PanelArea, type PanelDimension, type PanelKind } from '../shared/panels';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
@@ -44,6 +44,12 @@ export class Settings {
         wrap: typeof wrap === 'boolean' ? wrap : current.diffView.wrap,
         sideBySide: typeof sideBySide === 'boolean' ? sideBySide : current.diffView.sideBySide,
       };
+    }
+    // Kept only as it can be set: a model while on.
+    try {
+      current.highlights = checkHighlights(stored.highlights as HighlightsSettings);
+    } catch {
+      // Never set, or not as Loom takes it: off.
     }
     // A value Loom no longer offers falls back to the default.
     if (isTheme(stored.theme)) current.theme = stored.theme;
@@ -143,6 +149,11 @@ export class Settings {
     return this.set('diffView', { fileList, wrap, sideBySide });
   }
 
+  /** Sets Session highlights, all of it; rejects turning it on without a model. */
+  async setHighlights(highlights: HighlightsSettings): Promise<SettingsValues> {
+    return this.set('highlights', checkHighlights(highlights));
+  }
+
   private async set<K extends keyof SettingsValues>(key: K, value: SettingsValues[K]): Promise<SettingsValues> {
     const json = JSON.stringify(value);
     await this.db
@@ -159,6 +170,18 @@ export class Settings {
 /** Whether `value` is a whole number of minutes, at least 1. */
 function isStuckAfterMinutes(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
+/** Session highlights as Loom keeps them: the model and Effort trimmed, a blank one left out. */
+function checkHighlights(highlights: HighlightsSettings): HighlightsSettings {
+  if (typeof highlights !== 'object' || highlights === null) throw new Error('Session highlights must be an object.');
+  const { on, model, effort } = highlights;
+  if (typeof on !== 'boolean') throw new Error('Whether Session highlights is on must be true or false.');
+  if ((model !== undefined && typeof model !== 'string') || (effort !== undefined && typeof effort !== 'string')) throw new Error("Session highlights' model and Effort must be text.");
+  const picked = model?.trim();
+  const level = effort?.trim();
+  if (on && !picked) throw new Error('Pick the model that checks Sessions for highlights before turning it on.');
+  return { on, ...(picked ? { model: picked } : {}), ...(picked && level ? { effort: level } : {}) };
 }
 
 /** Whether `value` is Allow or Ask. */

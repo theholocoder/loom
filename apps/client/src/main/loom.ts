@@ -11,6 +11,7 @@ import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
 import { Attachments } from './sessions/attachments';
 import { Babysit } from './sessions/babysit';
+import { Highlights } from './sessions/highlights';
 import { openIn, type Opener } from './sessions/open-in';
 import { Panels } from './sessions/panels';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
@@ -142,7 +143,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   projects.set(projectService.list());
   removedProjects.set(projectService.listRemoved());
 
-  const settingsService = await Settings.load(db, (value) => settings.set(value));
+  let highlights: Highlights | undefined;
+  const settingsService = await Settings.load(db, (value) => {
+    settings.set(value);
+    highlights?.settingsChanged();
+  });
   const settings = new Topic<SettingsValues>(settingsService.value);
 
   const nativeForSessions: SessionEnvironment = {
@@ -179,10 +184,12 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       return environment && { label: environment.status.label, os: () => environment.status.bridge?.os, ready: () => environment.ready(), openChannel: (params) => environment.openChannel(params) };
     },
   });
+  const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
+  const projectName = (id: number) => projectService.list().find((p) => p.id === id)?.name ?? `Project ${id}`;
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
-    adapter: options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion),
+    adapter,
     project: (id) => projectService.list().find((p) => p.id === id),
     environment: (id) => (id === native.status.id ? nativeForSessions : undefined),
     worktreeRoot: () => settingsService.value.worktreeRoot,
@@ -190,7 +197,9 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       sessions.set(list);
       babysit?.sessionsChanged(list);
       terminals.sessionsChanged(list);
+      highlights?.sessionsChanged(list);
     },
+    onTurnEnded: (id, through) => highlights?.turnEnded(id, through),
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
@@ -203,6 +212,19 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   });
   sessions.set(sessionService.list());
   const panels = await Panels.load(db);
+  highlights = await Highlights.load({
+    db,
+    clock: options.clock,
+    adapter,
+    settings: () => settingsService.value.highlights,
+    session: (id) => sessionService.list().find((s) => s.id === id),
+    sessions: () => sessionService.list(),
+    environment: (session) => (environmentIdOf(session.projectId) === native.status.id ? nativeForSessions : undefined),
+    transcript: (id) => sessionService.transcriptItems(id),
+    projectName,
+    onCounts: (id, counts) => sessionService.setHighlightCounts(id, counts),
+  });
+  const highlighter = highlights;
 
   babysit = await Babysit.load({
     db,
@@ -234,6 +256,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
     panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
+    highlights: ({ sessionId }, listener) => highlighter.subscribe(sessionId, listener),
     terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
     terminalOutput: ({ id }, listener) => terminals.subscribeOutput(id, listener),
   };
@@ -281,6 +304,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setPanelArea': ({ kind, area }) => settingsService.setPanelArea(kind, area),
     'settings.setInbox': (inbox) => settingsService.setInbox(inbox),
     'settings.setDiffView': (diffView) => settingsService.setDiffView(diffView),
+    'settings.setHighlights': (value) => settingsService.setHighlights(value),
     'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
@@ -325,6 +349,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       if (!sessionService.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
       return panels.set(id, state);
     },
+    'sessions.resolveHighlight': (params) => highlighter.resolve(params),
+    'sessions.seeHighlights': (params) => highlighter.see(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
     'terminals.open': (params) => terminals.open(params),
@@ -369,6 +395,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     api,
     close: async () => {
       await babysitter.stop();
+      await highlighter.stop();
       await terminals.closeAll();
       await sessionService.shutdown();
       await native.stop();

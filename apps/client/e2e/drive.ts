@@ -59,6 +59,25 @@ const turns: AcpTurn[] = [
   { chunks: ['Trying'], error: 'Provider error: rate limit exceeded (429). Try again later.' },
 ];
 
+/** What Session highlights' checks answer, one per check: notes on the first turn, then a resolution. */
+const highlightTurns: AcpTurn[] = [
+  {
+    chunks: [
+      JSON.stringify({
+        add: [
+          { kind: 'for-you', text: 'Run the currency migration before deploying: `src/currency.ts:2` now falls back to EUR.' },
+          { kind: 'risk', text: 'Invoices cached before the change keep their old currency.' },
+          { kind: 'assumption', text: 'Assumed every EU customer bills in EUR.' },
+          { kind: 'not-done', text: 'The failing test was skipped rather than fixed.' },
+        ],
+        resolve: [],
+      }),
+    ],
+    tokens: { inputTokens: 900, outputTokens: 120 },
+  },
+  { chunks: [JSON.stringify({ add: [{ kind: 'decision', text: 'Kept the old API for one more release.' }], resolve: [{ id: 4, reason: 'The test was fixed in this turn.' }] })] },
+];
+
 const machine = new Machine();
 machine.installOpencode({
   version: 'opencode v2.1.4',
@@ -70,7 +89,7 @@ machine.installOpencode({
   ],
   commands: [{ name: 'review', description: 'Review the current changes' }, { name: 'init', description: 'Write AGENTS.md' }],
   skills: [{ id: 'tdd', name: 'tdd', description: 'Test-driven development' }],
-  acp: { images: true, turns },
+  acp: { images: true, turns, highlightTurns },
 });
 const branch = 'loom/12-invoices-show-the-wrong-currency';
 machine.installForgeCli('gh', {

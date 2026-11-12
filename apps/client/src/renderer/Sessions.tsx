@@ -2,13 +2,14 @@
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
-import { ChangesView, type DiffComments } from './Changes';
+import { ChangesView, type ChangesFocus, type DiffComments } from './Changes';
+import { highlightLine, HighlightsPanel } from './HighlightsPanel';
 import type { ReviewNotes } from './ReviewNotes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from './MergeRequestPanel';
@@ -589,11 +590,28 @@ export function SessionView({
       }
     : undefined;
 
+  /** Where Changes was last asked to take the user: a file a Highlight names. */
+  const [changesFocus, setChangesFocus] = useState<ChangesFocus>();
+  /**
+   * Scrolls the conversation to the turn `itemId` is in: to the user's
+   * message it starts with, the last at or before it (the first, for an item
+   * before any). A drawer over the conversation closes to show it.
+   */
+  const showTurn = (itemId: number) => {
+    if (panels.drawer) panels.closeDrawer();
+    const messages = [...document.querySelectorAll<HTMLElement>('[data-item-id]')];
+    const target = messages.filter((m) => Number(m.dataset.itemId) <= itemId).at(-1) ?? messages[0];
+    target?.scrollIntoView?.({ block: 'start' });
+  };
+  /** Ask the agent, on a Highlight: it goes to the composer as a comment quoting it, its note to edit. */
+  const askAboutHighlight = (highlight: Highlight) =>
+    setPending((list) => [...list, { comment: { quote: highlightLine(highlight), note: 'Can you look into this?' } }]);
+
   /** A Panel's content, in whichever area it sits. */
   const renderPanel = (panel: PanelId) => {
     switch (kindOf(panel)) {
       case 'changes':
-        return <ChangesView session={session} comments={diffComments} reviews={reviewNotes} />;
+        return <ChangesView session={session} comments={diffComments} reviews={reviewNotes} focus={changesFocus} />;
       case 'merge-request':
         return (
           <MergeRequestPanel
@@ -605,6 +623,19 @@ export function SessionView({
             // As on Changes: comments go with the next message, which an archived Session's diff doesn't take.
             comments={session.status === 'archived' || session.worktreeMissing ? undefined : diffComments}
             reviewNotes={reviewNotes}
+            onError={setError}
+          />
+        );
+      case 'highlights':
+        return (
+          <HighlightsPanel
+            session={session}
+            onShowTurn={showTurn}
+            onShowFile={(path) => {
+              setChangesFocus((was) => ({ path, n: (was?.n ?? 0) + 1 }));
+              panels.show('changes');
+            }}
+            onAsk={composerDisabled || freeAnswer ? undefined : askAboutHighlight}
             onError={setError}
           />
         );
@@ -643,7 +674,7 @@ export function SessionView({
           <div className="chat" role="log" aria-label="Conversation" onContextMenu={commentOnSelection}>
             {items.map((item) =>
               item.kind === 'user' ? (
-                <div key={item.id} className="msg user">
+                <div key={item.id} className="msg user" data-item-id={item.id}>
                   <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <div className="bubble">
                       {item.text && <Markdown text={item.text} flavour="user" />}

@@ -13,7 +13,7 @@ export interface AcpProfile {
   command: string;
   args: string[];
   /** Variables the agent's process gets for this Session: its approval rules. */
-  env?: (options: Pick<OpenOptions, 'approvals' | 'workingCopy' | 'tempDir'>) => Record<string, string>;
+  env?: (options: Pick<OpenOptions, 'approvals' | 'workingCopy' | 'tempDir' | 'toolsOff'>) => Record<string, string>;
   /** The agent's own tools; any other is from the user's MCP servers or plugins. */
   ownTools: ReadonlySet<string>;
 }
@@ -44,12 +44,12 @@ export class AcpAdapter implements AgentAdapter {
     return this.profile.name;
   }
 
-  async open({ environment, workingCopy, tempDir, approvals, loomTools, resume, onEvent }: OpenOptions): Promise<AgentSession> {
+  async open({ environment, workingCopy, tempDir, approvals, toolsOff, loomTools, resume, onEvent }: OpenOptions): Promise<AgentSession> {
     // The user's own setup (OpenCode config, MCP servers, plugins, skills,
     // AGENTS.md) loads as it would in their terminal: the agent starts in the
     // working copy with the Environment's own env and only the profile's args,
     // plus the profile's variables for the Session's approval rules.
-    const env = this.profile.env?.({ approvals, workingCopy, tempDir });
+    const env = this.profile.env?.({ approvals, workingCopy, tempDir, ...(toolsOff ? { toolsOff } : {}) });
     const channel = await environment.openChannel({ command: this.profile.command, args: this.profile.args, cwd: workingCopy, ...(env ? { env } : {}) }).catch((error: unknown) => {
       if (isNotFound(error)) throw new Error(`${this.profile.name} isn't installed in ${environment.label}, or isn't on your shell's PATH.`);
       throw error;

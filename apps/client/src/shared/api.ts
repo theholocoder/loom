@@ -589,8 +589,13 @@ export interface Session {
   agentCommands?: AgentCommand[];
   /** How full the agent's context was after its last run that reported it. */
   context?: ContextUsage;
-  /** What the Session has used so far, from its usage buckets and its runs; updated as turns end and runs start and stop. */
+  /** What the Session has used so far, from its usage buckets and its runs; updated as turns end and runs start and stop. Session highlights' checks aren't in it. */
   usage?: SessionUsage;
+  /**
+   * Its Highlights, counted: present while the Highlights Panel means
+   * something for it, Session highlights being on or it having some.
+   */
+  highlights?: HighlightCounts;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
@@ -611,6 +616,73 @@ export interface Session {
   /** Clock time its status last changed. */
   updatedAt: number;
 }
+
+/** How many Highlights a Session has, open or resolved, and how many came since the user last looked at its Highlights Panel. */
+export interface HighlightCounts {
+  count: number;
+  unseen: number;
+}
+
+/** The kinds of Highlight, in the order the Highlights Panel groups them. */
+export const HIGHLIGHT_KINDS = ['for-you', 'not-done', 'risk', 'assumption', 'decision'] as const;
+export type HighlightKind = (typeof HIGHLIGHT_KINDS)[number];
+
+/** Each kind of Highlight, as the user reads it. */
+export const HIGHLIGHT_LABELS: Record<HighlightKind, string> = { 'for-you': 'For you', 'not-done': 'Not done', risk: 'Risk', assumption: 'Assumption', decision: 'Decision' };
+
+export function isHighlightKind(value: unknown): value is HighlightKind {
+  return typeof value === 'string' && (HIGHLIGHT_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Something the user should know about a Session's work, which Session
+ * highlights' model noted after a turn: never rewritten, only resolved (by
+ * the model, giving why, or by the user) and reopened.
+ */
+export interface Highlight {
+  id: number;
+  kind: HighlightKind;
+  /** One or two sentences, as the model wrote them. */
+  text: string;
+  /** The transcript item the turn it came from starts at: the user's message. */
+  itemId: number;
+  /** Clock time it was noted. */
+  createdAt: number;
+  /** Set once resolved; gone when the user reopens it. */
+  resolved?: HighlightResolution;
+}
+
+export interface HighlightResolution {
+  /** The model, giving `reason`, or the user. */
+  by: 'model' | 'user';
+  reason?: string;
+  /** The transcript item the turn that resolved it starts at, when the model did. */
+  itemId?: number;
+  /** Clock time it was resolved. */
+  at: number;
+}
+
+/** A Session's Highlights, oldest first, and how checking them goes. */
+export interface SessionHighlights {
+  highlights: Highlight[];
+  /** The Highlights with a greater id came since the user last looked at the Panel. */
+  seenThrough: number;
+  /** While a check of the turns since the last one runs. */
+  checking: boolean;
+  /** Why the last check failed; gone once one succeeds. Its turns are checked again with the next. */
+  error?: string;
+}
+
+/** The Session highlights setting: whether a model checks each turn for Highlights, and which. */
+export interface HighlightsSettings {
+  on: boolean;
+  /** `provider/model`, as the agent names it: required while on. */
+  model?: string;
+  /** Its Effort level; the model's default while absent. */
+  effort?: string;
+}
+
+export const DEFAULT_HIGHLIGHTS: HighlightsSettings = { on: false };
 
 /** A Session's usage so far. */
 export interface SessionUsage {
@@ -825,6 +897,8 @@ export interface Settings extends Appearance {
   inbox: InboxSettings;
   /** How the Changes view is laid out, as the user left it: the same for every Session. */
   diffView: DiffViewSettings;
+  /** Session highlights: off until the user turns it on with a model. */
+  highlights: HighlightsSettings;
 }
 
 /** The Changes view's layout, kept in settings. */
@@ -919,6 +993,7 @@ export const DEFAULT_SETTINGS: Settings = {
   layout: DEFAULT_LAYOUT,
   inbox: DEFAULT_INBOX,
   diffView: DEFAULT_DIFF_VIEW,
+  highlights: DEFAULT_HIGHLIGHTS,
   ...DEFAULT_APPEARANCE,
 };
 
@@ -1309,6 +1384,12 @@ export interface Commands {
   'settings.setInbox': { params: Partial<InboxSettings>; result: Settings };
   /** Sets the Changes view's layout, all of it. Rejects anything but true or false. */
   'settings.setDiffView': { params: DiffViewSettings; result: Settings };
+  /**
+   * Sets Session highlights, all of it: on, Sessions are checked for
+   * Highlights from their next turn, with `model` (required while on) and
+   * `effort`. Off, no Session is checked, and its Highlights stay.
+   */
+  'settings.setHighlights': { params: HighlightsSettings; result: Settings };
   'sessions.list': { params: void; result: Session[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with
@@ -1601,6 +1682,13 @@ export interface Commands {
    * Rejects Panels Loom has not, or one open twice.
    */
   'sessions.setPanels': { params: { id: number; panels: SessionPanels }; result: void };
+  /**
+   * Resolves one of a Session's Highlights by hand, or reopens one resolved
+   * (by the user or the model). Rejects a Highlight the Session hasn't.
+   */
+  'sessions.resolveHighlight': { params: { id: number; highlightId: number; resolved: boolean }; result: void };
+  /** The user has looked at the Session's Highlights Panel: what it has so far is seen, and its tab's badge goes. */
+  'sessions.seeHighlights': { params: { id: number }; result: void };
   /** Marks a Session read (the user opened it) or unread again. */
   'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
   /**
@@ -1634,6 +1722,8 @@ export interface Topics {
   transcript: TranscriptItem[];
   /** One Session's Panels in each Panel area, as the user left them. */
   panels: SessionPanels;
+  /** One Session's Highlights, and how checking them goes. */
+  highlights: SessionHighlights;
   /** One Session's open terminals, in the order they were opened. */
   terminals: TerminalInfo[];
   /**
@@ -1649,6 +1739,7 @@ export interface Topics {
 export interface TopicParams {
   transcript: { sessionId: number };
   panels: { sessionId: number };
+  highlights: { sessionId: number };
   terminals: { sessionId: number };
   terminalOutput: { id: number };
 }
