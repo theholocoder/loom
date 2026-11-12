@@ -2,14 +2,14 @@
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, RotateCw, SendHorizontal, ShieldAlert, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { HIGHLIGHT_LABELS, mergeRequestRef, OPENCODE_NAME, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { mergeRequestRef, OPENCODE_NAME, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
-import { ChangesView, type DiffComments } from './Changes';
-import { HighlightsPanel } from './HighlightsPanel';
+import { ChangesView, type ChangesFocus, type DiffComments } from './Changes';
+import { highlightLine, HighlightsPanel } from './HighlightsPanel';
 import type { ReviewNotes } from './ReviewNotes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from './MergeRequestPanel';
@@ -578,15 +578,21 @@ export function SessionView({
     : undefined;
 
   /** Where Changes was last asked to take the user: a file a Highlight names. */
-  const [changesFocus, setChangesFocus] = useState<{ path: string; n: number }>();
-  /** Scrolls the conversation to the turn starting at `itemId`; a drawer over it closes to show it. */
+  const [changesFocus, setChangesFocus] = useState<ChangesFocus>();
+  /**
+   * Scrolls the conversation to the turn `itemId` is in: to the user's
+   * message it starts with, the last at or before it (the first, for an item
+   * before any). A drawer over the conversation closes to show it.
+   */
   const showTurn = (itemId: number) => {
     if (panels.drawer) panels.closeDrawer();
-    document.querySelector(`[data-item-id="${itemId}"]`)?.scrollIntoView?.({ block: 'start' });
+    const messages = [...document.querySelectorAll<HTMLElement>('[data-item-id]')];
+    const target = messages.filter((m) => Number(m.dataset.itemId) <= itemId).at(-1) ?? messages[0];
+    target?.scrollIntoView?.({ block: 'start' });
   };
   /** Ask the agent, on a Highlight: it goes to the composer as a comment quoting it, its note to edit. */
   const askAboutHighlight = (highlight: Highlight) =>
-    setPending((list) => [...list, { comment: { quote: `${HIGHLIGHT_LABELS[highlight.kind]}: ${highlight.text}`, note: 'Can you look into this?' } }]);
+    setPending((list) => [...list, { comment: { quote: highlightLine(highlight), note: 'Can you look into this?' } }]);
 
   /** A Panel's content, in whichever area it sits. */
   const renderPanel = (panel: PanelId) => {

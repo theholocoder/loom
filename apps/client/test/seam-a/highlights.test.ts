@@ -171,6 +171,27 @@ describe('Session highlights', () => {
     expect(prompts[1]).not.toContain('Prompt one');
   });
 
+  it('passes over the turns that end while it is off, even during a check', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['One.'] }, { chunks: ['Two.'] }, { chunks: ['Three.'] }], [answer({ add: [], resolve: [] }, { hold: 'first-check' })]);
+    const { main, project } = await start(machine, checkout);
+    await main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Prompt one' });
+    await waitFor(main.api, 'highlights', (h) => h.checking, { sessionId: id });
+    await main.api.invoke('settings.setHighlights', { on: false, model: CHEAP });
+    await main.api.invoke('sessions.send', { id, prompt: 'Prompt two' });
+    await waiting(main, id);
+    machine.release('first-check');
+    await highlightsWhere(main, id, () => true);
+
+    await main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    await main.api.invoke('sessions.send', { id, prompt: 'Prompt three' });
+    await waiting(main, id);
+    await waitFor(main.api, 'highlights', () => checkPrompts(machine).length === 2, { sessionId: id });
+    await highlightsWhere(main, id, () => true);
+    expect(checkPrompts(machine)[1]).toContain('User: Prompt three');
+    expect(checkPrompts(machine)[1]).not.toContain('Prompt two');
+  });
+
   it('starts from the next turn when turned on, without going back over the Session', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Before.'] }, { chunks: ['After.'] }]);
     const { main, project } = await start(machine, checkout);

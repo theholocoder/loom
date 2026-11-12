@@ -104,9 +104,10 @@ export class Highlights {
     if (!session || session.status === 'archived') return;
     const state = this.state(id);
     if (!this.options.settings().on) {
-      if (state.checking) return;
-      state.checkedThrough = through;
-      void this.saveCheck(id);
+      // Passed over, even with a check still running: turning it on again starts from the next turn.
+      delete state.dueThrough;
+      state.checkedThrough = Math.max(state.checkedThrough ?? -1, through);
+      if (!state.checking) void this.saveCheck(id);
       return;
     }
     state.dueThrough = through;
@@ -174,7 +175,8 @@ export class Highlights {
         if (!session || session.status === 'archived' || !this.options.settings().on) break;
         try {
           await this.checkThrough(session, through);
-          state.checkedThrough = through;
+          // Never back: turns passed over meanwhile (the setting turned off) stay passed over.
+          state.checkedThrough = Math.max(state.checkedThrough ?? -1, through);
           delete state.error;
         } catch (error) {
           state.error = (error as Error).message;
@@ -218,8 +220,10 @@ export class Highlights {
         state.highlights.push(highlightOf({ ...row, id }));
       }
       for (const { id, reason, turn } of answer.resolve) {
-        await trx.updateTable('highlights').set({ resolved_by: 'model', resolved_reason: reason || null, resolved_item_id: turn, resolved_at: now }).where('id', '=', id).execute();
         const at = state.highlights.findIndex((h) => h.id === id);
+        // The user may have resolved it meanwhile: theirs stands.
+        if (at < 0 || state.highlights[at]!.resolved) continue;
+        await trx.updateTable('highlights').set({ resolved_by: 'model', resolved_reason: reason || null, resolved_item_id: turn, resolved_at: now }).where('id', '=', id).execute();
         state.highlights[at] = { ...state.highlights[at]!, resolved: { by: 'model', ...(reason ? { reason } : {}), itemId: turn, at } };
       }
     });
@@ -268,6 +272,7 @@ export class Highlights {
       }
     };
     const tempDir = environment.tempDir();
+    // `toolsOff` stands in for any approval policy; the adapter still takes one.
     agent = await this.options.adapter.open({ environment, workingCopy: tempDir, tempDir, approvals: DEFAULT_APPROVALS, toolsOff: true, onEvent });
     let timer: TimerHandle | undefined;
     try {

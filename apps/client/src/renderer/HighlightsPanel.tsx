@@ -41,7 +41,7 @@ export function HighlightsPanel({
 
   const run = (promise: Promise<unknown>) => void promise.catch((e: unknown) => onError((e as Error).message));
   const resolve = (highlight: Highlight, resolved: boolean) => run(api.invoke('sessions.resolveHighlight', { id: session.id, highlightId: highlight.id, resolved }));
-  const copy = (highlight: Highlight) => run(navigator.clipboard.writeText(`${HIGHLIGHT_LABELS[highlight.kind]}: ${highlight.text}`));
+  const copy = (highlight: Highlight) => run(navigator.clipboard.writeText(highlightLine(highlight)));
   const open = value.highlights.filter((h) => !h.resolved);
   const resolved = value.highlights.filter((h) => h.resolved).reverse();
   const item = (highlight: Highlight) => (
@@ -98,6 +98,7 @@ function HighlightsStatus({ checking, error, on, model }: { checking: boolean; e
       </div>
     );
   }
+  if (!on) return <div className="hl-status muted">Session highlights is off: no new turns are checked.</div>;
   if (error) {
     return (
       <div className="hl-status err" role="alert">
@@ -106,7 +107,6 @@ function HighlightsStatus({ checking, error, on, model }: { checking: boolean; e
       </div>
     );
   }
-  if (!on) return <div className="hl-status muted">Session highlights is off: no new turns are checked.</div>;
   return null;
 }
 
@@ -170,6 +170,11 @@ function HighlightItem({
       </div>
     </li>
   );
+}
+
+/** A Highlight on one line, its kind first: what Copy copies, and what Ask the agent quotes. */
+export function highlightLine(highlight: Highlight): string {
+  return `${HIGHLIGHT_LABELS[highlight.kind]}: ${highlight.text}`;
 }
 
 /** `text` with each `path:line` it names as a button that shows the file in Changes. */

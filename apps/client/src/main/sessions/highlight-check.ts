@@ -2,7 +2,7 @@
 // reads of the answer. The model sees the open Highlights and the turns since
 // the last check, never the whole conversation again, and answers with JSON:
 // Highlights to add, and open ones to resolve.
-import { HIGHLIGHT_KINDS, isHighlightKind, type Highlight, type HighlightKind, type TranscriptItem } from '../../shared/api';
+import { isHighlightKind, type Highlight, type HighlightKind, type TranscriptItem } from '../../shared/api';
 
 /** One turn as the check sees it: the user's message, what the agent said, and what it did. */
 export interface TurnDigest {
@@ -116,7 +116,7 @@ export function checkPrompt(open: Highlight[], turns: TurnDigest[]): string {
     blocks.join('\n\n'),
     '',
     'Answer with one JSON object and nothing else, `turn` being the turn a Highlight or a resolution comes from:',
-    `{"add":[{"kind":"${HIGHLIGHT_KINDS[2]}","text":"One or two sentences.","turn":${turns.at(-1)?.itemId ?? 0}}],"resolve":[{"id":12,"reason":"A few words.","turn":${turns.at(-1)?.itemId ?? 0}}]}`,
+    `{"add":[{"kind":"risk","text":"One or two sentences.","turn":${turns.at(-1)?.itemId ?? 0}}],"resolve":[{"id":12,"reason":"A few words.","turn":${turns.at(-1)?.itemId ?? 0}}]}`,
     'With nothing to add or resolve: {"add":[],"resolve":[]}',
   ].join('\n');
 }
