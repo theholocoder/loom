@@ -132,6 +132,18 @@ describe('adding a checkout of a removed Project', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   });
 
+  it('offers to restore one with no archived Sessions without counting them', async () => {
+    openProjects(
+      new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.restorable': () => ({ id: 1, name: 'loom', sessions: 0 }), 'projects.link': () => loom }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+
+    const offer = await screen.findByRole('alertdialog', { name: 'Restore loom?' });
+    expect(offer.textContent).toContain('Restore loom with its usage history, or start a new Project?');
+    expect(offer.textContent).not.toMatch(/archived Session/);
+  });
+
   it('starts a new Project instead when asked', async () => {
     const main = openProjects(
       new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.restorable': () => ({ id: 1, name: 'loom', sessions: 2 }), 'projects.link': () => loom }),

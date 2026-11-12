@@ -41,7 +41,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
   const shown = data?.days === days ? data : undefined;
 
   return (
-    <div className="dash">
+    <div className="dash dashboard">
       <div className="row">
         <h1>Dashboard</h1>
         <span className="grow" />
@@ -96,14 +96,14 @@ function Content({
         <Tile icon={Coins} label="Tokens" value={formatTokens(data.tokens)} detail={`over the last ${data.days} days`} />
         <Tile icon={Receipt} label="Reported cost" value={formatCost(data.reportedCost)} detail="As agents report it. Subscription and local models report $0." />
         <Tile icon={MessagesSquare} label="Sessions started" value={String(data.sessionsStarted)} detail={`${data.outcomes.stuck} stuck at least once`} />
-        <Tile icon={GitMerge} label="Merge requests merged" value={String(data.mergeRequestsMerged)} detail={`${data.outcomes.open} Sessions still open`} />
+        <Tile icon={GitMerge} label="Merge requests merged" value={String(data.mergeRequestsMerged)} detail={`${data.outcomes.open} ${data.outcomes.open === 1 ? 'Session' : 'Sessions'} still open`} />
         <Tile
           icon={DatabaseZap}
           label="Cache hit rate"
           value={data.cacheHitRate === undefined ? '—' : percent(data.cacheHitRate)}
           detail="Cache reads out of all prompt tokens"
         />
-        <Tile icon={Timer} label="Median agent run" value={formatDuration(data.medianRunMs)} detail="Working → Waiting" />
+        <Tile icon={Timer} label="Median agent run" value={formatDuration(data.medianRunMs)} detail="Per run, Working → Waiting" />
       </div>
       <div className="cards">
         <section className="card wide" aria-labelledby="dash-per-day">
@@ -351,7 +351,7 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId
 function references(top: TopSession, projects: Project[]): string {
   const kind = projects.find((p) => p.id === top.projectId)?.forge.kind;
   const refs = [top.issue && `#${top.issue.number}`, top.mergeRequest && mergeRequestRef(kind, top.mergeRequest.number)].filter(Boolean);
-  return refs.length ? refs.join(' · ') : 'Session without issue';
+  return refs.length ? refs.join(' · ') : '—';
 }
 
 /** A token count, short: 950, 12k, 1.2M, 3.4B. */
@@ -368,10 +368,12 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-/** A duration, short: 30s, 6m 40s, 22m, 1h 12m; a dash for none. */
+/** A duration, short: <1s, 30s, 6m 40s, 22m, 1h 12m; a dash for none. */
 export function formatDuration(ms: number | undefined): string {
   if (ms === undefined) return '—';
   const seconds = Math.round(ms / 1000);
+  // Some time, too little to round to a second, isn't none.
+  if (seconds === 0 && ms > 0) return '<1s';
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return seconds % 60 ? `${minutes}m ${seconds % 60}s` : `${minutes}m`;

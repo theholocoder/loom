@@ -273,7 +273,11 @@ button.pick.full-access, button.pick.full-access b { color: var(--wait); }
 .dash { overflow: auto; padding: 20px 28px 90px; min-width: 0; }
 .dash h1 { font-size: 20px; margin: 0; }
 .dash-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 18px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.dashboard { container-type: inline-size; }
+/* The six tiles in one row, or in two or three rows of the same length: never one left over. */
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+@container (min-width: 1200px) { .tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@container (max-width: 600px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
 .tile .k { color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
 .tile .v { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin: 2px 0; font-variant-numeric: tabular-nums; }
