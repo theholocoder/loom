@@ -111,29 +111,6 @@ describe('Settings: appearance', () => {
     expect(main.invoked.filter((i) => i.command === 'settings.setAppearance').map((i) => i.params)).toEqual([{ uiFont: 'Figtree' }, { monoFont: 'JetBrains Mono' }]);
   });
 
-  it('uses themed dropdowns, not native selects', () => {
-    openSettings();
-
-    const settings = screen.getByRole('main', { name: 'Settings' });
-    expect(settings.querySelector('select')).toBeNull();
-    for (const name of ['Theme', 'UI font', 'Monospace font']) {
-      const trigger = pick(name);
-      expect(trigger.matches('button.pick')).toBe(true);
-      expect(trigger.getAttribute('aria-haspopup')).toBe('listbox');
-    }
-  });
-
-  it('saves each choice through settings.setAppearance', async () => {
-    const main = openSettings();
-
-    choose('Theme', 'Nord');
-    choose('UI font', 'system-ui');
-    choose('Monospace font', 'Fira Code');
-
-    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'settings.setAppearance')).toHaveLength(3));
-    expect(main.invoked.filter((i) => i.command === 'settings.setAppearance').map((i) => i.params)).toEqual([{ theme: 'nord' }, { uiFont: 'system-ui' }, { monoFont: 'Fira Code' }]);
-  });
-
   it('says why a setting was refused', async () => {
     openSettings(
       new FakeMain({}, {

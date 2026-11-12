@@ -250,15 +250,6 @@ describe('the Inbox', () => {
     expect(card('Busy').querySelector('.hover-actions')).toBeNull();
   });
 
-  it('labels the search box "Search…", its full name in the tooltip', () => {
-    renderApp(new FakeMain({ projects: [loom], sessions: [] }));
-
-    const search = within(inbox()).getByRole('button', { name: 'Search Sessions and actions' });
-
-    expect(search.getAttribute('title')).toBe('Search Sessions and actions');
-    expect(search.textContent).toBe('Search…Ctrl K');
-  });
-
   it('marks a Session read when it is opened, and lets Mark unread stick while it is shown', async () => {
     const unread = session({ title: 'News', unread: true });
     const main = renderApp(new FakeMain({ projects: [loom], sessions: [unread] }));

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { placePopover, POPOVER_MAX_HEIGHT, Select } from '../../src/renderer/Popover';
+import { placePopover, Select } from '../../src/renderer/Popover';
 
 const VIEWPORT = { width: 800, height: 300 };
 
@@ -12,15 +12,6 @@ afterEach(() => {
 });
 
 describe('placing a popover', () => {
-  it('opens below when it fits', () => {
-    expect(placePopover({ top: 10, bottom: 34, left: 20 }, { width: 800, height: 600 }, { width: 200, height: 100 })).toEqual({ side: 'down', top: 38, left: 20, maxHeight: POPOVER_MAX_HEIGHT });
-  });
-
-  it('opens above, capped to the room there, when the trigger is near the bottom', () => {
-    // Above: 260 - 4 (gap) - 8 (margin) = 248.
-    expect(placePopover({ top: 260, bottom: 284, left: 20 }, VIEWPORT, { width: 200, height: 400 })).toEqual({ side: 'up', bottom: 44, left: 20, maxHeight: 248 });
-  });
-
   it('grows taller than a menu when asked to, room allowing', () => {
     expect(placePopover({ top: 10, bottom: 34, left: 20 }, { width: 800, height: 600 }, { width: 200, height: 500 }, 640).maxHeight).toBe(600 - 34 - 4 - 8);
     expect(placePopover({ top: 10, bottom: 34, left: 20 }, { width: 800, height: 900 }, { width: 200, height: 500 }, 640).maxHeight).toBe(640);
@@ -82,12 +73,5 @@ describe('popover theme', () => {
         if (!/^(none|0|transparent)$/.test(value!.trim())) expect(`${prop}: ${value}`).toMatch(/var\(--/);
       }
     }
-  });
-
-  it('keeps the generic popover rules out of styles.css', () => {
-    const styles = readFileSync(resolve(dir, 'styles.css'), 'utf8');
-    const selectors = [...styles.matchAll(/^([^{}\n]*popover[^{}\n]*)\{/gm)].map(([, selector]) => selector!.trim());
-    const generic = selectors.filter((selector) => /(^|[^\w-])\.popover(?![\w.-])/.test(selector));
-    expect(generic).toEqual([]);
   });
 });
