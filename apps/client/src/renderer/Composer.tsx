@@ -62,7 +62,7 @@ export function Composer({
   held?: boolean;
   /** Whether files can go with the message: not with an answer to a question. */
   canAttach?: boolean;
-  /** What sits on the prompt box, part of it: the panel of a question it answers. */
+  /** What sits on the prompt box, part of it: the panel of a question it answers. With it, the prompt box gives only that answer: no toolbar, the panel's buttons going on. */
   dock?: ReactNode;
   /** Changing it empties the prompt box: what was typed was for something else, such as another question. */
   clearKey?: string;
@@ -290,7 +290,7 @@ export function Composer({
     <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
       {queue}
       {remarks && <div className="composer-remarks">{remarks}</div>}
-      <div className={`composer${dock ? ' docked' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
+      <div className={`composer${dock ? ' docked' : ''}${dock ? ' answering' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
         {dock}
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
         {comments.length > 0 && (
@@ -345,7 +345,8 @@ export function Composer({
             menu.dismiss();
           }}
         />
-        <div className="ctoolbar">
+        {/* An answer to the panel's question goes on with the panel's buttons, or Enter: no Send, nor a reply's tools. */}
+        {!dock && <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>
             <SquareTerminal className="sm" />
             <b>{agent}</b>
@@ -382,7 +383,7 @@ export function Composer({
             {queueing ? <ListPlus /> : <ArrowUp />}
             {queueing ? 'Queue' : 'Send'}
           </button>
-        </div>
+        </div>}
       </div>
     </form>
   );

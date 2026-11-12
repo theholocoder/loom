@@ -34,9 +34,9 @@ export function AskCard({ label, icon, name, asked, hint = 'The agent is asking 
 type TextField = Extract<QuestionField, { type: 'text' }>;
 
 /**
- * A question card in the transcript. While asked, it points at the panel on
- * the composer, where it is answered (see useQuestionPanel); once settled,
- * it shows what was answered.
+ * A question card in the transcript, once settled: what was answered. The
+ * question being asked shows in its panel on the composer instead (see
+ * useQuestionPanel); one asked after it points there.
  */
 export function QuestionCard({ item }: { item: Question }) {
   const asked = item.state === 'asked';
@@ -175,6 +175,8 @@ export function ErrorAlert({ error }: { error?: string }) {
 export function useQuestionPanel(
   item: Question | undefined,
   onAnswer: (itemId: number, answer: Answer | null) => Promise<void>,
+  /** What is typed in the composer: given an answer of one's own, Next and Answer take it, as Enter does. */
+  typed = '',
 ): { panel?: ReactNode; freeAnswer?: FreeAnswer; stepKey?: string } {
   const [flowState, setFlowState] = useState<Flow>(() => freshFlow(item));
   const { busy, error, setError, run } = useAction();
@@ -206,6 +208,8 @@ export function useQuestionPanel(
   };
 
   const problem = step && stepProblem(step, flow.draft);
+  // What is typed goes as the question's answer of one's own: Next submits the composer's form, which the panel sits in.
+  const takesTyped = !!step?.free && !busy && typed.trim() !== '';
   const panel = (
     <div className="ask-panel" role="group" aria-label="Question" tabIndex={-1} data-asked>
       <div className="ask-panel-head">
@@ -230,7 +234,12 @@ export function useQuestionPanel(
             Back
           </button>
         )}
-        <button className="primary" type="button" disabled={busy || (step && !canLeave(step, flow.draft))} onClick={() => leaveStep(flow.draft)}>
+        <button
+          className="primary"
+          type={takesTyped ? 'submit' : 'button'}
+          disabled={busy || (!takesTyped && step && !canLeave(step, flow.draft))}
+          onClick={takesTyped ? undefined : () => leaveStep(flow.draft)}
+        >
           {last ? 'Answer' : 'Next'}
         </button>
       </div>
@@ -248,7 +257,9 @@ export function useQuestionPanel(
               return false;
             }
             // One's own answer replaces a choice where there is only one answer, and joins the choices otherwise.
-            edit(singleAnswer(step) && step.main !== free ? { [free.key]: text, [step.main.key]: undefined } : { [free.key]: text }, true);
+            const values = singleAnswer(step) && step.main !== free ? { [free.key]: text, [step.main.key]: undefined } : { [free.key]: text };
+            // It goes on once the question's answer fits, choices and all; otherwise the panel says why.
+            edit(values, canLeave(step, { ...flow.draft, ...values }));
             return true;
           },
         }

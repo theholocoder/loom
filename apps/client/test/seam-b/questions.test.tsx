@@ -70,7 +70,7 @@ function openSession(items: TranscriptItem[], handlers: ConstructorParameters<ty
 
 describe("the agent's questions", () => {
   it('asks its questions one by one, in order, in a panel on the composer', async () => {
-    const { panel, prompt, step, click, pick, answers } = openSession([questions]);
+    const { composer, panel, prompt, step, click, pick, answers } = openSession([questions]);
     expect(within(panel()).getByText('A few questions')).toBeTruthy();
     expect(within(panel()).getByText('Question 1 of 3')).toBeTruthy();
     expect(step()).toBe('Color');
@@ -80,8 +80,11 @@ describe("the agent's questions", () => {
     expect(prompt().placeholder).toBe('Type your own answer…');
     // No question numbers: Dismiss on one side, Back and Next on the other.
     expect(within(panel()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Dismiss', 'Next']);
-    // The conversation keeps a card pointing at the panel.
-    expect(within(screen.getByRole('log', { name: 'Conversation' })).getByRole('group', { name: 'Question' }).textContent).toContain('Answer below');
+    // Asked once, in the panel: the conversation has no card for it until it is answered.
+    expect(within(screen.getByRole('log', { name: 'Conversation' })).queryByRole('group', { name: 'Question' })).toBeNull();
+    // The composer gives the answer of one's own: it has no Send of its own, nor the reply's tools, the panel's Next going on.
+    expect(within(composer()).queryByRole('button', { name: 'Send' })).toBeNull();
+    expect(within(composer()).queryByRole('button', { name: 'Attach' })).toBeNull();
 
     // One answer only: choosing it goes on to the next question.
     await pick('Blue');
@@ -285,6 +288,13 @@ describe('answering step by step', () => {
     expect(step()).toBe('Regions');
     expect(within(panel()).getByRole('alert').textContent).toBe('"Regions (other)" takes at most 5 characters.');
     expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('Antarctica');
+
+    // One's own answer that fits doesn't go on while the choices don't: it waits with them.
+    await pick('Americas', 'checkbox');
+    await type('Asia');
+    expect(step()).toBe('Regions');
+    expect(within(panel()).getByRole('status').textContent).toBe('"Regions" takes at most 1 choices.');
+    expect(within(panel()).getByText('Asia')).toBeTruthy();
   });
 
   it("drops the error once the user moves on, and lets an answer of one's own be removed", async () => {
@@ -308,6 +318,28 @@ describe('answering step by step', () => {
     await click('Next');
     await click('Answer');
     expect(answers().at(-1)).toEqual({ id: 7, itemId: 1, answer: { notes: 'Fast' } });
+  });
+
+  it("takes what is typed in the composer as the answer when the panel's Next or Answer is clicked", async () => {
+    const { prompt, step, click, pick, answers } = openSession([questions]);
+    fireEvent.change(prompt(), { target: { value: 'Green' } });
+    await click('Next');
+    expect(step()).toBe('Sizes');
+    expect(prompt().value).toBe('');
+    await pick('Small', 'checkbox');
+    await click('Next');
+    await pick('Express');
+    expect(answers()).toEqual([{ id: 7, itemId: 1, answer: { q0_custom: 'Green', q1: ['s'], q2: 'exp' } }]);
+
+    // The last question's answer too, typed and not yet sent with Enter.
+    const notes: TranscriptItem = { kind: 'question', id: 2, message: 'Release', state: 'asked', fields: [{ type: 'select', key: 'db', title: 'Database', required: true, options: [{ value: 'pg', label: 'postgres' }] }, { type: 'text', key: 'notes', title: 'Notes', required: false }] };
+    cleanup();
+    const second = openSession([notes]);
+    await second.pick('postgres');
+    fireEvent.change(second.prompt(), { target: { value: 'Use the replica' } });
+    expect(within(second.panel()).getByRole('button', { name: 'Answer' })).toBeTruthy();
+    await second.click('Answer');
+    expect(second.answers()).toEqual([{ id: 7, itemId: 2, answer: { db: 'pg', notes: 'Use the replica' } }]);
   });
 
   it('keeps what is typed once the last answer is sent, as the next message', async () => {
