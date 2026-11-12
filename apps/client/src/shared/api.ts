@@ -1207,8 +1207,12 @@ export type TranscriptItem =
       state: ApprovalState;
       message?: string;
     }
-  /** A run that failed, with the agent's message. */
-  | { kind: 'error'; id: number; message: string }
+  /**
+   * A run that failed, with the agent's message; `betweenRuns` when it
+   * came after the run had ended (its Environment restarted under a
+   * finished Session), leaving no run to go on with.
+   */
+  | { kind: 'error'; id: number; message: string; betweenRuns?: true }
   /** The run was interrupted: by the user, with Stop or to send a queued message now, or by Loom quitting or crashing. */
   | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' | 'quit' }
   /**

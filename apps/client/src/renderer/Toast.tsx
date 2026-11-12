@@ -6,14 +6,14 @@
 import { OctagonX, Undo2, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-/** How long a toast stays. */
+/** How long a toast stays, unless it says why an action failed. */
 export const TOAST_MS = 8000;
 
 export interface ToastContent {
   message: string;
   /** Takes the action back; rejects with why it couldn't. */
   undo?: () => Promise<unknown>;
-  /** The message is why an action failed, rather than what it did. */
+  /** The message is why an action failed, rather than what it did: it stays until dismissed or replaced, so as not to be missed. */
   failed?: boolean;
 }
 
@@ -64,7 +64,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
   }, []);
   const holding = held.pointer || held.focus;
   useEffect(() => {
-    if (!toast || holding) return;
+    if (!toast || holding || toast.failed) return;
     const timer = setTimeout(toaster.close, TOAST_MS);
     return () => clearTimeout(timer);
   }, [toast?.key, holding]);

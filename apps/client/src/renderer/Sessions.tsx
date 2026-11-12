@@ -609,7 +609,8 @@ export function SessionView({
   const atFoot = useRef(true);
   const scrolled = () => {
     const chat = conversation.current;
-    if (chat) atFoot.current = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= AT_FOOT_PX;
+    // Following the agent scrolls to the end of what was said, which leaves the bottom padding below.
+    if (chat) atFoot.current = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= (parseFloat(getComputedStyle(chat).paddingBottom) || 0) + AT_FOOT_PX;
   };
   // The queue on the composer takes height from the conversation, which stays at its foot if it was: the agent's last line in view.
   const queued = session.queue?.map((m) => m.id).join() ?? '';
@@ -667,7 +668,7 @@ export function SessionView({
   const retry = () => runCommand(() => api.invoke('sessions.retry', { id: session.id }));
   const goOn = () => void runCommand(() => api.invoke('sessions.continue', { id: session.id }));
   /** What the card ending the conversation offers, if `item` is that card. */
-  const goingFrom = (item: TranscriptItem) => (item === items.at(-1) ? going : undefined);
+  const offeredOn = (item: TranscriptItem) => (item === items.at(-1) ? going : undefined);
 
   // Comments can go with the next message: not while the composer takes none, nor with an answer to a question.
   const composerDisabled = readOnly || (asked && !freeAnswer) || !!session.worktreeMissing;
@@ -838,7 +839,7 @@ export function SessionView({
               ) : item.kind === 'trust' ? (
                 <TrustCard key={item.id} item={item} project={project?.name} onTrust={(trusted) => api.invoke('sessions.trust', { id: session.id, itemId: item.id, trusted })} />
               ) : item.kind === 'interruption' ? (
-                <Interruption key={item.id} item={item} onContinue={goingFrom(item) === 'continue' ? goOn : undefined} />
+                <Interruption key={item.id} item={item} onContinue={offeredOn(item) === 'continue' ? goOn : undefined} />
               ) : item.kind === 'model' ? (
                 <ModelMarker key={item.id} item={item} models={offeredModels} />
               ) : item.kind === 'merge-request-refused' ? (
@@ -865,7 +866,7 @@ export function SessionView({
               ) : item.kind === 'merge-request-ended' ? (
                 <MergeRequestEndedCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
               ) : (
-                <ErrorCard key={item.id} message={item.message} onRetry={goingFrom(item) === 'retry' ? retry : undefined} onContinue={goingFrom(item) === 'continue' ? goOn : undefined} />
+                <ErrorCard key={item.id} message={item.message} onRetry={offeredOn(item) === 'retry' ? retry : undefined} onContinue={offeredOn(item) === 'continue' ? goOn : undefined} />
               ),
             )}
             {unshownError && <ErrorCard message={unshownError} />}

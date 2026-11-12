@@ -877,7 +877,8 @@ export class Sessions {
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
     if (goingOn(session, items) !== 'continue') throw new Error('There is nothing to continue: send a new prompt instead.');
     const last = items.at(-1);
-    const text = session.waitingReason === 'stopped' ? CONTINUE_AFTER_STOP_PROMPT : last?.kind === 'error' ? continueAfterErrorPrompt(last.message) : CONTINUE_PROMPT;
+    const text =
+      session.waitingReason === 'stopped' ? CONTINUE_AFTER_STOP_PROMPT : session.waitingReason === 'error' && last?.kind === 'error' ? continueAfterErrorPrompt(last.message) : CONTINUE_PROMPT;
     this.reply(id, { text });
   }
 
@@ -2225,10 +2226,11 @@ export class Sessions {
   /** Puts a Working Session (or, `evenIfWaiting`, a Waiting one) in Waiting (error), showing why in its conversation. */
   private fail(id: number, error: string, { evenIfWaiting = false } = {}): void {
     const { status } = this.get(id);
-    if (!this.inRun(id) && !(evenIfWaiting && status === 'waiting')) return;
+    const inRun = this.inRun(id);
+    if (!inRun && !(evenIfWaiting && status === 'waiting')) return;
     this.endRun(id);
     this.denyMessages.delete(id);
-    this.addItem(id, { kind: 'error', message: error });
+    this.addItem(id, { kind: 'error', message: error, ...(inRun ? {} : { betweenRuns: true as const }) });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });
   }
 

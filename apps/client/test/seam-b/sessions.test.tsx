@@ -640,6 +640,17 @@ describe('a Session', () => {
       expect(view.top).toBe(760);
     });
 
+    it('counts the conversation at its foot with only its bottom padding below, as following the agent leaves it', () => {
+      const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
+      screen.getByRole('log', { name: 'Conversation' }).style.paddingBottom = '20px';
+      const view = scrollable(680);
+
+      view.height = 240;
+      act(() => main.publish('sessions', [{ ...working, queue: [{ id: 3, text: 'Then add tests' }] }]));
+
+      expect(view.top).toBe(760);
+    });
+
     it('leaves the conversation where it was when the user had scrolled up', () => {
       const main = open(renderApp(new FakeMain({ projects: [project], sessions: [working] })), working);
       const view = scrollable(200);
@@ -924,6 +935,33 @@ describe('open in editor and terminal', () => {
     const toast = await screen.findByRole('group', { name: 'What went wrong' });
     expect(within(toast).getByRole('alert').textContent).toContain("code isn't installed in Native");
     expect(within(screen.getByRole('log', { name: 'Conversation' })).queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps why an action failed until it is dismissed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const main = new FakeMain(
+        { projects: [project], sessions: [finished] },
+        {
+          'sessions.openInTerminal': () => {
+            throw new Error('Set a terminal command in Settings to open one.');
+          },
+        },
+      );
+      open(renderApp(main), finished);
+      fireEvent.click(within(header()).getByRole('button', { name: 'Open in terminal' }));
+      await act(async () => {});
+      const failed = () => screen.queryByRole('group', { name: 'What went wrong' });
+      expect(failed()).toBeTruthy();
+
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(failed()).toBeTruthy();
+
+      fireEvent.click(within(failed()!).getByRole('button', { name: 'Dismiss' }));
+      expect(failed()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('drops the open actions once the Session is archived', () => {
