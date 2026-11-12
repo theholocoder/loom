@@ -747,3 +747,18 @@ input.toggle:disabled { cursor: not-allowed; }
   .setting-control, .setting-form { align-items: flex-start; }
   .setting-control .err { text-align: left; }
 }
+
+/* Projects, the Dashboard and Settings open in a window over the main pane,
+   beside the Inbox, the open Session dimmed beneath it as it was. A narrow
+   window gives it all the room beside the Inbox. */
+.page-window-scrim { position: absolute; top: 0; bottom: 0; left: var(--inbox-width, 360px); right: 0; z-index: 30; display: flex; padding: 24px; background: color-mix(in srgb, #000 28%, transparent); }
+.page-window-scrim.narrow { padding: 0; }
+.page-window { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px var(--shadow); overflow: hidden; }
+.page-window-scrim.narrow .page-window { border: 0; border-radius: 0; box-shadow: none; }
+.page-window:focus { outline: none; }
+.page-window > .dash { flex: 1; min-height: 0; }
+.page-window-close { position: absolute; top: 16px; right: 18px; z-index: 2; }
+/* Each page's first row leaves the close button its corner. */
+.page-window > .dash > .row:first-child, .page-window .settings-head { padding-right: 40px; }
+/* The main pane's wrapper, inert under a Page, leaves its panes in the window's grid. */
+.main-pane { display: contents; }

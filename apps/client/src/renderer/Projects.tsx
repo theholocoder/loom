@@ -113,7 +113,7 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
 
   const environmentLabel = (id: string) => environments.find((e) => e.id === id)?.label ?? id;
   return (
-    <main className="dash" aria-label="Projects">
+    <div className="dash">
       <div className="row">
         <h1>Projects</h1>
         <span className="grow" />
@@ -160,7 +160,7 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
           </table>
         )}
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -429,3 +429,4 @@ function BranchPrefix({ project }: { project: Project }) {
     </form>
   );
 }
+

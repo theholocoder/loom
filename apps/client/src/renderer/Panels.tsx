@@ -762,7 +762,7 @@ function useDrawer(drawer: boolean, element: RefObject<HTMLElement | null>, clos
       closing.current();
     };
     const onPointerDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Element) || area?.contains(event.target) || event.target.closest('[aria-modal="true"], .popover')) return;
+      if (!(event.target instanceof Element) || area?.contains(event.target) || event.target.closest('[aria-modal="true"], .popover, .page-window-scrim')) return;
       closing.current();
     };
     window.addEventListener('keydown', onKeyDown);

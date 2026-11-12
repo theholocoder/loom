@@ -41,7 +41,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
   const shown = data?.days === days ? data : undefined;
 
   return (
-    <main className="dash" aria-label="Dashboard">
+    <div className="dash">
       <div className="row">
         <h1>Dashboard</h1>
         <span className="grow" />
@@ -58,7 +58,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
         </div>
       )}
       {shown && <Content data={shown} projects={projects} sessions={sessions} colorOf={colorOf} onOpenSession={onOpenSession} />}
-    </main>
+    </div>
   );
 }
 

@@ -452,7 +452,7 @@ describe('the + menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
-    expect(screen.getByRole('main', { name: 'Projects' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Projects' })).toBeTruthy();
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
@@ -471,7 +471,7 @@ describe('the + menu', () => {
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
 
-    const page = screen.getByRole('main', { name: 'Projects' });
+    const page = screen.getByRole('dialog', { name: 'Projects' });
     expect((await within(page).findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
   });
 
