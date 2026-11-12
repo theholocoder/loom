@@ -48,7 +48,7 @@ import { Popover } from './Popover';
 import { PageWindow, type Page } from './PageWindow';
 import { ProjectPicker } from './ProjectPicker';
 import { Dashboard } from './Dashboard';
-import { Projects, useExistingCloneLinker } from './Projects';
+import { Projects, useProjectAdder } from './Projects';
 import { DraftsProvider } from './drafts';
 import { NewSession, SessionView, type NewSessionWorkingCopy, type SessionCommand } from './Sessions';
 import { NewSessionContext } from './SessionMenu';
@@ -105,7 +105,7 @@ function Workspace() {
     window.addEventListener('focus', check);
     return () => window.removeEventListener('focus', check);
   }, [api]);
-  const linker = useExistingCloneLinker();
+  const adder = useProjectAdder();
   const toast = useToast();
   const sessions = useTopic('sessions') ?? [];
   const loadedProjects = useTopic('projects');
@@ -166,7 +166,7 @@ function Workspace() {
   };
   const addProject = () => {
     openPage('projects');
-    void linker.link();
+    void adder.link();
   };
   const forgeProjects = projects.filter((p) => p.forge.state === 'available');
   const inbox = useInbox();
@@ -345,7 +345,10 @@ function Workspace() {
             onRetryableChange={setRetryable}
           />
         ) : loadedProjects?.length === 0 ? (
-          <Welcome adding={linker.linking} onAddProject={addProject} />
+          <Welcome onAddProject={addProject} />
+        ) : !loadedProjects ? (
+          // Nothing to offer until the Projects are known: the welcome or a New Session.
+          <main className="main" aria-label="Session" />
         ) : (
           <main className="main" aria-label="Session">
             <div className="empty">
@@ -360,7 +363,7 @@ function Workspace() {
         </div>
         {page && (
           <PageWindow page={page.name} onClose={closePage}>
-            {page.name === 'settings' ? <Settings /> : page.name === 'dashboard' ? <Dashboard onOpenSession={select} /> : <Projects linker={linker} onStartSession={(project) => startNewSession(project)} />}
+            {page.name === 'settings' ? <Settings /> : page.name === 'dashboard' ? <Dashboard onOpenSession={select} /> : <Projects adder={adder} onStartSession={(project) => startNewSession(project)} />}
           </PageWindow>
         )}
         {picking && (

@@ -256,7 +256,7 @@ describe('running palette actions', () => {
     expect((await within(issues).findByRole('option')).textContent).toContain('Fix the login bug');
   });
 
-  it('adds a Project from an existing clone through the folder dialog', async () => {
+  it('adds a Project through the folder dialog', async () => {
     const main = renderApp(new FakeMain());
     runAction('Add a Project…');
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));

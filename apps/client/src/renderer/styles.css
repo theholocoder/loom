@@ -328,6 +328,7 @@ input.prefix { background: var(--panel2); border: 1px solid var(--line); border-
 input.prefix[aria-invalid] { border-color: var(--err); }
 .prefix-preview { font-size: 12px; margin-top: 2px; }
 .page-error, .page-note { gap: 6px; }
+.page-note { margin-top: 8px; }
 .pick .issue-title { max-width: 28ch; }
 .popover.issue-popover { width: 360px; gap: 4px; }
 .st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }

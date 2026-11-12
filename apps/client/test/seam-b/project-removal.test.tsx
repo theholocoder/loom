@@ -7,6 +7,9 @@ import { emptyDashboard, FakeMain } from './fake-main';
 
 afterEach(cleanup);
 
+/** Projects' own Add a Project…, rather than the welcome's behind it. */
+const addProjectButton = () => within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' });
+
 function renderApp(main: FakeMain) {
   render(
     <ApiProvider api={main}>
@@ -119,7 +122,7 @@ describe('adding a checkout of a removed Project', () => {
       ),
     );
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
 
     const offer = await screen.findByRole('alertdialog', { name: 'Restore loom?' });
     expect(offer.textContent).toMatch(/14 archived Sessions/);
@@ -137,7 +140,7 @@ describe('adding a checkout of a removed Project', () => {
       new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.restorable': () => ({ id: 1, name: 'loom', sessions: 0 }), 'projects.link': () => loom }),
     );
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
 
     const offer = await screen.findByRole('alertdialog', { name: 'Restore loom?' });
     expect(offer.textContent).toContain('Restore loom with its usage history, or start a new Project?');
@@ -149,7 +152,7 @@ describe('adding a checkout of a removed Project', () => {
       new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.restorable': () => ({ id: 1, name: 'loom', sessions: 2 }), 'projects.link': () => loom }),
     );
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
     fireEvent.click(await screen.findByRole('button', { name: 'New Project' }));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen } }));
@@ -158,7 +161,7 @@ describe('adding a checkout of a removed Project', () => {
   it('links straight away when nothing matches', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.link': () => loom }));
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen } }));
     expect(screen.queryByRole('alertdialog')).toBeNull();

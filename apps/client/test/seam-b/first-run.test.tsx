@@ -80,6 +80,12 @@ describe('the welcome, with no Project', () => {
     expect(main.invoked.map((i) => i.command)).toContain('environments.detect');
   });
 
+  it('says the Environments are starting until main reports them', () => {
+    renderApp();
+
+    expect(within(screen.getByRole('main', { name: 'Welcome' })).getByText('Starting your Environments…')).toBeTruthy();
+  });
+
   it('says what to fix when the agent is missing', () => {
     renderApp(new FakeMain({ environments: [native({ name: 'OpenCode', state: 'missing', checking: false })] }));
 
@@ -144,6 +150,29 @@ describe('after adding a Project', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add a Project…' }));
 
     fireEvent.click(await screen.findByRole('button', { name: 'Start a Session' }));
+
+    expect(within(screen.getByRole('main', { name: 'New Session' })).getByRole('button', { name: 'Project' }).textContent).toBe('loom');
+  });
+
+  it('says a restored Project was restored, and offers a Session in it too', async () => {
+    const main: FakeMain = new FakeMain(
+      {},
+      {
+        'dialogs.chooseFolder': () => '/home/dev/code/loom',
+        'projects.restorable': () => ({ id: 1, name: 'loom', sessions: 3 }),
+        'projects.link': () => {
+          main.publish('projects', [loom]);
+          return loom;
+        },
+      },
+    );
+    renderApp(main);
+    fireEvent.click(within(screen.getByRole('main', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Restore loom?' })).getByRole('button', { name: 'Restore' }));
+
+    const page = screen.getByRole('dialog', { name: 'Projects' });
+    expect((await within(page).findByRole('status')).textContent).toBe('Restored loom.');
+    fireEvent.click(within(page).getByRole('button', { name: 'Start a Session' }));
 
     expect(within(screen.getByRole('main', { name: 'New Session' })).getByRole('button', { name: 'Project' }).textContent).toBe('loom');
   });

@@ -7,6 +7,9 @@ import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
 
+/** Projects' own Add a Project…, rather than the welcome's behind it. */
+const addProjectButton = () => within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' });
+
 function renderApp(main = new FakeMain()) {
   render(
     <ApiProvider api={main}>
@@ -250,7 +253,7 @@ describe('Projects', () => {
   it('links the folder chosen with "Add a Project…"', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => project('loom') }));
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
   });
@@ -258,7 +261,7 @@ describe('Projects', () => {
   it('links nothing when the folder picker is cancelled', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => null }));
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
 
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));
     expect(main.invoked.map((i) => i.command)).not.toContain('projects.link');
@@ -277,7 +280,7 @@ describe('Projects', () => {
       ),
     );
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
 
     expect((await screen.findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
   });
@@ -295,7 +298,7 @@ describe('Projects', () => {
 
   it('dismisses why a folder was rejected', async () => {
     openProjects(rejecting());
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
     await screen.findByRole('alert');
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
@@ -305,7 +308,7 @@ describe('Projects', () => {
 
   it('forgets why a folder was rejected when leaving Projects', async () => {
     openProjects(rejecting());
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
     await screen.findByRole('alert');
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
@@ -325,14 +328,14 @@ describe('Projects', () => {
         },
       ),
     );
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }));
+    fireEvent.click(addProjectButton());
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('projects.link'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     fail(new Error('/home/dev/notes is not a git repository'));
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
 
-    await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => expect(addProjectButton().hasAttribute('disabled')).toBe(false));
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -447,7 +450,7 @@ describe('the + menu', () => {
     return main;
   }
 
-  it('adds a Project from an existing clone, then shows Projects', async () => {
+  it('adds a Project, then shows Projects', async () => {
     const main = openMenu(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => linked }));
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add a Project…' }));
