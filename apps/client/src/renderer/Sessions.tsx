@@ -2,7 +2,7 @@
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
+import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
@@ -620,13 +620,15 @@ export function SessionView({
   };
   const situation = composerSituation();
 
-  /** Runs a command on the Session, showing why if it fails. */
-  const runCommand = async (run: () => Promise<unknown>) => {
+  /** Runs a command on the Session, showing why if it fails; resolves to whether it went through. */
+  const runCommand = async (run: () => Promise<unknown>): Promise<boolean> => {
     setError(undefined);
     try {
       await run();
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     }
   };
   const openLink = (url: string) => void api.invoke('links.open', { url }).catch((e: unknown) => setError((e as Error).message));
@@ -898,16 +900,8 @@ export function SessionView({
                   onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
                   onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
                   onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
-                  onEdit={async (queuedId, text) => {
-                    setError(undefined);
-                    try {
-                      await api.invoke('sessions.editQueued', { id: session.id, queuedId, text });
-                      return true;
-                    } catch (e) {
-                      setError((e as Error).message);
-                      return false;
-                    }
-                  }}
+                  onEdit={(queuedId, text) => runCommand(() => api.invoke('sessions.editQueued', { id: session.id, queuedId, text }))}
+                  onEditLost={() => setError('The queued message was sent before your edit was saved.')}
                 />
               ) : undefined
             }
@@ -976,6 +970,7 @@ function Queue({
   onSteer,
   onRemove,
   onEdit,
+  onEditLost,
 }: {
   queue: QueuedMessage[];
   steer: boolean;
@@ -984,51 +979,29 @@ function Queue({
   onRemove: (queuedId: number) => void;
   /** Resolves to whether main took the edit. */
   onEdit: (queuedId: number, text: string) => Promise<boolean>;
+  /** The message being edited left the queue, sent as it was, before the edit was saved. */
+  onEditLost: () => void;
 }) {
-  /** The message being edited, and its text so far. */
-  const [editing, setEditing] = useState<{ id: number; text: string }>();
-  const [saving, setSaving] = useState(false);
-  const save = async () => {
-    if (!editing || saving) return;
-    setSaving(true);
-    try {
-      if (await onEdit(editing.id, editing.text)) setEditing((now) => (now?.id === editing.id ? undefined : now));
-    } finally {
-      setSaving(false);
-    }
-  };
+  /** The message being edited, if any. */
+  const [editing, setEditing] = useState<number>();
+  const lost = editing !== undefined && !queue.some((m) => m.id === editing);
+  useEffect(() => {
+    if (!lost) return;
+    setEditing(undefined);
+    onEditLost();
+  }, [lost]);
   return (
     <ul className="queue" aria-label="Queued messages">
       {queue.map((message) =>
-        editing?.id === message.id ? (
-          <li key={message.id} className="editing">
-            <ListPlus className="sm" />
-            <textarea
-              className="grow"
-              aria-label="Queued message"
-              rows={1}
-              value={editing.text}
-              autoFocus
-              onFocus={(event) => event.currentTarget.setSelectionRange(event.currentTarget.value.length, event.currentTarget.value.length)}
-              onChange={(event) => setEditing({ id: message.id, text: event.target.value })}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void save();
-                } else if (event.key === 'Escape') {
-                  // Taken here: not the view's Escape too.
-                  event.preventDefault();
-                  setEditing(undefined);
-                }
-              }}
-            />
-            <button type="button" className="primary" disabled={saving || (!editing.text.trim() && !message.attachments)} onClick={() => void save()}>
-              Save
-            </button>
-            <button type="button" onClick={() => setEditing(undefined)}>
-              Cancel
-            </button>
-          </li>
+        editing === message.id ? (
+          <QueuedMessageEditor
+            key={message.id}
+            message={message}
+            onSave={async (text) => {
+              if (await onEdit(message.id, text)) setEditing((now) => (now === message.id ? undefined : now));
+            }}
+            onCancel={() => setEditing(undefined)}
+          />
         ) : (
           <li key={message.id}>
             <ListPlus className="sm" />
@@ -1052,7 +1025,7 @@ function Queue({
                 Send now
               </button>
             )}
-            <button className="icon-btn sm" type="button" title="Edit" aria-label="Edit" onClick={() => setEditing({ id: message.id, text: message.text })}>
+            <button className="icon-btn sm" type="button" title="Edit" aria-label="Edit" onClick={() => setEditing(message.id)}>
               <Pencil className="sm" />
             </button>
             <button className="icon-btn sm" type="button" title="Remove" aria-label="Remove" onClick={() => onRemove(message.id)}>
@@ -1062,6 +1035,52 @@ function Queue({
         ),
       )}
     </ul>
+  );
+}
+
+/** A queued message's line while it is edited, in place: Enter or Save saves, Escape or Cancel leaves it as it was. */
+function QueuedMessageEditor({ message, onSave, onCancel }: { message: QueuedMessage; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
+  const [text, setText] = useState(message.text);
+  const [saving, setSaving] = useState(false);
+  const canSave = !saving && !hasNothingToSend({ text, attachments: message.attachments });
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      await onSave(text);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <li className="editing">
+      <ListPlus className="sm" />
+      <textarea
+        className="grow"
+        aria-label="Queued message"
+        rows={1}
+        value={text}
+        autoFocus
+        onFocus={(event) => event.currentTarget.setSelectionRange(event.currentTarget.value.length, event.currentTarget.value.length)}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            void save();
+          } else if (event.key === 'Escape') {
+            // Taken here: not the view's Escape too.
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+      />
+      <button type="button" className="primary" disabled={!canSave} onClick={() => void save()}>
+        Save
+      </button>
+      <button type="button" onClick={onCancel}>
+        Cancel
+      </button>
+    </li>
   );
 }
 

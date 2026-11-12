@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -643,7 +643,7 @@ export class Sessions {
   /** Changes the text of a queued message, which keeps its place and attachments. */
   editQueued({ id, queuedId, text }: { id: number; queuedId: number; text: string }): void {
     const message = this.queued(id, queuedId);
-    if (!text.trim() && !message.attachments) throw new Error('A queued message needs something to send: remove it instead.');
+    if (hasNothingToSend({ text, attachments: message.attachments })) throw new Error('A queued message needs something to send: remove it instead.');
     const edited = { ...message, text };
     this.update(id, { queue: this.get(id).queue!.map((m) => (m === message ? edited : m)) });
     this.write((trx) => trx.updateTable('queued_messages').set({ text }).where('id', '=', queuedId).execute());

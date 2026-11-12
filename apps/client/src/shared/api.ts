@@ -734,6 +734,11 @@ export interface QueuedMessage {
   attachments?: Attachment[];
 }
 
+/** Whether a queued message, as edited, would leave the agent nothing: no text and nothing attached. */
+export function hasNothingToSend({ text, attachments }: Pick<QueuedMessage, 'text' | 'attachments'>): boolean {
+  return !text.trim() && !attachments?.length;
+}
+
 /** A file or image the user attaches to a message, as the renderer read it. */
 export interface NewAttachment {
   /** Its file name, which the agent sees too. */

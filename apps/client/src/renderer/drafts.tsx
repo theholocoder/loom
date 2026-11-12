@@ -2,7 +2,7 @@
 // runs: one draft per Session and one for New Session, so that going to
 // another Session, or to a Page and from there to a Session, loses none of
 // it. A draft lives in the renderer only, gone with the window.
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, type ReactNode } from 'react';
 
 /** The drafts kept, by whose they are (`session:7`, `new-session`), each in parts: its text, its files… */
 type Drafts = Map<string, Map<string, unknown>>;
@@ -29,12 +29,16 @@ export function useKeptState<T>(owner: string | undefined, part: string, initial
     const parts = draft();
     return parts?.has(part) ? (parts.get(part) as T) : initial;
   });
+  // What was last set, for an update from a closure older than the last render.
+  const latest = useRef(value);
+  latest.current = value;
+  /** Worked out at once, kept or not: what the setter makes is there to read as soon as it returns. */
   const set = (next: T | ((was: T) => T)) => {
     const parts = draft();
-    if (!parts) return setValue(next);
-    const was = parts.has(part) ? (parts.get(part) as T) : value;
+    const was = parts?.has(part) ? (parts.get(part) as T) : latest.current;
     const now = typeof next === 'function' ? (next as (was: T) => T)(was) : next;
-    parts.set(part, now);
+    parts?.set(part, now);
+    latest.current = now;
     setValue(now);
   };
   return [value, set];

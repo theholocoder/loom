@@ -676,14 +676,27 @@ describe('a Session', () => {
       ),
       queuedUp,
     );
-    const item = within(screen.getByRole('list', { name: 'Queued messages' })).getByRole('listitem');
+    const item = () => within(screen.getByRole('list', { name: 'Queued messages' })).getByRole('listitem');
 
-    fireEvent.click(within(item).getByRole('button', { name: 'Edit' }));
-    fireEvent.change(within(item).getByRole('textbox', { name: 'Queued message' }), { target: { value: 'Then add more tests' } });
-    fireEvent.click(within(item).getByRole('button', { name: 'Save' }));
+    fireEvent.click(within(item()).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(within(item()).getByRole('textbox', { name: 'Queued message' }), { target: { value: 'Then add more tests' } });
+    fireEvent.click(within(item()).getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('There is no such queued message.'));
-    expect((within(item).getByRole('textbox', { name: 'Queued message' }) as HTMLTextAreaElement).value).toBe('Then add more tests');
+    expect((within(item()).getByRole('textbox', { name: 'Queued message' }) as HTMLTextAreaElement).value).toBe('Then add more tests');
+  });
+
+  it('says so when the message being edited is sent before the edit is saved', () => {
+    const queuedUp: Session = { ...working, queue: [{ id: 3, text: 'Then add tests' }, { id: 4, text: 'And update the docs' }] };
+    const main = open(renderApp(new FakeMain({ projects: [project], sessions: [queuedUp] })), queuedUp);
+    const queue = () => screen.getByRole('list', { name: 'Queued messages' });
+
+    fireEvent.click(within(within(queue()).getAllByRole('listitem')[0]!).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(within(queue()).getByRole('textbox', { name: 'Queued message' }), { target: { value: 'Then add more tests' } });
+    act(() => main.publish('sessions', [{ ...queuedUp, queue: [{ id: 4, text: 'And update the docs' }] }]));
+
+    expect(within(queue()).queryByRole('textbox', { name: 'Queued message' })).toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe('The queued message was sent before your edit was saved.');
   });
 
   it('offers Steer instead of Send now when the agent can be steered', async () => {
