@@ -1,6 +1,6 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
-import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderOpen, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
@@ -35,6 +35,7 @@ import { useSessionMenu } from './SessionMenu';
 import { isFreeEscape } from './escape';
 import { addToContextMenu, selectedText } from './ContextMenu';
 import { useForgetDraft, useKeptState } from './drafts';
+import { SHORTCUTS } from './shortcuts';
 
 /** Whose draft New Session's is (see `useKeptState`). */
 const NEW_SESSION_DRAFT = 'new-session';
@@ -148,12 +149,15 @@ export function NewSession({
   initialWorkingCopy,
   onStarted,
   onCancel,
+  onAddProject,
 }: {
   initialProjectId?: number;
   pickIssue?: boolean;
   initialWorkingCopy?: NewSessionWorkingCopy;
   onStarted: (session: Session) => void;
   onCancel: () => void;
+  /** Adds a Project, for when there is none to start a Session in. */
+  onAddProject: () => void;
 }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
@@ -245,7 +249,15 @@ export function NewSession({
         </button>
       </div>
       <div className="chat">
-        {projects.length === 0 && <div className="empty">Add a Project before starting a Session.</div>}
+        {projects.length === 0 && (
+          <div className="empty">
+            Add a Project before starting a Session.
+            <button className="primary" type="button" onClick={onAddProject}>
+              <FolderOpen className="sm" />
+              {SHORTCUTS.addProject.label}
+            </button>
+          </div>
+        )}
       </div>
       {chosen && (
         <Composer

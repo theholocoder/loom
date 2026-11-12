@@ -48,7 +48,7 @@ import { Popover } from './Popover';
 import { PageWindow, type Page } from './PageWindow';
 import { ProjectPicker } from './ProjectPicker';
 import { Dashboard } from './Dashboard';
-import { Projects, useExistingCloneLinker } from './Projects';
+import { Projects, useProjectAdder } from './Projects';
 import { DraftsProvider } from './drafts';
 import { NewSession, SessionView, type NewSessionWorkingCopy, type SessionCommand } from './Sessions';
 import { NewSessionContext } from './SessionMenu';
@@ -57,6 +57,7 @@ import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
 import { isTerminalShortcut, matchesShortcut, SHORTCUTS, typingGuard, type ShortcutName } from './shortcuts';
 import { ToastHost, useToast } from './Toast';
+import { Welcome } from './Welcome';
 import { ResizeEdge } from './ResizeEdge';
 import { useInbox, useWindowSize, WindowLayoutProvider } from './WindowLayout';
 import { INBOX_WIDTH, windowLayout } from '../shared/window';
@@ -104,10 +105,11 @@ function Workspace() {
     window.addEventListener('focus', check);
     return () => window.removeEventListener('focus', check);
   }, [api]);
-  const linker = useExistingCloneLinker();
+  const adder = useProjectAdder();
   const toast = useToast();
   const sessions = useTopic('sessions') ?? [];
-  const projects = useTopic('projects') ?? [];
+  const loadedProjects = useTopic('projects');
+  const projects = loadedProjects ?? [];
   const [selectedId, setSelectedId] = useState<number>();
   /** Bumped to focus the open Session's composer. */
   const [replyRequest, setReplyRequest] = useState(0);
@@ -162,9 +164,9 @@ function Workspace() {
     if (fromIssue || projects.length) setPicking({ fromIssue, returnFocus });
     else startNewSession(undefined);
   };
-  const addExistingClone = () => {
+  const addProject = () => {
     openPage('projects');
-    void linker.link();
+    void adder.link();
   };
   const forgeProjects = projects.filter((p) => p.forge.state === 'available');
   const inbox = useInbox();
@@ -182,7 +184,7 @@ function Workspace() {
     reply,
     newSession: (returnFocus) => pickProject(returnFocus),
     newSessionFromIssue: (returnFocus) => pickProject(returnFocus, true),
-    addExistingClone,
+    addProject,
     select,
     command: setCommand,
     setTheme: (theme) => {
@@ -276,7 +278,7 @@ function Workspace() {
             <div className="side-top">
               <div className="brand">
                 <Waypoints /> Loom<span className="grow" />
-                <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddExistingClone={addExistingClone} />
+                <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddProject={addProject} />
                 <button className="icon-btn" type="button" title="Collapse the Inbox" aria-label="Collapse the Inbox" aria-expanded="true" aria-controls="inbox" onClick={inbox.toggle}>
                   <PanelLeftClose />
                 </button>
@@ -309,7 +311,7 @@ function Workspace() {
                 </span>
               )}
             </button>
-            <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddExistingClone={addExistingClone} />
+            <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddProject={addProject} />
             <button className="icon-btn" type="button" title="Search Sessions and actions" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
               <Search />
             </button>
@@ -326,6 +328,7 @@ function Workspace() {
             pickIssue={newSession.fromIssue}
             initialWorkingCopy={newSession.workingCopy}
             onStarted={select}
+            onAddProject={addProject}
             onCancel={() => {
               // Back to the Page it was started from, focus going back on closing it where it was before that.
               setView(newSession.from.view);
@@ -341,15 +344,26 @@ function Workspace() {
             onCommandDone={() => setCommand(undefined)}
             onRetryableChange={setRetryable}
           />
+        ) : loadedProjects?.length === 0 ? (
+          <Welcome onAddProject={addProject} />
+        ) : !loadedProjects ? (
+          // Nothing to offer until the Projects are known: the welcome or a New Session.
+          <main className="main" aria-label="Session" />
         ) : (
           <main className="main" aria-label="Session">
-            <div className="empty">No Session selected.</div>
+            <div className="empty">
+              No Session selected.
+              <button type="button" onClick={(event) => pickProject(event.currentTarget)}>
+                <MessageSquarePlus className="sm" />
+                {SHORTCUTS.newSession.label}
+              </button>
+            </div>
           </main>
         )}
         </div>
         {page && (
           <PageWindow page={page.name} onClose={closePage}>
-            {page.name === 'settings' ? <Settings /> : page.name === 'dashboard' ? <Dashboard onOpenSession={select} /> : <Projects linker={linker} />}
+            {page.name === 'settings' ? <Settings /> : page.name === 'dashboard' ? <Dashboard onOpenSession={select} /> : <Projects adder={adder} onStartSession={(project) => startNewSession(project)} />}
           </PageWindow>
         )}
         {picking && (
@@ -428,7 +442,7 @@ function paletteActions(app: {
   reply: (session: Session) => void;
   newSession: (returnFocus: HTMLElement | null) => void;
   newSessionFromIssue: (returnFocus: HTMLElement | null) => void;
-  addExistingClone: () => void;
+  addProject: () => void;
   select: (session: Session) => void;
   command: (command: SessionCommand) => void;
   setTheme: (theme: Theme) => void;
@@ -446,7 +460,7 @@ function paletteActions(app: {
   const actions: Array<PaletteAction | false | undefined> = [
     shortcutAction('newSession', MessageSquarePlus, app.newSession),
     app.forgeProjects.length > 0 && shortcutAction('newSessionFromIssue', CircleDot, app.newSessionFromIssue),
-    shortcutAction('addExistingClone', FolderOpen, app.addExistingClone),
+    shortcutAction('addProject', FolderOpen, app.addProject),
     nextWaiting && shortcutAction('nextWaiting', ArrowRightToLine, () => app.select(nextWaiting)),
     previousWaiting && shortcutAction('previousWaiting', ArrowLeftToLine, () => app.select(previousWaiting)),
     active?.status === 'waiting' && shortcutAction('reply', Reply, () => app.reply(active)),
@@ -505,7 +519,7 @@ function currentProjectId(selected: Session | undefined, sessions: Session[]): n
 }
 
 /** The + button's menu of things to start: a Session or a Project. */
-function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: (trigger: HTMLElement | null) => void; onAddExistingClone: () => void }) {
+function NewMenu({ onNewSession, onAddProject }: { onNewSession: (trigger: HTMLElement | null) => void; onAddProject: () => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   return (
@@ -531,11 +545,11 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: (trigger:
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              onAddExistingClone();
+              onAddProject();
             }}
           >
             <FolderOpen className="sm" />
-            Add Project from existing clone…
+            {SHORTCUTS.addProject.label}
           </button>
         </Popover>
       )}

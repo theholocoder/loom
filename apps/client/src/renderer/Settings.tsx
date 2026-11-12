@@ -34,12 +34,17 @@ interface SettingsSection {
 // The prototype has no Settings page; it uses the layout of its other full
 // page, the Dashboard, a .dash page of cards, with a list of the sections
 // beside them to go to one, and a search over every setting.
-export function Settings() {
+/** Checks each Environment's agent again on mount, so what a page shows of them is current. */
+export function useAgentCheck() {
   const api = useApi();
-  // Opening Settings checks the agents again, so what it shows is current.
   useEffect(() => {
     api.invoke('environments.detect').catch((error: unknown) => console.error('agent detection failed:', error));
   }, [api]);
+}
+
+export function Settings() {
+  // Opening Settings checks the agents again, so what it shows is current.
+  useAgentCheck();
   const [query, setQuery] = useState('');
   const shown = useMemo(() => matching(SECTIONS, query), [query]);
   const page = useRef<HTMLDivElement>(null);
@@ -674,24 +679,16 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
       .catch((error: unknown) => setReloadError((error as Error).message))
       .finally(() => setReloading(false));
   };
-  const warnings = [shellWarning(env), env.agent && agentWarning(env.agent)].filter((w): w is string => !!w);
   return (
     <tr>
       <td>{env.label}</td>
       <td>
-        <span className={`row st-${env.state}`}>
-          <StateIcon state={env.state} />
-          <span>{env.state}</span>
-        </span>
+        <EnvironmentState env={env} />
         {env.error && <div className="err">{env.error}</div>}
       </td>
       <td>
         {env.agent ? <AgentCell agent={env.agent} /> : <span className="muted">—</span>}
-        {warnings.map((warning) => (
-          <div key={warning} className="warn" role="alert">
-            {warning}
-          </div>
-        ))}
+        <EnvironmentWarnings env={env} />
       </td>
       <td>{env.bridge ? <span className="tech">{`loom-bridge ${env.bridge.version}`}</span> : <span className="muted">—</span>}</td>
       <td>
@@ -712,13 +709,63 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
   );
 }
 
-function AgentCell({ agent }: { agent: AgentStatus }) {
+/**
+ * The welcome's short check: each Environment, its state and its agent's,
+ * and what to fix; the full table, with Reload, is in Settings.
+ */
+export function EnvironmentCheck() {
+  const environments = useTopic('environments');
+  if (!environments?.length) return <div className="muted">Starting your Environments…</div>;
+  return (
+    <ul className="environment-check" aria-label="Environments">
+      {environments.map((env) => (
+        <li key={env.id}>
+          <div className="row">
+            <b>{env.label}</b>
+            <EnvironmentState env={env} />
+            {env.agent && (
+              <>
+                <span className="muted">·</span>
+                <AgentCell agent={env.agent} inline />
+              </>
+            )}
+          </div>
+          {env.error && <div className="err">{env.error}</div>}
+          <EnvironmentWarnings env={env} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function EnvironmentState({ env }: { env: EnvironmentStatus }) {
+  return (
+    <span className={`row st-${env.state}`}>
+      <StateIcon state={env.state} />
+      <span>{env.state}</span>
+    </span>
+  );
+}
+
+/** What to fix in the Environment, its shell or its agent, before Sessions can run there. */
+function EnvironmentWarnings({ env }: { env: EnvironmentStatus }) {
+  const warnings = [shellWarning(env), env.agent && agentWarning(env.agent)].filter((w): w is string => !!w);
+  return warnings.map((warning) => (
+    <div key={warning} className="warn" role="alert">
+      {warning}
+    </div>
+  ));
+}
+
+/** The agent's name, version and state: on two lines, or `inline` on one. */
+function AgentCell({ agent, inline }: { agent: AgentStatus; inline?: boolean }) {
   const label = agent.checking ? 'checking' : agent.state;
+  const Name = inline ? 'span' : 'div';
   return (
     <>
-      <div className="tech" title={agent.path}>
+      <Name className="tech" title={agent.path}>
         {agent.version ? `${agent.name} ${agent.version}` : agent.name}
-      </div>
+      </Name>
       <span className={`row ag-${agent.checking ? 'checking' : agent.state}`}>
         <AgentIcon agent={agent} />
         <span>{label}</span>

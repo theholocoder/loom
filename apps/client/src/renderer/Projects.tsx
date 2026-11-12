@@ -1,42 +1,55 @@
-import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, TriangleAlert, X } from 'lucide-react';
+import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, MessageSquarePlus, TriangleAlert, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { branchPrefixError, branchPrefixOf } from '../shared/branches';
 import { useApi, useTopic } from './api';
 import { unsavedWorkSummary } from './Archive';
 import { copyable } from './ContextMenu';
+import { SHORTCUTS } from './shortcuts';
 
 const FORGE_NAME: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
 
+/** A Project the user just added, or restored, which a Session can start in next. */
+export interface AddedProject {
+  project: Project;
+  restored: boolean;
+}
+
 /** Adding a Project from a folder the user chooses, and how the last attempt went. */
-export interface ExistingCloneLinker {
+export interface ProjectAdder {
   linking: boolean;
   /** Why the last attempt failed. */
   error?: string;
+  /** The Project the last attempt added or restored. */
+  added?: AddedProject;
   /**
    * Asks for a folder and links its checkout; does nothing if the user
    * cancels. A checkout of a removed Project first asks whether to restore it.
    */
   link(): Promise<void>;
-  /** Clears the last attempt's error and any open restore offer; an attempt still running then fails silently. */
+  /** Clears the last attempt's error or Project added, and any open restore offer; an attempt still running then ends silently. */
   dismiss(): void;
   /** The offer to restore a removed Project, while one is open; render it anywhere. */
   dialog: ReactNode;
 }
 
-export function useExistingCloneLinker(): ExistingCloneLinker {
+export function useProjectAdder(): ProjectAdder {
   const api = useApi();
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string>();
+  const [added, setAdded] = useState<AddedProject>();
   const [offer, setOffer] = useState<{ path: string; project: RestorableProject }>();
   // Bumped by dismiss, so an attempt that fails after it doesn't show its error.
   const attempt = useRef(0);
-  const run = async (action: () => Promise<void>) => {
+  /** Runs an attempt, which resolves with the Project it added or restored, if it did. */
+  const run = async (action: () => Promise<AddedProject | undefined>) => {
     setError(undefined);
+    setAdded(undefined);
     setLinking(true);
     const current = attempt.current;
     try {
-      await action();
+      const result = await action();
+      if (result && attempt.current === current) setAdded(result);
     } catch (e) {
       if (attempt.current === current) setError((e as Error).message);
     } finally {
@@ -46,25 +59,28 @@ export function useExistingCloneLinker(): ExistingCloneLinker {
   const link = () =>
     run(async () => {
       const path = await api.invoke('dialogs.chooseFolder');
-      if (!path) return;
+      if (!path) return undefined;
       const project = await api.invoke('projects.restorable', { path });
-      if (project) setOffer({ path, project });
-      else await api.invoke('projects.link', { path });
+      if (!project) return { project: await api.invoke('projects.link', { path }), restored: false };
+      setOffer({ path, project });
+      return undefined;
     });
   const answer = (restore: boolean) => {
     if (!offer) return;
     setOffer(undefined);
-    void run(async () => {
-      await api.invoke('projects.link', restore ? { path: offer.path, restore: offer.project.id } : { path: offer.path });
-    });
+    void run(async () => ({
+      project: await api.invoke('projects.link', restore ? { path: offer.path, restore: offer.project.id } : { path: offer.path }),
+      restored: restore,
+    }));
   };
   const dialog = offer && <RestoreOffer project={offer.project} onRestore={() => answer(true)} onNew={() => answer(false)} onCancel={() => setOffer(undefined)} />;
   const dismiss = useCallback(() => {
     attempt.current++;
     setError(undefined);
+    setAdded(undefined);
     setOffer(undefined);
   }, []);
-  return { linking, error, link, dismiss, dialog };
+  return { linking, error, added, link, dismiss, dialog };
 }
 
 function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: RestorableProject; onRestore: () => void; onNew: () => void; onCancel: () => void }) {
@@ -100,8 +116,8 @@ function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: Restor
 }
 
 // Laid out like Settings: a .dash page with a card holding a data table. The
-// linker is shared with the sidebar's + menu, whose result shows here.
-export function Projects({ linker }: { linker: ExistingCloneLinker }) {
+// adder is shared with the sidebar's + menu, whose result shows here.
+export function Projects({ adder, onStartSession }: { adder: ProjectAdder; onStartSession: (project: Project) => void }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
   const environments = useTopic('environments') ?? [];
@@ -109,8 +125,8 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
   useEffect(() => {
     api.invoke('projects.check').catch((error: unknown) => console.error('Forge detection failed:', error));
   }, [api]);
-  // An error from adding a Project, or an offer to restore one, goes when the user leaves the page.
-  const { dismiss } = linker;
+  // An error from adding a Project, the next step after adding one, or an offer to restore one, goes when the user leaves the page.
+  const { dismiss } = adder;
   useEffect(() => dismiss, [dismiss]);
 
   const environmentLabel = (id: string) => environments.find((e) => e.id === id)?.label ?? id;
@@ -119,16 +135,20 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
       <div className="row">
         <h1>Projects</h1>
         <span className="grow" />
-        <button className="primary" type="button" disabled={linker.linking} onClick={() => void linker.link()}>
+        {/* Once a Project is added, starting a Session in it is the next step. */}
+        <button className={adder.added ? undefined : 'primary'} type="button" disabled={adder.linking} onClick={() => void adder.link()}>
           <FolderOpen className="sm" />
-          Use existing clone…
+          {SHORTCUTS.addProject.label}
         </button>
       </div>
-      {linker.dialog}
-      {linker.error && (
+      {adder.dialog}
+      {adder.added && (
+        <NextStep added={adder.added} onStartSession={onStartSession} onDismiss={dismiss} />
+      )}
+      {adder.error && (
         <div className="row page-error" style={{ marginTop: 8 }}>
           <div className="err" role="alert">
-            {linker.error}
+            {adder.error}
           </div>
           <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={dismiss}>
             <X />
@@ -141,7 +161,7 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
           <h3>Projects</h3>
         </div>
         {projects.length === 0 ? (
-          <div className="empty">No Projects yet. Add a git checkout with "Use existing clone…".</div>
+          <div className="empty">No Projects yet. Add a git checkout on this machine with "{SHORTCUTS.addProject.label}".</div>
         ) : (
           <table className="data">
             <thead>
@@ -162,6 +182,24 @@ export function Projects({ linker }: { linker: ExistingCloneLinker }) {
           </table>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The way on after adding a Project: a Session in it. */
+function NextStep({ added: { project, restored }, onStartSession, onDismiss }: { added: AddedProject; onStartSession: (project: Project) => void; onDismiss: () => void }) {
+  return (
+    <div className="row page-note">
+      <span role="status">
+        {restored ? 'Restored' : 'Added'} {project.name}.
+      </span>
+      <button className="primary" type="button" onClick={() => onStartSession(project)}>
+        <MessageSquarePlus className="sm" />
+        Start a Session
+      </button>
+      <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={onDismiss}>
+        <X />
+      </button>
     </div>
   );
 }

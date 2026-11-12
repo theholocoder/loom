@@ -59,7 +59,7 @@ export const SHORTCUTS = {
   help: { label: 'Show keyboard shortcuts', shortcut: { key: '?', ctrl: true }, inTerminal: true },
   newSession: { label: 'New Session', shortcut: { key: 'n', ctrl: true } },
   newSessionFromIssue: { label: 'New Session from an issue…', shortcut: { key: 'n', ctrl: true, shift: true } },
-  addExistingClone: { label: 'Add Project from existing clone…', shortcut: { key: 'o', ctrl: true } },
+  addProject: { label: 'Add a Project…', shortcut: { key: 'o', ctrl: true } },
   nextWaiting: { label: 'Go to next Waiting Session', shortcut: { key: 'j' } },
   previousWaiting: { label: 'Go to previous Waiting Session', shortcut: { key: 'k' } },
   // The App reads the digit itself: Ctrl+1 to Ctrl+9, by physical key (AZERTY's 1 types &).
