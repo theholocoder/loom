@@ -170,6 +170,10 @@ export interface ScriptedActivity {
   title?: string;
   draft?: boolean;
   author?: string;
+  /** Its Markdown description (default: none). */
+  description?: string;
+  /** Who is asked to review it; on GitHub, those who haven't yet, a name with a slash being a team. */
+  reviewers?: string[];
   /** The branch it merges into. */
   target?: string;
   commits?: number;

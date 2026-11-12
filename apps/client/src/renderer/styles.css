@@ -520,6 +520,15 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .review-card .quote .qh .link { text-align: left; overflow-wrap: anywhere; font-size: 11.5px; }
 .review-card .quote .qt { padding: 6px 8px; font-size: 13px; overflow-wrap: anywhere; }
 .avatar { width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font: 700 9px var(--font, inherit); color: var(--accent-text); background: var(--accent); flex: none; }
+.mr-meta .reviewers { flex-wrap: wrap; gap: 4px 8px; }
+.mr-meta .avatar { width: 16px; height: 16px; font-size: 7.5px; }
+.mr-desc .md { font-size: 13px; overflow-wrap: anywhere; }
+/* Pele's diagrams, in the theme's colours. */
+.md .diagram { margin: 6px 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); overflow-x: auto;
+  --pele-bg: var(--code); --pele-fg: var(--text); --pele-muted: var(--muted); --pele-line: var(--muted); --pele-surface: var(--panel2); --pele-surface-alt: var(--hover);
+  --pele-border: var(--line); --pele-accent: var(--accent); --pele-font: var(--font); --pele-series-1: var(--p1); --pele-series-2: var(--p2); --pele-series-3: var(--p3); }
+.md .diagram svg { display: block; margin: 0 auto; }
+.md .diagram-error { margin: -2px 0 6px; font-size: 12px; }
 .chip.verdict.approved { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
 .chip.verdict.changes { color: var(--wait); background: color-mix(in srgb, var(--wait) 15%, transparent); }
 .mr-foot { flex: none; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); }

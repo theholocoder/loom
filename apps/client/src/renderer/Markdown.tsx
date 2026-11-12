@@ -1,9 +1,12 @@
 // A chat message's text, rendered as GitHub-flavoured Markdown. Raw HTML in it
 // is shown as the text it is, never rendered; code blocks are highlighted in the
-// theme's colours, and code blocks and quotes can be copied.
+// theme's colours, and code blocks and quotes can be copied. Markdown a Forge
+// holds (a Merge request's description) is rendered as the Forge would: its
+// mermaid diagrams drawn, by Pele, and its HTML comments hidden.
 import type { Element, ElementContent } from 'hast';
 import { Check, Copy, TriangleAlert } from 'lucide-react';
 import type { Html, Nodes, PhrasingContent, Root } from 'mdast';
+import { renderAsync } from 'pele/lazy';
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -18,6 +21,21 @@ const BLOCK_CONTAINERS = new Set(['root', 'blockquote', 'listItem', 'footnoteDef
 /** Raw HTML's text, its lines kept. */
 function htmlLines({ value }: Html): PhrasingContent[] {
   return value.split('\n').flatMap((line, i): PhrasingContent[] => (i === 0 ? [{ type: 'text', value: line }] : [{ type: 'break' }, { type: 'text', value: line }]));
+}
+
+/** Leaves out raw HTML's comments, which a Forge doesn't show: Merge request templates are full of them. */
+function remarkHideHtmlComments() {
+  const visit = (node: Nodes) => {
+    if (!('children' in node)) return;
+    const children = node.children.flatMap((child): Nodes[] => {
+      if (child.type !== 'html') return [child];
+      const value = child.value.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+      return value.trim() ? [{ ...child, value }] : [];
+    });
+    (node as { children: Nodes[] }).children = children;
+    children.forEach(visit);
+  };
+  return (tree: Root) => visit(tree);
 }
 
 /** Turns raw HTML into plain text: a paragraph of it when it is a block. */
@@ -70,10 +88,20 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 function CodeBlock({ node, children }: { node?: Element; children?: ReactNode }) {
+  const diagrams = useContext(DrawsDiagrams);
   const code = node?.children.find((child): child is Element => child.type === 'element' && child.tagName === 'code');
   const language = languageOf(code);
   // The fence's closing newline is no part of the code.
   const text = code ? textOf(code).replace(/\n$/, '') : '';
+  const figure = (
+    <CodeFigure language={language} text={text}>
+      {children}
+    </CodeFigure>
+  );
+  return diagrams && language === 'mermaid' ? <Diagram source={text} code={figure} /> : figure;
+}
+
+function CodeFigure({ language, text, children }: { language: string | undefined; text: string; children?: ReactNode }) {
   return (
     <figure className="code-block">
       <figcaption>
@@ -83,6 +111,61 @@ function CodeBlock({ node, children }: { node?: Element; children?: ReactNode })
       <pre>{children}</pre>
     </figure>
   );
+}
+
+/** Whether the Markdown being rendered draws its mermaid blocks. */
+const DrawsDiagrams = createContext(false);
+
+/** A mermaid diagram, drawn by Pele; its `code` block until it is, or with why it can't be. */
+function Diagram({ source, code }: { source: string; code: ReactNode }) {
+  // Each diagram's own prefix for the ids in its SVG, so two never share a marker.
+  const idPrefix = `pele${useId().replace(/[^\w-]/g, '')}-`;
+  const [drawn, setDrawn] = useState<{ source: string; svg?: string; error?: string }>();
+  useEffect(() => {
+    let current = true;
+    // Pele escapes the diagram's text; links and images, which Loom wouldn't open, are left out.
+    renderAsync(source, { idPrefix, links: false, images: false }).then(
+      ({ svg }) => current && setDrawn({ source, svg: inertSvg(svg) }),
+      (e: unknown) => current && setDrawn({ source, error: e instanceof Error ? e.message : String(e) }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [source, idPrefix]);
+  const mine = drawn?.source === source ? drawn : undefined;
+  if (mine?.svg) return <figure className="diagram" role="img" aria-label="Diagram" dangerouslySetInnerHTML={{ __html: mine.svg }} />;
+  return (
+    <>
+      {code}
+      {mine?.error && (
+        <p className="diagram-error muted" role="note">
+          {`Couldn't draw this diagram: ${firstAndLast(mine.error)}`}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * `svg` without anything that could run, load or restyle the page: Pele
+ * already escapes the diagram's text, but anyone can write a Merge request's
+ * description, so this doesn't rest on Pele alone.
+ */
+function inertSvg(svg: string): string {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  if (doc.querySelector('parsererror')) return '';
+  doc.querySelectorAll('script, style, foreignObject, iframe, image').forEach((element) => element.remove());
+  for (const element of doc.querySelectorAll('*')) {
+    // A link within the diagram (a marker, a symbol) stays; one out of it goes.
+    for (const { name, value } of [...element.attributes]) if (/^on/i.test(name) || (/(^|:)href$/i.test(name) && !value.startsWith('#'))) element.removeAttribute(name);
+  }
+  return new XMLSerializer().serializeToString(doc.documentElement);
+}
+
+/** A parse error's first and last lines (where, then what was expected), without the source excerpt between them. */
+function firstAndLast(message: string): string {
+  const lines = message.split('\n');
+  return lines.length > 1 ? `${lines[0]} ${lines.at(-1)}` : message;
 }
 
 /** The message being rendered, for the parts that copy from its source. */
@@ -148,17 +231,28 @@ const COMPONENTS: Components = {
 const REMARK = [remarkGfm, remarkHtmlAsText];
 // The user types line breaks as they mean them, as in a chat; agents write Markdown.
 const USER_REMARK = [...REMARK, remarkBreaks];
+// The comments go before the rest of the raw HTML is turned into text.
+const FORGE_REMARK = [remarkGfm, remarkHideHtmlComments, remarkHtmlAsText];
+const REMARKS = { agent: REMARK, user: USER_REMARK, forge: FORGE_REMARK };
 const REHYPE = [rehypeHighlight];
 
-export function Markdown({ text, breaks = false }: { text: string; breaks?: boolean }) {
+/**
+ * Who wrote the Markdown, which says how to render it: an agent; the user,
+ * each line break kept as typed; or a Forge's user, as the Forge renders it.
+ */
+export type MarkdownFlavour = keyof typeof REMARKS;
+
+export function Markdown({ text, flavour = 'agent' }: { text: string; flavour?: MarkdownFlavour }) {
   // Each message's own prefix for its ids, so its footnote links find its own footnotes.
   const prefix = `md${useId().replace(/[^\w-]/g, '')}-`;
   return (
     <div className="md">
       <MessageSource value={text}>
-        <ReactMarkdown remarkPlugins={breaks ? USER_REMARK : REMARK} rehypePlugins={REHYPE} remarkRehypeOptions={{ clobberPrefix: prefix }} components={COMPONENTS}>
-          {text}
-        </ReactMarkdown>
+        <DrawsDiagrams value={flavour === 'forge'}>
+          <ReactMarkdown remarkPlugins={REMARKS[flavour]} rehypePlugins={REHYPE} remarkRehypeOptions={{ clobberPrefix: prefix }} components={COMPONENTS}>
+            {text}
+          </ReactMarkdown>
+        </DrawsDiagrams>
       </MessageSource>
     </div>
   );
