@@ -34,6 +34,12 @@ import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
 import { isFreeEscape } from './escape';
 import { addToContextMenu, selectedText } from './ContextMenu';
+import { useForgetDrafts, useKeptState } from './drafts';
+
+/** Where New Session's draft is kept (see `useKeptState`). */
+const NEW_SESSION_DRAFT = 'new-session';
+/** Where a Session's draft is kept. */
+const sessionDraft = (id: number) => `session:${id}`;
 
 /** Why a Session is Waiting, but for unsaved work, which shows what became of its Merge request (see ENDED). */
 const WAITING: Record<Exclude<WaitingReason, 'unsaved-work'>, { label: string; icon: LucideIcon }> = {
@@ -132,8 +138,9 @@ function filesRef(choice: WorkingCopyChoice, { existing, base }: { existing?: Ex
 /**
  * `pickIssue` opens the issue picker at once, for starting from an issue;
  * `initialWorkingCopy` picks the working copy. Cancel gives up through
- * `onCancel`, as does Escape that nothing open on it took, while nothing is
- * typed.
+ * `onCancel`, throwing the draft away, as does Escape that nothing open on it
+ * took, while nothing is typed. The draft is otherwise kept for the next New
+ * Session, until a Session starts from it.
  */
 export function NewSession({
   initialProjectId,
@@ -191,6 +198,7 @@ export function NewSession({
   const approvalModeDefault = useTopic('settings')?.approvalModeDefault ?? 'supervised';
   const [pickedMode, setApprovalMode] = useState<ApprovalMode>();
   const approvalMode = pickedMode ?? approvalModeDefault;
+  const forgetDrafts = useForgetDrafts();
   // Esc gives up, but for what was typed: only Cancel throws that away.
   const escape = useRef<() => void>(undefined);
   escape.current = () => !draft.trim() && editedBranch === undefined && onCancel();
@@ -225,7 +233,14 @@ export function NewSession({
       <div className="main-head">
         <h1>New Session</h1>
         <span className="grow" />
-        <button type="button" title="Cancel (Esc)" onClick={onCancel}>
+        <button
+          type="button"
+          title="Cancel (Esc)"
+          onClick={() => {
+            forgetDrafts(`${NEW_SESSION_DRAFT}:`);
+            onCancel();
+          }}
+        >
           Cancel
         </button>
       </div>
@@ -240,6 +255,7 @@ export function NewSession({
           focusRequest={focusRequest}
           onSend={start}
           onDraftChange={setDraft}
+          draftKey={NEW_SESSION_DRAFT}
           loadFiles={() => api.invoke('projects.files', { id: chosen.id, ...filesRef(workingCopy, { existing, base }) })}
           commands={commands}
           canSendEmpty={!!issue}
@@ -577,7 +593,7 @@ export function SessionView({
   }, [session.id, session.updatedAt]);
 
   /** The comments on the diff or the conversation to go with the next message: chips in the composer, and notes in the diff. */
-  const [pending, setPending] = useState<PendingComment[]>([]);
+  const [pending, setPending] = useKeptState<PendingComment[]>(`${sessionDraft(session.id)}:comments`, []);
   const comments = useMemo(() => pending.map((p) => p.comment), [pending]);
   const send = async (prompt: string, attachments: NewAttachment[]) => {
     setError(undefined);
@@ -856,6 +872,7 @@ export function SessionView({
             // Out to the conversation, where the shortcuts without Ctrl work.
             onEscape={() => conversation.current?.focus()}
             onDisabledWithFocus={focusAsked}
+            draftKey={sessionDraft(session.id)}
             queueing={working}
             tools={
               <ModelPickers

@@ -6,6 +6,7 @@ import { ArrowUp, Box, ClipboardPaste, Copy, FileText, FolderGit2, Image, ListPl
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { diffCommentRange, isConversationComment, isImage, type AgentCommand, type Attachment, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
 import { addToContextMenu, copyText } from './ContextMenu';
+import { useKeptState } from './drafts';
 import { Popover, stepIndex } from './Popover';
 
 /** The most files an @-mention suggests at once. */
@@ -41,6 +42,7 @@ export function Composer({
   onEditComment,
   onEscape,
   onDisabledWithFocus,
+  draftKey,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -87,16 +89,26 @@ export function Composer({
   onEscape?: () => void;
   /** The prompt box is being disabled with the focus in it, which it can't keep: where the focus goes instead. */
   onDisabledWithFocus?: () => void;
+  /** Given, what is typed and attached is kept under it until sent, to be there again the next time a composer has it (see `useKeptState`). */
+  draftKey?: string;
 }) {
   const id = useId();
-  const [draft, setDraftState] = useState('');
-  const [caret, setCaret] = useState(0);
+  const kept = (part: string) => draftKey && `${draftKey}:${part}`;
+  const [draft, setDraftState] = useKeptState(kept('text'), '');
+  const [caret, setCaret] = useKeptState(kept('caret'), 0);
   const setDraft = (value: string, at = value.length) => {
     setDraftState(value);
     setCaret(at);
-    onDraftChange?.(value);
   };
+  // Also with a draft kept from before, which whoever listens hasn't seen.
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft]);
   const prompt = useRef<HTMLTextAreaElement>(null);
+  // A draft kept from before has its caret where it was left.
+  useLayoutEffect(() => {
+    prompt.current?.setSelectionRange(caret, caret);
+  }, []);
   useEffect(() => {
     if (focusRequest) prompt.current?.focus();
   }, [focusRequest]);
@@ -110,15 +122,16 @@ export function Composer({
     focused.current = false;
     handOnFocus.current?.();
   }, [disabled]);
-  const clearedFor = useRef(clearKey);
+  // Kept with the draft: what it was typed for may have changed while away.
+  const [clearedFor, setClearedFor] = useKeptState(kept('clearedFor'), clearKey);
   useEffect(() => {
-    if (clearedFor.current === clearKey) return;
-    clearedFor.current = clearKey;
+    if (clearedFor === clearKey) return;
+    setClearedFor(clearKey);
     setDraft('');
   }, [clearKey]);
   /** The files attached so far, each with a key of its own: the same file may be attached twice. */
-  const [files, setFiles] = useState<Array<{ key: number; file: File }>>([]);
-  const nextKey = useRef(0);
+  const [files, setFiles] = useKeptState<Array<{ key: number; file: File }>>(kept('files'), []);
+  const nextKey = useRef(files.reduce((next, { key }) => Math.max(next, key + 1), 0));
   const attachable = canAttach && !disabled;
   const attached = attachable ? files : [];
   const [sending, setSending] = useState(false);
