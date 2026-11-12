@@ -1,7 +1,7 @@
 // What is going on on a Merge request, read through the Forge's CLI and the
 // user's login (ADR 0002), in terms Babysit needs: who said what, its CI, and
 // whether it conflicts. The user's own comments are already left out.
-import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState, type ReviewCount } from '../../shared/api';
+import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState, type ReviewCount, type ReviewThread } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 
 const ACTIVITY_TIMEOUT_MS = 30_000;
@@ -37,6 +37,8 @@ export interface MergeRequestActivity {
   conflicts?: boolean;
   /** The reviews and comments of others. */
   reviews: ReviewCount;
+  /** The review threads on the code, not resolved, that others wrote in. */
+  threads: ReviewThread[];
 }
 
 /** Reads a Merge request's activity from `forge`; rejects when the Forge can't say. */
@@ -57,6 +59,8 @@ const GITHUB_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
       mergeable
       reviews(last: 100) { nodes { databaseId state body url author { login } comments(first: 100) { nodes { path line originalLine body url } } } }
       comments(last: 100) { nodes { databaseId body url author { login } } }
+      reviewThreads(last: 100) { nodes { id isResolved isOutdated path line originalLine diffSide viewerCanResolve
+        comments(first: 50) { nodes { body url createdAt diffHunk author { login } pullRequestReview { state } } } } }
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
         __typename
         ... on CheckRun { databaseId name status conclusion detailsUrl }
@@ -81,6 +85,17 @@ interface GitHubComment extends GitHubAuthored {
   body: string;
   url: string;
 }
+interface GitHubThread {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  path: string;
+  line: number | null;
+  originalLine: number | null;
+  diffSide: 'LEFT' | 'RIGHT';
+  viewerCanResolve: boolean;
+  comments: { nodes: (GitHubAuthored & { body: string; url: string; createdAt: string | null; diffHunk?: string; pullRequestReview: { state: string } | null })[] };
+}
 export type GitHubContext = { __typename: 'CheckRun'; databaseId: number; name: string; status: string; conclusion: string | null; detailsUrl: string | null } | { __typename: 'StatusContext'; context: string; state: string; targetUrl: string | null; createdAt: string };
 interface GitHubResponse {
   data: {
@@ -91,6 +106,7 @@ interface GitHubResponse {
         mergeable: string;
         reviews: { nodes: GitHubReview[] };
         comments: { nodes: GitHubComment[] };
+        reviewThreads: { nodes: GitHubThread[] };
         commits: { nodes: { commit: { oid: string; statusCheckRollup: { state: string; contexts: { nodes: GitHubContext[] } } | null } }[] };
       };
     };
@@ -130,6 +146,23 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
     approvals,
     ci: gitHubCi(commit?.oid ?? '', commit?.statusCheckRollup ?? undefined),
     conflicts: pull.mergeable === 'CONFLICTING' ? true : pull.mergeable === 'MERGEABLE' ? false : undefined,
+    threads: pull.reviewThreads.nodes.flatMap((thread) => {
+      const comments = thread.comments.nodes;
+      if (thread.isResolved || !comments.some((c) => c.author?.login.toLowerCase() !== own)) return [];
+      return [
+        {
+          id: thread.id,
+          path: thread.path,
+          // An outdated thread's line is on a diff the Merge request has moved on from.
+          ...lineOf(thread.isOutdated ? undefined : thread.line),
+          side: thread.diffSide === 'LEFT' ? 'old' : 'new',
+          ...codeOf(comments[0]?.diffHunk),
+          ...(comments.some((c) => c.pullRequestReview?.state === 'CHANGES_REQUESTED') ? { changesRequested: true } : {}),
+          comments: comments.map((c) => ({ author: authorOf(c), body: c.body, ...timeOf(c.createdAt), url: c.url })),
+          canResolve: thread.viewerCanResolve,
+        } satisfies ReviewThread,
+      ];
+    }),
   };
 }
 
@@ -174,25 +207,35 @@ interface GitLabNote {
   body: string;
   system: boolean;
   author: { username: string };
+  created_at?: string;
   position?: { new_path?: string; old_path?: string; new_line?: number | null; old_line?: number | null };
+  resolvable?: boolean;
+  resolved?: boolean;
+}
+interface GitLabDiscussion {
+  id: string;
+  notes: GitLabNote[];
 }
 
 async function readGitLab(call: BridgeCall, repository: string, workingCopy: string, number: number): Promise<MergeRequestActivity> {
   const project = `projects/${encodeURIComponent(repository)}`;
   const run = (args: string[]) => runJson(call, 'gitlab', args, workingCopy);
-  const [request, user, notes, approvals] = (await Promise.all([
+  const [request, user, discussions, approvals] = (await Promise.all([
     run(['mr', 'view', String(number), '--output', 'json']),
     run(['api', 'user']),
-    // Newest first, as GitLab returns them by default.
-    run(['api', `${project}/merge_requests/${number}/notes?per_page=100`]),
+    // Each with its notes: a comment outside a thread is a discussion of its own.
+    run(['api', `${project}/merge_requests/${number}/discussions?per_page=100`]),
     run(['api', `${project}/merge_requests/${number}/approvals`]),
-  ])) as [GitLabMergeRequest, { username: string }, GitLabNote[], { approved_by: { user: { username: string } }[] }];
+  ])) as [GitLabMergeRequest, { username: string }, GitLabDiscussion[], { approved_by: { user: { username: string } }[] }];
   const own = user.username.toLowerCase();
   const url = request.web_url;
+  const byOthers = (note: GitLabNote) => !note.system && note.author.username.toLowerCase() !== own;
 
-  const feedback: KeyedFeedback[] = notes
-    .filter((note) => !note.system && note.author.username.toLowerCase() !== own)
-    .reverse()
+  const feedback: KeyedFeedback[] = discussions
+    .flatMap((discussion) => discussion.notes)
+    .filter(byOthers)
+    // Oldest first.
+    .sort((a, b) => a.id - b.id)
     .map((note) => {
       const path = note.position?.new_path ?? note.position?.old_path;
       return { key: `note:${note.id}`, item: { kind: 'comment', author: note.author.username, ...(path ? { path } : {}), ...lineOf(note.position?.new_line ?? note.position?.old_line), excerpt: excerptOf(note.body), url: `${url}#note_${note.id}` } };
@@ -207,6 +250,23 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     approvals: approved.map(({ user: u }) => ({ key: `approval:${u.username}`, author: u.username, url })),
     ci: await gitLabCi(run, project, request.head_pipeline ?? undefined),
     conflicts: request.has_conflicts,
+    threads: discussions.flatMap((discussion) => {
+      const notes = discussion.notes.filter((note) => !note.system);
+      const first = notes[0];
+      const path = first?.position?.new_path ?? first?.position?.old_path;
+      if (!first || !path || first.resolved || !notes.some(byOthers)) return [];
+      const onOld = !first.position?.new_line && !!first.position?.old_line;
+      return [
+        {
+          id: discussion.id,
+          path: onOld ? (first.position?.old_path ?? path) : path,
+          ...lineOf(onOld ? first.position?.old_line : first.position?.new_line),
+          side: onOld ? 'old' : 'new',
+          comments: notes.map((note) => ({ author: note.author.username, body: note.body, ...timeOf(note.created_at), url: `${url}#note_${note.id}` })),
+          canResolve: first.resolvable !== false,
+        } satisfies ReviewThread,
+      ];
+    }),
   };
 }
 
@@ -250,6 +310,18 @@ export function listedCheck(name: string, state: BabysitCheckState, url: string 
 
 function checkOf({ name, url }: { name: string; url: string | null }): FeedbackCheck {
   return { name, ...(url ? { url } : {}) };
+}
+
+/** The line a GitHub review comment is on, as its hunk's last line holds it, without its diff marker. */
+function codeOf(hunk: string | undefined): { code?: string } {
+  const last = hunk?.trimEnd().split('\n').at(-1);
+  return last && /^[ +-]/.test(last) ? { code: last.slice(1) } : {};
+}
+
+/** A time as the Forge writes it, as clock time; none when it gives none, or one that doesn't parse. */
+export function timeOf(text: string | null | undefined): { at?: number } {
+  const at = text ? Date.parse(text) : NaN;
+  return Number.isNaN(at) ? {} : { at };
 }
 
 export function lineOf(line: number | null | undefined): { line?: number } {

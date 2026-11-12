@@ -9,6 +9,7 @@ import { useApi, useTopic } from './api';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
 import { ChangesView, type DiffComments } from './Changes';
+import type { ReviewNotes } from './ReviewNotes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from './MergeRequestPanel';
 import { canRunTerminals, PanelArea, usePanels } from './Panels';
@@ -552,11 +553,33 @@ export function SessionView({
     remove: removeComment,
   };
 
+  /** The review threads resolved here, left out until Babysit's next read has them gone. */
+  const [resolved, setResolved] = useState<ReadonlySet<string>>(new Set());
+  const threads = session.babysit?.threads?.filter((thread) => !resolved.has(thread.id));
+  // Replying and resolving work on the Forge from the Project's checkout: the worktree needn't be there.
+  const actOnThreads = session.status !== 'archived' && project?.forge.state === 'available';
+  const reviewNotes: ReviewNotes | undefined = threads?.length
+    ? {
+        threads,
+        forge: project?.forge.kind,
+        onOpen: openLink,
+        ...(actOnThreads
+          ? {
+              reply: (thread, body) => api.invoke('sessions.replyToReviewThread', { id: session.id, thread: thread.id, body }),
+              resolve: async (thread) => {
+                await api.invoke('sessions.resolveReviewThread', { id: session.id, thread: thread.id });
+                setResolved((ids) => new Set(ids).add(thread.id));
+              },
+            }
+          : {}),
+      }
+    : undefined;
+
   /** A Panel's content, in whichever area it sits. */
   const renderPanel = (panel: PanelId) => {
     switch (kindOf(panel)) {
       case 'changes':
-        return <ChangesView session={session} comments={diffComments} />;
+        return <ChangesView session={session} comments={diffComments} reviews={reviewNotes} />;
       case 'merge-request':
         return (
           <MergeRequestPanel
@@ -567,6 +590,7 @@ export function SessionView({
             onTab={showMergeRequestTab}
             // As on Changes: comments go with the next message, which an archived Session's diff doesn't take.
             comments={session.status === 'archived' || session.worktreeMissing ? undefined : diffComments}
+            reviewNotes={reviewNotes}
             onError={setError}
           />
         );

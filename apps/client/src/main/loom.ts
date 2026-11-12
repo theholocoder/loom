@@ -303,6 +303,15 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       if (!babysitter.pollNow(params.id) && result.state && result.state !== 'open') sessionService.setMergeRequestState(params.id, result.state);
       return result;
     },
+    // Babysit reads the Merge request again, so that its notes show the reply, or go once resolved.
+    'sessions.replyToReviewThread': async (params) => {
+      await sessionService.replyToReviewThread(params);
+      babysitter.pollNow(params.id);
+    },
+    'sessions.resolveReviewThread': async (params) => {
+      await sessionService.resolveReviewThread(params);
+      babysitter.pollNow(params.id);
+    },
     'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
     'sessions.setAutoPrompt': (params) => sessionService.setAutoPrompt(params),
     'sessions.setBabysitting': (params) => sessionService.setBabysitting(params),

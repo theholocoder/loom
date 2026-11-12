@@ -1,18 +1,35 @@
 // The Merge request Panel's Diff tab: what the Merge request changes, as its
 // Forge has it, drawn as the Changes Panel draws a diff (its file tree, its
-// layout toggles, comments to the agent on its lines), read when the tab
-// shows, again after each Babysit poll and on the Panel's refresh.
+// layout toggles, comments to the agent on its lines, its review threads as
+// notes), read when the tab shows, again after each Babysit poll and on the
+// Panel's refresh.
 import { useRef } from 'react';
 import { DEFAULT_SETTINGS, FORGE_NAMES, type DiffFile, type ForgeKind, type Session } from '../shared/api';
 import { useTopic } from './api';
 import { DiffFiles, DiffViewToggles, useDiffView, useWide, WIDE_CHANGES_PX, type DiffComments } from './Changes';
 import { useMergeRequestRead } from './merge-request-read';
+import type { ReviewNotes } from './ReviewNotes';
 
 /**
  * The diff of `session`'s Merge request, read again when `generation`
- * changes. Its lines can be commented on while `comments` is given.
+ * changes. Its lines can be commented on while `comments` is given; the
+ * review threads in `reviews` show as notes on their lines.
  */
-export function MergeRequestDiffView({ session, forge, generation, comments, onRefresh }: { session: Session; forge: ForgeKind | undefined; generation: number; comments: DiffComments | undefined; onRefresh: () => void }) {
+export function MergeRequestDiffView({
+  session,
+  forge,
+  generation,
+  comments,
+  reviews,
+  onRefresh,
+}: {
+  session: Session;
+  forge: ForgeKind | undefined;
+  generation: number;
+  comments: DiffComments | undefined;
+  reviews?: ReviewNotes;
+  onRefresh: () => void;
+}) {
   const settings = useTopic('settings');
   const [view, changeView] = useDiffView(settings?.diffView);
   const root = useRef<HTMLDivElement>(null);
@@ -57,6 +74,7 @@ export function MergeRequestDiffView({ session, forge, generation, comments, onR
           }}
           version={String(read.at)}
           comments={comments}
+          reviews={reviews}
           wide={wide}
           patterns={settings?.diffCollapsedPatterns ?? []}
           theme={settings?.theme ?? DEFAULT_SETTINGS.theme}

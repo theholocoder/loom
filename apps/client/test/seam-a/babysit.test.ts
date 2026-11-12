@@ -918,3 +918,90 @@ describe('the CI checks of a Merge request', () => {
     expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.checks).toEqual([{ name: 'unit', state: 'passed' }]);
   });
 });
+
+describe('review threads, as notes on the diff', () => {
+  const others = { author: 'alice', body: 'Off by one', url: `${URLS.gh}#t1`, createdAt: '2026-11-01T10:00:00Z' };
+
+  it("carries each open thread others wrote in, with its file, line and comments, to the Session's Babysit status", async () => {
+    const { main, id } = await babysat('gh', {
+      threads: [
+        { id: 'PRRT_1', path: 'src/a.ts', line: 10, code: 'const a = 1;', changesRequested: true, comments: [others, { author: 'octocat', body: 'Fixed?', url: `${URLS.gh}#t1r` }] },
+        { id: 'PRRT_2', path: 'src/b.ts', line: 4, side: 'old', comments: [{ author: 'bob', body: 'Why remove it?', url: `${URLS.gh}#t2` }] },
+        { id: 'PRRT_3', path: 'src/c.ts', line: 1, outdated: true, canResolve: false, comments: [{ author: 'bob', body: 'Old news', url: `${URLS.gh}#t3` }] },
+        { id: 'PRRT_4', path: 'src/d.ts', line: 2, resolved: true, comments: [{ author: 'bob', body: 'Done', url: `${URLS.gh}#t4` }] },
+        { id: 'PRRT_5', path: 'src/e.ts', line: 2, comments: [{ author: 'octocat', body: 'Note to self', url: `${URLS.gh}#t5` }] },
+      ],
+    });
+
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.threads).toEqual([
+      {
+        id: 'PRRT_1',
+        path: 'src/a.ts',
+        line: 10,
+        side: 'new',
+        code: 'const a = 1;',
+        changesRequested: true,
+        comments: [
+          { author: 'alice', body: 'Off by one', at: Date.parse('2026-11-01T10:00:00Z'), url: `${URLS.gh}#t1` },
+          { author: 'octocat', body: 'Fixed?', url: `${URLS.gh}#t1r` },
+        ],
+        canResolve: true,
+      },
+      { id: 'PRRT_2', path: 'src/b.ts', line: 4, side: 'old', comments: [{ author: 'bob', body: 'Why remove it?', url: `${URLS.gh}#t2` }], canResolve: true },
+      // Outdated: GitHub no longer places it on the diff.
+      { id: 'PRRT_3', path: 'src/c.ts', side: 'new', comments: [{ author: 'bob', body: 'Old news', url: `${URLS.gh}#t3` }], canResolve: false },
+    ]);
+  });
+
+  it('replies to and resolves a thread on GitHub, then reads the Merge request again', async () => {
+    const { machine, main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+
+    await main.api.invoke('sessions.replyToReviewThread', { id, thread: 'PRRT_1', body: '  Good catch:\nfixed in a & b  ' });
+    const mutation = graphql(machine).find((args) => args.some((a) => a.includes('addPullRequestReviewThreadReply')))!;
+    expect(mutation).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'thread=PRRT_1', 'body=Good catch:\nfixed in a & b']));
+    const replied = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.[0]?.comments.length === 2);
+    expect(sessionOf(replied, id).babysit!.threads![0]!.comments[1]).toMatchObject({ author: 'octocat', body: 'Good catch:\nfixed in a & b' });
+
+    await main.api.invoke('sessions.resolveReviewThread', { id, thread: 'PRRT_1' });
+    expect(graphql(machine).some((args) => args.some((a) => a.includes('resolveReviewThread')) && args.includes('thread=PRRT_1'))).toBe(true);
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.length === 0);
+    // The user's own reply wakes nobody.
+    await main.elapse(QUIET_WINDOW);
+    expect(await cardsOf(main, id)).toEqual([]);
+  });
+
+  it('reads threads from GitLab discussions, and replies to and resolves them through glab, in the working copy', async () => {
+    const { machine, main, id, checkout } = await babysat('glab', {
+      comments: [{ id: 1, author: 'carol', body: 'Overall fine' }],
+      threads: [
+        { id: 'abc123', path: 'lib/a.rb', line: 3, comments: [{ id: 7, author: 'carol', body: 'Rename it', createdAt: '2026-11-01T10:00:00Z' }] },
+        { id: 'def456', path: 'lib/b.rb', line: 8, side: 'old', comments: [{ id: 8, author: 'dave', body: 'Keep this' }] },
+        { id: 'fed789', path: 'lib/c.rb', line: 1, resolved: true, comments: [{ id: 9, author: 'dave', body: 'Done' }] },
+      ],
+    });
+    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.threads).toEqual([
+      { id: 'abc123', path: 'lib/a.rb', line: 3, side: 'new', comments: [{ author: 'carol', body: 'Rename it', at: Date.parse('2026-11-01T10:00:00Z'), url: `${URLS.glab}#note_7` }], canResolve: true },
+      { id: 'def456', path: 'lib/b.rb', line: 8, side: 'old', comments: [{ author: 'dave', body: 'Keep this', url: `${URLS.glab}#note_8` }], canResolve: true },
+    ]);
+
+    await main.api.invoke('sessions.replyToReviewThread', { id, thread: 'abc123', body: 'Renamed' });
+    await main.api.invoke('sessions.resolveReviewThread', { id, thread: 'def456' });
+    const invocations = machine.forgeCliInvocations('glab');
+    const discussion = 'projects/acme%2Floom/merge_requests/12/discussions';
+    const reply = invocations.findIndex((args) => args[1] === `${discussion}/abc123/notes`);
+    expect(invocations[reply]).toEqual(['api', `${discussion}/abc123/notes`, '--method', 'POST', '-f', 'body=Renamed']);
+    expect(invocations).toContainEqual(['api', `${discussion}/def456`, '--method', 'PUT', '-F', 'resolved=true']);
+    expect(machine.forgeCliCwds('glab')[reply]).toBe(checkout);
+    const after = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.length === 1 && sessionOf(list, id).babysit!.threads![0]!.comments.length === 2);
+    expect(sessionOf(after, id).babysit!.threads![0]!.comments[1]).toMatchObject({ author: 'octocat', body: 'Renamed' });
+  });
+
+  it('refuses an empty reply, a thread the Forge lacks or that names no thread, and an archived Session', async () => {
+    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    await expect(main.api.invoke('sessions.replyToReviewThread', { id, thread: 'PRRT_1', body: '  ' })).rejects.toThrow('The reply is empty.');
+    await expect(main.api.invoke('sessions.resolveReviewThread', { id, thread: 'PRRT_9' })).rejects.toThrow('Could not resolve to a node');
+    await expect(main.api.invoke('sessions.resolveReviewThread', { id, thread: '../../merge' })).rejects.toThrow("isn't a review thread");
+    await main.api.invoke('sessions.archive', { id });
+    await expect(main.api.invoke('sessions.resolveReviewThread', { id, thread: 'PRRT_1' })).rejects.toThrow('archived');
+  });
+});

@@ -12,12 +12,13 @@ import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type
 import { useApi } from './api';
 import type { DiffComments } from './Changes';
 import { MergeRequestDiffView } from './MergeRequestDiff';
+import type { ReviewNotes } from './ReviewNotes';
 import { useMergeRequestRead } from './merge-request-read';
 import { Markdown } from './Markdown';
 import { useNow } from './now';
 import { attempt } from './SessionDetails';
 import { SquashAndMergeDialog } from './SquashAndMerge';
-import { canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
+import { ago, Avatar, canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
 
 /** Where the Panel is asked to take the user: the link form, or the reviews and comments. `n` tells one ask from the next. */
 export interface MergeRequestFocus {
@@ -40,7 +41,8 @@ const VERDICTS: Record<ReviewVerdict, { label: string; className: string }> = {
  * The Merge request Panel of `session`, showing `tab`; `onTab` switches it.
  * What goes wrong running an action goes to `onError`; a new `focus` opens
  * the link form or scrolls to the reviews and comments. The Diff tab's lines
- * can be commented on while `comments` is given.
+ * can be commented on while `comments` is given, and show the review threads
+ * in `reviewNotes` as notes.
  */
 export function MergeRequestPanel({
   session,
@@ -49,6 +51,7 @@ export function MergeRequestPanel({
   tab,
   onTab,
   comments,
+  reviewNotes,
   onError,
 }: {
   session: Session;
@@ -57,6 +60,7 @@ export function MergeRequestPanel({
   tab: MergeRequestTab;
   onTab: (tab: MergeRequestTab) => void;
   comments?: DiffComments;
+  reviewNotes?: ReviewNotes;
   onError: (message: string | undefined) => void;
 }) {
   const api = useApi();
@@ -290,7 +294,7 @@ export function MergeRequestPanel({
         </div>
         {tab === 'diff' ? (
           <div className="mr-tab-view" role="tabpanel" id={`${ids}-diff`} aria-labelledby={`${ids}-tab-diff`}>
-            <MergeRequestDiffView session={session} forge={project?.forge.kind} generation={generation} comments={comments} onRefresh={refresh} />
+            <MergeRequestDiffView session={session} forge={project?.forge.kind} generation={generation} comments={comments} reviews={reviewNotes} onRefresh={refresh} />
           </div>
         ) : (
         <div role="tabpanel" id={`${ids}-overview`} aria-labelledby={`${ids}-tab-overview`}>
@@ -441,25 +445,6 @@ function CodeComment({ comment, onOpen }: { comment: MergeRequestComment; onOpen
       </div>
     </div>
   );
-}
-
-/** Someone's initials, standing in for their picture. */
-function Avatar({ name }: { name: string }) {
-  return (
-    <span className="avatar" aria-hidden="true">
-      {name.slice(0, 2).toUpperCase()}
-    </span>
-  );
-}
-
-/** "just now", "12 min ago", "3 h ago", "Yesterday", then the date. */
-function ago(at: number, now: number): string {
-  const minutes = Math.floor((now - at) / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`;
-  if (minutes < 48 * 60) return 'Yesterday';
-  return new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 /** A labelled switch: its name, whether it is on, and what that means, shown under it. */

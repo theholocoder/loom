@@ -25,6 +25,13 @@
 // view`, `api …/reviewers` (those of its `reviewers` in `requestedChanges`
 // asking for changes), `api …/commits` and `api …/diffs` for glab. And its Diff tab's:
 // `api …/pulls/<n>/files` for gh (the script's `files`), `api …/diffs` for glab.
+// And review threads (the script's `threads`): in the same `api graphql` for
+// gh, as GitLab discussions in `api …/discussions` for glab (each of the
+// script's `comments` a discussion of its own); replying to one (`api
+// graphql` with addPullRequestReviewThreadReply, `api …/discussions/<id>/notes
+// --method POST`) adds the viewer's comment to it, resolving one (`api graphql`
+// with resolveReviewThread, `api …/discussions/<id> --method PUT`) marks it
+// resolved, both written back to the script; one not in the script fails.
 // And Squash and merge: `pr merge <n>` / `mr merge <n>`, which fail like the
 // real CLI when the head commit given isn't the Merge request's `oid` or the
 // script has a `mergeRefusal`, and otherwise mark it merged in the script
@@ -67,6 +74,29 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
 } else if (args[0] === 'api' && script.offline) {
   process.stderr.write('error connecting to the Forge\n');
   process.exit(1);
+} else if (args[0] === 'api' && args[1] === 'graphql' && args.some((a) => a.startsWith('query=mutation'))) {
+  const query = args.find((a) => a.startsWith('query='));
+  const id = args.find((a) => a.startsWith('thread=')).slice('thread='.length);
+  const thread = (script.mergeRequests ?? []).flatMap((m) => m.threads ?? []).find((t) => t.id === id);
+  if (!thread) {
+    process.stderr.write(`GraphQL: Could not resolve to a node with the global id of '${id}'\n`);
+    process.exit(1);
+  }
+  if (query.includes('resolveReviewThread')) thread.resolved = true;
+  else thread.comments.push({ author: script.viewer ?? 'octocat', body: args.find((a) => a.startsWith('body=')).slice('body='.length) });
+  writeFileSync(scriptPath, JSON.stringify(script));
+  process.stdout.write(JSON.stringify({ data: {} }));
+} else if (args[0] === 'api' && /\/merge_requests\/\d+\/discussions\/[^/?]+(\/notes)?$/.test(args[1])) {
+  const [, id, notes] = /\/discussions\/([^/?]+)(\/notes)?$/.exec(args[1]);
+  const thread = (mergeRequestIn(args[1])?.threads ?? []).find((t) => t.id === id);
+  if (!thread) {
+    process.stderr.write('404 Not found\n');
+    process.exit(1);
+  }
+  if (notes) thread.comments.push({ author: script.viewer ?? 'octocat', body: args[args.indexOf('-f') + 1].slice('body='.length) });
+  else thread.resolved = true;
+  writeFileSync(scriptPath, JSON.stringify(script));
+  process.stdout.write('{}');
 } else if (args[0] === 'api' && args[1] === 'graphql') {
   const number = args.find((a) => a.startsWith('number=')).slice('number='.length);
   const found = (script.mergeRequests ?? []).find((m) => String(m.number) === number);
@@ -84,6 +114,10 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
 } else if (args[0] === 'api' && /\/merge_requests\/\d+\/notes(\?|$)/.test(args[1])) {
   const found = mergeRequestIn(args[1]);
   process.stdout.write(JSON.stringify((found.comments ?? []).map(asNote)));
+} else if (args[0] === 'api' && /\/merge_requests\/\d+\/discussions(\?|$)/.test(args[1])) {
+  const found = mergeRequestIn(args[1]);
+  const single = (found.comments ?? []).map((c) => ({ id: `d${c.id}`, individual_note: !c.path, notes: [asNote(c)] }));
+  process.stdout.write(JSON.stringify([...single, ...(found.threads ?? []).map(asDiscussion)]));
 } else if (args[0] === 'api' && /\/merge_requests\/\d+\/approvals$/.test(args[1])) {
   const found = mergeRequestIn(args[1]);
   process.stdout.write(JSON.stringify({ approved_by: (found.approvedBy ?? []).map((username) => ({ user: { username } })) }));
@@ -155,6 +189,31 @@ function asNote({ id, author, body, path, line, system = false, createdAt }) {
   return { id, body, system, author: { username: author }, ...(createdAt ? { created_at: createdAt } : {}), ...(path ? { type: 'DiffNote', position: { new_path: path, new_line: line } } : { type: null }) };
 }
 
+/** A scripted review thread as GitLab's discussions API returns it: its notes numbered from 1000 unless they say. */
+function asDiscussion({ id, path, line, side = 'new', resolved = false, canResolve = true, comments }, at) {
+  const position = side === 'old' ? { old_path: path, new_path: path, old_line: line ?? null, new_line: null } : { old_path: path, new_path: path, old_line: null, new_line: line ?? null };
+  return {
+    id,
+    individual_note: false,
+    notes: comments.map((c, n) => ({ id: c.id ?? 1000 + at * 100 + n, body: c.body, system: false, author: { username: c.author }, ...(c.createdAt ? { created_at: c.createdAt } : {}), type: 'DiffNote', position, resolvable: canResolve, resolved })),
+  };
+}
+
+/** A scripted review thread as Loom's GraphQL query gets it from GitHub. */
+function asThread({ id, path, line, side = 'new', outdated = false, resolved = false, canResolve = true, changesRequested = false, code, comments }) {
+  return {
+    id,
+    isResolved: resolved,
+    isOutdated: outdated,
+    path,
+    line: outdated ? null : (line ?? null),
+    originalLine: line ?? null,
+    diffSide: side === 'old' ? 'LEFT' : 'RIGHT',
+    viewerCanResolve: canResolve,
+    comments: { nodes: comments.map((c, n) => ({ body: c.body, url: c.url ?? `https://github.com/thread/${id}#${n}`, createdAt: c.createdAt ?? null, diffHunk: code === undefined ? '@@ -1,1 +1,1 @@' : `@@ -1,1 +1,1 @@\n${side === 'old' ? '-' : '+'}${code}`, author: c.author ? { login: c.author } : null, pullRequestReview: changesRequested && n === 0 ? { state: 'CHANGES_REQUESTED' } : { state: 'COMMENTED' } })) },
+  };
+}
+
 /** The state GitHub sums a commit's checks up as. */
 function rollupOf(checks) {
   if (checks.some((c) => (c.context ? c.state === 'PENDING' : (c.status ?? 'COMPLETED') !== 'COMPLETED'))) return 'PENDING';
@@ -162,7 +221,7 @@ function rollupOf(checks) {
 }
 
 /** A scripted Merge request as Loom's GraphQL query gets it from GitHub. */
-function asPullRequest({ number, url, branch, state = 'open', reviews = [], comments = [], checks = [], conflicts, oid = 'commit-1', rollupState, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', commits = 1, additions = 0, deletions = 0, changedFiles = 0, description = '', reviewers = [] }) {
+function asPullRequest({ number, url, branch, state = 'open', reviews = [], comments = [], threads = [], checks = [], conflicts, oid = 'commit-1', rollupState, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', commits = 1, additions = 0, deletions = 0, changedFiles = 0, description = '', reviewers = [] }) {
   return {
     number,
     url,
@@ -191,6 +250,7 @@ function asPullRequest({ number, url, branch, state = 'open', reviews = [], comm
       })),
     },
     comments: { nodes: comments.map((c) => ({ databaseId: c.id, body: c.body, url: c.url, createdAt: c.createdAt ?? null, author: c.author ? { login: c.author } : null })) },
+    reviewThreads: { nodes: threads.map(asThread) },
     commits: {
       nodes: [
         {

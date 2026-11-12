@@ -2,8 +2,9 @@
 // Forge's CLI and the user's login (ADR 0002): the open one whose source
 // branch is a given branch (`gh pr list --head`, `glab mr list
 // --source-branch`), or one by its number (`gh pr view`, `glab mr view`);
-// and squashing and merging one when the user asks (`gh pr merge`, `glab mr
-// merge`). Loom never creates a Merge request itself.
+// squashing and merging one when the user asks (`gh pr merge`, `glab mr
+// merge`); and replying to or resolving one of its review threads, as the
+// user asks from a note on the diff. Loom never creates a Merge request itself.
 import { FORGE_CLI, type ForgeKind, type ForgeLink, type ForgeStatus, type MergeRequestState } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 
@@ -57,6 +58,44 @@ export async function squashAndMerge(call: BridgeCall, forge: ForgeStatus | unde
       ? ['pr', 'merge', String(number), ...repo, '--squash', '--subject', title, '--match-head-commit', head]
       : ['mr', 'merge', String(number), '--squash', '--squash-message', title, '--sha', head, '--yes'];
   await runCli(call, kind, args, workingCopy, MERGE_TIMEOUT_MS);
+}
+
+/** What a review thread is named by: a GitHub node id, or a GitLab discussion id. */
+const THREAD_ID = /^[\w=-]+$/;
+
+/** Posts `body` as a reply in review thread `thread` of Merge request `number`; rejects with what the Forge said when it won't. */
+export async function replyToReviewThread(call: BridgeCall, forge: ForgeStatus | undefined, workingCopy: string, number: number, thread: string, body: string): Promise<void> {
+  const { kind } = threadForge(forge, thread);
+  // The reply is the user's own text, newlines, & and all: gh and glab install as executables, not .cmd shims.
+  const args =
+    kind === 'github'
+      ? ['api', 'graphql', '--hostname', forge!.host!, '-f', `query=${GITHUB_REPLY}`, '-f', `thread=${thread}`, '-f', `body=${body}`]
+      : ['api', `${gitLabDiscussion(forge!, number, thread)}/notes`, '--method', 'POST', '-f', `body=${body}`];
+  await runCli(call, kind, args, workingCopy, MERGE_REQUEST_TIMEOUT_MS);
+}
+
+/** Resolves review thread `thread` of Merge request `number`; rejects with what the Forge said when it won't. */
+export async function resolveReviewThread(call: BridgeCall, forge: ForgeStatus | undefined, workingCopy: string, number: number, thread: string): Promise<void> {
+  const { kind } = threadForge(forge, thread);
+  const args =
+    kind === 'github'
+      ? ['api', 'graphql', '--hostname', forge!.host!, '-f', `query=${GITHUB_RESOLVE}`, '-f', `thread=${thread}`]
+      : ['api', gitLabDiscussion(forge!, number, thread), '--method', 'PUT', '-F', 'resolved=true'];
+  await runCli(call, kind, args, workingCopy, MERGE_REQUEST_TIMEOUT_MS);
+}
+
+const GITHUB_REPLY = 'mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }';
+const GITHUB_RESOLVE = 'mutation($thread: ID!) { resolveReviewThread(input: { threadId: $thread }) { thread { isResolved } } }';
+
+function threadForge(forge: ForgeStatus | undefined, thread: string): { kind: ForgeKind } {
+  const { kind } = mergeRequestForge(forge);
+  if (!THREAD_ID.test(thread)) throw new Error(`${JSON.stringify(thread)} isn't a review thread of this Merge request.`);
+  return { kind };
+}
+
+/** The GitLab API path of a Merge request's discussion. */
+function gitLabDiscussion(forge: ForgeStatus, number: number, thread: string): string {
+  return `projects/${encodeURIComponent(forge.repository!)}/merge_requests/${number}/discussions/${thread}`;
 }
 
 /**

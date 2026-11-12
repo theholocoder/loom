@@ -2,15 +2,17 @@
 // what isn't committed yet, as a file tree (above the diffs in a narrow
 // Panel, beside them in a wide one) and unified per-file diffs loaded as they
 // are expanded or scrolled to, each line or range of which can be commented
-// on: a comment shows as a note on its lines until it is sent. It follows the
-// working copy as it changes, whoever changes it.
-import { ArrowRightToLine, ChevronDown, ChevronRight, CircleHelp, Columns2, Folder, GitBranch, ListTree, MessageSquareCode, RefreshCw, Rows2, SquarePen, WrapText, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, DIFF_SCOPES, diffCommentRange, type DiffBaseSource, type DiffComment, type DiffCounts, type DiffFile, type DiffScope, type DiffSummary, type DiffViewSettings, type FileDiff, type Session } from '../shared/api';
+// on: a comment shows as a note on its lines until it is sent, as does each
+// review thread of the Merge request Babysit last saw. It follows the working
+// copy as it changes, whoever changes it.
+import { ArrowRightToLine, ChevronDown, ChevronRight, CircleHelp, Columns2, Folder, GitBranch, ListTree, MessageSquare, MessageSquareCode, RefreshCw, Rows2, SquarePen, WrapText, X, type LucideIcon } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, DIFF_SCOPES, diffCommentRange, type DiffBaseSource, type DiffComment, type DiffCounts, type DiffFile, type DiffScope, type DiffSummary, type DiffViewSettings, type FileDiff, type ReviewThread, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
-import { FileDiffView, type Commenting } from './FileDiffView';
+import { FileDiffView, useFocusOnceShown, type Commenting, type LineNote } from './FileDiffView';
+import { askHead, askNote, ReviewNote, type ReviewNotes } from './ReviewNotes';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
 import { copyable } from './ContextMenu';
 
@@ -43,13 +45,13 @@ export interface DiffComments {
  * on each show after, at each turn end while shown, whenever the working copy
  * changes while shown, and on Refresh.
  */
-export function ChangesView({ session, comments }: { session: Session; comments?: DiffComments }) {
-  return <SessionDiff key={session.id} session={session} comments={comments} />;
+export function ChangesView({ session, comments, reviews }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes }) {
+  return <SessionDiff key={session.id} session={session} comments={comments} reviews={reviews} />;
 }
 
 type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; summary: DiffSummary };
 
-function SessionDiff({ session, comments }: { session: Session; comments?: DiffComments }) {
+function SessionDiff({ session, comments, reviews }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes }) {
   const api = useApi();
   const settings = useTopic('settings');
   const [view, changeView] = useDiffView(settings?.diffView);
@@ -121,6 +123,7 @@ function SessionDiff({ session, comments }: { session: Session; comments?: DiffC
           read={(file) => api.invoke('sessions.diffFile', { id: session.id, path: file.path, scope })}
           onOpenInEditor={readOnly ? undefined : (file) => void api.invoke('sessions.openInEditor', { id: session.id, file: file.path }).catch((error: unknown) => console.error(error))}
           comments={readOnly ? undefined : comments}
+          reviews={reviews}
           wide={wide}
           patterns={settings?.diffCollapsedPatterns ?? []}
           theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
@@ -239,13 +242,15 @@ export function DiffViewToggles({ view, onChange }: { view: DiffViewSettings; on
  * beside them when `wide`), and each file's diff, read with `read` as it is
  * expanded or scrolled to, and read again when `version` changes. Its lines
  * can be commented on while `comments` is given; each file opens in the
- * editor while `onOpenInEditor` is.
+ * editor while `onOpenInEditor` is. The review threads in `reviews` show as
+ * notes on their lines.
  */
 export function DiffFiles(props: {
   files: DiffFile[];
   read: (file: DiffFile) => Promise<FileDiff>;
   version: string;
   comments: DiffComments | undefined;
+  reviews?: ReviewNotes;
   onOpenInEditor?: (file: DiffFile) => void;
   wide: boolean;
   patterns: string[];
@@ -253,7 +258,7 @@ export function DiffFiles(props: {
   view: DiffViewSettings;
   onViewChange: (change: Partial<DiffViewSettings>) => void;
 }) {
-  const { files, patterns, view, wide, onViewChange } = props;
+  const { files, patterns, view, wide, onViewChange, reviews } = props;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
   const toggle = (file: DiffFile, open = !isExpanded(file)) => setExpanded((e) => ({ ...e, [file.path]: open }));
@@ -299,7 +304,7 @@ export function DiffFiles(props: {
               }}
             />
             {/* With no match, the diffs beside it say so. */}
-            {matching.length === 0 ? null : <FileTree files={matching} searching={needle !== ''} onPick={show} />}
+            {matching.length === 0 ? null : <FileTree files={matching} searching={needle !== ''} threads={reviews?.threads ?? []} onPick={show} />}
           </div>
         ) : null}
       </div>
@@ -348,8 +353,9 @@ function buildTree(files: DiffFile[]): TreeNode[] {
   return root.children;
 }
 
-function FileTree({ files, searching, onPick }: { files: DiffFile[]; searching: boolean; onPick: (file: DiffFile) => void }) {
+function FileTree({ files, searching, threads, onPick }: { files: DiffFile[]; searching: boolean; threads: ReviewThread[]; onPick: (file: DiffFile) => void }) {
   const tree = useMemo(() => buildTree(files), [files]);
+  const threadsOn = (file: DiffFile) => threads.filter((thread) => isOn(thread, file)).length;
   const [closed, setClosed] = useState<Set<string>>(new Set());
   // A search shows every match, so no folder is closed during one.
   const isClosed = (path: string) => !searching && closed.has(path);
@@ -360,6 +366,7 @@ function FileTree({ files, searching, onPick }: { files: DiffFile[]; searching: 
           <button type="button" className="diff-tree-row" style={{ paddingLeft: 10 + depth * 14 }} title={`${node.file.path} · ${statusLabel(node.file)}`} onClick={() => onPick(node.file!)} {...copyable('path', node.file.path)}>
             <StatusBadge file={node.file} />
             <span className="name">{node.name}</span>
+            <ThreadCount count={threadsOn(node.file)} />
             <Counts lines={node.file} />
           </button>
         </li>
@@ -394,6 +401,23 @@ function FileTree({ files, searching, onPick }: { files: DiffFile[]; searching: 
   );
 }
 
+/** How many review threads are on a file, in the file tree: none says nothing. */
+function ThreadCount({ count }: { count: number }) {
+  if (!count) return null;
+  const label = `${count} review ${count === 1 ? 'comment' : 'comments'}`;
+  return (
+    <span className="thread-count" title={label} aria-label={label}>
+      <MessageSquare className="sm" aria-hidden="true" />
+      {count}
+    </span>
+  );
+}
+
+/** Whether a review thread is on `file`: by its path, or its old one for a thread on a removed line. */
+function isOn(thread: ReviewThread, file: DiffFile): boolean {
+  return thread.path === file.path || (thread.side === 'old' && thread.path === file.oldPath);
+}
+
 /** What a file's badge says: deleted or renamed when it is, else where its change is. */
 function statusLabel(file: DiffFile): string {
   return file.change ?? STATUS_LABEL[file.status];
@@ -425,6 +449,7 @@ function FileSection({
   read,
   onOpenInEditor,
   comments,
+  reviews,
   expanded,
   onToggle,
   view,
@@ -438,6 +463,7 @@ function FileSection({
   onOpenInEditor?: (file: DiffFile) => void;
   /** Absent when the diff can't be commented on. */
   comments: DiffComments | undefined;
+  reviews?: ReviewNotes;
   expanded: boolean;
   onToggle: () => void;
   view: DiffViewSettings;
@@ -471,7 +497,9 @@ function FileSection({
     // `file` is compared by what identifies its diff.
   }, [file.path, file.oldPath, file.status, file.added, file.removed, file.change, expanded, visible, version]);
 
-  const commenting = useCommenting(file.path, text.state === 'done' ? text.text : undefined, comments);
+  const patch = text.state === 'done' ? text.text : undefined;
+  const { commenting, notes } = useCommenting(file.path, patch, comments);
+  const threads = patch === undefined ? { placed: [], elsewhere: [] } : reviewThreadNotes(file, patch, reviews, comments);
 
   return (
     <section className="diff-file" id={id} ref={ref} aria-label={file.path} hidden={hidden}>
@@ -498,7 +526,8 @@ function FileSection({
         </div>
       ) : text.state === 'done' ? (
         <>
-          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} view={view} commenting={commenting} /> : null}
+          {threads.elsewhere.length ? <div className="review-notes">{threads.elsewhere}</div> : null}
+          {hasHunks(text.text) ? <FileDiffView patch={text.text} theme={theme} view={view} commenting={commenting} notes={[...threads.placed, ...notes]} /> : null}
           {text.truncated ? <div className="diff-note">This diff is too large to show in full.</div> : null}
           {!text.truncated && !hasHunks(text.text) ? <div className="diff-note">No changes to its content.</div> : null}
         </>
@@ -510,13 +539,43 @@ function FileSection({
 }
 
 /**
+ * The review threads on `file`, whose diff is `patch`: those it still holds
+ * the line of, as notes under it, and the others, to show above the diff with
+ * where they are. Ask the agent on one under its line, while `comments` is
+ * given, comments on that line.
+ */
+function reviewThreadNotes(file: DiffFile, patch: string, reviews: ReviewNotes | undefined, comments: DiffComments | undefined): { placed: LineNote[]; elsewhere: ReactNode[] } {
+  const placed: LineNote[] = [];
+  const elsewhere: ReactNode[] = [];
+  for (const thread of reviews?.threads ?? []) {
+    if (!isOn(thread, file)) continue;
+    const range: LineRange | undefined = thread.line ? { start: thread.line, end: thread.line, side: thread.side === 'old' ? 'deletions' : 'additions' } : undefined;
+    const quote = range && quoteRange(file.path, patch, range);
+    // The line, as the diff holds it now, must read as it did: else the code has moved on under the thread.
+    const moved = quote !== undefined && thread.code !== undefined && quote.lines[0]!.slice(1) !== thread.code;
+    if (!quote || moved) {
+      const where = !thread.line ? 'on an outdated diff' : moved ? `on line ${thread.line}, which has changed since` : `on line ${thread.line}, which this diff doesn't show`;
+      elsewhere.push(<ReviewNote key={thread.id} thread={thread} notes={reviews!} where={where} />);
+      continue;
+    }
+    const { last, ...quoted } = quote;
+    const comment = { ...quoted, note: askNote(thread) };
+    // Asked once: the comment it made is on its way already, however it was edited or the thread went on since.
+    const asked = comments?.pending.some((p) => p.comment.path === comment.path && p.comment.note.startsWith(askHead(thread)));
+    const onAsk = comments && !asked ? () => comments.add(comment, range!) : undefined;
+    placed.push({ key: `review:${thread.id}`, at: last, note: <ReviewNote thread={thread} notes={reviews!} onAsk={onAsk} /> });
+  }
+  return { placed, elsewhere };
+}
+
+/**
  * Commenting on the file at `path`, whose diff is `patch`, while it can be:
  * the comment being written and its form, and the comments added, as notes
  * under their last line while the diff still holds the lines they quote. A
  * diff loaded again keeps the comment being written while it still holds the
  * same lines there.
  */
-function useCommenting(path: string, patch: string | undefined, comments: DiffComments | undefined): Commenting | undefined {
+function useCommenting(path: string, patch: string | undefined, comments: DiffComments | undefined): { commenting?: Commenting; notes: LineNote[] } {
   /** The comment being written: what its range quotes, and its range as picked. */
   const [draft, setDraft] = useState<{ quote: Quote; range: LineRange }>();
   useEffect(() => {
@@ -526,7 +585,7 @@ function useCommenting(path: string, patch: string | undefined, comments: DiffCo
       return quote && sameLines(quote, was.quote) ? { quote, range: was.range } : undefined;
     });
   }, [patch]);
-  if (!comments || patch === undefined) return undefined;
+  if (!comments || patch === undefined) return { notes: [] };
   const notes = comments.pending.flatMap(({ index, comment, range }) => {
     if (comment.path !== path) return [];
     const quote = quoteRange(path, patch, range);
@@ -536,20 +595,22 @@ function useCommenting(path: string, patch: string | undefined, comments: DiffCo
     const quote = quoteRange(path, patch, range);
     if (quote) setDraft({ quote, range });
   };
-  if (!draft) return { onStartComment, notes };
+  if (!draft) return { commenting: { onStartComment }, notes };
   const add = (note: string) => {
     const { last: _, ...quoted } = draft.quote;
     comments.add({ ...quoted, note }, draft.range);
     setDraft(undefined);
   };
   return {
-    onStartComment,
-    notes,
-    draft: {
-      range: draft.range,
-      at: draft.quote.last,
-      form: <CommentForm key={diffCommentRange(draft.quote)} quote={draft.quote} onAdd={add} onCancel={() => setDraft(undefined)} />,
+    commenting: {
+      onStartComment,
+      draft: {
+        range: draft.range,
+        at: draft.quote.last,
+        form: <CommentForm key={diffCommentRange(draft.quote)} quote={draft.quote} onAdd={add} onCancel={() => setDraft(undefined)} />,
+      },
     },
+    notes,
   };
 }
 
@@ -610,30 +671,6 @@ function CommentForm({ quote, onAdd, onCancel }: { quote: Quote; onAdd: (note: s
       </div>
     </div>
   );
-}
-
-/** How many frames a field waits to be shown before it gives up on taking the focus. */
-const FOCUS_FRAMES = 10;
-
-/**
- * Puts the focus in `field` as it mounts. The diff library shows what it is
- * given only once it has made a place for it in its shadow DOM, after React
- * mounts it: until then the field can't take the focus, so it is tried again
- * each frame until it does.
- */
-function useFocusOnceShown(field: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    let frame = 0;
-    let tries = 0;
-    const attempt = () => {
-      const el = field.current;
-      if (!el) return;
-      el.focus();
-      if (document.activeElement !== el && ++tries < FOCUS_FRAMES) frame = requestAnimationFrame(attempt);
-    };
-    attempt();
-    return () => cancelAnimationFrame(frame);
-  }, [field]);
 }
 
 /** Whether a patch changes any lines: one that only renames a file or changes its mode doesn't. */
