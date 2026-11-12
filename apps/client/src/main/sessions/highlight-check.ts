@@ -2,7 +2,7 @@
 // reads of the answer. The model sees the open Highlights and the turns since
 // the last check, never the whole conversation again, and answers with JSON:
 // Highlights to add, and open ones to resolve.
-import { isHighlightKind, type Highlight, type HighlightKind, type TranscriptItem } from '../../shared/api';
+import { isHighlightKind, toolLine, type Highlight, type HighlightKind, type TranscriptItem } from '../../shared/api';
 
 /** One turn as the check sees it: the user's message, what the agent said, and what it did. */
 export interface TurnDigest {
@@ -61,9 +61,11 @@ function lineOf(item: TranscriptItem): string | undefined {
     }
     case 'agent':
       return item.text.trim() ? `Agent: ${capped(item.text)}` : undefined;
-    case 'tool':
-      // Its name and what it acted on; its output is left out.
-      return `${item.toolKind ? `${item.toolKind} ` : ''}${oneLine(item.title)}${item.status === 'failed' ? ' (failed)' : ''}`;
+    case 'tool': {
+      // Its tool and what it acted on; its output is left out.
+      const { tool, what } = toolLine(item);
+      return `${tool}${what ? ` ${oneLine(what)}` : ''}${item.status === 'failed' ? ' (failed)' : ''}`;
+    }
     case 'question':
       return `Agent asked the user: ${capped(item.message)} (${item.state})`;
     case 'approval':

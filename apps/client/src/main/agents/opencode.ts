@@ -22,6 +22,8 @@ export const OPENCODE_ACP: AcpProfile = {
     OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: toolsOff ? NO_TOOLS : openCodePermission({ policy: approvals, workingCopy, tempDir }) }),
   }),
   ownTools: new Set(OPENCODE_TOOLS),
+  // OpenCode keeps its to-do list with a tool, and tells ACP nothing else of it.
+  planTool: 'todowrite',
 };
 const VERSION_TIMEOUT_MS = 10_000;
 // The bridge gives the probe 15 s; this leaves it room to answer.

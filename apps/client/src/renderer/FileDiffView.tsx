@@ -1,10 +1,10 @@
 // One file's diff, drawn by @pierre/diffs. The only module that imports the
-// library: everything else hands it a patch, the Loom theme and, to comment
-// on it, what to do with a range the "+" was pressed for. Colours other
-// than the code's own come from the Loom theme, through the library's CSS
-// variables on `.file-diff` in styles.css. Notes go under their lines,
-// whether the diff can be commented on or not.
-import { PatchDiff } from '@pierre/diffs/react';
+// library: everything else hands it a patch (or a file's texts before and
+// after), the Loom theme and, to comment on it, what to do with a range the
+// "+" was pressed for. Colours other than the code's own come from the Loom
+// theme, through the library's CSS variables on `.file-diff` in styles.css.
+// Notes go under their lines, whether the diff can be commented on or not.
+import { MultiFileDiff, PatchDiff } from '@pierre/diffs/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { DiffViewSettings } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
@@ -106,6 +106,26 @@ export function FileDiffView({
       {...(commentable ? { selectedLines: draft?.range ?? selection } : {})}
     />
   );
+}
+
+/**
+ * A file's change from its text before (empty for a new file) to its text
+ * after, as an agent's edit reports it: unified, wrapped, not commented on.
+ */
+export function TextDiffView({ path, oldText, newText, theme }: { path: string; oldText: string; newText: string; theme: Theme }) {
+  const options = useMemo(
+    () =>
+      ({
+        diffStyle: 'unified',
+        overflow: 'wrap',
+        lineDiffType: 'word',
+        disableFileHeader: true,
+        theme: SHIKI_THEMES[theme],
+        themeType: THEMES[theme].scheme,
+      }) as const,
+    [theme],
+  );
+  return <MultiFileDiff className="file-diff" oldFile={{ name: path, contents: oldText }} newFile={{ name: path, contents: newText }} options={options} />;
 }
 
 /** How many frames a field waits to be shown before it gives up on taking the focus. */

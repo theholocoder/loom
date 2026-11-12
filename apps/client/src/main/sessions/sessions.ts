@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -20,7 +20,7 @@ import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { WorkingCopyDiff } from './diff';
 import { createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
-import { capToolOutput } from './tool-output';
+import { capToolDiffs, capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
 import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict } from './approvals';
 import { checkAttachments, type Attachments } from './attachments';
@@ -188,6 +188,8 @@ export class Sessions {
   private readonly afterTurns = this.perSession<Promise<unknown>>();
   /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
   private readonly linkCalls = this.perSession<Set<string>>();
+  /** The plan card of each Session's run, by its item id, once the agent has given one. */
+  private readonly plans = this.perSession<number>();
   /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
   private readonly reportedCosts = this.perSession<number>();
   /** The auto-prompts each Session has been sent since the user's last message; none if absent. */
@@ -1785,6 +1787,9 @@ export class Sessions {
         return this.appendText(id, 'agent', event.text);
       case 'thinking-delta':
         return this.appendText(id, 'thinking', event.text);
+      case 'plan':
+        if (!this.inRun(id)) return;
+        return this.recordPlan(id, event.entries);
       case 'tool-started':
       case 'tool-updated':
         // A run's cards are settled when it ends; what comes after can't reopen them.
@@ -1868,7 +1873,7 @@ export class Sessions {
   /** The model the Session runs with: the one picked, or else the agent's own. */
   private modelOf(id: number): string {
     const session = this.get(id);
-    return session.model ?? session.agentConfig?.model ?? 'default';
+    return session.model ?? session.agentConfig?.model ?? DEFAULT_MODEL;
   }
 
   /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */
@@ -2181,7 +2186,9 @@ export class Sessions {
       if (!this.checkpoints.has(id)) this.checkpoints.set(id, this.options.clock.setTimeout(() => this.checkpoint(id), CHECKPOINT_MS));
     } else {
       this.endStreaming(id);
-      this.addItem(id, { kind, text, streaming: true });
+      // Which model said it: the one the run goes with, when Loom knows it.
+      const model = this.runModels.get(id);
+      this.addItem(id, { kind, text, streaming: true, ...(model && model !== DEFAULT_MODEL ? { model } : {}) });
     }
   }
 
@@ -2221,6 +2228,7 @@ export class Sessions {
     this.asks.delete(id);
     this.approvedCalls.delete(id);
     this.linkCalls.delete(id);
+    this.plans.delete(id);
     const items = this.transcript(id).value;
     if (!items.some(leftGoing)) return;
     const ended = items.map((i) => (!leftGoing(i) ? i : i.kind === 'tool' ? { ...i, status: 'failed' as const } : { ...i, state: 'expired' as const }));
@@ -2230,22 +2238,36 @@ export class Sessions {
 
   /**
    * Adds a tool call's card, or updates the one with its id wherever it is in
-   * the transcript, writing it at once. Its input and output are capped.
+   * the transcript, writing it at once. Its input, output and diffs are capped.
    */
   private recordTool(id: number, { type: _type, ...call }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
     const input = call.input === undefined ? undefined : capToolOutput(call.input);
     const output = call.output === undefined ? undefined : capToolOutput(call.output);
-    const changes = withoutUndefined({ ...call, input: input?.text, output: output?.text });
+    const diffs = call.diffs === undefined ? undefined : capToolDiffs(call.diffs);
+    const changes = withoutUndefined({ ...call, input: input?.text, output: output?.text, diffs: diffs?.diffs });
     const items = this.transcript(id).value;
     const at = items.findLastIndex((i) => i.kind === 'tool' && i.toolCallId === call.toolCallId);
     const card = items[at];
     // A card stays marked once cut: what's kept of it is still partial.
-    const truncated = (card?.kind === 'tool' && card.truncated) || input?.truncated || output?.truncated;
+    const truncated = (card?.kind === 'tool' && card.truncated) || input?.truncated || output?.truncated || diffs?.truncated;
     if (card?.kind !== 'tool') {
       this.endStreaming(id);
       return this.addItem(id, { kind: 'tool', title: 'Tool call', status: 'running', ...changes, ...(truncated ? { truncated } : {}) });
     }
     this.replaceItem(id, { ...card, ...changes, ...(truncated ? { truncated } : {}) });
+  }
+
+  /**
+   * Adds the run's plan card, or, the run having one, updates it: each plan
+   * the agent gives is the whole of it. An empty plan before any is no card.
+   */
+  private recordPlan(id: number, entries: PlanEntry[]): void {
+    const card = this.plans.get(id);
+    if (card !== undefined) return this.replaceItem(id, { kind: 'plan', id: card, entries });
+    if (entries.length === 0) return;
+    this.endStreaming(id);
+    this.plans.set(id, this.transcript(id).value.length);
+    this.addItem(id, { kind: 'plan', entries });
   }
 
   /** Puts `item` in place of the transcript item with its id, and writes it. */
@@ -2586,6 +2608,9 @@ function leftGoing(item: TranscriptItem): item is Extract<TranscriptItem, { kind
 function isStreamingText(item: TranscriptItem | undefined): item is Extract<TranscriptItem, { kind: 'agent' | 'thinking' }> {
   return (item?.kind === 'agent' || item?.kind === 'thinking') && item.streaming;
 }
+
+/** What usage is filed under when neither the user nor the agent named a model. */
+const DEFAULT_MODEL = 'default';
 
 function itemOf(row: EventsTable): TranscriptItem {
   return { ...(JSON.parse(row.data) as object), kind: row.kind, id: row.seq } as TranscriptItem;

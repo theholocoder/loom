@@ -170,6 +170,20 @@ describe('changing the model and Effort between runs', () => {
     expect(prompts).toEqual(['session/prompt', 'model=anthropic/claude-sonnet-5-5', 'effort=max', 'session/prompt', 'session/prompt']);
   });
 
+  it('notes on each reply the model that gave it', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['On Pulse.'] }, { chunks: ['On Sonnet.'] }]);
+    const { main, id } = await finishedSession(machine, checkout);
+
+    await main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' });
+    await main.api.invoke('sessions.send', { id, prompt: 'Second' });
+    const items = await waitFor(main.api, 'transcript', (all) => all.some((i) => i.kind === 'agent' && i.text === 'On Sonnet.' && !i.streaming), { sessionId: id });
+
+    expect(items.filter((i) => i.kind === 'agent').map((i) => (i.kind === 'agent' ? [i.text, i.model] : []))).toEqual([
+      ['On Pulse.', 'opencode/pulse-free'],
+      ['On Sonnet.', 'anthropic/claude-sonnet-5-5'],
+    ]);
+  });
+
   it("goes back to the new model's default Effort when the model changes", async () => {
     const { machine, checkout } = machineWith();
     const { main, id } = await finishedSession(machine, checkout);

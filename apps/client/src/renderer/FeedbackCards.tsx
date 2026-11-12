@@ -1,8 +1,8 @@
 // What Babysit found on the Session's Merge request, in its transcript: a card
 // of feedback the agent may need to act on, and quiet notes of progress.
-import { CircleCheckBig, GitMerge, GitPullRequestClosed, MessageSquareWarning, type LucideIcon } from 'lucide-react';
+import { CircleCheckBig, CircleX, Eye, GitMerge, GitPullRequestClosed, MessageSquare, type LucideIcon } from 'lucide-react';
 import { codePlace, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type EndedMergeRequestState, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
-import { AskCard, ErrorAlert, useAction } from './Questions';
+import { ErrorAlert, useAction } from './Questions';
 import { unsavedWorkSummary } from './Archive';
 
 const CI_LABELS: Record<BabysitCi, string> = { pending: 'CI pending', passed: 'CI passed', failed: 'CI failed' };
@@ -13,95 +13,144 @@ export const ENDED: Record<EndedMergeRequestState, { icon: LucideIcon; label: st
   closed: { icon: GitPullRequestClosed, label: 'Closed' },
 };
 
-/** The feedback, its CI status, Send to agent while it can be sent, and Open on Forge. */
+/**
+ * The feedback, in the style of the agent's tool calls: each item on one line,
+ * its places in the code taking Changes to their notes; its CI status, Send to
+ * agent while it can be sent, and Open on Forge.
+ */
 export function FeedbackCard({
   item,
   forge,
   readOnly,
   onSend,
   onOpen,
+  onShowPlace,
 }: {
   item: Extract<TranscriptItem, { kind: 'feedback' }>;
   forge: ForgeKind | undefined;
   readOnly: boolean;
   onSend: () => Promise<void>;
   onOpen: (url: string) => void;
+  /** Shows the file a comment is on in Changes, where its note is. */
+  onShowPlace: (path: string) => void;
 }) {
   const { busy, error, run } = useAction();
   const sent = item.state === 'sent';
+  const asked = !sent && !readOnly;
   const ref = mergeRequestRef(forge, item.number);
+  // A failed CI is an item of its own already.
+  const ci = item.ci && !item.items.some((entry) => entry.kind === 'ci-failed') ? CI_LABELS[item.ci] : undefined;
   return (
-    <AskCard label={`Feedback on Merge request ${ref}`} icon={<MessageSquareWarning className="sm" />} name={`Feedback on ${ref}`} asked={!sent && !readOnly} hint="New feedback from the Forge" state={sent ? 'Sent to the agent' : undefined}>
-      <ul className="feedback-items">
-        {item.items.map((entry, at) => (
-          <li key={at}>
-            <Entry entry={entry} onOpen={onOpen} />
-          </li>
-        ))}
-      </ul>
-      {item.ci && <p className="muted ask-hint">{CI_LABELS[item.ci]}</p>}
-      {item.paused && !sent && <p className="muted ask-hint">Auto-prompt paused after {MAX_AUTO_PROMPTS} attempts with no message from you. Sending this, or any message, starts it again.</p>}
-      <ErrorAlert error={error} />
-      <div className="opts">
-        {!sent && !readOnly && (
-          <button className="primary" type="button" disabled={busy} onClick={() => void run(onSend)}>
-            Send to agent
-          </button>
-        )}
-        <button type="button" onClick={() => onOpen(item.url)}>
-          Open on Forge
-        </button>
+    <div className="tools">
+      <div className={`tool feedback${asked ? ' asked' : ''}`} role="group" aria-label={`Feedback on Merge request ${ref}`}>
+        <div className="tool-head">
+          <Eye className="sm" />
+          <span className="tool-name">babysit</span>
+          <span className="grow muted tool-title">{`New feedback on Merge request ${ref}`}</span>
+          {sent && <span className="chip">Sent to the agent</span>}
+        </div>
+        <div className="tool-body">
+          <ul className="feedback-lines">
+            {item.items.map((entry, at) => (
+              <FeedbackLine key={at} entry={entry} onOpen={onOpen} onShowPlace={onShowPlace} />
+            ))}
+          </ul>
+          {ci && <p className="muted ask-hint">{ci}</p>}
+          {item.paused && !sent && <p className="muted ask-hint">Auto-prompt paused after {MAX_AUTO_PROMPTS} attempts with no message from you. Sending this, or any message, starts it again.</p>}
+          <ErrorAlert error={error} />
+          <div className="opts">
+            {asked && (
+              <button className="primary" type="button" disabled={busy} onClick={() => void run(onSend)}>
+                Send to agent
+              </button>
+            )}
+            <button type="button" onClick={() => onOpen(item.url)}>
+              Open on Forge
+            </button>
+          </div>
+        </div>
       </div>
-    </AskCard>
+    </div>
   );
 }
 
-function Entry({ entry, onOpen }: { entry: FeedbackItem; onOpen: (url: string) => void }) {
+/** One item of the feedback on one line, with its icon; what it says in full on hover. */
+function FeedbackLine({ entry, onOpen, onShowPlace }: { entry: FeedbackItem; onOpen: (url: string) => void; onShowPlace: (path: string) => void }) {
+  const places = (comments: Array<{ path: string; line?: number }>) =>
+    comments.map((comment, at) => (
+      <span key={at}>
+        {at > 0 && ', '}
+        <button type="button" className="feedback-link tech" onClick={() => onShowPlace(comment.path)}>
+          {codePlace(comment)}
+        </button>
+      </span>
+    ));
   switch (entry.kind) {
-    case 'review':
+    case 'review': {
+      const verdict = `${entry.author} ${entry.verdict === 'changes-requested' ? 'requested changes' : 'reviewed'}`;
+      const count = entry.comments.length;
       return (
-        <>
-          <Linked url={entry.url} onOpen={onOpen}>{`${entry.author} ${entry.verdict === 'changes-requested' ? 'requested changes' : 'reviewed'}`}</Linked>
-          {entry.excerpt && <p className="feedback-excerpt">{entry.excerpt}</p>}
-          {entry.comments.length > 0 && (
-            <ul className="feedback-items">
-              {entry.comments.map((comment) => (
-                <li key={comment.url}>
-                  <Linked url={comment.url} onOpen={onOpen} tech>{codePlace(comment)}</Linked>
-                  <p className="feedback-excerpt">{comment.excerpt}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
+        <li title={entry.excerpt || undefined}>
+          <MessageSquare className={`sm ${entry.verdict === 'changes-requested' ? 'tone-pending' : 'tone-accent'}`} />
+          <span className="feedback-line">
+            <Linked url={entry.url} onOpen={onOpen}>{verdict}</Linked>
+            {count > 0 ? (
+              <>
+                {`: ${count} ${count === 1 ? 'comment' : 'comments'} on `}
+                {places(entry.comments)}
+              </>
+            ) : (
+              entry.excerpt && <span className="muted">{`: ${entry.excerpt}`}</span>
+            )}
+          </span>
+        </li>
       );
+    }
     case 'comment':
       return (
-        <>
-          <Linked url={entry.url} onOpen={onOpen}>{`${entry.author} commented${entry.path ? ` on ${codePlace(entry)}` : ''}`}</Linked>
-          <p className="feedback-excerpt">{entry.excerpt}</p>
-        </>
+        <li title={entry.excerpt || undefined}>
+          <MessageSquare className="sm tone-accent" />
+          <span className="feedback-line">
+            <Linked url={entry.url} onOpen={onOpen}>{`${entry.author} commented`}</Linked>
+            {entry.path ? (
+              <>
+                {' on '}
+                {places([{ path: entry.path, ...(entry.line ? { line: entry.line } : {}) }])}
+              </>
+            ) : (
+              <span className="muted">{`: ${entry.excerpt}`}</span>
+            )}
+          </span>
+        </li>
       );
     case 'ci-failed':
       return (
-        <>
-          Failing checks:{' '}
-          {entry.checks.map((check, at) => (
-            <span key={check.name}>
-              {at > 0 && ', '}
-              {check.url ? (
-                <Linked url={check.url} onOpen={onOpen} tech>
-                  {check.name}
-                </Linked>
-              ) : (
-                <span className="tech">{check.name}</span>
-              )}
-            </span>
-          ))}
-        </>
+        <li>
+          <CircleX className="sm tone-failed" />
+          <span className="feedback-line">
+            {'CI failed: '}
+            {entry.checks.map((check, at) => (
+              <span key={check.name}>
+                {at > 0 && ', '}
+                {check.url ? (
+                  <Linked url={check.url} onOpen={onOpen} tech>
+                    {check.name}
+                  </Linked>
+                ) : (
+                  <span className="tech">{check.name}</span>
+                )}
+              </span>
+            ))}
+          </span>
+        </li>
       );
     case 'conflicts':
-      return <>Conflicts with its target branch</>;
+      return (
+        <li>
+          <GitMerge className="sm tone-failed" />
+          <span className="feedback-line">Conflicts with its target branch</span>
+        </li>
+      );
   }
 }
 

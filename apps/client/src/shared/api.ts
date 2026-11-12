@@ -1015,6 +1015,20 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export type ToolStatus = 'running' | 'completed' | 'failed';
 
+/**
+ * One file a tool call changed, as the agent reports it: its path, in the
+ * working copy when it is in there, its text before (none for a new file) and
+ * after; or, too large to keep (see TOOL_OUTPUT_CAP), only its path.
+ */
+export type ToolDiff = FileChange | { path: string; tooLarge: true };
+
+/** A file's text before (none for a new file) and after a change. */
+export interface FileChange {
+  path: string;
+  oldText?: string;
+  newText: string;
+}
+
 /** One choice of a `select` or `multiselect` question field. */
 export interface QuestionOption {
   /** What the answer holds when it is chosen. */
@@ -1081,17 +1095,40 @@ export type ApprovalState = 'asked' | 'approved' | 'approved-session' | 'denied'
 /** The user's decision on an Approval request. */
 export type ApprovalDecision = 'once' | 'session' | 'deny';
 
+/**
+ * How a tool call reads on one line: its tool (its name, or else its kind)
+ * and what it worked on (its command, its subject, or a title saying more
+ * than the tool's name), if anything.
+ */
+export function toolLine(call: Pick<Extract<TranscriptItem, { kind: 'tool' }>, 'name' | 'toolKind' | 'command' | 'subject' | 'title'>): { tool: string; what?: string } {
+  const tool = call.name ?? call.toolKind ?? 'tool';
+  const what = call.command ?? call.subject ?? (call.title === tool ? undefined : call.title);
+  return what === undefined ? { tool } : { tool, what };
+}
+
+/** Where one step of the agent's plan is; `cancelled` when it gave the step up. */
+export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+/** One step of the agent's plan: its to-do list for the turn. */
+export interface PlanEntry {
+  content: string;
+  status: PlanStatus;
+}
+
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
   /** What the user sent, with what they attached to it, if anything. */
   | { kind: 'user'; id: number; text: string; attachments?: Attachment[] }
-  /** `streaming` while the agent is still adding to it. */
-  | { kind: 'agent'; id: number; text: string; streaming: boolean }
-  /** The agent's thinking, apart from its reply; `streaming` as for `agent`. */
-  | { kind: 'thinking'; id: number; text: string; streaming: boolean }
+  /** `streaming` while the agent is still adding to it; `model` the one that said it, as `provider/model`, when Loom knows. */
+  | { kind: 'agent'; id: number; text: string; streaming: boolean; model?: string }
+  /** The agent's plan for its run, as it last gave it: one per run, kept up to date. */
+  | { kind: 'plan'; id: number; entries: PlanEntry[] }
+  /** The agent's thinking, apart from its reply; `streaming` and `model` as for `agent`. */
+  | { kind: 'thinking'; id: number; text: string; streaming: boolean; model?: string }
   /**
    * One tool call, kept up to date. Its `input` and `output` are capped at
-   * 256 KB each, keeping head and tail around a marker; `truncated` if cut.
+   * 256 KB each, keeping head and tail around a marker, and a diff over 256 KB
+   * is left out; `truncated` if cut.
    * A call still running when its run ended is `failed`.
    */
   | {
@@ -1100,9 +1137,17 @@ export type TranscriptItem =
       toolCallId: string;
       title: string;
       toolKind?: string;
+      /** The tool's own name, when the agent gives it: `bash`, `read`, `edit`. */
+      name?: string;
+      /** The command line, for a shell command. */
+      command?: string;
+      /** What it worked on, when the agent says: its files, or what it searched for or fetched. */
+      subject?: string;
       status: ToolStatus;
       input?: string;
       output?: string;
+      /** The files it changed, for an edit. */
+      diffs?: ToolDiff[];
       truncated?: boolean;
     }
   /**
