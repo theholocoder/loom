@@ -77,7 +77,7 @@ Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedb
 _Avoid_: Watch, monitor
 
 **Panel**:
-One tool shown in a tab beside an open **Session**'s conversation: Changes, the **Merge request**, **Highlights**, a **Terminal**. Each kind has its own size, wherever it sits, and every Terminal shares one.
+One tool shown in a tab beside an open **Session**'s conversation: Changes, the **Merge request**, the issue, **Highlights**, a **Terminal**. Each kind has its own size, wherever it sits, and every Terminal shares one.
 _Avoid_: Applet, widget, view, tab (the tab is only its handle)
 
 **Panel area**:

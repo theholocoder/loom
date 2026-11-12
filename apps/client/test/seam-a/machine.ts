@@ -144,8 +144,14 @@ export interface ForgeCliScript {
   authStatus?: Record<string, { stdout?: string; stderr?: string; exitCode: number }>;
   /** What `repo view --output json` prints and exits with (default: fails, not a repository). */
   repoView?: { stdout?: string | object; stderr?: string; exitCode?: number };
-  /** The open issues `issue list` lists. */
-  issues?: { number: number; title: string; body: string; url: string }[];
+  /**
+   * The issues on the Forge: `issue list` lists the open ones, and reading
+   * one (`api repos/…/issues/<n>`, `api projects/…/issues/<n>`) gives any
+   * of them, with its `state` (default open), labels, author, when it was
+   * opened and how many comments it has; `pullRequest` makes it one of
+   * GitHub's pull requests, which its issues API gives too.
+   */
+  issues?: { number: number; title: string; body: string; url: string; state?: 'open' | 'closed'; labels?: string[]; author?: string; createdAt?: string; comments?: number; pullRequest?: boolean }[];
   /** The Merge requests `pr`/`mr list` and `view` know of; `state` defaults to open, and `pr`/`mr merge` makes it merged. */
   mergeRequests?: ({ number: number; url: string; branch: string; state?: 'open' | 'merged' | 'closed' } & ScriptedActivity)[];
   /** The account signed in, whose comments are the user's own (default: `octocat`). */

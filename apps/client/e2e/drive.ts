@@ -96,7 +96,7 @@ machine.installForgeCli('gh', {
   signedInHosts: ['github.com'],
   repoView: { stdout: { nameWithOwner: 'acme/billing-api', url: 'https://github.com/acme/billing-api' } },
   issues: [
-    { number: 12, title: 'Invoices show the wrong currency', body: 'When a customer is in EU the currency is USD.', url: 'https://github.com/acme/billing-api/issues/12' },
+    { number: 12, title: 'Invoices show the wrong currency', body: 'When a customer is in EU the currency is USD.', url: 'https://github.com/acme/billing-api/issues/12', labels: ['bug'], author: 'aduval', createdAt: '2026-11-09T10:00:00Z', comments: 2 },
     { number: 15, title: 'Add CSV export', body: 'Export invoices to CSV.', url: 'https://github.com/acme/billing-api/issues/15' },
   ],
   mergeRequests: [

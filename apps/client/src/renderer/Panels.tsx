@@ -7,7 +7,7 @@
 // area takes every Panel of its kind there, in every Session. An area takes
 // the size of the Panel it shows. A Panel with a large work surface can take
 // the Session's main area instead, in Review mode.
-import { ChevronDown, Ellipsis, FileDiff, GitPullRequest, Maximize2, Minimize2, PanelBottom, PanelRight, Plus, Sparkles, SquareTerminal, X, type LucideIcon } from 'lucide-react';
+import { ChevronDown, CircleDot, Ellipsis, FileDiff, GitPullRequest, Maximize2, Minimize2, PanelBottom, PanelRight, Plus, Sparkles, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { Session, TerminalInfo } from '../shared/api';
 import {
@@ -82,6 +82,13 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
       if (!reviews) return undefined;
       return { text: String(reviews), description: `${countText(reviews, 'review')}${babysit.reviews!.changesRequested ? ', changes requested' : ''}` };
     },
+  },
+  issue: {
+    ...PANEL_SPECS.issue,
+    label: 'Issue',
+    icon: CircleDot,
+    // Like the Merge request's, it means nothing on a Session without one.
+    offered: (session) => !!session.issue,
   },
   highlights: {
     ...PANEL_SPECS.highlights,

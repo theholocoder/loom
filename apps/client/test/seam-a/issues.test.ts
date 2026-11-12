@@ -165,3 +165,94 @@ describe('linking an issue to a Session', () => {
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)?.issue).toBeUndefined();
   });
 });
+
+describe("the Issue Panel's read of the linked issue", () => {
+  const scripted = { ...loginBug, labels: ['bug', 'sso'], author: 'aduval', createdAt: '2026-11-09T10:00:00Z', comments: 2 };
+
+  it('reads its state, labels, title, author, age, comment count and body from GitHub', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['On it.'] }] } });
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'], issues: [scripted, { ...darkMode, state: 'closed' }] });
+    const { main, project } = await withProject(machine, machine.gitRepo('loom', { origin: 'https://github.com/theholocoder/loom.git' }));
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', issue: loginBug, prompt: '' });
+
+    expect(await main.api.invoke('sessions.issue', { id: created.id })).toEqual({
+      number: 31,
+      url: loginBug.url,
+      title: 'Fix the login bug',
+      state: 'open',
+      labels: ['bug', 'sso'],
+      author: 'aduval',
+      at: Date.parse('2026-11-09T10:00:00Z'),
+      comments: 2,
+      body: loginBug.body,
+    });
+    const read = machine.forgeCliInvocations('gh').findLast((args) => args[0] === 'api')!;
+    expect(read).toEqual(expect.arrayContaining(['repos/theholocoder/loom/issues/31', '--hostname', 'github.com']));
+
+    // One closed since is read all the same.
+    await main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 7, url: darkMode.url } });
+    expect(await main.api.invoke('sessions.issue', { id: created.id })).toMatchObject({ number: 7, state: 'closed', labels: [], comments: 0 });
+  });
+
+  it('reads it from GitLab through glab, in the working copy', async () => {
+    const { machine, checkout } = machineOn('glab', 'git@gitlab.example.org:acme/loom.git');
+    machine.installForgeCli('glab', { signedInHosts: ['gitlab.example.org'], issues: [scripted] });
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', issue: loginBug, prompt: '' });
+
+    expect(await main.api.invoke('sessions.issue', { id: created.id })).toEqual({
+      number: 31,
+      url: loginBug.url,
+      title: 'Fix the login bug',
+      state: 'open',
+      labels: ['bug', 'sso'],
+      author: 'aduval',
+      at: Date.parse('2026-11-09T10:00:00Z'),
+      comments: 2,
+      body: loginBug.body,
+    });
+    const at = machine.forgeCliInvocations('glab').findLastIndex((args) => args[0] === 'api');
+    expect(machine.forgeCliInvocations('glab')[at]).toEqual(['api', 'projects/acme%2Floom/issues/31']);
+    expect(machine.forgeCliCwds('glab')[at]).toBe(checkout);
+  });
+
+  it('rejects a Session with no issue, and says why the Forge could not answer', async () => {
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git');
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix SSO' });
+    await expect(main.api.invoke('sessions.issue', { id: created.id })).rejects.toThrow('This Session has no issue.');
+
+    await main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 99, url: 'https://github.com/theholocoder/loom/issues/99' } });
+    await expect(main.api.invoke('sessions.issue', { id: created.id })).rejects.toThrow('gh api repos/theholocoder/loom/issues/99 exited with code 1: gh: Not Found (HTTP 404)');
+  });
+
+  it("rejects one of GitHub's pull requests linked as an issue", async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [{ chunks: ['On it.'] }] } });
+    const pull = { number: 40, title: 'Fix SSO', body: '', url: 'https://github.com/theholocoder/loom/pull/40', pullRequest: true };
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'], issues: [pull] });
+    const { main, project } = await withProject(machine, machine.gitRepo('loom', { origin: 'https://github.com/theholocoder/loom.git' }));
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix SSO' });
+    await main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 40, url: pull.url } });
+
+    await expect(main.api.invoke('sessions.issue', { id: created.id })).rejects.toThrow('#40 is a pull request on GitHub, not an issue.');
+  });
+});
+
+describe('unlinking the issue from a Session', () => {
+  it('unlinks it, kept when main starts again', async () => {
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git');
+    const userDataDir = tempDir('loom-issues-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', issue: loginBug, prompt: '' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+
+    await main.api.invoke('sessions.unlinkIssue', { id: created.id });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.issue === undefined));
+    await main.close();
+
+    const again = await startMain({ machine, userDataDir });
+    expect((await again.api.invoke('sessions.list')).find((s) => s.id === created.id)?.issue).toBeUndefined();
+  });
+});

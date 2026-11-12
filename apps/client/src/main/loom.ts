@@ -345,6 +345,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.snooze': (params) => sessionService.snooze(params),
     'sessions.rename': (params) => sessionService.rename(params),
     'sessions.linkIssue': (params) => sessionService.linkIssue(params),
+    'sessions.unlinkIssue': (params) => sessionService.unlinkIssue(params),
+    'sessions.issue': (params) => sessionService.issue(params),
     'sessions.setPanels': ({ id, panels: state }) => {
       if (!sessionService.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
       return panels.set(id, state);
