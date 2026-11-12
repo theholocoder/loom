@@ -12,6 +12,7 @@ import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type
 import { useApi } from './api';
 import type { DiffComments } from './Changes';
 import { MergeRequestDiffView } from './MergeRequestDiff';
+import { useMergeRequestRead } from './merge-request-read';
 import { Markdown } from './Markdown';
 import { useNow } from './now';
 import { attempt } from './SessionDetails';
@@ -65,7 +66,7 @@ export function MergeRequestPanel({
   /** Moves on each refresh: the overview and the diff are read again. */
   const [generation, setGeneration] = useState(0);
   const refresh = () => setGeneration((n) => n + 1);
-  const read = useDetails(session, generation);
+  const read = useMergeRequestRead('sessions.mergeRequest', session, generation);
   const ids = useId();
   /** Set while the reviews are to be scrolled to: again once read, as what comes above them pushes them down. */
   const toReviews = useRef(false);
@@ -78,8 +79,8 @@ export function MergeRequestPanel({
     if (!toReviews.current) return;
     reviews.current?.focus({ preventScroll: true });
     reviews.current?.scrollIntoView?.({ block: 'start' });
-    if (read.details) toReviews.current = false;
-  }, [focus?.n, read.details, tab]);
+    if (read.value) toReviews.current = false;
+  }, [focus?.n, read.value, tab]);
   const ask = () => attempt(onError, () => api.invoke('sessions.requestMergeRequest', { id: session.id }));
   const linkForm = canAct && linking && <LinkMergeRequestForm session={session} onLinked={() => setLinking(false)} onCancel={() => setLinking(false)} />;
   const linkButton = canAct && (
@@ -112,7 +113,7 @@ export function MergeRequestPanel({
   }
 
   const ref = mergeRequestRef(project?.forge.kind, mergeRequest.number);
-  const details = read.details;
+  const details = read.value;
   const state = details?.state ?? session.mergeRequestState;
   // Babysit's checks are the latest; with Babysit off, the Panel's own read.
   const live = session.babysit?.checks;
@@ -341,33 +342,6 @@ export function MergeRequestPanel({
       {linkForm && <div className="mr-link">{linkForm}</div>}
     </div>
   );
-}
-
-/** What the Panel last read of the Session's Merge request, read again on a new link, after each Babysit poll, and on a new `generation`. */
-function useDetails(session: Session, generation: number): { details?: MergeRequestDetails; error?: string; loading: boolean; at?: number } {
-  const api = useApi();
-  const url = session.mergeRequest?.url;
-  const [read, setRead] = useState<{ url: string; details?: MergeRequestDetails; error?: string; at?: number }>();
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!url) return void setLoading(false);
-    let current = true;
-    setLoading(true);
-    api
-      .invoke('sessions.mergeRequest', { id: session.id })
-      .then((details) => current && setRead({ url, details, at: Date.now() }))
-      // What was read before stays, under why it couldn't be read again.
-      .catch((e: unknown) => current && setRead((was) => ({ url, details: was?.url === url ? was.details : undefined, at: was?.url === url ? was.at : undefined, error: (e as Error).message })))
-      .finally(() => current && setLoading(false));
-    return () => {
-      current = false;
-      // The read that replaces it, if any, says it is loading again.
-      setLoading(false);
-    };
-  }, [api, session.id, url, session.babysit?.lastPollAt, generation]);
-  // Not what was read of a Merge request linked before.
-  const mine = read?.url === url ? read : undefined;
-  return { details: mine?.details, error: mine?.error, at: mine?.at, loading };
 }
 
 /** One entry of the reviews and comments: a review, or a comment outside one. */

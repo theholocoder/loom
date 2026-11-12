@@ -2,10 +2,11 @@
 // Forge has it, drawn as the Changes Panel draws a diff (its file tree, its
 // layout toggles, comments to the agent on its lines), read when the tab
 // shows, again after each Babysit poll and on the Panel's refresh.
-import { useEffect, useRef, useState } from 'react';
-import { DEFAULT_SETTINGS, FORGE_NAMES, type DiffFile, type ForgeKind, type MergeRequestDiff, type Session } from '../shared/api';
-import { useApi, useTopic } from './api';
+import { useRef } from 'react';
+import { DEFAULT_SETTINGS, FORGE_NAMES, type DiffFile, type ForgeKind, type Session } from '../shared/api';
+import { useTopic } from './api';
 import { DiffFiles, DiffViewToggles, useDiffView, useWide, WIDE_CHANGES_PX, type DiffComments } from './Changes';
+import { useMergeRequestRead } from './merge-request-read';
 
 /**
  * The diff of `session`'s Merge request, read again when `generation`
@@ -16,9 +17,9 @@ export function MergeRequestDiffView({ session, forge, generation, comments, onR
   const [view, changeView] = useDiffView(settings?.diffView);
   const root = useRef<HTMLDivElement>(null);
   const wide = useWide(root, WIDE_CHANGES_PX);
-  const read = useMergeRequestDiff(session, generation);
+  const read = useMergeRequestRead('sessions.mergeRequestDiff', session, generation);
   const forgeName = forge ? FORGE_NAMES[forge] : 'the Forge';
-  const diff = read.diff;
+  const diff = read.value;
   const byPath = new Map(diff?.files.map((file) => [file.path, file]));
   return (
     <div className="changes mr-diff" ref={root}>
@@ -65,25 +66,4 @@ export function MergeRequestDiffView({ session, forge, generation, comments, onR
       )}
     </div>
   );
-}
-
-/** The diff last read of the Session's Merge request, read again on a new link, after each Babysit poll, and on a new `generation`. */
-function useMergeRequestDiff(session: Session, generation: number): { diff?: MergeRequestDiff; error?: string; at?: number } {
-  const api = useApi();
-  const url = session.mergeRequest?.url;
-  const [read, setRead] = useState<{ url: string; diff?: MergeRequestDiff; error?: string; at?: number }>();
-  useEffect(() => {
-    if (!url) return;
-    let current = true;
-    api.invoke('sessions.mergeRequestDiff', { id: session.id }).then(
-      (diff) => current && setRead({ url, diff, at: Date.now() }),
-      // What was read before stays, under why it couldn't be read again.
-      (e: unknown) => current && setRead((was) => ({ ...(was?.url === url ? was : { url }), error: (e as Error).message })),
-    );
-    return () => {
-      current = false;
-    };
-  }, [api, session.id, url, session.babysit?.lastPollAt, generation]);
-  // Not what was read of a Merge request linked before.
-  return read && read.url === url ? read : {};
 }

@@ -69,6 +69,7 @@ interface GitLabDiff {
 }
 
 async function readGitLab(call: BridgeCall, repository: string, workingCopy: string, number: number): Promise<MergeRequestDiffFile[]> {
+  // No & in an argument: see merge-request-activity.ts.
   const path = `projects/${encodeURIComponent(repository)}/merge_requests/${number}/diffs?per_page=${MAX_MERGE_REQUEST_DIFF_FILES}`;
   const listed = (await runJson(call, 'gitlab', ['api', path], workingCopy)) as GitLabDiff[];
   if (!Array.isArray(listed)) throw new Error(`GitLab listed something other than the diffs of merge request !${number}.`);

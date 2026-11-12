@@ -258,10 +258,10 @@ export function DiffFiles(props: {
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
   const toggle = (file: DiffFile, open = !isExpanded(file)) => setExpanded((e) => ({ ...e, [file.path]: open }));
   // Each diff on the page has its own ids: Changes and a Merge request's may show at once.
-  const ids = useId();
+  const prefix = useId();
   const show = (file: DiffFile) => {
     toggle(file, true);
-    document.getElementById(fileId(ids, file.path))?.scrollIntoView?.({ block: 'start' });
+    document.getElementById(fileId(prefix, file.path))?.scrollIntoView?.({ block: 'start' });
   };
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
@@ -307,7 +307,7 @@ export function DiffFiles(props: {
         {matching.length === 0 ? <div className="diff-note">No changed file matches “{query.trim()}”.</div> : null}
         {/* Filtered out rather than removed, so a diff needn't load again when it comes back. */}
         {files.map((file) => (
-          <FileSection key={file.path} {...props} id={fileId(ids, file.path)} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
+          <FileSection key={file.path} {...props} id={fileId(prefix, file.path)} file={file} hidden={!shown.has(file)} expanded={isExpanded(file)} onToggle={() => toggle(file)} />
         ))}
       </div>
     </div>
@@ -641,8 +641,8 @@ function hasHunks(patch: string): boolean {
   return patch.startsWith('@@') || patch.includes('\n@@');
 }
 
-function fileId(ids: string, path: string): string {
-  return `diff-file-${ids.replace(/:/g, '')}-${encodeURIComponent(path)}`;
+function fileId(prefix: string, path: string): string {
+  return `diff-file-${prefix.replace(/:/g, '')}-${encodeURIComponent(path)}`;
 }
 
 /** Whether a file starts collapsed: a binary, a large change, or one the patterns name. */

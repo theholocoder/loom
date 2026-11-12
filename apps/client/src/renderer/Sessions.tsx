@@ -389,7 +389,8 @@ export function SessionView({
   /** Shows the Merge request Panel, at its link form or its reviews when asked. */
   const showMergeRequest = (to?: MergeRequestFocus['to']) => {
     panels.show('merge-request');
-    if (to === 'reviews') setMergeRequestTab('overview');
+    // The reviews are on the Overview, which leaves Review mode.
+    if (to === 'reviews') showMergeRequestTab('overview');
     if (to) setMergeRequestFocus((was) => ({ to, n: (was?.n ?? 0) + 1 }));
   };
   /** Switches the Merge request Panel's tab: off its diff, it leaves Review mode. */

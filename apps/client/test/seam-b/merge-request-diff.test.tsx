@@ -197,6 +197,17 @@ describe("the Merge request Panel's Diff tab", () => {
     expect(within(sideArea()!).getByRole('tabpanel', { name: 'Overview' })).toBeTruthy();
   });
 
+  it('leaves Review mode for the Overview when its reviews are asked for', async () => {
+    renderApp({ sessions: [{ ...session, babysit: { stale: false, reviews: { reviews: 1, comments: 0, changesRequested: true } } }] });
+    await showDiff();
+    fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Review Merge request' }));
+    expect(reviewArea()).not.toBeNull();
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Session at a glance' })).getByRole('button', { name: '1 review, changes requested: show them' }));
+    expect(reviewArea()).toBeNull();
+    expect(within(sideArea()!).getByRole('tabpanel', { name: 'Overview' })).toBeTruthy();
+  });
+
   it('switches tabs with the arrow keys', async () => {
     renderApp();
     const overview = within(await screen.findByRole('tablist', { name: 'Merge request' })).getByRole('tab', { name: 'Overview' });

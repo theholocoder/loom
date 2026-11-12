@@ -853,21 +853,23 @@ export class Sessions {
 
   /** The Session's Merge request as its Forge has it now, read in its working copy, or the Project's checkout once that is gone. */
   async mergeRequest({ id }: { id: number }): Promise<MergeRequestDetails> {
-    return readMergeRequestDetails(...this.mergeRequestRead(this.get(id)));
+    const { call, forge, workingCopy, number } = this.mergeRequestRead(this.get(id));
+    return readMergeRequestDetails(call, forge, workingCopy, number);
   }
 
   /** The Session's Merge request's diff as its Forge has it now, read where `mergeRequest` reads it. */
   async mergeRequestDiff({ id }: { id: number }): Promise<MergeRequestDiff> {
-    return readMergeRequestDiff(...this.mergeRequestRead(this.get(id)));
+    const { call, forge, workingCopy, number } = this.mergeRequestRead(this.get(id));
+    return readMergeRequestDiff(call, forge, workingCopy, number);
   }
 
   /** What reading the Session's Merge request takes: its Environment, its Project's Forge, where glab runs and its number. */
-  private mergeRequestRead(session: Session): [BridgeCall, ForgeStatus | undefined, string, number] {
+  private mergeRequestRead(session: Session): { call: BridgeCall; forge: ForgeStatus | undefined; workingCopy: string; number: number } {
     if (!session.mergeRequest) throw new Error('This Session has no Merge request.');
     const project = this.options.project(session.projectId);
     if (!project) throw new Error("This Session's Project was removed.");
     const gone = session.status === 'archived' || session.worktreeMissing;
-    return [this.environmentOf(session).request, project.forge, gone ? project.checkout.path : session.workingCopy.path, session.mergeRequest.number];
+    return { call: this.environmentOf(session).request, forge: project.forge, workingCopy: gone ? project.checkout.path : session.workingCopy.path, number: session.mergeRequest.number };
   }
 
   /**
