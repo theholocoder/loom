@@ -138,6 +138,48 @@ describe('the Inbox', () => {
     }
   });
 
+  it('keeps the Inbox at the top, with Snoozed, Working and Archived together at the bottom, above the footer', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [
+          session({ title: 'Needs me' }),
+          session({ title: 'Later', snoozedUntil: NOW + 3_600_000 }),
+          session({ title: 'Busy', status: 'working', waitingReason: undefined }),
+          session({ title: 'Done long ago', status: 'archived', waitingReason: undefined }),
+        ],
+      }),
+    );
+    const card = within(inbox()).getByRole('listitem', { name: 'Needs me' });
+    const heads = ['Snoozed', 'Working', 'Archived'].map((name) => within(inbox()).getByRole('button', { name }));
+    const footer = within(inbox()).getByRole('navigation');
+    const follows = (a: Node, b: Node) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+    // In this order: the Inbox's cards, then each section, then the footer.
+    for (const [before, after] of [[card, heads[0]], [heads[0], heads[1]], [heads[1], heads[2]], [heads[2], footer]] as const) {
+      expect(follows(before!, after!)).toBe(true);
+    }
+    // The Inbox scrolls on its own, taking the space in between; the sections share the bottom block.
+    const bottom = heads[0]!.closest('.side-bottom');
+    expect(bottom).toBeTruthy();
+    expect(heads.every((head) => head.closest('.side-bottom') === bottom)).toBe(true);
+    expect(card.closest('.side-list')).toBeTruthy();
+    expect(bottom!.closest('.side-list')).toBeNull();
+    // Each is still collapsible.
+    fireEvent.click(heads[0]!);
+    expect(within(bottom as HTMLElement).getByRole('listitem', { name: 'Later' })).toBeTruthy();
+  });
+
+  it('labels the search box "Search…", its full name in the tooltip', () => {
+    renderApp(new FakeMain({ projects: [loom], sessions: [] }));
+
+    const search = within(inbox()).getByRole('button', { name: 'Search Sessions and actions' });
+
+    expect(search.getAttribute('title')).toBe('Search Sessions and actions');
+    expect(search.textContent).toBe('Search…Ctrl K');
+  });
+
   it('marks a Session read when it is opened, and lets Mark unread stick while it is shown', async () => {
     const unread = session({ title: 'News', unread: true });
     const main = renderApp(new FakeMain({ projects: [loom], sessions: [unread] }));

@@ -237,15 +237,13 @@ function Workspace() {
                   <PanelLeftClose />
                 </button>
               </div>
-              <button className="search" type="button" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
+              <button className="search" type="button" title="Search Sessions and actions" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
                 <Search />
-                <span>Search Sessions and actions</span>
+                <span>Search…</span>
                 <kbd>Ctrl K</kbd>
               </button>
             </div>
-            <div className="side-list">
-              <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
-            </div>
+            <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
             <ViewNav className="side-foot" view={view} onView={setView} />
           </aside>
         ) : (
