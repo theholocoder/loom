@@ -74,6 +74,7 @@ export function SessionHeader({
   menu,
   onShowChanges,
   onShowMergeRequest,
+  onShowIssue,
   onError,
   children,
 }: {
@@ -90,6 +91,8 @@ export function SessionHeader({
   onShowChanges: () => void;
   /** Shows the Merge request Panel, at its reviews and comments when asked. */
   onShowMergeRequest: (at?: 'reviews') => void;
+  /** Shows the Issue Panel. */
+  onShowIssue: () => void;
   onError: (message: string | undefined) => void;
   /** Rendered in the header: the dialogs its actions open. */
   children?: ReactNode;
@@ -221,7 +224,7 @@ export function SessionHeader({
           </button>
         </span>
         <ContextChip session={session} anchor={anchors.context} expanded={details === 'context'} onClick={() => toggleDetails('context')} />
-        <IssueChip session={session} project={project} open={popover?.kind === 'issue'} onPopover={onPopover} onError={onError} />
+        <IssueChip session={session} project={project} open={popover?.kind === 'issue'} onPopover={onPopover} onShow={onShowIssue} onError={onError} />
       </div>
     </>
   );
@@ -258,15 +261,29 @@ function ContextChip({ session, anchor, expanded, onClick }: { session: Session;
   );
 }
 
-/** The linked issue, opening it; or, while one can be linked, Link issue. */
-function IssueChip({ session, project, open, onPopover, onError }: { session: Session; project: Project | undefined; open: boolean; onPopover: (popover: HeaderPopover | undefined) => void; onError: (message: string | undefined) => void }) {
+/** The linked issue, showing its Panel; or, while one can be linked, Link issue. */
+function IssueChip({
+  session,
+  project,
+  open,
+  onPopover,
+  onShow,
+  onError,
+}: {
+  session: Session;
+  project: Project | undefined;
+  open: boolean;
+  onPopover: (popover: HeaderPopover | undefined) => void;
+  onShow: () => void;
+  onError: (message: string | undefined) => void;
+}) {
   const api = useApi();
   const trigger = useRef<HTMLButtonElement>(null);
   const { issue } = session;
   if (issue) {
     return (
       <span className="g-chip">
-        <button type="button" title={`Open issue #${issue.number}`} onClick={() => attempt(onError, () => api.invoke('links.open', { url: issue.url }))}>
+        <button type="button" title={`Issue #${issue.number}`} aria-controls="session-side" onClick={onShow}>
           <CircleDot className="sm" />
           <span className="tech">#{issue.number}</span>
         </button>

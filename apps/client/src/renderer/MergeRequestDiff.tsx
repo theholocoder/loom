@@ -7,7 +7,7 @@ import { useRef } from 'react';
 import { DEFAULT_SETTINGS, FORGE_NAMES, type DiffFile, type ForgeKind, type Session } from '../shared/api';
 import { useTopic } from './api';
 import { DiffFiles, DiffViewToggles, useDiffView, useWide, WIDE_CHANGES_PX, type DiffComments } from './Changes';
-import { useMergeRequestRead } from './merge-request-read';
+import { useMergeRequestRead } from './forge-read';
 import type { ReviewNotes } from './ReviewNotes';
 
 /**

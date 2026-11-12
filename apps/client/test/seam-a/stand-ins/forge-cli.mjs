@@ -10,7 +10,10 @@
 // invocation's cwd is appended to <script.json>.cwd.
 // And the issue picker's `issue list`: the script's open `issues`, filtered by
 // `--search` (case-insensitive, in title or body), printed as JSON the way the
-// CLI it stands in for (named by the script file, gh.json or glab.json) does.
+// CLI it stands in for (named by the script file, gh.json or glab.json) does;
+// and the Issue Panel's read of one in any state, `api repos/<owner>/<repo>/
+// issues/<n>` for gh and `api projects/<id>/issues/<n>` for glab, failing
+// with a 404 like the real API when the script has none.
 // And Merge request linking: `pr list --head <branch>` / `mr list
 // --source-branch <branch>` list the script's open `mergeRequests` on that
 // branch, and `pr view <n>` / `mr view <n>` print one of them in any state,
@@ -66,12 +69,28 @@ if (args[0] === 'auth' && args[1] === 'status' && args.includes('--hostname') &&
   }
 } else if (args[0] === 'issue' && args[1] === 'list') {
   const search = args.includes('--search') ? args[args.indexOf('--search') + 1].toLowerCase() : '';
-  const issues = (script.issues ?? []).filter((i) => !search || `${i.title}\n${i.body}`.toLowerCase().includes(search));
+  const issues = (script.issues ?? []).filter((i) => (i.state ?? 'open') === 'open' && (!search || `${i.title}\n${i.body}`.toLowerCase().includes(search)));
   const json =
     basename(scriptPath, '.json') === 'glab'
       ? issues.map((i) => ({ id: 9000 + i.number, iid: i.number, title: i.title, description: i.body, state: 'opened', web_url: i.url }))
       : issues.map((i) => ({ number: i.number, title: i.title, body: i.body, url: i.url }));
   process.stdout.write(JSON.stringify(json));
+} else if (args[0] === 'api' && /^(repos\/[^/]+\/[^/]+|projects\/[^/]+)\/issues\/\d+$/.test(args[1])) {
+  const number = Number(/\/issues\/(\d+)$/.exec(args[1])[1]);
+  const found = (script.issues ?? []).find((i) => i.number === number);
+  const glab = basename(scriptPath, '.json') === 'glab';
+  if (!found) {
+    process.stderr.write(glab ? '404 Not found\n' : 'gh: Not Found (HTTP 404)\n');
+    process.exit(1);
+  }
+  const { title, body, url, state = 'open', labels = [], author = 'octocat', createdAt = '2026-11-01T00:00:00Z', comments = 0, pullRequest = false } = found;
+  process.stdout.write(
+    JSON.stringify(
+      glab
+        ? { id: 9000 + number, iid: number, title, description: body, state: state === 'open' ? 'opened' : 'closed', labels, author: { username: author }, created_at: createdAt, user_notes_count: comments, web_url: url }
+        : { number, title, body, state, labels: labels.map((name, n) => ({ id: n + 1, name })), user: { login: author }, created_at: createdAt, comments, html_url: url, ...(pullRequest ? { pull_request: { html_url: url } } : {}) },
+    ),
+  );
 } else if (args[0] === 'api' && script.offline) {
   process.stderr.write('error connecting to the Forge\n');
   process.exit(1);

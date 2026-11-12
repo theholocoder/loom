@@ -13,7 +13,7 @@ import { useApi } from './api';
 import type { DiffComments } from './Changes';
 import { MergeRequestDiffView } from './MergeRequestDiff';
 import type { ReviewNotes } from './ReviewNotes';
-import { useMergeRequestRead } from './merge-request-read';
+import { useMergeRequestRead } from './forge-read';
 import { Markdown } from './Markdown';
 import { useNow } from './now';
 import { attempt } from './SessionDetails';

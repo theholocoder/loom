@@ -444,6 +444,22 @@ export interface Issue extends ForgeLink {
   body: string;
 }
 
+/** A Session's linked issue as its Panel shows it, read from the Project's Forge. */
+export interface IssueDetails extends ForgeLink {
+  title: string;
+  state: 'open' | 'closed';
+  /** Its labels' names, as the Forge orders them. */
+  labels: string[];
+  /** Who opened it: `ghost` for a deleted account. */
+  author: string;
+  /** When it was opened, as clock time; absent when the Forge gives no time. */
+  at?: number;
+  /** How many comments it has, not counting its body. */
+  comments: number;
+  /** Its description, as the Forge stores it (Markdown). */
+  body: string;
+}
+
 /**
  * What a worktree Session can start from, as `projects.branches` lists it
  * after fetching `origin`: a base for a new branch, an existing worktree to
@@ -1675,6 +1691,15 @@ export interface Commands {
    * http(s) link.
    */
   'sessions.linkIssue': { params: { id: number; issue: ForgeLink }; result: void };
+  /** Unlinks the Session's issue, if it has one, while its Project is there. */
+  'sessions.unlinkIssue': { params: { id: number }; result: void };
+  /**
+   * The Session's linked issue as its Forge has it now, for its Panel: its
+   * state, labels, title, author, age, comment count and body, whatever its
+   * state. Rejects with no issue linked, or the Project's Forge off or out of
+   * reach.
+   */
+  'sessions.issue': { params: { id: number }; result: IssueDetails };
   /**
    * Keeps a Session's Panels as the user left them: which are open in each
    * Panel area, the one shown and whether each area is shown. Its Terminals'

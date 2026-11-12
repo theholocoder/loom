@@ -10,6 +10,7 @@ import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
 import { ChangesView, type ChangesFocus, type DiffComments } from './Changes';
 import { highlightLine, HighlightsPanel } from './HighlightsPanel';
+import { IssuePanel } from './IssuePanel';
 import type { ReviewNotes } from './ReviewNotes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from './MergeRequestPanel';
@@ -628,6 +629,8 @@ export function SessionView({
             onError={setError}
           />
         );
+      case 'issue':
+        return <IssuePanel session={session} project={project} onUnlinked={() => panels.close('issue')} onError={setError} />;
       case 'highlights':
         return (
           <HighlightsPanel
@@ -665,6 +668,7 @@ export function SessionView({
         menu={menu}
         onShowChanges={() => panels.show('changes')}
         onShowMergeRequest={showMergeRequest}
+        onShowIssue={() => panels.show('issue')}
         onError={setError}
       >
         {archiver.dialog}

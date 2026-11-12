@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -13,6 +13,7 @@ import { diffCommentBlocks } from './diff-comment-prompt';
 import { feedbackPrompt } from './feedback-prompt';
 import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, replyToReviewThread, resolveReviewThread, squashAndMerge, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import { readMergeRequestDetails } from '../projects/merge-request-details';
+import { readIssue } from '../projects/issues';
 import { readMergeRequestDiff } from '../projects/merge-request-diff';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
@@ -912,10 +913,15 @@ export class Sessions {
   /** What reading the Session's Merge request takes: its Environment, its Project's Forge, where glab runs and its number. */
   private mergeRequestRead(session: Session): { call: BridgeCall; forge: ForgeStatus | undefined; workingCopy: string; number: number } {
     if (!session.mergeRequest) throw new Error('This Session has no Merge request.');
+    return { ...this.forgeRead(session), number: session.mergeRequest.number };
+  }
+
+  /** What reading from the Session's Forge takes: its Environment, its Project's Forge, and where glab runs (its working copy, or the Project's checkout once that is gone). */
+  private forgeRead(session: Session): { call: BridgeCall; forge: ForgeStatus | undefined; workingCopy: string } {
     const project = this.options.project(session.projectId);
     if (!project) throw new Error("This Session's Project was removed.");
     const gone = session.status === 'archived' || session.worktreeMissing;
-    return { call: this.environmentOf(session).request, forge: project.forge, workingCopy: gone ? project.checkout.path : session.workingCopy.path, number: session.mergeRequest.number };
+    return { call: this.environmentOf(session).request, forge: project.forge, workingCopy: gone ? project.checkout.path : session.workingCopy.path };
   }
 
   /**
@@ -1516,6 +1522,23 @@ export class Sessions {
     const link = { number: issue.number, url: issue.url };
     this.update(id, { issue: link });
     this.save(id, { issue_number: link.number, issue_url: link.url });
+  }
+
+  /** Unlinks the Session's issue, if it has one, while its Project is there. */
+  unlinkIssue({ id }: Commands['sessions.unlinkIssue']['params']): void {
+    const session = this.get(id);
+    if (!this.options.project(session.projectId)) throw new Error("This Session's Project was removed, so its issue can't be unlinked.");
+    if (!session.issue) return;
+    this.update(id, { issue: undefined });
+    this.save(id, { issue_number: null, issue_url: null });
+  }
+
+  /** The Session's linked issue as its Forge has it now, read where `forgeRead` says. */
+  async issue({ id }: Commands['sessions.issue']['params']): Promise<IssueDetails> {
+    const session = this.get(id);
+    if (!session.issue) throw new Error('This Session has no issue.');
+    const { call, forge, workingCopy } = this.forgeRead(session);
+    return readIssue(call, forge, workingCopy, session.issue.number);
   }
 
   /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */

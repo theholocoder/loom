@@ -1,8 +1,8 @@
 // The opt-in Forge contract suite: runs the user's real `gh` and `glab`
 // against sandbox repositories, checks Loom reads their output, records it
 // under recordings/, and checks seam A's scripted stand-in (stand-ins/
-// forge-cli.mjs) prints the same shape: the issue picker's list, and the
-// Merge request Panel's read of one. Skipped unless LOOM_FORGE_CONTRACT=1;
+// forge-cli.mjs) prints the same shape: the issue picker's list, the Issue
+// Panel's read of one issue, and the Merge request Panel's read of one. Skipped unless LOOM_FORGE_CONTRACT=1;
 // see the README's "Forge contract suite". Never point it at a real project:
 // it only reads, but it is meant for throwaway sandboxes with an open issue
 // and a Merge request.
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { listIssues } from '../../src/main/projects/issues';
+import { listIssues, readIssue } from '../../src/main/projects/issues';
 import { readMergeRequestDetails } from '../../src/main/projects/merge-request-details';
 import type { BridgeCall, ExecResult } from '../../src/main/environments/exec';
 import { FORGE_CLI, type ForgeKind } from '../../src/shared/api';
@@ -93,6 +93,31 @@ for (const kind of ['github', 'gitlab'] as const) {
       // gh prints exactly the fields asked for; glab prints many, of which the stand-in fakes those Loom reads.
       if (kind === 'github') expect(keysOf(scripted.stdout)).toEqual(keysOf(real.stdout));
       else expect(keysOf(real.stdout)).toEqual(expect.arrayContaining(keysOf(scripted.stdout)));
+    });
+
+    it('reads an issue as its Panel shows it, which the stand-in prints in the same shape', async () => {
+      const [first] = await listIssues(local, forge);
+      expect(first, 'the sandbox needs at least one open issue').toBeDefined();
+      // glab finds the repository from the working copy's remote, as in a Session's.
+      const workingCopy = mkdtempSync(join(tmpdir(), 'loom-forge-contract-'));
+      await run('git', ['init', '-q'], workingCopy);
+      await run('git', ['remote', 'add', 'origin', `https://${host}/${forge.repository}.git`], workingCopy);
+
+      ran.length = 0;
+      const issue = await readIssue(local, forge, workingCopy, first!.number);
+      expect(issue).toMatchObject({ number: first!.number, url: first!.url, title: first!.title, state: 'open' });
+      expect(issue.labels.every((label) => typeof label === 'string')).toBe(true);
+      expect(typeof issue.author).toBe('string');
+      expect(typeof issue.at).toBe('number');
+      expect(Number.isInteger(issue.comments)).toBe(true);
+      expect(typeof issue.body).toBe('string');
+
+      // What the read printed, recorded, then the stand-in's answer to the same command.
+      const read = ran.find(({ args }) => args[0] === 'api')!;
+      record(`${cli}-issue.json`, read.args, read.stdout);
+      const scripted = await standInRun(cli, { signedInHosts: [host], issues: [{ number: first!.number, title: 'T', body: 'B', url: 'https://example.org/1', labels: ['bug'] }] }, read.args);
+      // Both APIs print many fields, of which the stand-in fakes those Loom reads.
+      expect(Object.keys(JSON.parse(read.stdout) as object)).toEqual(expect.arrayContaining(Object.keys(JSON.parse(scripted.stdout) as object)));
     });
 
     it("reads a Merge request as its Panel shows it, description and reviewers too, which the stand-in prints in the same shape", async () => {
