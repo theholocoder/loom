@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -53,6 +53,8 @@ export interface SessionsOptions {
   models: (projectId: number) => Promise<ModelChoice[]>;
   /** Where the files attached to messages are kept. */
   attachments: Attachments;
+  /** A turn has ended, however it did: its transcript runs through item `throughItem`. For Session highlights. */
+  onTurnEnded?: (id: number, throughItem: number) => void;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -1295,6 +1297,19 @@ export class Sessions {
   }
 
   /** Says what Babysit last saw of the Session's Merge request. */
+  /** The Session's conversation so far. */
+  async transcriptItems(id: number): Promise<TranscriptItem[]> {
+    return (await this.loadTranscript(id)).value;
+  }
+
+  /** Records how many Highlights the Session has, as the Highlights service counts them; undefined while its Panel means nothing. */
+  setHighlightCounts(id: number, counts: HighlightCounts | undefined): void {
+    if (!this.sessions.has(id)) return;
+    const was = this.get(id).highlights;
+    if (was?.count === counts?.count && was?.unseen === counts?.unseen) return;
+    this.update(id, { highlights: counts });
+  }
+
   setBabysit(id: number, status: BabysitStatus | undefined): void {
     this.update(id, { babysit: status });
   }
@@ -1827,6 +1842,8 @@ export class Sessions {
 
   /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */
   private afterTurn(id: number): void {
+    const through = this.transcripts.get(id)?.value.at(-1)?.id;
+    if (through !== undefined) this.options.onTurnEnded?.(id, through);
     const looking = this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
     this.afterTurns.set(id, looking);
     void looking.finally(() => {

@@ -41,6 +41,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   sessions: [],
   transcript: [],
   panels: DEFAULT_SESSION_PANELS,
+  highlights: { highlights: [], seenThrough: 0, checking: false },
   terminals: [],
   terminalOutput: { data: new Uint8Array() },
   database: { state: 'ok' },
@@ -113,6 +114,12 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setHighlights': (highlights) => {
+        if (highlights.on && !highlights.model) throw new Error('Pick the model that checks Sessions for highlights before turning it on.');
+        const settings = { ...this.value('settings'), highlights };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setDiffView': (diffView) => {
         const settings = { ...this.value('settings'), diffView };
         this.publish('settings', settings);
@@ -175,6 +182,8 @@ export class FakeMain implements LoomApi {
       'sessions.snooze': () => {},
       'sessions.rename': () => {},
       'sessions.setPanels': ({ id, panels }) => this.publish('panels', panels, { sessionId: id }),
+      'sessions.resolveHighlight': () => {},
+      'sessions.seeHighlights': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
       'terminals.open': () => {

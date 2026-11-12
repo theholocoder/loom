@@ -45,13 +45,19 @@ export interface DiffComments {
  * on each show after, at each turn end while shown, whenever the working copy
  * changes while shown, and on Refresh.
  */
-export function ChangesView({ session, comments, reviews }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes }) {
-  return <SessionDiff key={session.id} session={session} comments={comments} reviews={reviews} />;
+/** A file Changes was asked to show; `n` counts the asks, so that the same file can be asked for again. */
+export interface ChangesFocus {
+  path: string;
+  n: number;
+}
+
+export function ChangesView({ session, comments, reviews, focus }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes; focus?: ChangesFocus }) {
+  return <SessionDiff key={session.id} session={session} comments={comments} reviews={reviews} focus={focus} />;
 }
 
 type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; summary: DiffSummary };
 
-function SessionDiff({ session, comments, reviews }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes }) {
+function SessionDiff({ session, comments, reviews, focus }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes; focus?: ChangesFocus }) {
   const api = useApi();
   const settings = useTopic('settings');
   const [view, changeView] = useDiffView(settings?.diffView);
@@ -130,6 +136,7 @@ function SessionDiff({ session, comments, reviews }: { session: Session; comment
           view={view}
           onViewChange={changeView}
           version={`${scope}:${refreshes}:${turnEnded}:${changed}`}
+          focus={focus}
         />
       )}
     </div>
@@ -257,8 +264,10 @@ export function DiffFiles(props: {
   theme: Theme;
   view: DiffViewSettings;
   onViewChange: (change: Partial<DiffViewSettings>) => void;
+  /** A file to show, expanded and scrolled to, once listed. */
+  focus?: ChangesFocus;
 }) {
-  const { files, patterns, view, wide, onViewChange, reviews } = props;
+  const { files, patterns, view, wide, onViewChange, reviews, focus } = props;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (file: DiffFile) => expanded[file.path] ?? !startsCollapsed(file, patterns);
   const toggle = (file: DiffFile, open = !isExpanded(file)) => setExpanded((e) => ({ ...e, [file.path]: open }));
@@ -268,6 +277,12 @@ export function DiffFiles(props: {
     toggle(file, true);
     document.getElementById(fileId(prefix, file.path))?.scrollIntoView?.({ block: 'start' });
   };
+  // Asked for, a file is shown once it's listed: matched on its path, or else as a path it ends with.
+  useEffect(() => {
+    if (!focus) return;
+    const file = files.find((f) => f.path === focus.path) ?? files.find((f) => f.path.endsWith(`/${focus.path}`));
+    if (file) show(file);
+  }, [focus, files]);
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
   const matching = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(needle)), [files, needle]);

@@ -73,7 +73,7 @@ Loom watching a **Session**'s open **Merge request** on the **Forge**: new feedb
 _Avoid_: Watch, monitor
 
 **Panel**:
-One tool shown in a tab beside an open **Session**'s conversation: Changes, the **Merge request**, a **Terminal**. Each kind has its own size, wherever it sits, and every Terminal shares one.
+One tool shown in a tab beside an open **Session**'s conversation: Changes, the **Merge request**, **Highlights**, a **Terminal**. Each kind has its own size, wherever it sits, and every Terminal shares one.
 _Avoid_: Applet, widget, view, tab (the tab is only its handle)
 
 **Panel area**:
@@ -101,6 +101,13 @@ _Avoid_: Session info
 **Review mode**:
 A **Panel** with a large work surface (Changes, the **Merge request**'s diff) taking the main area of the **Session**, the conversation narrowed beside it, until the user leaves it. The **Side area** is hidden meanwhile.
 _Avoid_: Fullscreen, zen mode
+
+**Highlight**:
+Something the user should know about a **Session**'s work, which **Session highlights** noted after a turn: something left for them to do, something not done, a risk, an assumption or a decision. Never rewritten: only resolved (by the model, saying why, or by the user) or reopened. A record, not an alert: a new one doesn't make the Session **Waiting**. They are shown in the Session's **Highlights** **Panel**.
+_Avoid_: Note (a review comment on a diff line), summary, notification
+
+**Session highlights**:
+The setting that has a model of the user's picking, usually a cheap one, check each turn of every **Session** for **Highlights**, as a conversation of its own with every tool refused. Off until turned on with a model. Its usage counts on the dashboard under its model, but isn't the Session's own.
 
 **Terminal**:
 A shell in a **Panel**, run by the **Session**'s **Environment** in its working copy. A Session can have several. They keep running when another Session is shown, and end when closed, when their shell exits, when the Session is archived or when Loom quits. None outlives Loom. "Open in terminal" is different: it opens the working copy in the user's own terminal app.

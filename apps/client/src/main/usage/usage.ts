@@ -19,11 +19,15 @@ export interface TurnUsage {
   cost: number;
 }
 
-/** Adds a turn's usage to its Session × day × model bucket. */
-export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage): Promise<void> {
+/**
+ * Adds a turn's usage to its Session × day × model bucket: the Session's own
+ * (`usage_buckets`), or its Session highlights' checks' (`highlight_usage`).
+ */
+export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage, table: 'usage_buckets' | 'highlight_usage' = 'usage_buckets'): Promise<void> {
   const { tokens, cost } = turn;
-  await trx
-    .insertInto('usage_buckets')
+  // Both tables have the same columns; the builder is typed for one of them.
+  await (trx as unknown as Transaction<Pick<Schema, 'usage_buckets'>>)
+    .insertInto(table as 'usage_buckets')
     .values({
       session_id: turn.sessionId,
       day: dayOf(turn.endedAt),
@@ -38,15 +42,18 @@ export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage): Pro
       cost,
     })
     .onConflict((oc) =>
-      oc.columns(['session_id', 'day', 'model']).doUpdateSet((eb) => ({
-        project_name: eb.ref('excluded.project_name'),
-        input_tokens: eb('usage_buckets.input_tokens', '+', eb.ref('excluded.input_tokens')),
-        output_tokens: eb('usage_buckets.output_tokens', '+', eb.ref('excluded.output_tokens')),
-        cache_read_tokens: eb('usage_buckets.cache_read_tokens', '+', eb.ref('excluded.cache_read_tokens')),
-        cache_write_tokens: eb('usage_buckets.cache_write_tokens', '+', eb.ref('excluded.cache_write_tokens')),
-        reasoning_tokens: eb('usage_buckets.reasoning_tokens', '+', eb.ref('excluded.reasoning_tokens')),
-        cost: eb('usage_buckets.cost', '+', eb.ref('excluded.cost')),
-      })),
+      oc.columns(['session_id', 'day', 'model']).doUpdateSet((eb) => {
+        const column = (name: 'input_tokens' | 'output_tokens' | 'cache_read_tokens' | 'cache_write_tokens' | 'reasoning_tokens' | 'cost') => eb(`${table as 'usage_buckets'}.${name}`, '+', eb.ref(`excluded.${name}`));
+        return {
+          project_name: eb.ref('excluded.project_name'),
+          input_tokens: column('input_tokens'),
+          output_tokens: column('output_tokens'),
+          cache_read_tokens: column('cache_read_tokens'),
+          cache_write_tokens: column('cache_write_tokens'),
+          reasoning_tokens: column('reasoning_tokens'),
+          cost: column('cost'),
+        };
+      }),
     )
     .execute();
 }
@@ -79,8 +86,9 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   const from = dayList[0]!;
   const to = dayList.at(-1)!;
 
-  const [buckets, sessions, spans, removedRows] = await Promise.all([
+  const [sessionBuckets, highlightBuckets, sessions, spans, removedRows] = await Promise.all([
     db.selectFrom('usage_buckets').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
+    db.selectFrom('highlight_usage').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('sessions').selectAll().execute(),
     db.selectFrom('session_spans').selectAll().where('ended_at', '>=', since).where('ended_at', '<=', now).execute(),
     db.selectFrom('projects').select('id').where('removed_at', 'is not', null).execute(),
@@ -96,6 +104,8 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   const projectNames = new Map<number, { name: string; day: string }>();
   const perModel = new Map<string, number>();
   const perSession = new Map<number, { tokens: number; projectId: number; byModel: Map<string, number> }>();
+  // Session highlights' checks count as usage like any other, but are no Session's own: left out of the top Sessions.
+  const buckets = [...sessionBuckets.map((b) => ({ ...b, own: true })), ...highlightBuckets.map((b) => ({ ...b, own: false }))];
   for (const b of buckets) {
     const tokens = b.input_tokens + b.output_tokens + b.cache_read_tokens + b.cache_write_tokens + b.reasoning_tokens;
     mix.input += b.input_tokens;
@@ -111,6 +121,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     const named = projectNames.get(b.project_id);
     if (!named || named.day < b.day) projectNames.set(b.project_id, { name: b.project_name, day: b.day });
     add(perModel, b.model, tokens);
+    if (!b.own) continue;
     let s = perSession.get(b.session_id);
     if (!s) perSession.set(b.session_id, (s = { tokens: 0, projectId: b.project_id, byModel: new Map() }));
     s.tokens += tokens;

@@ -7,7 +7,7 @@
 // area takes every Panel of its kind there, in every Session. An area takes
 // the size of the Panel it shows. A Panel with a large work surface can take
 // the Session's main area instead, in Review mode.
-import { ChevronDown, Ellipsis, FileDiff, GitPullRequest, Maximize2, Minimize2, PanelBottom, PanelRight, Plus, SquareTerminal, X, type LucideIcon } from 'lucide-react';
+import { ChevronDown, Ellipsis, FileDiff, GitPullRequest, Maximize2, Minimize2, PanelBottom, PanelRight, Plus, Sparkles, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { Session, TerminalInfo } from '../shared/api';
 import {
@@ -82,6 +82,14 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
       if (!reviews) return undefined;
       return { text: String(reviews), description: `${countText(reviews, 'review')}${babysit.reviews!.changesRequested ? ', changes requested' : ''}` };
     },
+  },
+  highlights: {
+    ...PANEL_SPECS.highlights,
+    label: 'Highlights',
+    icon: Sparkles,
+    // Session highlights on, or Highlights kept from when it was.
+    offered: (session) => !!session.highlights,
+    badge: ({ highlights }) => (highlights?.unseen ? { text: String(highlights.unseen), description: `${highlights.unseen} new ${highlights.unseen === 1 ? 'highlight' : 'highlights'}` } : undefined),
   },
   terminal: { ...PANEL_SPECS.terminal, label: 'Terminal', icon: SquareTerminal, offered: (session) => canRunTerminals(session) },
 };

@@ -7,7 +7,7 @@ import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentCommand,
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { AcpProfile } from './acp-adapter';
 import { agentCommandsOf } from './commands';
-import { OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
+import { NO_TOOLS, OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
 
 /**
  * Sessions run on `opencode acp`, one process each, with Loom's approval
@@ -18,7 +18,9 @@ export const OPENCODE_ACP: AcpProfile = {
   name: OPENCODE_NAME,
   command: 'opencode',
   args: ['acp'],
-  env: ({ approvals, workingCopy, tempDir }) => ({ OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: openCodePermission({ policy: approvals, workingCopy, tempDir }) }) }),
+  env: ({ approvals, workingCopy, tempDir, toolsOff }) => ({
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: toolsOff ? NO_TOOLS : openCodePermission({ policy: approvals, workingCopy, tempDir }) }),
+  }),
   ownTools: new Set(OPENCODE_TOOLS),
 };
 const VERSION_TIMEOUT_MS = 10_000;

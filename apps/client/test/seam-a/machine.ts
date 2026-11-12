@@ -47,6 +47,12 @@ export interface OpencodeScript {
     images?: boolean;
     /** What a process that resumed or loaded a session plays instead of `turns`. */
     resumedTurns?: AcpTurn[];
+    /**
+     * What Session highlights' checks play, one per check across processes
+     * (a process with every tool denied is one); past the end, an answer
+     * with nothing to add.
+     */
+    highlightTurns?: AcpTurn[];
     /** The ways of taking up a session each process turns down, as OpenCode does one it doesn't know. */
     refuse?: Array<'session/resume' | 'session/load'>;
   };

@@ -221,4 +221,45 @@ export const migrations: Migration[] = [
       // Unreadable: the Layout reads it as unset.
     }
   },
+  async (db) => {
+    // Session highlights (ADR 0010): each Session's Highlights, and how far its turns have been checked.
+    await db.schema
+      .createTable('highlights')
+      .addColumn('id', 'integer', (c) => c.primaryKey().autoIncrement())
+      .addColumn('session_id', 'integer', (c) => c.notNull().references('sessions.id').onDelete('cascade'))
+      .addColumn('kind', 'text', (c) => c.notNull())
+      .addColumn('text', 'text', (c) => c.notNull())
+      .addColumn('item_id', 'integer', (c) => c.notNull())
+      .addColumn('created_at', 'integer', (c) => c.notNull())
+      .addColumn('resolved_by', 'text')
+      .addColumn('resolved_reason', 'text')
+      .addColumn('resolved_item_id', 'integer')
+      .addColumn('resolved_at', 'integer')
+      .execute();
+    await db.schema.createIndex('highlights_session').on('highlights').column('session_id').execute();
+    await db.schema
+      .createTable('highlight_checks')
+      .addColumn('session_id', 'integer', (c) => c.primaryKey().references('sessions.id').onDelete('cascade'))
+      .addColumn('checked_through', 'integer', (c) => c.notNull())
+      .addColumn('seen_through', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('error', 'text')
+      .execute();
+    // Their checks' usage, apart from the Sessions' own: like usage_buckets, it outlives the Session and its Project.
+    await db.schema
+      .createTable('highlight_usage')
+      .addColumn('session_id', 'integer', (c) => c.notNull())
+      .addColumn('day', 'text', (c) => c.notNull())
+      .addColumn('model', 'text', (c) => c.notNull())
+      .addColumn('project_id', 'integer', (c) => c.notNull())
+      .addColumn('project_name', 'text', (c) => c.notNull())
+      .addColumn('input_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('output_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_read_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addPrimaryKeyConstraint('highlight_usage_pk', ['session_id', 'day', 'model'])
+      .execute();
+    await db.schema.createIndex('highlight_usage_day').on('highlight_usage').column('day').execute();
+  },
 ];

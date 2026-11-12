@@ -1,6 +1,6 @@
 // The database's typed schema, as of the latest migration.
 import type { Generated } from 'kysely';
-import type { MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
+import type { HighlightKind, MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
 
 export interface SettingsTable {
   key: string;
@@ -154,6 +154,32 @@ export interface SessionPanelsTable {
   state: string;
 }
 
+/** A Session's Highlight (shared/api's Highlight): the resolution's columns all null while open. */
+export interface HighlightsTable {
+  id: Generated<number>;
+  session_id: number;
+  kind: HighlightKind;
+  text: string;
+  /** The transcript item the turn it came from starts at. */
+  item_id: number;
+  created_at: number;
+  resolved_by: 'model' | 'user' | null;
+  resolved_reason: string | null;
+  resolved_item_id: number | null;
+  resolved_at: number | null;
+}
+
+/** How far a Session's turns have been checked for Highlights, and what the user has seen of them. */
+export interface HighlightChecksTable {
+  session_id: number;
+  /** The last transcript item a check covered, or that was left unchecked (Session highlights off); -1 for none. */
+  checked_through: number;
+  /** The greatest Highlight id the user has seen in the Panel. */
+  seen_through: number;
+  /** Why the last check failed; null once one succeeds. */
+  error: string | null;
+}
+
 export interface Schema {
   settings: SettingsTable;
   projects: ProjectsTable;
@@ -165,4 +191,8 @@ export interface Schema {
   session_spans: SessionSpansTable;
   babysit: BabysitTable;
   session_panels: SessionPanelsTable;
+  highlights: HighlightsTable;
+  highlight_checks: HighlightChecksTable;
+  /** Session highlights' checks' usage, by Session × day × model: as usage_buckets, but no Session's own. */
+  highlight_usage: UsageBucketsTable;
 }

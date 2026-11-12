@@ -1,8 +1,10 @@
-import { CircleCheckBig, CircleX, CodeXml, FolderTree, GitPullRequestArrow, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, Timer, TriangleAlert } from 'lucide-react';
+import { CircleCheckBig, CircleX, CodeXml, FolderTree, GitPullRequestArrow, LoaderCircle, Palette, RotateCw, Server, ShieldAlert, Sparkles, Timer, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { APPROVAL_CATEGORIES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, type AgentStatus, type ApprovalCategory, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
+import { APPROVAL_CATEGORIES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { useCheckoutModels } from './checkout';
+import { effortsOf, ModelPickers } from './ModelPicker';
 import { Select } from './Popover';
 import { ErrorAlert } from './Questions';
 
@@ -69,6 +71,13 @@ export function Settings() {
           <h3>Merge request feedback</h3>
         </div>
         <AutoPromptDefault />
+      </div>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <Sparkles className="sm" />
+          <h3>Session highlights</h3>
+        </div>
+        <HighlightsSetting />
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
@@ -193,6 +202,58 @@ function AutoPromptDefault() {
       <ErrorAlert error={error} />
     </div>
   );
+}
+
+/**
+ * Session highlights: whether a model checks each turn for what the user
+ * should know, and which, picked from the models the agent offers in the
+ * first Project's checkout.
+ */
+function HighlightsSetting() {
+  const api = useApi();
+  const highlights = useTopic('settings')?.highlights;
+  const projectId = useTopic('projects')?.[0]?.id;
+  const models = useCheckoutModels(projectId);
+  const [error, setError] = useState<string>();
+  if (!highlights) return null;
+  const save = (change: Partial<HighlightsSettings>) => {
+    setError(undefined);
+    const next = { ...highlights, ...change };
+    api.invoke('settings.setHighlights', withoutUndefined(next)).catch((e: unknown) => setError((e as Error).message));
+  };
+  return (
+    <div style={{ padding: '10px 14px' }}>
+      <label className="row">
+        <input type="checkbox" checked={highlights.on} disabled={!highlights.on && !highlights.model} onChange={(event) => save({ on: event.target.checked })} />
+        <span>Note highlights after each turn</span>
+      </label>
+      <div className="row" style={{ marginTop: 8, gap: 6 }}>
+        <span>Model</span>
+        {projectId === undefined ? (
+          <span className="muted">Add a Project to pick one from {OPENCODE_NAME}'s models.</span>
+        ) : (
+          <ModelPickers
+            agent={OPENCODE_NAME}
+            models={models.listed}
+            model={highlights.model}
+            efforts={effortsOf(models.listed, highlights.model)}
+            effort={highlights.effort}
+            onOpen={models.refresh}
+            onModel={(model) => save({ model, effort: undefined })}
+            onEffort={(effort) => save({ effort })}
+          />
+        )}
+      </div>
+      <div className="muted" style={{ marginTop: 6 }}>
+        After each turn, this model reads what the turn said and did and notes, in the Session's Highlights Panel, what you should know: what's left for you, what wasn't done, risks, assumptions and decisions. It runs as a conversation of its own, with every tool refused, so a cheap model does. Its tokens count on the dashboard under its model, but not in the Session's own usage.
+      </div>
+      <ErrorAlert error={error} />
+    </div>
+  );
+}
+
+function withoutUndefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 }
 
 /** Where new worktrees go; `~` is the home in each Project's Environment. */
