@@ -54,7 +54,8 @@ import { NewSessionContext } from './SessionMenu';
 import { ContextMenuHost } from './ContextMenu';
 import { Settings } from './Settings';
 import { ShortcutHelp } from './ShortcutHelp';
-import { matchesShortcut, SHORTCUTS, type ShortcutName } from './shortcuts';
+import { isTerminalShortcut, matchesShortcut, SHORTCUTS, typingGuard, type ShortcutName } from './shortcuts';
+import { ToastHost, useToast } from './Toast';
 import { ResizeEdge } from './ResizeEdge';
 import { useInbox, useWindowSize, WindowLayoutProvider } from './WindowLayout';
 import { INBOX_WIDTH, windowLayout } from '../shared/window';
@@ -67,7 +68,11 @@ export function App() {
   // Nothing else can be served until main knows its database is usable.
   if (!database) return null;
   if (database.state === 'damaged') return <DatabaseProblem status={database} />;
-  return <Workspace />;
+  return (
+    <ToastHost>
+      <Workspace />
+    </ToastHost>
+  );
 }
 
 /** The Page open over the main pane, and where focus goes back when it closes. */
@@ -97,6 +102,7 @@ function Workspace() {
     return () => window.removeEventListener('focus', check);
   }, [api]);
   const linker = useExistingCloneLinker();
+  const toast = useToast();
   const sessions = useTopic('sessions') ?? [];
   const projects = useTopic('projects') ?? [];
   const [selectedId, setSelectedId] = useState<number>();
@@ -196,15 +202,13 @@ function Workspace() {
   const latest = useRef({ palette, openPalette, closePalette, help, closeHelp, actions, waiting, select });
   latest.current = { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select };
   useEffect(() => {
+    const typing = typingGuard();
+    const onPointerDown = () => typing.reset();
     const onKeyDown = (event: KeyboardEvent) => {
       const { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select } = latest.current;
-      // A terminal takes every key but Ctrl+`, which xterm lets through to here.
-      if (event.target instanceof Element && event.target.closest('.terminal-screen')) {
-        if (!matchesShortcut(SHORTCUTS.toggleTerminal.shortcut, event)) return;
-        event.preventDefault();
-        actions.find((a) => a.shortcut === SHORTCUTS.toggleTerminal.shortcut)?.run(focusedElement());
-        return;
-      }
+      // A terminal takes every key but the few shortcuts xterm lets through to here.
+      if (event.target instanceof Element && event.target.closest('.terminal-screen') && !isTerminalShortcut(event)) return;
+      if (isTyping(event.target)) typing.typed(event);
       // Not over a dialog, nor a menu or picker, which have keys of their own.
       const covered = () => !!document.querySelector('[aria-modal="true"], .popover');
       // The palette and the shortcuts list close on their own key too.
@@ -221,6 +225,13 @@ function Workspace() {
       }
       const ctrl = event.ctrlKey || event.metaKey;
       if (event.altKey || event.defaultPrevented || (!ctrl && isTyping(event.target)) || covered()) return;
+      // The toast's Undo; in a text field, the field's own.
+      if (matchesShortcut(SHORTCUTS.undo.shortcut, event)) {
+        if (!isTyping(event.target) && toast.undo()) event.preventDefault();
+        return;
+      }
+      // Keys meant as text, the focus having dropped out of a text field mid-word.
+      if (!ctrl && typing.holds()) return;
       // Ctrl+1 to Ctrl+9: the Inbox's Sessions by position, by physical key (AZERTY's 1 types &).
       const position = ctrl && !event.shiftKey ? /^Digit([1-9])$/.exec(event.code)?.[1] : undefined;
       if (position) {
@@ -235,7 +246,11 @@ function Workspace() {
       action.run(focusedElement());
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+    };
   }, []);
 
   return (

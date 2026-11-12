@@ -19,6 +19,7 @@ import { TerminalView } from './TerminalView';
 import { Select } from './Popover';
 import { Markdown } from './Markdown';
 import { useArchive, useRemovedProject } from './Archive';
+import { useToast } from './Toast';
 import { useDelete } from './Delete';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
@@ -486,6 +487,17 @@ export function SessionView({
   const hasDock = runsTerminals || dock.panels.length > 0;
   const archiver = useArchive();
   const deleter = useDelete();
+  const toast = useToast();
+  const conversation = useRef<HTMLDivElement>(null);
+  /**
+   * Where the focus goes when the composer can't keep it, disabled while the
+   * agent waits on an answer: the card or panel asking, else the conversation.
+   */
+  const focusAsked = () => {
+    const main = conversation.current?.closest('main');
+    // A question is answered in its panel on the composer, rather than on its card.
+    (main?.querySelector<HTMLElement>('.ask-panel[data-asked]') ?? main?.querySelector<HTMLElement>('[data-asked]') ?? conversation.current)?.focus();
+  };
   const menu = useSessionMenu(session, setError);
   const status = statusOf(session);
   const working = session.status === 'working';
@@ -532,7 +544,10 @@ export function SessionView({
       openInEditor: () => api.invoke('sessions.openInEditor', { id }),
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
       retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
-      markUnread: () => api.invoke('sessions.setUnread', { id, unread: true }),
+      markUnread: async () => {
+        await api.invoke('sessions.setUnread', { id, unread: true });
+        toast.show({ message: `Marked “${session.title}” unread`, undo: () => api.invoke('sessions.setUnread', { id, unread: false }) });
+      },
       toggleSideArea: async () => panels.toggleArea('side'),
       toggleChanges: async () => panels.toggle('changes'),
       reviewChanges: async () => panels.toggleReview('changes'),
@@ -748,7 +763,7 @@ export function SessionView({
       </SessionHeader>
       <div className={panels.review ? 'session-body reviewing' : 'session-body'}>
         <div className="convo">
-          <div className="chat" role="log" aria-label="Conversation" onContextMenu={commentOnSelection}>
+          <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onContextMenu={commentOnSelection}>
             {turnParts(items).map((item) =>
               'said' in item ? (
                 <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={modelName(item.said.find((i) => i.model)?.model)} />
@@ -838,6 +853,9 @@ export function SessionView({
             comments={freeAnswer ? undefined : comments}
             onRemoveComment={removeComment}
             onEditComment={(index, note) => setPending((list) => list.map((p, i) => (i === index ? withNote(p, note) : p)))}
+            // Out to the conversation, where the shortcuts without Ctrl work.
+            onEscape={() => conversation.current?.focus()}
+            onDisabledWithFocus={focusAsked}
             queueing={working}
             tools={
               <ModelPickers

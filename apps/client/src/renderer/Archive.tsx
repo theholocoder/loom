@@ -1,10 +1,11 @@
 // The archive command, shared by the Session header, the Inbox rows, the
 // palette and the `e` shortcut: archives a Session, warning first (Discard / Cancel) when its
-// worktree has uncommitted changes or unpushed commits.
+// worktree has uncommitted changes or unpushed commits, then says so in a toast with Undo.
 import { FolderX, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { RemovedProject, Session, UnsavedWork } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { useToast } from './Toast';
 
 export interface Archiver {
   /** Archives the Session, or opens the warning; rejects with what went wrong. */
@@ -15,10 +16,13 @@ export interface Archiver {
 
 export function useArchive(): Archiver {
   const api = useApi();
+  const toast = useToast();
   const [held, setHeld] = useState<{ session: Session; unsavedWork: UnsavedWork }>();
   const archive = async (session: Session) => {
     const result = await api.invoke('sessions.archive', { id: session.id });
-    if (!result.archived) setHeld({ session, unsavedWork: result.unsavedWork });
+    if (!result.archived) return setHeld({ session, unsavedWork: result.unsavedWork });
+    // Not after Discard, confirmed on the warning: what it discarded wouldn't come back.
+    toast.show({ message: `Archived “${session.title}”`, undo: () => api.invoke('sessions.unarchive', { id: session.id }) });
   };
   const dialog = held && (
     <DiscardWarning

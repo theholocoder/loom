@@ -3,7 +3,7 @@
 // it, @-mentions of the working copy's files, and `/` for the agent's skills
 // and commands.
 import { ArrowUp, Box, ClipboardPaste, Copy, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, MessageSquareQuote, Paperclip, Scissors, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { diffCommentRange, isConversationComment, isImage, type AgentCommand, type Attachment, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
 import { addToContextMenu, copyText } from './ContextMenu';
 import { Popover, stepIndex } from './Popover';
@@ -39,6 +39,8 @@ export function Composer({
   comments = [],
   onRemoveComment,
   onEditComment,
+  onEscape,
+  onDisabledWithFocus,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
@@ -81,6 +83,10 @@ export function Composer({
   onRemoveComment?: (index: number) => void;
   /** Given, a click on a comment's chip edits its note. */
   onEditComment?: (index: number, note: string) => void;
+  /** Given, Escape with no menu open runs it, to take the focus out of the prompt box. */
+  onEscape?: () => void;
+  /** The prompt box is being disabled with the focus in it, which it can't keep: where the focus goes instead. */
+  onDisabledWithFocus?: () => void;
 }) {
   const id = useId();
   const [draft, setDraftState] = useState('');
@@ -94,6 +100,14 @@ export function Composer({
   useEffect(() => {
     if (focusRequest) prompt.current?.focus();
   }, [focusRequest]);
+  /** Whether the prompt box has the focus, or had it until it was disabled. */
+  const focused = useRef(false);
+  // Before the browser drops the focus of the disabled field to the page, where keys typed would run shortcuts.
+  useLayoutEffect(() => {
+    if (!disabled || !(focused.current || document.activeElement === prompt.current)) return;
+    focused.current = false;
+    onDisabledWithFocus?.();
+  }, [disabled]);
   const clearedFor = useRef(clearKey);
   useEffect(() => {
     if (clearedFor.current === clearKey) return;
@@ -171,6 +185,11 @@ export function Composer({
     if (open && event.key === 'Escape') {
       event.preventDefault();
       menu.dismiss();
+      return;
+    }
+    if (onEscape && event.key === 'Escape') {
+      event.preventDefault();
+      onEscape();
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) void send(event);
@@ -285,7 +304,14 @@ export function Composer({
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onContextMenu={onContextMenu}
-          onBlur={menu.dismiss}
+          onFocus={() => {
+            focused.current = true;
+          }}
+          onBlur={(event) => {
+            // Disabled, it loses the focus: still counted as having it, to hand it on (see above).
+            if (!event.currentTarget.disabled) focused.current = false;
+            menu.dismiss();
+          }}
         />
         <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>

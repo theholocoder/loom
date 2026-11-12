@@ -9,7 +9,7 @@ const keysOf = (entry: ShortcutEntry) => entry.display ?? shortcutLabel(entry.sh
 
 /** The list's groups, in order. */
 const GROUPS = ['Even while typing', 'Outside text fields', 'In the composer'] as const;
-const groupOf = (entry: ShortcutEntry): (typeof GROUPS)[number] => (entry.composer ? 'In the composer' : entry.shortcut.ctrl ? 'Even while typing' : 'Outside text fields');
+const groupOf = (entry: ShortcutEntry): (typeof GROUPS)[number] => (entry.composer ? 'In the composer' : entry.shortcut.ctrl && !entry.outsideTextFields ? 'Even while typing' : 'Outside text fields');
 
 /** Escape or a click on the backdrop closes it; the caller puts focus back. */
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {

@@ -146,6 +146,8 @@ export class Sessions {
   private readonly deleted = new Set<number>();
   /** Archived Sessions being reopened, by Session. */
   private readonly reopening = new Map<number, Promise<void>>();
+  /** Why each Session archived since the Client started was Waiting, or would be once stopped: what undoing the archive brings back. */
+  private readonly archivedFrom = this.perSession<WaitingReason>();
   /** Projects being removed, which no new Session may start on. */
   private readonly removing = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
@@ -501,6 +503,35 @@ export class Sessions {
     const reopening = (async () => {
       await this.prepareReopen(id);
       await this.prompt(id, text, newAttachments, { reopening: true });
+    })();
+    this.reopening.set(id, reopening);
+    try {
+      await reopening;
+    } finally {
+      if (this.reopening.get(id) === reopening) this.reopening.delete(id);
+    }
+  }
+
+  /**
+   * Undoes an archive: reopens the Session as a message would (see
+   * `prepareReopen`), but sends none, so that it is Waiting again, as it was
+   * before; Stopped if it was archived mid-run or while it waited on an
+   * answer, which archiving denied.
+   */
+  async unarchive({ id }: { id: number }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    const running = this.reopening.get(id);
+    if (running) {
+      await running.catch(() => {});
+      if (this.get(id).status !== 'archived') return;
+    }
+    if (this.get(id).status !== 'archived') throw new Error('This Session is not archived.');
+    const reopening = (async () => {
+      await this.prepareReopen(id);
+      this.assertCanReopen(id);
+      this.setStatus(id, { status: 'waiting', waitingReason: this.archivedFrom.get(id) ?? 'finished' });
+      this.archivedFrom.delete(id);
     })();
     this.reopening.set(id, reopening);
     try {
@@ -1298,7 +1329,11 @@ export class Sessions {
 
   private markArchived(id: number): void {
     // Also guards a concurrent archive of the same Session: it was archived while this one waited.
-    if (this.get(id).status === 'archived') return;
+    const was = this.get(id);
+    if (was.status === 'archived') return;
+    // Asked again, a run or a question doesn't come back: the agent is stopped, and what it asked denied.
+    const stopped = was.status === 'working' || ['question', 'approval', 'stuck'].includes(was.waitingReason ?? '');
+    this.archivedFrom.set(id, stopped ? 'stopped' : (was.waitingReason ?? 'finished'));
     this.endRun(id);
     this.denyMessages.delete(id);
     if (this.get(id).queue) {
