@@ -1,6 +1,7 @@
 // The window's panes, following docs/prototypes/ui-layout.html: the Inbox
-// sidebar, the main pane and the open Session's Side area. Also the
-// Ctrl+K palette and the keyboard shortcuts, which run the same actions.
+// sidebar, the main pane and the open Session's Side area, with Projects, the
+// Dashboard or Settings in a window over them. Also the Ctrl+K palette and
+// the keyboard shortcuts, which run the same actions.
 import {
   Archive,
   ArrowLeftToLine,
@@ -44,6 +45,7 @@ import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { DatabaseProblem } from './DatabaseProblem';
 import { inboxOrder, InboxList } from './Inbox';
 import { Popover } from './Popover';
+import { PageWindow, type Page } from './PageWindow';
 import { ProjectPicker } from './ProjectPicker';
 import { Dashboard } from './Dashboard';
 import { Projects, useExistingCloneLinker } from './Projects';
@@ -57,7 +59,8 @@ import { ResizeEdge } from './ResizeEdge';
 import { useInbox, useWindowSize, WindowLayoutProvider } from './WindowLayout';
 import { INBOX_WIDTH, windowLayout } from '../shared/window';
 
-type View = 'session' | 'new-session' | 'projects' | 'dashboard' | 'settings';
+/** What the main pane shows; a Page opens over it. */
+type View = 'session' | 'new-session';
 
 export function App() {
   const database = useTopic('database');
@@ -65,6 +68,12 @@ export function App() {
   if (!database) return null;
   if (database.state === 'damaged') return <DatabaseProblem status={database} />;
   return <Workspace />;
+}
+
+/** The Page open over the main pane, and where focus goes back when it closes. */
+interface OpenPage {
+  name: Page;
+  returnFocus: HTMLElement | null;
 }
 
 /** The Project picker, while open: for any new Session or one from an issue, and where focus goes back to. */
@@ -77,6 +86,8 @@ function Workspace() {
   useAppearance();
   const api = useApi();
   const [view, setView] = useState<View>('session');
+  /** The Page open over the main pane, and where focus was before it opened. */
+  const [page, setPage] = useState<OpenPage>();
   // A worktree may be deleted while Loom is in the background: look again on focus.
   useEffect(() => {
     const check = () => {
@@ -96,19 +107,33 @@ function Workspace() {
   /** Whether the open Session's last prompt failed, so it can be sent again. */
   const [retryable, setRetryable] = useState(false);
   /** The Project picked for the New Session view; each pick starts it afresh. */
-  /** `from` is the view it was started from, which Cancel goes back to. */
-  const [newSession, setNewSession] = useState<{ projectId?: number; fromIssue?: boolean; workingCopy?: NewSessionWorkingCopy; from: View; generation: number }>({ from: 'session', generation: 0 });
+  /** `from` is the view it was started from, and the Page open over it, which Cancel goes back to. */
+  const [newSession, setNewSession] = useState<{ projectId?: number; fromIssue?: boolean; workingCopy?: NewSessionWorkingCopy; from: { view: View; page?: OpenPage }; generation: number }>({
+    from: { view: 'session' },
+    generation: 0,
+  });
   const [picking, setPicking] = useState<Picking>();
   /** The palette, while open, and where focus was before it. */
   const [palette, setPalette] = useState<{ returnFocus: HTMLElement | null }>();
   /** The shortcuts list, while open, and where focus was before it. */
   const [help, setHelp] = useState<{ returnFocus: HTMLElement | null }>();
   const selected = sessions.find((s) => s.id === selectedId);
-  const shown = view === 'session' ? selected : undefined;
+  /** The Session in the main pane, under any Page. */
+  const behind = view === 'session' ? selected : undefined;
+  /** The Session shown, which actions act on: none while a Page covers it. */
+  const shown = page ? undefined : behind;
+  /** Opens a Page over the main pane, or another in its place. */
+  const openPage = (name: Page) => setPage((open) => ({ name, returnFocus: open ? open.returnFocus : focusedElement() }));
+  /** Closes the Page, focus going back where it was. */
+  const closePage = () => {
+    if (page?.returnFocus?.isConnected) page.returnFocus.focus();
+    setPage(undefined);
+  };
   const select = (session: Session) => {
     setSelectedId(session.id);
     setCommand(undefined);
     setView('session');
+    setPage(undefined);
   };
   const reply = (session: Session) => {
     select(session);
@@ -116,8 +141,9 @@ function Workspace() {
   };
   /** Starts the New Session view afresh, Cancel going back to the view before it. */
   const openNewSession = (start: { projectId?: number; fromIssue?: boolean; workingCopy?: NewSessionWorkingCopy }) => {
-    setNewSession((n) => ({ ...start, from: view === 'new-session' ? n.from : view, generation: n.generation + 1 }));
+    setNewSession((n) => ({ ...start, from: view === 'new-session' ? n.from : { view, page }, generation: n.generation + 1 }));
     setView('new-session');
+    setPage(undefined);
   };
   const startNewSession = (project: Project | undefined, fromIssue = false) => openNewSession({ projectId: project?.id, fromIssue });
   /** New Session on a Project's working copy, from another Session's menu. */
@@ -128,7 +154,7 @@ function Workspace() {
     else startNewSession(undefined);
   };
   const addExistingClone = () => {
-    setView('projects');
+    openPage('projects');
     void linker.link();
   };
   const forgeProjects = projects.filter((p) => p.forge.state === 'available');
@@ -153,7 +179,7 @@ function Workspace() {
     setTheme: (theme) => {
       api.invoke('settings.setAppearance', { theme }).catch((error: unknown) => console.error('theme change failed:', error));
     },
-    setView,
+    openPage,
     showHelp: (returnFocus) => setHelp({ returnFocus }),
     toggleInbox: inbox.toggle,
   });
@@ -243,8 +269,8 @@ function Workspace() {
                 <kbd>Ctrl K</kbd>
               </button>
             </div>
-            <InboxList sessions={sessions} projects={projects} selectedId={shown?.id} onSelect={select} onReply={reply} />
-            <ViewNav className="side-foot" view={view} onView={setView} />
+            <InboxList sessions={sessions} projects={projects} selectedId={behind?.id} onSelect={select} onReply={reply} />
+            <PageNav className="side-foot" page={page?.name} onPage={openPage} />
           </aside>
         ) : (
           <aside className="side rail" id="inbox" aria-label="Inbox">
@@ -270,23 +296,23 @@ function Workspace() {
               <Search />
             </button>
             <span className="grow" />
-            <ViewNav className="rail-foot" view={view} onView={setView} />
+            <PageNav className="rail-foot" page={page?.name} onPage={openPage} />
           </aside>
         )}
-        {view === 'settings' ? (
-          <Settings />
-        ) : view === 'dashboard' ? (
-          <Dashboard onOpenSession={select} />
-        ) : view === 'projects' ? (
-          <Projects linker={linker} />
-        ) : view === 'new-session' ? (
+        {/* Inert under a Page, as it was; it adds no box of its own to the layout. */}
+        <div className="main-pane" inert={!!page}>
+        {view === 'new-session' ? (
           <NewSession
             key={newSession.generation}
             initialProjectId={newSession.projectId}
             pickIssue={newSession.fromIssue}
             initialWorkingCopy={newSession.workingCopy}
             onStarted={select}
-            onCancel={() => setView(newSession.from)}
+            onCancel={() => {
+              // Back to the Page it was started from, focus going back on closing it where it was before that.
+              setView(newSession.from.view);
+              setPage(newSession.from.page);
+            }}
           />
         ) : selected ? (
           <SessionView
@@ -301,6 +327,12 @@ function Workspace() {
           <main className="main" aria-label="Session">
             <div className="empty">No Session selected.</div>
           </main>
+        )}
+        </div>
+        {page && (
+          <PageWindow page={page.name} onClose={closePage}>
+            {page.name === 'settings' ? <Settings /> : page.name === 'dashboard' ? <Dashboard onOpenSession={select} /> : <Projects linker={linker} />}
+          </PageWindow>
         )}
         {picking && (
           <ProjectPicker
@@ -382,7 +414,7 @@ function paletteActions(app: {
   select: (session: Session) => void;
   command: (command: SessionCommand) => void;
   setTheme: (theme: Theme) => void;
-  setView: (view: View) => void;
+  openPage: (page: Page) => void;
   showHelp: (returnFocus: HTMLElement | null) => void;
   toggleInbox: () => void;
 }): PaletteAction[] {
@@ -434,9 +466,9 @@ function paletteActions(app: {
     open && shortcutAction('archive', Archive, () => app.command('archive')),
     session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
-    { label: 'Open Projects', icon: FolderGit2, run: () => app.setView('projects') },
-    { label: 'Open Dashboard', icon: ChartColumn, run: () => app.setView('dashboard') },
-    shortcutAction('settings', SettingsIcon, () => app.setView('settings')),
+    { label: 'Open Projects', icon: FolderGit2, run: () => app.openPage('projects') },
+    { label: 'Open Dashboard', icon: ChartColumn, run: () => app.openPage('dashboard') },
+    shortcutAction('settings', SettingsIcon, () => app.openPage('settings')),
     shortcutAction('help', Keyboard, app.showHelp),
   ];
   return actions.filter((action): action is PaletteAction => !!action);
@@ -493,21 +525,21 @@ function NewMenu({ onNewSession, onAddExistingClone }: { onNewSession: (trigger:
   );
 }
 
-/** The Inbox's foot: Projects, Dashboard and Settings, Settings at the end. */
-function ViewNav({ className, view, onView }: { className: string; view: View; onView: (view: View) => void }) {
+/** The Inbox's foot: Projects, Dashboard and Settings, Settings at the end, each opening its Page over the main pane. */
+function PageNav({ className, page, onPage }: { className: string; page: Page | undefined; onPage: (page: Page) => void }) {
   return (
     <nav className={className}>
-      <FootButton label="Projects" icon={FolderGit2} current={view === 'projects'} onClick={() => onView('projects')} />
-      <FootButton label="Dashboard" icon={ChartColumn} current={view === 'dashboard'} onClick={() => onView('dashboard')} />
+      <FootButton label="Projects" icon={FolderGit2} current={page === 'projects'} onClick={() => onPage('projects')} />
+      <FootButton label="Dashboard" icon={ChartColumn} current={page === 'dashboard'} onClick={() => onPage('dashboard')} />
       <span className="grow" />
-      <FootButton label="Settings" icon={SettingsIcon} current={view === 'settings'} onClick={() => onView('settings')} />
+      <FootButton label="Settings" icon={SettingsIcon} current={page === 'settings'} onClick={() => onPage('settings')} />
     </nav>
   );
 }
 
 function FootButton({ label, icon: Icon, current, onClick }: { label: string; icon: LucideIcon; current: boolean; onClick: () => void }) {
   return (
-    <button className="icon-btn" type="button" title={label} aria-label={label} aria-current={current ? 'page' : undefined} onClick={onClick}>
+    <button className="icon-btn" type="button" title={label} aria-label={label} aria-haspopup="dialog" aria-current={current ? 'page' : undefined} onClick={onClick}>
       <Icon />
     </button>
   );

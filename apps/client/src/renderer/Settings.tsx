@@ -42,7 +42,7 @@ export function Settings() {
   }, [api]);
   const [query, setQuery] = useState('');
   const shown = useMemo(() => matching(SECTIONS, query), [query]);
-  const page = useRef<HTMLElement>(null);
+  const page = useRef<HTMLDivElement>(null);
   const [current, setCurrent] = useState(SECTIONS[0]!.id);
   const active = shown.some(({ section }) => section.id === current) ? current : shown[0]?.section.id;
 
@@ -83,7 +83,7 @@ export function Settings() {
   };
 
   return (
-    <main className="dash settings" aria-label="Settings" ref={page} onScroll={followScroll}>
+    <div className="dash settings" ref={page} onScroll={followScroll}>
       <div className="settings-layout">
         <div className="settings-head">
           <h1>Settings</h1>
@@ -111,7 +111,7 @@ export function Settings() {
           )}
         </div>
       </div>
-    </main>
+    </div>
   );
 }
 

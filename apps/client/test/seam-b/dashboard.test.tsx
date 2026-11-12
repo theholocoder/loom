@@ -71,7 +71,7 @@ function openDashboard(main: FakeMain) {
     </ApiProvider>,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }));
-  return screen.getByRole('main', { name: 'Dashboard' });
+  return screen.getByRole('dialog', { name: 'Dashboard' });
 }
 
 const tile = (view: HTMLElement, name: string) => within(view).getByRole('group', { name });
@@ -135,7 +135,7 @@ describe('the dashboard', () => {
     ]);
 
     fireEvent.click(rows[0]!);
-    await waitFor(() => expect(screen.queryByRole('main', { name: 'Dashboard' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Dashboard' })).toBeNull());
   });
 
   it('moves between ranges with the arrow keys', async () => {
@@ -158,7 +158,7 @@ describe('the dashboard', () => {
     const row = within(within(view).getByRole('table', { name: 'Top Sessions by tokens' })).getAllByRole('row')[1]!;
     fireEvent.keyDown(row, { key: 'Enter' });
 
-    await waitFor(() => expect(screen.queryByRole('main', { name: 'Dashboard' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Dashboard' })).toBeNull());
   });
 
   it('works the numbers out again when a Session’s status changes', async () => {

@@ -114,8 +114,6 @@ describe('the Side area', () => {
     expect(sideArea()).toBeNull();
     openSession();
     expect(sideArea()).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(sideArea()).toBeNull();
   });
 
   it('opens on the Panels, the one shown and the width main had, at startup', () => {
