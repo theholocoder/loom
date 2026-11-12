@@ -34,9 +34,9 @@ export function AskCard({ label, icon, name, asked, hint = 'The agent is asking 
 type TextField = Extract<QuestionField, { type: 'text' }>;
 
 /**
- * A question card in the transcript. While asked, it points at the panel on
- * the composer, where it is answered (see useQuestionPanel); once settled,
- * it shows what was answered.
+ * A question card in the transcript, once settled: what was answered. The
+ * question being asked shows in its panel on the composer instead (see
+ * useQuestionPanel); one asked after it points there.
  */
 export function QuestionCard({ item }: { item: Question }) {
   const asked = item.state === 'asked';
@@ -257,7 +257,9 @@ export function useQuestionPanel(
               return false;
             }
             // One's own answer replaces a choice where there is only one answer, and joins the choices otherwise.
-            edit(singleAnswer(step) && step.main !== free ? { [free.key]: text, [step.main.key]: undefined } : { [free.key]: text }, true);
+            const values = singleAnswer(step) && step.main !== free ? { [free.key]: text, [step.main.key]: undefined } : { [free.key]: text };
+            // It goes on once the question's answer fits, choices and all; otherwise the panel says why.
+            edit(values, canLeave(step, { ...flow.draft, ...values }));
             return true;
           },
         }

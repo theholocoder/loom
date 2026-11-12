@@ -54,12 +54,6 @@ export function ApprovalCard({ item, onDecide }: { item: Approval; onDecide: (de
               value={message}
               disabled={busy}
               onChange={(event) => setMessage(event.target.value)}
-              // Enter denies with the message, rather than sending anything else.
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter') return;
-                event.preventDefault();
-                if (!busy) void decide('deny');
-              }}
             />
             <button className="deny" type="button" disabled={busy} onClick={() => void decide('deny')}>
               Deny

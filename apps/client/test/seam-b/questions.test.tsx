@@ -288,6 +288,13 @@ describe('answering step by step', () => {
     expect(step()).toBe('Regions');
     expect(within(panel()).getByRole('alert').textContent).toBe('"Regions (other)" takes at most 5 characters.');
     expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('Antarctica');
+
+    // One's own answer that fits doesn't go on while the choices don't: it waits with them.
+    await pick('Americas', 'checkbox');
+    await type('Asia');
+    expect(step()).toBe('Regions');
+    expect(within(panel()).getByRole('status').textContent).toBe('"Regions" takes at most 1 choices.');
+    expect(within(panel()).getByText('Asia')).toBeTruthy();
   });
 
   it("drops the error once the user moves on, and lets an answer of one's own be removed", async () => {

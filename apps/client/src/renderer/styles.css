@@ -159,8 +159,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .approval-message { flex: 1; min-width: 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
 .approval-message::placeholder { color: var(--muted); }
 .approval-message:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
-button.deny { color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, var(--line)); font-weight: 600; }
-button.deny:hover { background: color-mix(in srgb, var(--err) 12%, var(--panel2)); }
+.approval-deny .deny { color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, var(--line)); font-weight: 600; }
+.approval-deny .deny:hover { background: color-mix(in srgb, var(--err) 12%, var(--panel2)); }
 /* A button of an asked card or the question's panel that can't be pressed yet looks it. */
 .tool.ask button:not(.primary):disabled, .ask-panel button:not(.primary):disabled { opacity: .55; cursor: default; }
 .ask-step input[type='number']:focus-visible, .ask-choice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -172,10 +172,10 @@ button.deny:hover { background: color-mix(in srgb, var(--err) 12%, var(--panel2)
 .ask-choice-text { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
 .ask-choice-label { font-weight: 600; }
 /* the asked question's panel, docked on the composer */
+.composer.docked { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent), 0 2px 12px var(--shadow); }
 /* The prompt box giving the question's answer of one's own: part of the panel, its buttons going on. */
 .composer.answering textarea { min-height: 44px; padding-bottom: 12px; }
 .composer.answering textarea:disabled { display: none; }
-.composer.docked { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 15%, transparent), 0 2px 12px var(--shadow); }
 .ask-panel { padding: 10px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; max-height: 45vh; overflow: auto; }
 .ask-panel-head { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--wait); }
 .ask-panel-head .ask-message { margin: 0; color: var(--text); font-weight: 600; }

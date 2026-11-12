@@ -29,7 +29,6 @@ export function Composer({
   held = false,
   canAttach = true,
   dock,
-  answering = false,
   clearKey,
   queueing = false,
   onStop,
@@ -63,10 +62,8 @@ export function Composer({
   held?: boolean;
   /** Whether files can go with the message: not with an answer to a question. */
   canAttach?: boolean;
-  /** What sits on the prompt box, part of it: the panel of a question it answers. */
+  /** What sits on the prompt box, part of it: the panel of a question it answers. With it, the prompt box gives only that answer: no toolbar, the panel's buttons going on. */
   dock?: ReactNode;
-  /** Whether the prompt box gives an answer to the docked panel's question: no toolbar, the panel's buttons going on. */
-  answering?: boolean;
   /** Changing it empties the prompt box: what was typed was for something else, such as another question. */
   clearKey?: string;
   /** Whether what is sent joins the queue, the agent working: the button says Queue. */
@@ -293,7 +290,7 @@ export function Composer({
     <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
       {queue}
       {remarks && <div className="composer-remarks">{remarks}</div>}
-      <div className={`composer${dock ? ' docked' : ''}${answering ? ' answering' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
+      <div className={`composer${dock ? ' docked' : ''}${dock ? ' answering' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
         {dock}
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
         {comments.length > 0 && (
@@ -349,7 +346,7 @@ export function Composer({
           }}
         />
         {/* An answer to the panel's question goes on with the panel's buttons, or Enter: no Send, nor a reply's tools. */}
-        {!answering && <div className="ctoolbar">
+        {!dock && <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>
             <SquareTerminal className="sm" />
             <b>{agent}</b>

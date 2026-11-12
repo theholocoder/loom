@@ -838,7 +838,7 @@ export function SessionView({
                 <PlanCard key={item.id} item={item} />
               ) : item.kind === 'question' ? (
                 // The question asked is shown once, in its panel on the composer, until it is answered.
-                item !== firstAsked && <QuestionCard key={item.id} item={item} />
+                item.id !== firstAsked?.id && <QuestionCard key={item.id} item={item} />
               ) : item.kind === 'approval' ? (
                 <ApprovalCard key={item.id} item={item} onDecide={(decision, message) => api.invoke('sessions.approve', { id: session.id, itemId: item.id, decision, ...(message ? { message } : {}) })} />
               ) : item.kind === 'trust' ? (
@@ -900,7 +900,6 @@ export function SessionView({
             tips={situation === undefined}
             disabled={composerDisabled}
             dock={panel}
-            answering={!!panel}
             clearKey={stepKey}
             onDraftChange={setTyped}
             focusRequest={replyRequest}
