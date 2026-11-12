@@ -154,6 +154,13 @@ export interface ScriptedActivity {
   comments?: { id: number; author: string | null; body: string; url?: string; path?: string; line?: number; system?: boolean; createdAt?: string }[];
   /** GitHub's reviews with their inline comments. */
   reviews?: { id: number; author: string | null; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'; body?: string; url: string; submittedAt?: string; comments?: { path: string; line?: number; originalLine?: number; body: string; url: string; createdAt?: string }[] }[];
+  /**
+   * Its review threads on the code: GitHub's, or GitLab's diff discussions.
+   * `side` defaults to `new`; `outdated` is GitHub's, whose line is then lost.
+   * Replying adds the viewer's comment, resolving sets `resolved`. `code` is
+   * the line as GitHub's diff hunk ends with it.
+   */
+  threads?: { id: string; path: string; line?: number; side?: 'old' | 'new'; code?: string; outdated?: boolean; resolved?: boolean; canResolve?: boolean; changesRequested?: boolean; comments: { id?: number; author: string; body: string; url?: string; createdAt?: string }[] }[];
   /** GitHub's check runs (`id`) and commit statuses (`context`) on the head commit. */
   checks?: ({ id: number; name: string; status?: string; conclusion?: string; url?: string; context?: undefined } | { context: string; state: string; url?: string; createdAt?: string })[];
   /** What GitHub sums the checks up as, when it isn't what they say (a suite with no runs yet). */

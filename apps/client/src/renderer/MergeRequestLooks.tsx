@@ -1,5 +1,6 @@
 // How a Merge request and its checks look wherever Loom shows them: the
-// Glance strip, its checks popover, the Merge request Panel and its tab.
+// Glance strip, its checks popover, the Merge request Panel and its tab, and
+// its review threads' notes on the diff.
 import { CircleCheck, CircleMinus, CircleX, Clock, GitMerge, GitPullRequestClosed } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BabysitCheck, BabysitCheckState, EndedMergeRequestState, Project, Session } from '../shared/api';
@@ -37,4 +38,23 @@ export function checksSummary(checks: BabysitCheck[]): string {
 /** "1 review", "3 reviews"; with `more`, "100+ files", the Forge having listed only so many. */
 export function countText(count: number, noun: string, more = false): string {
   return `${count}${more ? '+' : ''} ${count === 1 && !more ? noun : `${noun}s`}`;
+}
+
+/** Someone's initials, standing in for their picture. */
+export function Avatar({ name }: { name: string }) {
+  return (
+    <span className="avatar" aria-hidden="true">
+      {name.slice(0, 2).toUpperCase()}
+    </span>
+  );
+}
+
+/** "just now", "12 min ago", "3 h ago", "Yesterday", then the date. */
+export function ago(at: number, now: number): string {
+  const minutes = Math.floor((now - at) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`;
+  if (minutes < 48 * 60) return 'Yesterday';
+  return new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }

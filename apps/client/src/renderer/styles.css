@@ -228,6 +228,24 @@ button.pick.full-access, button.pick.full-access b { color: var(--wait); }
 .diff-comment.note .row > svg { color: var(--accent); flex: none; }
 .diff-comment.note b { font-weight: 600; white-space: nowrap; }
 .note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A review thread of the Merge request on its line, or above the diff when the diff no longer holds it. */
+.review-note { margin: 6px 10px; border: 1px solid var(--line); border-left: 3px solid var(--wait); border-radius: 8px; background: var(--panel2); font: 13px/1.5 var(--font); white-space: normal; min-width: 0; }
+.review-note .note-h { display: flex; align-items: center; gap: 6px; padding: 6px 10px 0; font-size: 12px; min-width: 0; }
+.review-note .note-h b { font-weight: 600; white-space: nowrap; }
+.review-note .note-h .chip { flex: none; }
+.review-note .note-b { padding: 2px 10px 8px; overflow-wrap: anywhere; }
+.review-note .note-b > :first-child { margin-top: 0; }
+.review-note .note-b > :last-child { margin-bottom: 0; }
+.review-note .note-reply { margin-left: 26px; border-top: 1px solid var(--line); }
+.review-note .note-a { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 8px; }
+.review-note .note-a button { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; }
+.review-note .note-reply-form { padding: 0 10px; }
+.review-note .note-reply-form textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; outline: none; font: inherit; }
+.review-note .note-reply-form textarea:focus { border-color: var(--accent); }
+.review-note .note-reply-form .note-a { padding: 6px 0 8px; }
+.review-note .err { margin: 0 10px 8px; }
+.review-notes { padding-top: 2px; }
+.thread-count { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; color: var(--wait); flex: none; }
 .diff-loading { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; }
 
 /* dashboard (also the layout of other full pages, like Settings) */

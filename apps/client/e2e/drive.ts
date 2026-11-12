@@ -116,6 +116,16 @@ machine.installForgeCli('gh', {
       ],
       comments: [{ id: 1, author: 'alice', body: 'Can we keep the old helper around for one release?', url: 'https://github.com/acme/billing-api/pull/40#c1', createdAt: '2026-11-01T10:30:00Z' }],
       reviews: [{ id: 2, author: 'bob', state: 'CHANGES_REQUESTED', body: 'A few things', url: 'https://github.com/acme/billing-api/pull/40#r2', submittedAt: '2026-11-01T10:00:00Z', comments: [{ path: 'src/currency.ts', line: 3, body: 'This should use `Intl.NumberFormat`', url: 'https://github.com/acme/billing-api/pull/40#c3', createdAt: '2026-11-01T10:00:00Z' }] }],
+      threads: [
+        {
+          id: 'PRRT_kwDOA1',
+          path: 'src/currency.ts',
+          line: 3,
+          code: 'export function currencyFor(account: { billingCurrency?: string }): string {',
+          changesRequested: true,
+          comments: [{ author: 'bob', body: 'This should use `Intl.NumberFormat`', url: 'https://github.com/acme/billing-api/pull/40#c3', createdAt: '2026-11-01T10:00:00Z' }],
+        },
+      ],
       checks: [
         { id: 5, name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', url: 'https://github.com/acme/billing-api/actions/5' },
         { id: 6, name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
