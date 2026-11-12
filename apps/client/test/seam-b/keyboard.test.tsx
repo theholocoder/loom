@@ -60,7 +60,7 @@ const typeKeys = (text: string) => {
 const openSessionTitle = () => within(screen.getByRole('region', { name: 'Session header' })).getByRole('heading').textContent;
 const prompt = () => screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
 const commands = (main: FakeMain) => main.invoked.map((i) => i.command);
-const toast = () => screen.queryByRole('group', { name: 'Notification' });
+const toast = () => screen.queryByRole('group', { name: 'What was done' });
 
 describe('Escape in the composer', () => {
   it('moves the focus out of it, to the conversation, where j works again at once', () => {
@@ -188,13 +188,23 @@ describe('the Undo toast', () => {
       press('u');
       await act(async () => {});
       expect(toast()).toBeTruthy();
+      // Not while the pointer is on it.
+      fireEvent.mouseEnter(toast()!);
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(toast()).toBeTruthy();
+      fireEvent.mouseLeave(toast()!);
       act(() => vi.advanceTimersByTime(10_000));
       expect(toast()).toBeNull();
 
-      press('u', document.body);
+      const conversation = screen.getByRole('log', { name: 'Conversation' });
+      conversation.focus();
+      press('u');
       await act(async () => {});
+      // Closed from the keyboard, the focus goes back where it was.
+      within(toast()!).getByRole('button', { name: 'Dismiss' }).focus();
       fireEvent.click(within(toast()!).getByRole('button', { name: 'Dismiss' }));
       expect(toast()).toBeNull();
+      expect(document.activeElement).toBe(conversation);
     } finally {
       vi.useRealTimers();
     }

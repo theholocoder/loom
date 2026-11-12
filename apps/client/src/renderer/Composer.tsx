@@ -103,10 +103,12 @@ export function Composer({
   /** Whether the prompt box has the focus, or had it until it was disabled. */
   const focused = useRef(false);
   // Before the browser drops the focus of the disabled field to the page, where keys typed would run shortcuts.
+  const handOnFocus = useRef(onDisabledWithFocus);
+  handOnFocus.current = onDisabledWithFocus;
   useLayoutEffect(() => {
     if (!disabled || !(focused.current || document.activeElement === prompt.current)) return;
     focused.current = false;
-    onDisabledWithFocus?.();
+    handOnFocus.current?.();
   }, [disabled]);
   const clearedFor = useRef(clearKey);
   useEffect(() => {
@@ -187,8 +189,8 @@ export function Composer({
       menu.dismiss();
       return;
     }
+    // Left free for the view too: the same Esc leaves Review mode.
     if (onEscape && event.key === 'Escape') {
-      event.preventDefault();
       onEscape();
       return;
     }

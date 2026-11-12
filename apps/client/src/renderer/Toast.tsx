@@ -3,7 +3,7 @@
 // Ctrl+Z runs too outside text fields. One at a time: a new one takes the
 // place of the last.
 import { Undo2, X } from 'lucide-react';
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 /** How long a toast stays. */
 export const TOAST_MS = 8000;
@@ -30,44 +30,65 @@ export function useToast(): Toaster {
 
 /** Holds the toast showing, at the foot of `children`. */
 export function ToastHost({ children }: { children: ReactNode }) {
-  const [toast, setToast] = useState<ToastContent & { key: number }>();
+  const [toast, setToast] = useState<ToastContent & { key: number; returnFocus: HTMLElement | null }>();
+  /** Whether the pointer or the focus is on it, which keeps it there. */
+  const [held, setHeld] = useState({ pointer: false, focus: false });
+  const element = useRef<HTMLDivElement>(null);
+  const shown = useRef(toast);
+  shown.current = toast;
   const next = useRef(0);
-  const current = useRef(toast);
-  current.current = toast;
-  const show = (content: ToastContent) => setToast({ ...content, key: next.current++ });
-  const close = () => setToast(undefined);
-  const undo = () => {
-    const shown = current.current;
-    if (!shown?.undo) return false;
-    // Taken once: a second Ctrl+Z or click doesn't run it again.
-    current.current = undefined;
-    setToast(undefined);
-    shown.undo().catch((error: unknown) => show({ message: `Couldn’t undo: ${(error as Error).message}` }));
-    return true;
-  };
-  const toaster = useRef<Toaster>({ show, undo });
-  toaster.current.show = show;
-  toaster.current.undo = undo;
+  const toaster = useMemo<Toaster & { close: () => void }>(() => {
+    const show = (content: ToastContent) => {
+      const focused = document.activeElement instanceof HTMLElement && !element.current?.contains(document.activeElement) ? document.activeElement : (shown.current?.returnFocus ?? null);
+      setHeld({ pointer: false, focus: false });
+      setToast({ ...content, key: next.current++, returnFocus: focused });
+    };
+    const close = () => {
+      // Closing under the focus, it goes back where it was, rather than to the page, where keys would run shortcuts.
+      if (element.current?.contains(document.activeElement) && shown.current?.returnFocus?.isConnected) shown.current.returnFocus.focus();
+      shown.current = undefined;
+      setToast(undefined);
+    };
+    const undo = () => {
+      const taken = shown.current;
+      if (!taken?.undo) return false;
+      // Taken once: a second Ctrl+Z or click doesn't run it again.
+      close();
+      taken.undo().catch((error: unknown) => show({ message: `Couldn’t undo: ${(error as Error).message}` }));
+      return true;
+    };
+    return { show, undo, close };
+  }, []);
+  const holding = held.pointer || held.focus;
   useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(close, TOAST_MS);
+    if (!toast || holding) return;
+    const timer = setTimeout(toaster.close, TOAST_MS);
     return () => clearTimeout(timer);
-  }, [toast?.key]);
+  }, [toast?.key, holding]);
   return (
-    <ToastContext.Provider value={toaster.current}>
+    <ToastContext.Provider value={toaster}>
       {children}
       {/* Always there, so that screen readers hear what is put in it. */}
-      <div className="toast-region" role="status" aria-label="Notifications" aria-live="polite">
+      <div ref={element} className="toast-region" role="status" aria-live="polite">
         {toast && (
-          <div key={toast.key} className="toast" role="group" aria-label="Notification">
+          <div
+            key={toast.key}
+            className="toast"
+            role="group"
+            aria-label="What was done"
+            onMouseEnter={() => setHeld((h) => ({ ...h, pointer: true }))}
+            onMouseLeave={() => setHeld((h) => ({ ...h, pointer: false }))}
+            onFocus={() => setHeld((h) => ({ ...h, focus: true }))}
+            onBlur={(event) => !event.currentTarget.contains(event.relatedTarget as Node | null) && setHeld((h) => ({ ...h, focus: false }))}
+          >
             <span className="grow">{toast.message}</span>
             {toast.undo && (
-              <button type="button" className="link" title="Undo (Ctrl Z)" onClick={undo}>
+              <button type="button" className="link" title="Undo (Ctrl Z)" onClick={toaster.undo}>
                 <Undo2 className="sm" />
                 Undo
               </button>
             )}
-            <button type="button" className="icon-btn sm" title="Dismiss" aria-label="Dismiss" onClick={close}>
+            <button type="button" className="icon-btn sm" title="Dismiss" aria-label="Dismiss" onClick={toaster.close}>
               <X className="sm" />
             </button>
           </div>
