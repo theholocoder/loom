@@ -11,7 +11,7 @@ import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { FeedbackDelivery } from './babysit';
 import { diffCommentBlocks } from './diff-comment-prompt';
 import { feedbackPrompt } from './feedback-prompt';
-import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, squashAndMerge, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
+import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, replyToReviewThread, resolveReviewThread, squashAndMerge, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import { readMergeRequestDetails } from '../projects/merge-request-details';
 import { readMergeRequestDiff } from '../projects/merge-request-diff';
 import type { LoomDatabase } from '../storage/database';
@@ -884,6 +884,23 @@ export class Sessions {
       // Merged all the same: the next read says how it stands.
       return {};
     }
+  }
+
+  /** Replies to a review thread of the Session's Merge request, as the user wrote it in its note on the diff. */
+  async replyToReviewThread({ id, thread, body }: { id: number; thread: string; body: string }): Promise<void> {
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    if (typeof body !== 'string' || !body.trim()) throw new Error('The reply is empty.');
+    const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
+    await replyToReviewThread(call, forge, workingCopy, this.environmentOf(session).tempDir(), number, String(thread), body.trim());
+  }
+
+  /** Resolves a review thread of the Session's Merge request, as the user asked from its note on the diff. */
+  async resolveReviewThread({ id, thread }: { id: number; thread: string }): Promise<void> {
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
+    await resolveReviewThread(call, forge, workingCopy, number, String(thread));
   }
 
   /** What reading the Session's Merge request takes: its Environment, its Project's Forge, where glab runs and its number. */

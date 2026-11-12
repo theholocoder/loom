@@ -4,7 +4,7 @@
 // everyone's reviews and comments.
 import type { ForgeStatus, MergeRequestComment, MergeRequestDetails, MergeRequestReview, ReviewVerdict } from '../../shared/api';
 import type { BridgeCall } from '../environments/exec';
-import { authorOf, gitHubCi, gitHubState, gitLabCi, gitLabState, lineOf, runJson, type GitHubAuthored, type GitHubContext, type GitLabMergeRequest } from './merge-request-activity';
+import { authorOf, gitHubCi, gitHubState, gitLabCi, gitLabState, lineOf, runJson, timeOf, type GitHubAuthored, type GitHubContext, type GitLabMergeRequest } from './merge-request-activity';
 import { mergeRequestForge } from './merge-requests';
 
 /** How many commits, files and notes one call lists, on GitLab: past that many commits or files, Loom says there are more. */
@@ -205,9 +205,4 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
 /** `names` once each, in order, without the Merge request's `author`: replying to a thread makes them a reviewer on GitHub. */
 function reviewersOf(author: string, names: string[]): string[] {
   return [...new Set(names)].filter((name) => name !== author);
-}
-
-function timeOf(iso: string | null | undefined): { at?: number } {
-  const at = iso ? Date.parse(iso) : NaN;
-  return Number.isFinite(at) ? { at } : {};
 }

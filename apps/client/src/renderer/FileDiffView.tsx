@@ -2,9 +2,10 @@
 // library: everything else hands it a patch, the Loom theme and, to comment
 // on it, what to do with a range the "+" was pressed for. Colours other
 // than the code's own come from the Loom theme, through the library's CSS
-// variables on `.file-diff` in styles.css.
+// variables on `.file-diff` in styles.css. Notes go under their lines,
+// whether the diff can be commented on or not.
 import { PatchDiff } from '@pierre/diffs/react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { DiffViewSettings } from '../shared/api';
 import { THEMES, type Theme } from '../shared/appearance';
 import type { LinePoint, LineRange, Side } from './diff-comments';
@@ -18,14 +19,19 @@ const SHIKI_THEMES: Record<Theme, string> = {
   daylight: 'github-light',
 };
 
-/** Commenting on the diff: the "+" by each line, what it was last pressed for, and the comments added. */
+/** Commenting on the diff: the "+" by each line, and what it was last pressed for. */
 export interface Commenting {
   /** Starts a comment on the line, or the range dragged over or selected, the "+" was pressed for. */
   onStartComment: (range: LineRange) => void;
   /** The comment being written, if any: its range, kept selected, and its form, under its last line. */
   draft?: { range: LineRange; at: Required<LinePoint>; form: ReactNode };
-  /** The comments added and not sent yet, each under its last line: `key` tells them apart. */
-  notes?: Array<{ key: string; at: Required<LinePoint>; note: ReactNode }>;
+}
+
+/** A note under a line of the diff: a comment added and not sent yet, or a review thread. `key` tells them apart. */
+export interface LineNote {
+  key: string;
+  at: Required<LinePoint>;
+  note: ReactNode;
 }
 
 /** A note or form under a line of the diff; its `metadata` says which: a note's key, or DRAFT. */
@@ -39,12 +45,14 @@ export function FileDiffView({
   theme,
   view: { wrap, sideBySide },
   commenting,
+  notes = [],
 }: {
   patch: string;
   theme: Theme;
   view: Pick<DiffViewSettings, 'wrap' | 'sideBySide'>;
   /** Absent when the diff can't be commented on. */
   commenting?: Commenting;
+  notes?: LineNote[];
 }) {
   const commentable = commenting !== undefined;
   // The latest `onStartComment`, so that a new one doesn't make new options, which would draw the diff again.
@@ -80,7 +88,6 @@ export function FileDiffView({
   useEffect(() => {
     if (!drafting) setSelection(null);
   }, [drafting]);
-  const notes = commenting?.notes ?? [];
   const wanted: Annotation[] = [
     ...notes.map(({ key, at }) => ({ side: at.side, lineNumber: at.lineNumber, metadata: key })),
     ...(draft ? [{ side: draft.at.side, lineNumber: draft.at.lineNumber, metadata: DRAFT }] : []),
@@ -94,7 +101,33 @@ export function FileDiffView({
       className="file-diff"
       patch={patch}
       options={options}
-      {...(commentable ? { selectedLines: draft?.range ?? selection, lineAnnotations: annotations, renderAnnotation: render } : {})}
+      lineAnnotations={annotations}
+      renderAnnotation={render}
+      {...(commentable ? { selectedLines: draft?.range ?? selection } : {})}
     />
   );
+}
+
+/** How many frames a field waits to be shown before it gives up on taking the focus. */
+const FOCUS_FRAMES = 10;
+
+/**
+ * Puts the focus in `field` as it mounts. The diff library shows what it is
+ * given only once it has made a place for it in its shadow DOM, after React
+ * mounts it: until then the field can't take the focus, so it is tried again
+ * each frame until it does.
+ */
+export function useFocusOnceShown(field: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    let frame = 0;
+    let tries = 0;
+    const attempt = () => {
+      const el = field.current;
+      if (!el) return;
+      el.focus();
+      if (document.activeElement !== el && ++tries < FOCUS_FRAMES) frame = requestAnimationFrame(attempt);
+    };
+    attempt();
+    return () => cancelAnimationFrame(frame);
+  }, [field]);
 }

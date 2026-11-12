@@ -2,7 +2,7 @@
 // brings what is new on it back to its Session. Nothing a poll sees reaches
 // the Session straight away: feedback waits out a quiet window, so a burst is
 // one wake-up, and everything waits for the agent to be done with its run.
-import type { BabysitCheck, BabysitCi, BabysitStatus, EndedMergeRequestState, FeedbackInfo, FeedbackItem, MergeRequestState, Project, ReviewCount, Session } from '../../shared/api';
+import type { BabysitCheck, BabysitCi, BabysitStatus, EndedMergeRequestState, FeedbackInfo, FeedbackItem, MergeRequestState, Project, ReviewCount, ReviewThread, Session } from '../../shared/api';
 import type { Clock, TimerHandle } from '../clock';
 import type { BridgeCall } from '../environments/exec';
 import { readMergeRequestActivity, type MergeRequestActivity } from '../projects/merge-request-activity';
@@ -56,6 +56,7 @@ interface BabysitRecord {
   ci?: BabysitCi;
   checks?: BabysitCheck[];
   reviews?: ReviewCount;
+  threads?: ReviewThread[];
   lastPollAt?: number;
   stale: boolean;
   /** Merged or closed, as a poll found it, until the Session has been archived or told. */
@@ -246,6 +247,7 @@ export class Babysit {
     record.ci = ci.status;
     record.checks = ci.checks;
     record.reviews = activity.reviews;
+    record.threads = activity.threads;
     record.lastPollAt = now;
     record.stale = false;
     if (activity.state !== 'open') {
@@ -360,6 +362,6 @@ function newRecord({ number, url }: { number: number; url: string }): BabysitRec
   return { number, url, baselined: false, seen: [], conflictsReported: false, pending: [], info: [], stale: false };
 }
 
-function statusOf({ ci, checks, reviews, lastPollAt, stale }: BabysitRecord): BabysitStatus {
-  return { stale, ...(ci ? { ci } : {}), ...(checks ? { checks } : {}), ...(reviews ? { reviews } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
+function statusOf({ ci, checks, reviews, threads, lastPollAt, stale }: BabysitRecord): BabysitStatus {
+  return { stale, ...(ci ? { ci } : {}), ...(checks ? { checks } : {}), ...(reviews ? { reviews } : {}), ...(threads ? { threads } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
 }

@@ -280,6 +280,41 @@ export interface BabysitStatus {
   stale: boolean;
   /** The reviews and comments others left on it, as last seen; absent before the first poll that worked. */
   reviews?: ReviewCount;
+  /** Its review threads on the code still open that others wrote in, as last seen: notes on their lines in the diffs. */
+  threads?: ReviewThread[];
+}
+
+/** One comment of a review thread. */
+export interface ReviewThreadComment {
+  author: string;
+  /** Markdown. */
+  body: string;
+  /** Clock time it was written, when the Forge says. */
+  at?: number;
+  url: string;
+}
+
+/**
+ * A thread of review comments on a line of a Merge request's code, not
+ * resolved, that someone other than the user wrote in: shown as a note on its
+ * line in Changes and in the Merge request's diff, to reply to or resolve.
+ */
+export interface ReviewThread {
+  /** The Forge's own id for it, which replying and resolving name: GitHub's thread, GitLab's discussion. */
+  id: string;
+  path: string;
+  /** The line it is on, numbered as the Merge request's diff numbers its `side`; absent once the Forge no longer places it (outdated). */
+  line?: number;
+  /** `old` for a removed line, numbered in the old file. */
+  side: 'old' | 'new';
+  /** What the line read when it was commented on, when the Forge says (GitHub): a diff where it reads otherwise has moved on. */
+  code?: string;
+  /** Set when it came with a review asking for changes. */
+  changesRequested?: boolean;
+  /** Oldest first: the first one started it. */
+  comments: ReviewThreadComment[];
+  /** Whether the user may resolve it, as the Forge says. */
+  canResolve: boolean;
 }
 
 /** How many reviews and comments others left on a Merge request, for the Glance strip. */
@@ -1411,6 +1446,15 @@ export interface Commands {
    * the Session is Working. Rejects when the card has been sent already.
    */
   'sessions.sendFeedback': { params: { id: number; itemId: number }; result: void };
+  /**
+   * Replies `body` (Markdown) to review thread `thread` of the Session's
+   * Merge request, on its Forge, as the user asked in a note on the diff;
+   * Babysit then reads the Merge request again. Rejects an archived Session,
+   * an empty reply, and as `sessions.mergeRequest` does.
+   */
+  'sessions.replyToReviewThread': { params: { id: number; thread: string; body: string }; result: void };
+  /** Resolves review thread `thread` of the Session's Merge request on its Forge, then has Babysit read it again; rejects as `sessions.replyToReviewThread` does. */
+  'sessions.resolveReviewThread': { params: { id: number; thread: string }; result: void };
   /** Starts or stops Babysit watching the Session's Merge request; started again, it reports what came meanwhile. Rejects an archived Session. */
   'sessions.setBabysitting': { params: { id: number; on: boolean }; result: void };
   /** Turns auto-prompt on or off for the Session; rejects an archived Session or one whose worktree is gone. */
