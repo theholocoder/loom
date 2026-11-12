@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { Project } from '../../src/shared/api';
+import type { Project, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -16,9 +16,9 @@ const project = (id: number, name: string, path: string): Project => ({
 });
 const projects = [project(1, 'billing-api', '/home/dev/billing-api'), project(2, 'web-shop', '/home/dev/shop'), project(3, 'docs', '/srv/handbook')];
 
-function openPicker(list: Project[] = projects) {
+function openPicker(list: Project[] = projects, sessions: Session[] = []) {
   render(
-    <ApiProvider api={new FakeMain({ projects: list })}>
+    <ApiProvider api={new FakeMain({ projects: list, sessions })}>
       <App />
     </ApiProvider>,
   );
@@ -26,6 +26,19 @@ function openPicker(list: Project[] = projects) {
   fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
   return screen.queryByRole('dialog', { name: 'Pick a Project' });
 }
+
+const session = (id: number, projectId: number, updatedAt: number): Session => ({
+  id,
+  projectId,
+  title: `Session ${id}`,
+  workingCopy: { kind: 'checkout', path: '/home/dev' },
+  agent: 'OpenCode',
+  status: 'waiting',
+  waitingReason: 'finished',
+  unread: false,
+  createdAt: 1,
+  updatedAt,
+});
 
 const filter = () => screen.getByRole('combobox', { name: 'Filter Projects' });
 const rows = () => screen.getAllByRole('option');
@@ -55,6 +68,25 @@ describe('the Project picker for a new Session', () => {
     expect(names()).toEqual(['billing-api', 'web-shop', 'docs']);
     expect(highlighted()).toBe('billing-api');
     expect(first.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it("highlights the Project of the most recent Session, rather than the first Project", () => {
+    openPicker(projects, [session(1, 1, 10), session(2, 3, 30), session(3, 2, 20)]);
+    expect(highlighted()).toBe('docs');
+    fireEvent.keyDown(filter(), { key: 'Enter' });
+    expect(within(screen.getByRole('main', { name: 'New Session' })).getByRole('button', { name: 'Project' }).textContent).toBe('docs');
+  });
+
+  it('highlights the open Session\'s Project above all', () => {
+    render(
+      <ApiProvider api={new FakeMain({ projects, sessions: [session(1, 2, 10), session(2, 3, 30)] })}>
+        <App />
+      </ApiProvider>,
+    );
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: 'Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
+    expect(highlighted()).toBe('web-shop');
   });
 
   it('filters by name and by path, case-insensitively, highlighting the first match', () => {

@@ -124,6 +124,8 @@ export async function listBranches(environment: GitRunner, checkout: string): Pr
   const base = await defaultBase(environment, checkout, fetched);
   const { local, remote } = await branchesOf(environment, checkout);
   const all = await worktreesOf(environment, checkout);
+  const head = await git(environment, ['-C', checkout, 'symbolic-ref', '--quiet', '--short', 'HEAD']);
+  const checkoutBranch = head.exitCode === 0 ? head.stdout.trim() : '';
   const busy = new Set(all.flatMap((worktree) => (worktree.branch ? [worktree.branch] : [])));
   const locals = new Set(local);
   return {
@@ -136,6 +138,7 @@ export async function listBranches(environment: GitRunner, checkout: string): Pr
     worktrees: workable(all, checkout)
       .filter((worktree) => !worktree.locked)
       .map(({ path, branch }) => (branch ? { path, branch } : { path })),
+    ...(checkoutBranch && { checkoutBranch }),
     ...(fetched.state === 'failed' && { fetchError: `Couldn't fetch origin: ${fetched.error}` }),
   };
 }

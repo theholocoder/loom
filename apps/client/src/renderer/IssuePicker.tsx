@@ -60,8 +60,16 @@ export function IssuePicker({ project, issue, defaultOpen = false, onChange }: {
 export function IssueSearch({ project, anchor, onPick, onClose }: { project: Project; anchor: RefObject<HTMLElement | null>; onPick: (issue: Issue) => void; onClose: () => void }) {
   const api = useApi();
   const [search, setSearch] = useState('');
-  const [issues, setIssues] = useState<Issue[]>();
+  // The issues found, and the search they were found for.
+  const [found, setFound] = useState<{ search: string; issues: Issue[] }>();
+  const issues = found?.issues;
   const [error, setError] = useState<string>();
+  // Enter, pressed before the search's own issues came: the first of them is picked once they do.
+  const [picking, setPicking] = useState(false);
+  const pick = (issue: Issue) => {
+    onClose();
+    onPick(issue);
+  };
 
   useEffect(() => {
     let current = true;
@@ -69,8 +77,8 @@ export function IssueSearch({ project, anchor, onPick, onClose }: { project: Pro
       () => {
         api
           .invoke('projects.issues', { id: project.id, ...(search.trim() ? { search: search.trim() } : {}) })
-          .then((found) => current && (setIssues(found), setError(undefined)))
-          .catch((e: unknown) => current && (setIssues(undefined), setError((e as Error).message)));
+          .then((listed) => current && (setFound({ search, issues: listed }), setError(undefined)))
+          .catch((e: unknown) => current && (setFound(undefined), setError((e as Error).message), setPicking(false)));
       },
       search ? SEARCH_DELAY_MS : 0,
     );
@@ -80,9 +88,29 @@ export function IssueSearch({ project, anchor, onPick, onClose }: { project: Pro
     };
   }, [api, project.id, search]);
 
+  const listedForSearch = found?.search === search;
+  useEffect(() => {
+    if (!picking || !found || found.search !== search) return;
+    setPicking(false);
+    if (found.issues[0]) pick(found.issues[0]);
+  }, [picking, found, search]);
+
   return (
     <Popover anchor={anchor} role="dialog" label="Pick an issue" className="issue-popover" onClose={onClose}>
-      <input aria-label="Search issues" placeholder="Search open issues…" data-autofocus value={search} onChange={(event) => setSearch(event.target.value)} />
+      <input
+        aria-label="Search issues"
+        placeholder="Search open issues…"
+        data-autofocus
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter') return;
+          // Enter in the search picks the first issue it finds, with no ↓ first.
+          event.preventDefault();
+          if (!listedForSearch) setPicking(true);
+          else if (issues?.[0]) pick(issues[0]);
+        }}
+      />
       {error && (
         <div className="err" role="alert">
           {error}
@@ -90,18 +118,9 @@ export function IssueSearch({ project, anchor, onPick, onClose }: { project: Pro
       )}
       {issues?.length === 0 && <div className="muted">No open issues found.</div>}
       <div role="listbox" aria-label="Open issues">
-        {issues?.map((found) => (
-          <button
-            key={found.number}
-            type="button"
-            role="option"
-            aria-selected={false}
-            onClick={() => {
-              onClose();
-              onPick(found);
-            }}
-          >
-            <span className="tech">#{found.number}</span> {found.title}
+        {issues?.map((issue, index) => (
+          <button key={issue.number} type="button" role="option" aria-selected={false} data-enter={index === 0 && listedForSearch ? '' : undefined} onClick={() => pick(issue)}>
+            <span className="tech">#{issue.number}</span> {issue.title}
           </button>
         ))}
       </div>

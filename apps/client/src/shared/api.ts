@@ -489,6 +489,8 @@ export interface Branches {
    * missing and locked ones; those Sessions work in too, to share.
    */
   worktrees: ExistingWorktree[];
+  /** The branch the Project's checkout has checked out, where a checkout Session would work; absent on a detached HEAD. */
+  checkoutBranch?: string;
   /**
    * Why `origin` couldn't be fetched, when it couldn't (offline, or gone):
    * its branches are then as the checkout last fetched them. Absent once

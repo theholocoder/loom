@@ -42,6 +42,7 @@ import { Popover } from './Popover';
 import { ResizeEdge } from './ResizeEdge';
 import { SHORTCUTS, shortcutLabel } from './shortcuts';
 import { useWindowLayout } from './WindowLayout';
+import { isFreeEscape } from './escape';
 
 /** What a tab shows beside its label: a count, with what it counts for a screen reader and the tooltip. */
 export interface PanelBadge {
@@ -731,9 +732,7 @@ function useReview(reviewing: boolean, element: RefObject<HTMLElement | null>, l
     else if (!document.activeElement || document.activeElement === document.body) element.current?.querySelector<HTMLElement>('[data-review-toggle]')?.focus();
     if (!reviewing) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (event.target instanceof Element && event.target.closest('.terminal-screen')) return;
-      if (document.querySelector('[aria-modal="true"], .popover')) return;
+      if (!isFreeEscape(event)) return;
       event.preventDefault();
       leaving.current();
     };
@@ -758,9 +757,7 @@ function useDrawer(drawer: boolean, element: RefObject<HTMLElement | null>, clos
     const area = element.current;
     if (area && !area.contains(document.activeElement)) area.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (event.target instanceof Element && event.target.closest('.terminal-screen')) return;
-      if (document.querySelector('[aria-modal="true"], .popover')) return;
+      if (!isFreeEscape(event)) return;
       event.preventDefault();
       closing.current();
     };

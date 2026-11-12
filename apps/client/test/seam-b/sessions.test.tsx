@@ -106,6 +106,21 @@ describe('starting a Session', () => {
     );
   });
 
+  it('picks the first branch the search shows on Enter', async () => {
+    renderApp(new FakeMain({ projects: [project] }, { 'projects.branches': () => branches }));
+    const pane = startNewSession();
+    const base = within(pane).getByRole('button', { name: 'Branch from' });
+    await waitFor(() => expect(base.textContent).toBe('origin/trunk'));
+
+    fireEvent.click(base);
+    const search = screen.getByRole('textbox', { name: 'Search branches' });
+    fireEvent.change(search, { target: { value: 'release' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+
+    expect(base.textContent).toBe('origin/release/1.2');
+    expect(screen.queryByRole('listbox', { name: 'Branches' })).toBeNull();
+  });
+
   it('works in an existing worktree, or a branch no worktree has in a new one, searchable, naming no new branch', async () => {
     const main = renderApp(new FakeMain({ projects: [project] }, { 'projects.branches': () => branches, 'sessions.create': () => inWorktree }));
     const pane = startNewSession();
@@ -201,22 +216,46 @@ describe('starting a Session', () => {
     expect(main.invoked.filter((i) => i.command === 'projects.branches')).toHaveLength(2);
   });
 
-  it('defaults to a new worktree, also offering an existing worktree or the current branch, with OpenCode as the agent', () => {
-    renderApp(new FakeMain({ projects: [project] }));
+  it("defaults to a new worktree, also offering an existing worktree or the checkout's branch, with OpenCode as the agent", async () => {
+    renderApp(new FakeMain({ projects: [project] }, { 'projects.branches': () => ({ ...branches, checkoutBranch: 'trunk' }) }));
 
     const pane = startNewSession();
 
     const workingCopy = within(pane).getByRole('button', { name: 'Working copy' });
     expect(workingCopy.textContent).toBe('New worktree');
+    await waitFor(() => expect(within(pane).getByRole('button', { name: 'Branch from' }).textContent).toBe('origin/trunk'));
     fireEvent.click(workingCopy);
     const choices = within(screen.getByRole('listbox', { name: 'Working copy' })).getAllByRole('option');
     expect(choices.map((o) => [o.textContent, o.getAttribute('aria-selected')])).toEqual([
       ['New worktree', 'true'],
       ['Existing worktree', 'false'],
-      ['Stay on current branch', 'false'],
+      ['Stay on trunk', 'false'],
     ]);
     expect(within(pane).getByTitle('Agent').textContent).toBe('OpenCode');
     expect(within(pane).getByRole('button', { name: 'Project' }).textContent).toBe(project.name);
+  });
+
+  it('offers no existing worktree when there is none to work in, nor a branch for one', async () => {
+    renderApp(new FakeMain({ projects: [project] }, { 'projects.branches': () => ({ defaultBase: { name: 'main', remote: true }, bases: [{ name: 'main', remote: true }], existing: [], worktrees: [] }) }));
+    const pane = startNewSession();
+    await waitFor(() => expect(within(pane).getByRole('button', { name: 'Branch from' }).textContent).toBe('origin/main'));
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Working copy' }));
+
+    // A detached checkout has no branch to name.
+    expect(within(screen.getByRole('listbox', { name: 'Working copy' })).getAllByRole('option').map((o) => o.textContent)).toEqual(['New worktree', 'Stay on current branch']);
+  });
+
+  it('says to pick a worktree while the prompt waits for one', () => {
+    renderApp(new FakeMain({ projects: [project] }, { 'projects.branches': () => branches }));
+    const pane = startNewSession();
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Working copy' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Existing worktree' }));
+
+    const prompt = within(pane).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+    expect(prompt.disabled).toBe(true);
+    expect(prompt.placeholder).toBe('Pick the worktree to work in first.');
   });
 
   it('starts a checkout Session with the prompt, then shows it', async () => {
@@ -271,6 +310,33 @@ describe('starting a Session', () => {
     ]);
   });
 
+  it("says as it is typed that git wouldn't take the branch name, holding Send back until it would", () => {
+    const main = renderApp(new FakeMain({ projects: [project] }, { 'sessions.create': () => inWorktree }));
+    const pane = startNewSession();
+    const prompt = within(pane).getByRole('textbox', { name: 'Prompt' });
+    const branch = within(pane).getByRole('textbox', { name: 'Branch' });
+    const send = within(pane).getByRole('button', { name: 'Send' }) as HTMLButtonElement;
+    fireEvent.change(prompt, { target: { value: 'Fix the login bug' } });
+
+    fireEvent.change(branch, { target: { value: 'loom/login bug' } });
+
+    const alert = within(pane).getByRole('alert');
+    expect(alert.textContent).toBe(`"loom/login bug" can't be a branch name: it contains a space, a control character or one of ~ ^ : ? * [ \\`);
+    expect(branch.getAttribute('aria-invalid')).toBe('true');
+    expect(branch.getAttribute('aria-describedby')).toBe(alert.id);
+    expect(send.disabled).toBe(true);
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+    expect(main.invoked.filter((i) => i.command === 'sessions.create')).toEqual([]);
+
+    fireEvent.change(branch, { target: { value: 'loom/login.' } });
+    expect(within(pane).getByRole('alert').textContent).toBe(`"loom/login." can't be a branch name: it ends with '.'`);
+
+    fireEvent.change(branch, { target: { value: 'loom/login' } });
+    expect(within(pane).queryByRole('alert')).toBeNull();
+    expect(branch.getAttribute('aria-invalid')).toBeNull();
+    expect(send.disabled).toBe(false);
+  });
+
   it('starts in the default Approval mode from Settings, and with the mode picked', async () => {
     const main = renderApp(new FakeMain({ projects: [project], settings: { ...DEFAULT_SETTINGS, approvalModeDefault: 'full' } }, { 'sessions.create': () => inWorktree }));
     const pane = startNewSession();
@@ -315,6 +381,71 @@ describe('starting a Session', () => {
 
     // By the composer's controls, not at the top of the pane.
     expect((await within(within(pane).getByRole('form', { name: 'Composer' })).findByRole('alert')).textContent).toBe('Native is not connected');
+  });
+
+  it('puts the focus in the prompt, once the Project is picked', () => {
+    renderApp(new FakeMain({ projects: [project] }));
+
+    const pane = startNewSession();
+
+    expect(document.activeElement).toBe(within(pane).getByRole('textbox', { name: 'Prompt' }));
+  });
+
+  it("drops why the last Project's Session couldn't start once another Project is picked, the focus back in the prompt", async () => {
+    const other: Project = { ...project, id: 2, name: 'web-shop', checkout: { environmentId: 'native', path: '/home/dev/web-shop' } };
+    renderApp(
+      new FakeMain({ projects: [project, other] }, {
+        'sessions.create': () => {
+          throw new Error("Couldn't fetch origin: Could not resolve host: github.com");
+        },
+      }),
+    );
+    const pane = startNewSession();
+    fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Go' } });
+    fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
+    await within(pane).findByRole('alert');
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Project' }));
+    fireEvent.click(screen.getByRole('option', { name: 'web-shop' }));
+
+    expect(within(pane).queryByRole('alert')).toBeNull();
+    expect(document.activeElement).toBe(within(pane).getByRole('textbox', { name: 'Prompt' }));
+  });
+
+  it('goes back to where it was started from on Cancel, or on Esc once no picker is open and nothing is typed', () => {
+    open(renderApp(new FakeMain({ projects: [project], sessions: [finished] })), finished);
+
+    fireEvent.click(within(startNewSession()).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('main', { name: 'New Session' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Say hello' })).toBeTruthy();
+
+    const pane = startNewSession();
+    fireEvent.click(within(pane).getByRole('button', { name: 'Working copy' }));
+    fireEvent.keyDown(screen.getByRole('listbox', { name: 'Working copy' }), { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: 'Working copy' })).toBeNull();
+    expect(screen.getByRole('main', { name: 'New Session' })).toBe(pane);
+
+    // Esc doesn't throw away what was typed; Cancel would.
+    const prompt = within(pane).getByRole('textbox', { name: 'Prompt' });
+    fireEvent.change(prompt, { target: { value: 'Half a thought' } });
+    fireEvent.keyDown(prompt, { key: 'Escape' });
+    expect(screen.getByRole('main', { name: 'New Session' })).toBe(pane);
+    fireEvent.change(prompt, { target: { value: '' } });
+
+    fireEvent.keyDown(prompt, { key: 'Escape' });
+    expect(screen.queryByRole('main', { name: 'New Session' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Say hello' })).toBeTruthy();
+  });
+
+  it('goes back to the view it was started from, such as Settings', () => {
+    renderApp(new FakeMain({ projects: [project] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    startNewSession();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+
+    expect(screen.queryByRole('main', { name: 'New Session' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
   });
 
   it('asks for a Project first when there is none', () => {
