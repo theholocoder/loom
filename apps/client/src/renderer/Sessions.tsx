@@ -599,7 +599,7 @@ export function SessionView({
                 <div key={item.id} className="msg user">
                   <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <div className="bubble">
-                      {item.text && <Markdown text={item.text} breaks />}
+                      {item.text && <Markdown text={item.text} flavour="user" />}
                       {item.attachments && <AttachmentList attachments={item.attachments} />}
                     </div>
                   </div>

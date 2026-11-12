@@ -331,6 +331,10 @@ export interface MergeRequestDetails extends ForgeLink {
   sourceBranch: string;
   targetBranch: string;
   author: string;
+  /** Markdown, as its author wrote it; empty when there is none. */
+  description: string;
+  /** Who was asked to review it or did, its author aside: users, and on GitHub teams as `org/team`. */
+  reviewers: string[];
   /** How many commits it has; `moreCommits` when the Forge listed only the first of them. */
   commits: number;
   moreCommits?: boolean;

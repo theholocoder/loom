@@ -67,6 +67,8 @@ function details(fields: Partial<MergeRequestDetails> = {}): MergeRequestDetails
     sourceBranch: 'loom/fix-login',
     targetBranch: 'main',
     author: 'dave',
+    description: '',
+    reviewers: [],
     commits: 3,
     files: 3,
     added: 67,
@@ -154,6 +156,42 @@ describe("the Session's Merge request", () => {
     expect(within(entries[1]!).getByText('Ship it').tagName).toBe('STRONG');
     fireEvent.click(within(entries[1]!).getByRole('button', { name: 'Open the comment by carol' }));
     await waitFor(() => expect(calls(main, 'links.open')).toContainEqual({ url: `${url}#note_2` }));
+  });
+
+  it('shows its reviewers, and its description as the Forge renders it: Markdown, its mermaid diagrams drawn, its HTML comments hidden, as in its comments', async () => {
+    const description = ['<!-- Say what this changes. -->', '## What', '', 'Invoices use the **billing** currency.', '', '```mermaid', 'flowchart LR', '  showInvoice --> currencyFor', '```'].join('\n');
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] }, { 'sessions.mergeRequest': () => details({ reviewers: ['erin', 'frank'], description, comments: [{ author: 'carol', body: '<!-- coverage-bot -->\nCoverage **91%**', at: 2000, url: `${url}#note_2` }] }) });
+    open(main);
+    const shown = panel();
+    await within(shown).findByRole('heading', { name: 'Fix the login bug' });
+
+    expect(shown.querySelector('.mr-head')!.querySelectorAll('.mr-meta')[1]!.textContent).toBe('by daveReviewersERerinFRfrank3 commits3 files+67−1');
+    const section = within(shown).getByRole('region', { name: 'Description' });
+    expect(within(section).getByRole('heading', { name: 'What' })).toBeTruthy();
+    expect(within(section).getByText('billing').tagName).toBe('STRONG');
+    expect(section.textContent).not.toContain('Say what this changes');
+    const diagram = await within(section).findByRole('img', { name: 'Diagram' });
+    expect(diagram.querySelector('svg')!.textContent).toContain('currencyFor');
+    // Drawn instead of shown as code.
+    expect(within(section).queryByRole('button', { name: 'Copy code' })).toBeNull();
+    const reviews = within(shown).getByRole('region', { name: 'Reviews and comments' });
+    expect(within(reviews).getByRole('listitem', { name: 'Comment by carol' }).querySelector('.rb')!.textContent).toBe('Coverage 91%');
+  });
+
+  it("shows a diagram it can't draw as its code, saying why, and says when there is no description", async () => {
+    let description = '```mermaid\nflowchart LR\n  a -->\n```';
+    const main = new FakeMain({ projects: [gitlab], sessions: [session({ mergeRequest: { number: 12, url }, mergeRequestState: 'open' })] }, { 'sessions.mergeRequest': () => details({ description }) });
+    open(main);
+    const shown = panel();
+    const section = within(shown).getByRole('region', { name: 'Description' });
+    expect((await within(section).findByRole('note')).textContent).toBe("Couldn't draw this diagram: Parse error on line 2: Expecting 'NODE_STRING', got 'EOF'");
+    expect(within(section).getByRole('button', { name: 'Copy code' })).toBeTruthy();
+    expect(section.textContent).toContain('a -->');
+    expect(within(shown).getByText('by dave').closest('.mr-meta')!.textContent).not.toContain('Reviewer');
+
+    description = '  ';
+    fireEvent.click(within(shown).getByRole('button', { name: 'Refresh the Merge request' }));
+    await waitFor(() => expect(section.textContent).toBe('DescriptionNo description.'));
   });
 
   it('takes the checks Babysit last saw over its own read, and reads it again after each poll', async () => {
