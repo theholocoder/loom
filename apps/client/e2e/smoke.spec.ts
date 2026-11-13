@@ -60,6 +60,8 @@ test('launches into the three-pane window and connects the native Environment', 
   await expect(window.getByRole('complementary', { name: 'Side area' })).toHaveCount(0);
 
   await window.getByRole('button', { name: 'Settings' }).click();
+  // Each section of Settings is a page of its own.
+  await window.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: 'Environments' }).click();
   const native = window.getByRole('row', { name: /Native/ });
   await expect(native.getByText('connected')).toBeVisible();
   await expect(native.getByText(`loom-bridge ${clientPackage.version}`)).toBeVisible();
@@ -173,6 +175,7 @@ function luminance(color: string): number {
 test('the Settings dropdowns take on the theme', async () => {
   const window = await launch();
   await window.getByRole('button', { name: 'Settings' }).click();
+  await window.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: 'Appearance' }).click();
   const themes = window.getByRole('radiogroup', { name: 'Theme' });
   const dropdown = window.getByRole('button', { name: 'UI font' });
 
