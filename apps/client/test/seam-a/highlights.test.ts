@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { startMain, tempDir, tempMachine, waitFor, type AcpMessage, type AcpTurn, type MainHarness, type Machine } from './harness';
 import type { EnvironmentStatus, Session, SessionHighlights } from '../../src/shared/api';
@@ -127,6 +129,59 @@ describe('Session highlights', () => {
     await main.api.invoke('sessions.resolveHighlight', { id, highlightId: skipped!.id, resolved: false });
     expect((await highlightsWhere(main, id, () => true)).highlights.find((h) => h.id === skipped!.id)!.resolved).toBeUndefined();
     await expect(main.api.invoke('sessions.resolveHighlight', { id, highlightId: 12345, resolved: true })).rejects.toThrow(/no Highlight/);
+  });
+
+  it('keeps when the model resolved a Highlight, the same across restarts', async () => {
+    const { machine, checkout } = machineWith(
+      [{ chunks: ['Skipped the e2e tests for now.'] }, { chunks: ['Added the e2e tests.'] }],
+      [answer({ add: [{ kind: 'not-done', text: 'The e2e tests were skipped.' }], resolve: [] }), answer({ add: [], resolve: [{ id: 1, reason: 'The e2e tests were added.' }] })],
+    );
+    const userDataDir = tempDir('loom-highlights-');
+    const first = await start(machine, checkout, { userDataDir });
+    await first.main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Add tests' });
+    const noted = (await highlightsWhere(first.main, id, (h) => h.highlights.length === 1)).highlights[0]!;
+    const sent = first.main.clock.now();
+    await first.main.api.invoke('sessions.send', { id, prompt: 'Add the e2e tests too' });
+    const resolved = (await highlightsWhere(first.main, id, (h) => h.highlights.some((x) => x.resolved))).highlights[0]!.resolved!;
+    expect(resolved.at).toBeGreaterThanOrEqual(Math.max(sent, noted.createdAt));
+    expect(resolved.at).toBeLessThanOrEqual(first.main.clock.now());
+    await first.main.close();
+
+    const main = await startMain({ machine, userDataDir });
+    await waitFor(main.api, 'environments', ready);
+    const kept = await highlightsWhere(main, id, (h) => h.highlights.length === 1);
+    expect(kept.highlights[0]!.resolved).toEqual(resolved);
+  });
+
+  it("leaves the Session's Highlights as they were when recording a check fails", async () => {
+    const { machine, checkout } = machineWith(
+      [{ chunks: ['Skipped the e2e tests for now.'] }, { chunks: ['Added the e2e tests, and kept the old API.'] }],
+      [
+        answer({ add: [{ kind: 'not-done', text: 'The e2e tests were skipped.' }], resolve: [] }),
+        answer({ add: [{ kind: 'decision', text: 'Kept the old API.' }], resolve: [{ id: 1, reason: 'The e2e tests were added.' }] }),
+      ],
+    );
+    const userDataDir = tempDir('loom-highlights-');
+    const first = await start(machine, checkout, { userDataDir });
+    await first.main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Add tests' });
+    const before = structuredClone((await highlightsWhere(first.main, id, (h) => h.highlights.length === 1)).highlights);
+    // The disk refuses the resolution, after the new Highlight was written in the same transaction.
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.exec("create trigger refuse before update of resolved_by on highlights begin select raise(abort, 'disk I/O error'); end");
+    db.close();
+
+    await first.main.api.invoke('sessions.send', { id, prompt: 'Add the e2e tests too' });
+    const failed = await highlightsWhere(first.main, id, (h) => h.error !== undefined);
+    expect(failed.error).toMatch(/disk I\/O error/);
+    expect(failed.highlights).toEqual(before);
+    await waitFor(first.main.api, 'sessions', sessionWhere(id, (s) => s.highlights?.count === 1));
+    await first.main.close();
+
+    const main = await startMain({ machine, userDataDir });
+    await waitFor(main.api, 'environments', ready);
+    expect((await highlightsWhere(main, id, () => true)).highlights).toEqual(before);
   });
 
   it('says why a check failed, and checks its turn again with the next', async () => {

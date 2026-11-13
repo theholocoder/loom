@@ -221,20 +221,24 @@ export class Highlights {
     }
     if (!this.states.has(session.id)) return;
     const now = this.options.clock.now();
+    // Applied once written: a check whose write fails leaves the Highlights as they were.
+    const added: Highlight[] = [];
+    const resolutions = new Map<number, NonNullable<Highlight['resolved']>>();
     await this.options.db.transaction().execute(async (trx) => {
       for (const { kind, text, turn } of answer.add) {
         const row = { session_id: session.id, kind, text, item_id: turn, created_at: now, resolved_by: null, resolved_reason: null, resolved_item_id: null, resolved_at: null };
         const { id } = await trx.insertInto('highlights').values(row).returning('id').executeTakeFirstOrThrow();
-        state.highlights.push(highlightOf({ ...row, id }));
+        added.push(highlightOf({ ...row, id }));
       }
       for (const { id, reason, turn } of answer.resolve) {
-        const at = state.highlights.findIndex((h) => h.id === id);
+        const highlight = state.highlights.find((h) => h.id === id);
         // The user may have resolved it meanwhile: theirs stands.
-        if (at < 0 || state.highlights[at]!.resolved) continue;
+        if (!highlight || highlight.resolved) continue;
         await trx.updateTable('highlights').set({ resolved_by: 'model', resolved_reason: reason || null, resolved_item_id: turn, resolved_at: now }).where('id', '=', id).execute();
-        state.highlights[at] = { ...state.highlights[at]!, resolved: { by: 'model', ...(reason ? { reason } : {}), itemId: turn, at } };
+        resolutions.set(id, { by: 'model', ...(reason ? { reason } : {}), itemId: turn, at: now });
       }
     });
+    state.highlights = [...state.highlights.map((h) => (resolutions.has(h.id) ? { ...h, resolved: resolutions.get(h.id)! } : h)), ...added];
   }
 
   /**
