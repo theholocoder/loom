@@ -32,3 +32,10 @@ dev:
     exec pnpm dev
 
 alias start := dev
+
+# Add the tables, columns and indexes the dev database's schema version promises but lacks (backs it up first; --dry-run to only look)
+db-repair *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if pgrep -f "electron.*apps/client" >/dev/null; then echo "Quit Loom first."; exit 1; fi
+    node scripts/db-repair.mjs {{args}}
