@@ -295,6 +295,76 @@ describe('commenting on the conversation', () => {
   });
 });
 
+describe("a link's and a code block's right-click menu in the conversation", () => {
+  const reply = (text: string): TranscriptItem[] => [
+    { kind: 'user', id: 1, text: 'Fix the login bug' },
+    { kind: 'agent', id: 2, text, streaming: false },
+  ];
+  async function openConversation(text: string) {
+    const fix = session({ title: 'Fix login' });
+    const main = renderApp([fix]);
+    main.publish('transcript', reply(text), { sessionId: fix.id });
+    fireEvent.click(within(card('Fix login')).getByRole('button', { name: 'Fix login' }));
+    await screen.findByRole('log', { name: 'Conversation' });
+    return { main, fix };
+  }
+
+  it('opens a link in the browser, or copies its address', async () => {
+    const { main } = await openConversation('See [the docs](https://example.com/login) first.');
+    const link = await screen.findByRole('link', { name: 'the docs' });
+    fireEvent.contextMenu(link);
+    expect(items()).toEqual(['Open link', 'Copy link address']);
+    pick('Open link');
+    await waitFor(() => expect(invoked(main, 'links.open')).toEqual([{ url: 'https://example.com/login' }]));
+    fireEvent.contextMenu(link);
+    pick('Copy link address');
+    await waitFor(() => expect(clipboard).toEqual(['https://example.com/login']));
+  });
+
+  /** The code of the conversation's code block, highlighted. */
+  const codeBlock = () =>
+    waitFor(() => {
+      const code = screen.getByRole('log', { name: 'Conversation' }).querySelector('pre code');
+      if (!code) throw new Error('no code block in the conversation');
+      return code;
+    });
+  const code = 'Here is the fix:\n\n```ts\nconst retries = 1;\nlogin(retries);\n```\n';
+
+  it("copies a code block's code", async () => {
+    await openConversation(code);
+    const block = await codeBlock();
+    fireEvent.contextMenu(block);
+    expect(items()[0]).toBe('Copy code');
+    pick('Copy code');
+    await waitFor(() => expect(clipboard).toEqual(['const retries = 1;\nlogin(retries);']));
+  });
+
+  it('comments on the whole code block, with nothing selected', async () => {
+    const { main, fix } = await openConversation(code);
+    fireEvent.contextMenu(await codeBlock());
+    expect(items()).toEqual(['Copy code', '—', 'Comment…']);
+    pick('Comment…');
+    const dialog = screen.getByRole('dialog', { name: 'Comment on the conversation' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: 'Why once?' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(invoked(main, 'sessions.send')).toEqual([{ id: fix.id, prompt: '', comments: [{ quote: 'const retries = 1;\nlogin(retries);', note: 'Why once?' }] }]),
+    );
+  });
+
+  it('comments on the part of a code block selected', async () => {
+    await openConversation(code);
+    const block = await codeBlock();
+    const line = [...block.querySelectorAll('span')].find((span) => span.textContent === 'login')!;
+    select(line);
+    fireEvent.contextMenu(line);
+    expect(items()).toEqual(['Copy code', '—', 'Comment…', '—', 'Copy']);
+    pick('Comment…');
+    expect(within(screen.getByRole('dialog', { name: 'Comment on the conversation' })).getByText('login')).toBeTruthy();
+  });
+});
+
 describe('copying from any right-click', () => {
   it('copies the text selected', async () => {
     const fix = session({ title: 'Fix login' });

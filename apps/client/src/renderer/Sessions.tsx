@@ -18,7 +18,7 @@ import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from 
 import { canRunTerminals, PanelArea, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
 import { Select } from './Popover';
-import { Markdown } from './Markdown';
+import { codeBlockAt, Markdown } from './Markdown';
 import { useArchive, useRemovedProject } from './Archive';
 import { useToast } from './Toast';
 import { useDelete } from './Delete';
@@ -678,12 +678,18 @@ export function SessionView({
 
   // Comments can go with the next message: not while the composer takes none, nor with an answer to a question.
   const composerDisabled = readOnly || (asked && !freeAnswer) || !!session.worktreeMissing;
-  /** Comment…, on a right-click of text selected in the conversation: the passage and a note go to the composer as a chip. */
-  const commentOnSelection = (event: ReactMouseEvent<HTMLElement>) => {
-    const quote = selectedText().trim();
+  /**
+   * Comment…, on a right-click of text selected in the conversation, or of a
+   * code block (the selection in it, or its whole code): the passage and a
+   * note go to the composer as a chip.
+   */
+  const commentOnConversation = (event: ReactMouseEvent<HTMLElement>) => {
     const selection = window.getSelection();
-    const inside = selection && selection.rangeCount > 0 && event.currentTarget.contains(selection.getRangeAt(0).commonAncestorContainer);
-    if (!quote || !inside) return;
+    const selected = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).commonAncestorContainer : null;
+    const block = codeBlockAt(event.target);
+    const onSelection = !!selected && (block ? block.element.contains(selected) : event.currentTarget.contains(selected)) && !!selectedText().trim();
+    const quote = onSelection ? selectedText().trim() : (block?.code ?? '');
+    if (!quote.trim()) return;
     addToContextMenu(event, [
       {
         label: 'Comment…',
@@ -821,7 +827,7 @@ export function SessionView({
       </SessionHeader>
       <div className={panels.review ? 'session-body reviewing' : 'session-body'}>
         <div className="convo">
-          <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnSelection}>
+          <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnConversation}>
             {turnParts(items).map((item) =>
               'said' in item ? (
                 <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
