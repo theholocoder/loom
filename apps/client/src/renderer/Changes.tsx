@@ -67,7 +67,7 @@ function SessionDiff({ session, comments, reviews, focus }: { session: Session; 
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
   const root = useRef<HTMLDivElement>(null);
   const wide = useWide(root, WIDE_CHANGES_PX);
-  // A turn ending refreshes it; so do the working copy changing, showing it again and the refresh button.
+  // A turn ending refreshes it; so do the working copy changing, archiving or reopening (the worktree goes or comes back, maybe with a WIP commit), showing it again and the refresh button.
   const turnEnded = useTurnsEnded(session.status);
   const changed = useWorkingCopyChanges(session.id, live);
   useEffect(() => {
@@ -80,7 +80,7 @@ function SessionDiff({ session, comments, reviews, focus }: { session: Session; 
     return () => {
       current = false;
     };
-  }, [api, session.id, scope, refreshes, turnEnded, changed]);
+  }, [api, session.id, scope, refreshes, turnEnded, changed, live]);
 
   const summary = loaded.state === 'done' ? loaded.summary : undefined;
   const readOnly = !summary?.available || summary.readOnly;

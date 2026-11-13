@@ -187,6 +187,16 @@ describe('the Changes view', () => {
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
   });
 
+  it('refreshes when the Session is archived and when it is reopened, as its working copy changed', async () => {
+    const main = renderOpen(fakeMain());
+    showChanges();
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(1));
+    act(() => main.publish('sessions', [{ ...session, status: 'archived', waitingReason: undefined }]));
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(2));
+    act(() => main.publish('sessions', [{ ...session, status: 'waiting' }]));
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
+  });
+
   it("shows an archived Session's branch read-only, or no diff available", async () => {
     const archived = { ...session, status: 'archived' as const };
     const renderPanel = (main: FakeMain) => {

@@ -305,7 +305,7 @@ describe('the Inbox', () => {
     fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Half done' })).getByRole('button', { name: 'Archive' }));
 
     const warning = await screen.findByRole('alertdialog', { name: 'Archive with unsaved work?' });
-    expect(warning.textContent).toContain('loom/half');
+    expect(warning.textContent).toContain('keep them on its branch loom/half as a WIP commit, there when the Session reopens');
     fireEvent.click(within(warning).getByRole('button', { name: 'Commit and archive' }));
 
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: dirty.id }, { id: dirty.id, commitWork: true }]));

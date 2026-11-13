@@ -98,18 +98,21 @@ export function unsavedWorkSummary({ uncommitted, unpushedCommits }: UnsavedWork
 /** How the user closes a Session whose worktree has unsaved work: keeping it as a commit on its branch, or discarding it. */
 export type CloseChoice = Pick<CloseSessionParams, 'discard' | 'commitWork'>;
 
-/** What the worktree's unsaved work is, and what happens to it either way, in words. */
-export function unsavedWorkText(work: UnsavedWork, branch: string | undefined): string {
+/** Which way the dialog closes the Session: for now, or for good. */
+type CloseVerb = 'archive' | 'delete';
+
+/** What the worktree's unsaved work is, and what happens to it either way, in words; `reopens`, whether the Session can come back to it. */
+export function unsavedWorkText(work: UnsavedWork, branch: string | undefined, reopens: boolean): string {
   const { uncommitted, unpushedCommits, detached } = work;
   const has = `This Session's worktree has ${unsavedWorkSummary(work)}.`;
   if (detached) return `${has} Its HEAD is on no branch, so nothing can keep it: removing the worktree loses it all.`;
   const on = branch ? `its branch ${branch}` : 'its branch';
   if (!uncommitted) return `${has} ${unpushedCommits === 1 ? 'It stays' : 'They stay'} on ${on} when the worktree is removed.`;
-  return `${has} Commit them to keep them on ${on} as a WIP commit, there when the Session reopens, or discard them with the worktree.${unpushedCommits ? ` Its commits stay on ${on}.` : ''}`;
+  return `${has} Commit them to keep them on ${on} as a WIP commit${reopens ? ', there when the Session reopens,' : ','} or discard them with the worktree.${unpushedCommits ? ` Its commits stay on ${on}.` : ''}`;
 }
 
 /** The buttons closing a Session with unsaved work offers, for `verb` ("archive", "delete"): keep it if it can be, else discard it. */
-function unsavedChoices(work: UnsavedWork, verb: string): Array<{ label: string; className: string; choice: CloseChoice }> {
+function unsavedChoices(work: UnsavedWork, verb: CloseVerb): Array<{ label: string; className: string; choice: CloseChoice }> {
   const Verb = verb.charAt(0).toUpperCase() + verb.slice(1);
   // On no branch, nothing can keep it; with only commits, on a branch, nothing is lost. Committing whatever came meanwhile loses nothing either.
   if (work.detached) return [{ label: `Discard and ${verb}`, className: 'danger', choice: { discard: true } }];
@@ -141,7 +144,7 @@ export function CloseSessionDialog({
   title: string;
   icon: ReactNode;
   text?: string;
-  verb: string;
+  verb: CloseVerb;
   plain?: string;
   branch: string | undefined;
   unsavedWork?: UnsavedWork;
@@ -169,7 +172,7 @@ export function CloseSessionDialog({
         </div>
         <div id={`${id}-text`}>
           {text && <p>{text}</p>}
-          {unsavedWork && <p>{unsavedWorkText(unsavedWork, branch)}</p>}
+          {unsavedWork && <p>{unsavedWorkText(unsavedWork, branch, verb === 'archive')}</p>}
         </div>
         {error && (
           <div className="err" role="alert">

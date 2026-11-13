@@ -109,6 +109,9 @@ describe('deleting a Session', () => {
 
     const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Commit and delete' }));
+    // A deleted Session never reopens: the commit is on its branch, for whoever picks it up.
+    expect(dialog.textContent).toContain('keep them on its branch loom/fix-login as a WIP commit, or discard them');
+    expect(dialog.textContent).not.toMatch(/reopens/);
 
     await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7, commitWork: true }]));
   });
