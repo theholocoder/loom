@@ -30,6 +30,11 @@ export interface PanelPlace {
   stack: PanelStack;
 }
 
+/** Whether `a` and `b` are the same area and stack. */
+export function samePlace(a: PanelPlace, b: PanelPlace): boolean {
+  return a.area === b.area && a.stack === b.stack;
+}
+
 /** The kinds of Panel Loom has. */
 export const PANEL_KINDS = ['changes', 'merge-request', 'issue', 'highlights', 'terminal'] as const;
 /** One kind of Panel. */
@@ -212,6 +217,7 @@ export const DEFAULT_SESSION_PANELS: SessionPanels = {
   dock: { panels: [], shown: null, open: false },
 };
 
+/** A stack with no Panel: an area's second, until it is split. */
 const NO_STACK: PanelStackState = { panels: [], shown: null };
 
 /** Stack `stack` of `area`. */
@@ -311,7 +317,8 @@ export function withoutPanel(panels: SessionPanels, panel: PanelId): SessionPane
 export function withPanelAt(panels: SessionPanels, panel: PanelId, place: PanelPlace, { at, shown }: { at?: number; shown: boolean }): SessionPanels {
   const from = placeOf(panels, panel);
   // Its place among the tabs it stays among, once it is out of them.
-  const index = at !== undefined && from && from.area === place.area && from.stack === place.stack && stackOf(panels[from.area], from.stack).panels.indexOf(panel) < at ? at - 1 : at;
+  const before = from && samePlace(from, place) ? stackOf(panels[from.area], from.stack).panels.indexOf(panel) : -1;
+  const index = at !== undefined && before !== -1 && before < at ? at - 1 : at;
   const next = withoutPanel(panels, panel);
   const area = next[place.area];
   const stack = stackOf(area, place.stack);
@@ -333,7 +340,7 @@ export function inLayout(panels: SessionPanels, layout: LayoutSettings): Session
     for (const stack of PANEL_STACKS) {
       for (const panel of stackOf(panels[from], stack).panels) {
         const to = panelPlace(layout, kindOf(panel));
-        if (to.area === from && to.stack === stack) continue;
+        if (samePlace(to, { area: from, stack })) continue;
         const source = next[from];
         next = withPanelAt(next, panel, to, { shown: source.open && stackOf(source, stack).shown === panel });
       }

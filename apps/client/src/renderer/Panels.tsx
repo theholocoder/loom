@@ -40,6 +40,7 @@ import {
   withoutPanel,
   withPanelAt,
   withPanelPlace,
+  samePlace,
   type LayoutSettings,
   type PanelArea as PanelAreaName,
   type PanelAreaState,
@@ -125,8 +126,11 @@ export function canRunTerminals(session: Session): boolean {
 
 /** The Panel areas' names, as the user reads them. */
 export const AREA_LABELS: Record<PanelAreaName, string> = { side: 'Side area', dock: 'Dock' };
-/** Where each stack of a split area sits in it, as the user reads it: the Side area's one above the other, the Dock's side by side. */
-const STACK_LABELS: Record<PanelAreaName, Record<PanelStack, string>> = { side: { first: 'top', second: 'bottom' }, dock: { first: 'left', second: 'right' } };
+/** Where each stack of an area with two sits in it, as the user reads it, and which way a tab goes to split the area into it: the Side area's one above the other, the Dock's side by side. */
+const STACK_SIDES: Record<PanelAreaName, Record<PanelStack, { where: string; way: string }>> = {
+  side: { first: { where: 'top', way: 'up' }, second: { where: 'bottom', way: 'down' } },
+  dock: { first: { where: 'left', way: 'left' }, second: { where: 'right', way: 'right' } },
+};
 /** The kind of data a dragged tab carries. */
 const PANEL_DRAG_TYPE = 'application/x-loom-panel';
 
@@ -340,7 +344,7 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     if (!loaded.current || !from) return;
     const kind = kindOf(panel);
     const was = panelPlace(layout.value, kind);
-    const next = was.area === to.area && was.stack === to.stack ? layout.value : layout.setPlace(kind, to);
+    const next = samePlace(was, to) ? layout.value : layout.setPlace(kind, to);
     // The Side area comes back for the Panel brought into it; the one in Review mode leaves it for the Dock.
     if (reviewing.current && ((to.area === 'side' && from.area !== 'side') || reviewing.current === panel)) setReview(undefined);
     // Shown last: the others of its kind follow it, and one of them shown where it was would be shown in its place.
@@ -375,7 +379,8 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     onMoved: () => setMoved(undefined),
     areaFor: (kind) => panelArea(layout.value, kind),
     placeFor: (kind) => panelPlace(layout.value, kind),
-    dragging,
+    // A tab gone mid-drag (its Terminal ended) never says the drag ended.
+    dragging: dragging && placeOf(current, dragging) ? dragging : undefined,
     drag: setDragging,
     size: (kind, dimension) => panelSize(layout.value, kind, dimension),
     show,
@@ -462,8 +467,7 @@ function useLayout(): {
     },
     setPlace: (kind, place) => {
       const next = withPanelPlace(latest.current, kind, place);
-      const { area, stack } = place;
-      keep(next, api.invoke('settings.setPanelArea', stack === 'second' ? { kind, area, stack } : { kind, area }), 'area');
+      keep(next, api.invoke('settings.setPanelPlace', { kind, ...place }), 'place');
       return next;
     },
   };
@@ -576,7 +580,7 @@ export function PanelArea({
   const reviewing = area === 'side' ? control.review : undefined;
   // In Review mode, only the stack of the Panel in review, which holds it.
   const stacks = reviewing ? [placeOf(control.state, reviewing)?.stack ?? 'first'] : stacksShown(state);
-  const split = stacks.length > 1;
+  const twoStacks = stacks.length > 1;
   const kinds = stacks.flatMap((stack) => {
     const { shown } = stackOf(state, stack);
     return shown ? [kindOf(shown)] : [];
@@ -594,8 +598,8 @@ export function PanelArea({
   const id = `session-${area}`;
   const element = useRef<HTMLElement>(null);
   // The second stack takes the size of the Panel it shows along the area, leaving the first its least.
-  const extent = useExtent(element, along, split);
-  const second = split && !reviewing ? stackOf(state, 'second').shown : null;
+  const extent = useExtent(element, along, twoStacks);
+  const second = twoStacks && !reviewing ? stackOf(state, 'second').shown : null;
   const secondKind = second ? kindOf(second) : undefined;
   const firstShown = stackOf(state, 'first').shown;
   const firstMin = firstShown ? PANEL_SPECS[kindOf(firstShown)][along].min : 0;
@@ -622,7 +626,7 @@ export function PanelArea({
     {drawer && <div className="drawer-scrim" aria-hidden="true" />}
     <Element
       ref={element}
-      className={['panel-area', area, reviewing ? 'review' : drawer ? 'drawer' : '', split ? 'split' : ''].filter(Boolean).join(' ')}
+      className={['panel-area', area, reviewing ? 'review' : drawer ? 'drawer' : '', twoStacks ? 'two-stacks' : ''].filter(Boolean).join(' ')}
       id={id}
       role={reviewing ? 'region' : undefined}
       aria-label={reviewing ? 'Review mode' : label}
@@ -646,7 +650,7 @@ export function PanelArea({
           key={stack}
           area={area}
           stack={stack}
-          split={split}
+          twoStacks={twoStacks}
           session={session}
           terminals={terminals}
           control={control}
@@ -675,7 +679,7 @@ type DropTarget = { at: number } | { stack: PanelStack; half: boolean };
 function PanelStackView({
   area,
   stack,
-  split,
+  twoStacks,
   session,
   terminals,
   control,
@@ -688,7 +692,7 @@ function PanelStackView({
   area: PanelAreaName;
   stack: PanelStack;
   /** Whether the area shows both its stacks. */
-  split: boolean;
+  twoStacks: boolean;
   session: Session;
   terminals: TerminalInfo[] | undefined;
   control: PanelsControl;
@@ -705,8 +709,8 @@ function PanelStackView({
   const state = stackOf(areaState, stack);
   const tab = (panel: PanelId) => tabOf(panel, session, terminals);
   const areaLabel = AREA_LABELS[area];
-  const where = STACK_LABELS[area];
-  const label = split ? `${areaLabel} Panels, ${where[stack]}` : `${areaLabel} Panels`;
+  const sides = STACK_SIDES[area];
+  const label = twoStacks ? `${areaLabel} Panels, ${sides[stack].where}` : `${areaLabel} Panels`;
   const areaId = `session-${area}`;
   const id = stack === 'first' ? areaId : `${areaId}-second`;
   const viewId = `${id}-view`;
@@ -734,9 +738,9 @@ function PanelStackView({
     [
       { label: `Move to the ${AREA_LABELS[other]}`, icon: other === 'dock' ? PanelBottom : PanelRight, run: () => control.move(panel) },
       ...(stackOf(areaState, otherStack).panels.length
-        ? [{ label: `Move to the ${where[otherStack]} stack`, icon: SplitIcon, run: () => control.place(panel, { area, stack: otherStack }) }]
+        ? [{ label: `Move to the ${sides[otherStack].where} stack`, icon: SplitIcon, run: () => control.place(panel, { area, stack: otherStack }) }]
         : splits(panel)
-          ? [{ label: `Split ${SPLIT_WAYS[area][otherStack]}`, icon: SplitIcon, run: () => control.place(panel, { area, stack: otherStack }) }]
+          ? [{ label: `Split ${sides[otherStack].way}`, icon: SplitIcon, run: () => control.place(panel, { area, stack: otherStack }) }]
           : []),
       ...(area === 'side' && PANELS[kindOf(panel)].reviewable && canReview(panel)
         ? [
@@ -760,17 +764,20 @@ function PanelStackView({
 
   const [drop, setDrop] = useState<DropTarget>();
   const dragging = control.dragging;
+  // A drag that ended elsewhere, or was given up, leaves no hint for the next.
+  useEffect(() => {
+    if (!dragging) setDrop(undefined);
+  }, [dragging]);
   const target = dragging && drop;
   const over = (event: ReactDragEvent, to: DropTarget) => {
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    setDrop((was) => (JSON.stringify(was) === JSON.stringify(to) ? was : to));
+    takeDrop(event);
+    setDrop((was) => (same(was, to) ? was : to));
   };
   const leave = (event: ReactDragEvent) => {
-    if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setDrop(undefined);
+    if (leftFor(event)) setDrop(undefined);
   };
   const dropped = (event: ReactDragEvent, to: DropTarget) => {
-    event.preventDefault();
+    takeDrop(event);
     setDrop(undefined);
     control.drag(undefined);
     if (!dragging) return;
@@ -788,7 +795,7 @@ function PanelStackView({
   };
   /** Where a tab dragged over the Panel shown goes: its stack, or, on the far half of an unsplit area, a new stack splitting it. */
   const intoView = (event: ReactDragEvent): DropTarget => {
-    if (split || !dragging || !state.panels.some((p) => kindOf(p) !== kindOf(dragging))) return { stack, half: false };
+    if (twoStacks || !dragging || !state.panels.some((p) => kindOf(p) !== kindOf(dragging))) return { stack, half: false };
     const rect = event.currentTarget.getBoundingClientRect();
     const far = area === 'side' ? event.clientY > rect.top + rect.height / 2 : event.clientX > rect.left + rect.width / 2;
     const to: PanelStack = far ? 'second' : 'first';
@@ -806,7 +813,7 @@ function PanelStackView({
       {edge && !reviewing && (
         <ResizeEdge
           side={area === 'side' ? 'top' : 'left'}
-          label={`Resize the ${areaLabel}'s ${where.second} stack`}
+          label={`Resize the ${areaLabel}'s ${sides.second.where} stack`}
           controls={id}
           size={edge.size}
           min={edge.min}
@@ -873,7 +880,7 @@ function PanelStackView({
           {target && 'at' in target && target.at === state.panels.length && <span className="panel-tab-drop-end" aria-hidden="true" />}
         </div>
         {fit.hidden.length > 0 && <OverflowMenu hidden={fit.hidden as PanelId[]} tabOf={tab} onShow={control.show} />}
-        <AddMenu area={areaLabel} choices={choicesFor(area, split ? stack : undefined, session, control)} />
+        <AddMenu area={areaLabel} choices={choicesFor(area, twoStacks ? stack : undefined, session, control)} />
         <span className="grow" />
         {reviewable && (
           <button
@@ -906,7 +913,7 @@ function PanelStackView({
         onDragLeave={leave}
         onDrop={dragging && !reviewing ? (event) => dropped(event, intoView(event)) : undefined}
       >
-        {area === control.areaFor('terminal') && (!split || stack === control.placeFor('terminal').stack) && control.error && (
+        {area === control.areaFor('terminal') && (!twoStacks || stack === control.placeFor('terminal').stack) && control.error && (
           <p className="panel-error" role="alert">
             {control.error}
           </p>
@@ -917,9 +924,6 @@ function PanelStackView({
     </div>
   );
 }
-
-/** Which way a tab splits an area into the stack it goes to: the Side area's second below its first, the Dock's right of it. */
-const SPLIT_WAYS: Record<PanelAreaName, Record<PanelStack, string>> = { side: { first: 'up', second: 'down' }, dock: { first: 'left', second: 'right' } };
 
 /**
  * While a tab is dragged, a strip for each Panel area `shown` says isn't:
@@ -936,13 +940,14 @@ export function PanelDropStrips({ control, shown }: { control: PanelsControl; sh
           key={area}
           className={over === area ? `panel-drop-strip ${area} over` : `panel-drop-strip ${area}`}
           onDragOver={(event) => {
-            event.preventDefault();
-            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            takeDrop(event);
             setOver(area);
           }}
-          onDragLeave={() => setOver(undefined)}
+          onDragLeave={(event) => {
+            if (leftFor(event)) setOver(undefined);
+          }}
           onDrop={(event) => {
-            event.preventDefault();
+            takeDrop(event);
             setOver(undefined);
             control.drag(undefined);
             control.place(dragging, { area, stack: 'first' });
@@ -954,6 +959,17 @@ export function PanelDropStrips({ control, shown }: { control: PanelsControl; sh
       ))}
     </>
   );
+}
+
+/** Takes a dragged tab over, or dropped on, an element: it moves there. */
+function takeDrop(event: ReactDragEvent) {
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+}
+
+/** Whether a drag leaving an element left it for good, rather than for something in it. */
+function leftFor(event: ReactDragEvent): boolean {
+  return !(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget));
 }
 
 /** The size of `element` across `dimension`, kept as it changes, while `on`; unknown without a way to watch it. */

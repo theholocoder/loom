@@ -163,7 +163,7 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
-      'settings.setPanelArea': ({ kind, area, stack = 'first' }) => {
+      'settings.setPanelPlace': ({ kind, area, stack = 'first' }) => {
         const current = this.value('settings');
         const settings = { ...current, layout: withPanelPlace(current.layout, kind, { area, stack }) };
         this.publish('settings', settings);

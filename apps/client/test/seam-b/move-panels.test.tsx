@@ -147,7 +147,7 @@ describe('moving a Panel', () => {
     expect(tabNames(dock())).toEqual(['Changes']);
     expect(shownIn(dock())).toBe('Changes');
     expect(document.activeElement).toBe(tab(dock(), 'Changes'));
-    expect(calls(main, 'settings.setPanelArea')).toEqual([{ kind: 'changes', area: 'dock' }]);
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'changes', area: 'dock', stack: 'first' }]);
     expect(kept(main, 7)).toEqual({ side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: true } });
   });
 
@@ -167,7 +167,7 @@ describe('moving a Panel', () => {
     expect(dock()).toBeNull();
     expect(tabNames(sideArea())).toEqual(['Changes']);
     expect(sideArea()!.style.width).toBe('640px');
-    expect(calls(main, 'settings.setPanelArea')).toEqual([{ kind: 'changes', area: 'side' }]);
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'changes', area: 'side', stack: 'first' }]);
     expect(kept(main, 7)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } });
   });
 
@@ -186,7 +186,7 @@ describe('moving a Panel', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const main = renderApp(
       fakeMain([login, billing], {
-        'settings.setPanelArea': () => {
+        'settings.setPanelPlace': () => {
           throw new Error('database is locked');
         },
       }),
@@ -212,7 +212,7 @@ describe('moving a Panel', () => {
     expect(dock()).toBeNull();
     expect(tabNames(sideArea())).toEqual(['Changes', 'Terminal 1', 'Terminal 2']);
     expect(shownIn(sideArea())).toBe('Terminal 1');
-    expect(calls(main, 'settings.setPanelArea')).toEqual([{ kind: 'terminal', area: 'side' }]);
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'terminal', area: 'side', stack: 'first' }]);
     // The Dock has nothing left: the header's toggle shows it empty, rather than start a Terminal there.
     fireEvent.click(within(screen.getByRole('region', { name: 'Session header' })).getByRole('button', { name: 'Show the Dock' }));
     expect(within(dock()!).getByRole('tabpanel', { name: 'Dock' }).textContent).toBe('No Panels here. Add one with +, or drag a tab here.');
@@ -291,7 +291,7 @@ describe('splitting an area', () => {
     expect(tabLists(sideArea())).toEqual(['Side area Panels, top', 'Side area Panels, bottom']);
     expect(tabsOf(sideArea(), 'Side area Panels, top')).toEqual(['Changes']);
     expect(tabsOf(sideArea(), 'Side area Panels, bottom')).toEqual(['Terminal 1']);
-    expect(calls(main, 'settings.setPanelArea').at(-1)).toEqual({ kind: 'terminal', area: 'side', stack: 'second' });
+    expect(calls(main, 'settings.setPanelPlace').at(-1)).toEqual({ kind: 'terminal', area: 'side', stack: 'second' });
     expect(kept(main, 7)!.side).toEqual({ panels: ['changes'], shown: 'changes', open: true, second: { panels: ['terminal:1'], shown: 'terminal:1' } });
     // Each stack shows its own: Changes still, beside the Terminal.
     expect(within(sideArea()!).getAllByRole('tab', { selected: true }).map((t) => t.getAttribute('aria-label'))).toEqual(['Changes', 'Terminal 1']);
@@ -309,7 +309,7 @@ describe('splitting an area', () => {
     expect(tabLists(sideArea())).toEqual(['Side area Panels']);
     expect(tabNames(sideArea())).toEqual(['Terminal 1', 'Terminal 2', 'Changes']);
     expect(shownIn(sideArea())).toBe('Changes');
-    expect(calls(main, 'settings.setPanelArea').at(-1)).toEqual({ kind: 'changes', area: 'side', stack: 'second' });
+    expect(calls(main, 'settings.setPanelPlace').at(-1)).toEqual({ kind: 'changes', area: 'side', stack: 'second' });
   });
 
   it('keeps the split for the other Sessions, a Panel of the kind opening in its stack', async () => {
@@ -373,7 +373,7 @@ describe('dragging a tab', () => {
     expect(sideArea()).toBeNull();
     expect(tabNames(dock())).toEqual(['Changes']);
     expect(document.activeElement).toBe(tab(dock(), 'Changes'));
-    expect(calls(main, 'settings.setPanelArea')).toEqual([{ kind: 'changes', area: 'dock' }]);
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'changes', area: 'dock', stack: 'first' }]);
     expect(screen.queryByText('Move to the Side area')).toBeNull();
   });
 
@@ -392,13 +392,13 @@ describe('dragging a tab', () => {
     expect(sideArea()).toBeNull();
     expect(tabNames(dock())).toEqual(['Terminal 1', 'Changes', 'Terminal 2']);
     expect(shownIn(dock())).toBe('Changes');
-    expect(calls(main, 'settings.setPanelArea')).toEqual([{ kind: 'changes', area: 'dock' }]);
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'changes', area: 'dock', stack: 'first' }]);
 
     // Within its own tabs it only changes places, the Layout as it was.
     placeAt(tab(dock(), 'Terminal 1').parentElement!, { left: 0, width: 100 });
     drag(tab(dock(), 'Terminal 2'), tab(dock(), 'Terminal 1'), { clientX: 10 });
     expect(tabNames(dock())).toEqual(['Terminal 2', 'Terminal 1', 'Changes']);
-    expect(calls(main, 'settings.setPanelArea')).toHaveLength(1);
+    expect(calls(main, 'settings.setPanelPlace')).toHaveLength(1);
   });
 
   it("splits an area dropped on the far half of its Panel, and joins a stack dropped on the near half", async () => {
@@ -413,7 +413,7 @@ describe('dragging a tab', () => {
     expect(dock()).toBeNull();
     expect(tabLists(sideArea())).toEqual(['Side area Panels, top', 'Side area Panels, bottom']);
     expect(tabsOf(sideArea(), 'Side area Panels, bottom')).toEqual(['Terminal 1']);
-    expect(calls(main, 'settings.setPanelArea')).toEqual([{ kind: 'terminal', area: 'side', stack: 'second' }]);
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'terminal', area: 'side', stack: 'second' }]);
 
     // Into Changes' stack, split: it joins it, and the area is one again.
     const top = within(sideArea()!).getAllByRole('tabpanel')[0]!;
@@ -421,7 +421,7 @@ describe('dragging a tab', () => {
     drag(tab(sideArea(), 'Terminal 1'), top, { clientY: 280 });
     expect(tabLists(sideArea())).toEqual(['Side area Panels']);
     expect(tabNames(sideArea())).toEqual(['Changes', 'Terminal 1']);
-    expect(calls(main, 'settings.setPanelArea').at(-1)).toEqual({ kind: 'terminal', area: 'side' });
+    expect(calls(main, 'settings.setPanelPlace').at(-1)).toEqual({ kind: 'terminal', area: 'side', stack: 'first' });
   });
 
   it('splits the Dock side by side', async () => {
@@ -435,8 +435,21 @@ describe('dragging a tab', () => {
 
     expect(tabLists(dock())).toEqual(['Dock Panels, left', 'Dock Panels, right']);
     expect(tabsOf(dock(), 'Dock Panels, right')).toEqual(['Changes']);
-    expect(calls(main, 'settings.setPanelArea')).toEqual([{ kind: 'changes', area: 'dock', stack: 'second' }]);
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'changes', area: 'dock', stack: 'second' }]);
     // The right stack takes Changes' width.
     expect(screen.getByRole('separator', { name: "Resize the Dock's right stack" }).parentElement!.style.width).toBe('640px');
+  });
+});
+
+describe('dragging a tab in Review mode', () => {
+  it('offers no strip over the Panel in review', async () => {
+    renderApp(fakeMain());
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(tabNames(dock())).toEqual(['Terminal 1']));
+    fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Review Changes' }));
+    fireEvent.dragStart(tab(dock(), 'Terminal 1'));
+    expect(screen.queryByText('Move to the Side area')).toBeNull();
+    fireEvent.dragEnd(tab(dock(), 'Terminal 1'));
   });
 });

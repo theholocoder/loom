@@ -1,6 +1,6 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
 import { DEFAULT_APPROVALS, DEFAULT_NOTIFICATIONS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, isNotificationKind, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type HighlightsSettings, type NotificationKind, type Settings as SettingsValues } from '../shared/api';
-import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, isPanelStack, readLayout, withPanelPlace, type PanelArea, type PanelDimension, type PanelKind, type PanelStack } from '../shared/panels';
+import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, isPanelStack, readLayout, withPanelPlace, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type PanelStack } from '../shared/panels';
 import { DEFAULT_KEYBINDINGS, readKeybindings, remap, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
@@ -166,16 +166,25 @@ export class Settings {
     if (!isPanelKind(kind)) throw new Error(`"${String(kind)}" is not a Panel.`);
     if (!isPanelDimension(dimension)) throw new Error(`A Panel's size is its width or its height, not "${String(dimension)}".`);
     if (typeof size !== 'number' || !Number.isFinite(size)) throw new Error("A Panel's size must be a number of pixels.");
-    const { layout } = this.current;
-    return this.set('layout', { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } });
+    return this.changeLayout((layout) => ({ ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } }));
   }
 
   /** Sets the area a Panel kind sits in, in the Layout, the Side area or the Dock, and the stack of it: its first, unless told its second. */
-  async setPanelArea(kind: PanelKind, area: PanelArea, stack: PanelStack = 'first'): Promise<SettingsValues> {
+  async setPanelPlace(kind: PanelKind, area: PanelArea, stack: PanelStack = 'first'): Promise<SettingsValues> {
     if (!isPanelKind(kind)) throw new Error(`"${String(kind)}" is not a Panel.`);
     if (!isPanelArea(area)) throw new Error(`A Panel sits in the Side area or the Dock, not "${String(area)}".`);
     if (!isPanelStack(stack)) throw new Error(`A Panel sits in its area's first or second stack, not "${String(stack)}".`);
-    return this.set('layout', withPanelPlace(this.current.layout, kind, { area, stack }));
+    return this.changeLayout((layout) => withPanelPlace(layout, kind, { area, stack }));
+  }
+
+  /** The Layout changes asked for, one after another. */
+  private layoutChanges: Promise<unknown> = Promise.resolve();
+
+  /** Changes the Layout once those asked for before are kept, from the Layout they left, so that two asked for at once both stay. */
+  private changeLayout(change: (layout: LayoutSettings) => LayoutSettings): Promise<SettingsValues> {
+    const changing = this.layoutChanges.then(() => this.set('layout', change(this.current.layout)));
+    this.layoutChanges = changing.catch(() => {});
+    return changing;
   }
 
   /** Sets the Inbox's width, kept within its least and most, whether it is shown, or both. */

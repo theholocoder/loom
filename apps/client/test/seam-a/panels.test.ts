@@ -193,8 +193,8 @@ describe('the Layout', () => {
   it('keeps the area each Panel kind was moved to across restarts', async () => {
     const userDataDir = await before();
     const main = await startMain({ userDataDir });
-    await main.api.invoke('settings.setPanelArea', { kind: 'changes', area: 'dock' });
-    expect((await main.api.invoke('settings.setPanelArea', { kind: 'terminal', area: 'side' })).layout.area).toEqual({ changes: 'dock', terminal: 'side' });
+    await main.api.invoke('settings.setPanelPlace', { kind: 'changes', area: 'dock' });
+    expect((await main.api.invoke('settings.setPanelPlace', { kind: 'terminal', area: 'side' })).layout.area).toEqual({ changes: 'dock', terminal: 'side' });
     await main.close();
 
     const again = await startMain({ userDataDir });
@@ -204,9 +204,9 @@ describe('the Layout', () => {
   it('keeps which kinds sit in the second stack of a split area across restarts, a move to the other area taking a kind back to its first', async () => {
     const userDataDir = await before();
     const main = await startMain({ userDataDir });
-    await main.api.invoke('settings.setPanelArea', { kind: 'terminal', area: 'side', stack: 'second' });
-    await main.api.invoke('settings.setPanelArea', { kind: 'highlights', area: 'side', stack: 'second' });
-    const { layout } = await main.api.invoke('settings.setPanelArea', { kind: 'highlights', area: 'dock' });
+    await main.api.invoke('settings.setPanelPlace', { kind: 'terminal', area: 'side', stack: 'second' });
+    await main.api.invoke('settings.setPanelPlace', { kind: 'highlights', area: 'side', stack: 'second' });
+    const { layout } = await main.api.invoke('settings.setPanelPlace', { kind: 'highlights', area: 'dock' });
     expect(layout.area).toEqual({ terminal: 'side', highlights: 'dock' });
     expect(layout.stack).toEqual({ terminal: 'second' });
     await main.close();
@@ -215,11 +215,27 @@ describe('the Layout', () => {
     expect((await waitFor(again.api, 'settings', () => true)).layout.stack).toEqual({ terminal: 'second' });
   });
 
+  it('keeps every change asked for at once, as when a split area is resized and sizes both its Panels', async () => {
+    const userDataDir = await before();
+    const main = await startMain({ userDataDir });
+    await Promise.all([
+      main.api.invoke('settings.setPanelSize', { kind: 'changes', dimension: 'width', size: 600 }),
+      main.api.invoke('settings.setPanelSize', { kind: 'terminal', dimension: 'width', size: 600 }),
+      main.api.invoke('settings.setPanelPlace', { kind: 'terminal', area: 'side', stack: 'second' }),
+    ]);
+    await main.close();
+
+    const again = await startMain({ userDataDir });
+    const { layout } = await waitFor(again.api, 'settings', () => true);
+    expect(layout.width).toEqual({ changes: 600, terminal: 600 });
+    expect(layout.stack).toEqual({ terminal: 'second' });
+  });
+
   it('refuses to move a kind Loom has not, or to an area or a stack it has not', async () => {
     const main = await startMain({ userDataDir: await before() });
-    await expect(main.api.invoke('settings.setPanelArea', { kind: 'files' as never, area: 'dock' })).rejects.toThrow('"files" is not a Panel.');
-    await expect(main.api.invoke('settings.setPanelArea', { kind: 'changes', area: 'top' as never })).rejects.toThrow('not "top"');
-    await expect(main.api.invoke('settings.setPanelArea', { kind: 'changes', area: 'side', stack: 'third' as never })).rejects.toThrow('not "third"');
+    await expect(main.api.invoke('settings.setPanelPlace', { kind: 'files' as never, area: 'dock' })).rejects.toThrow('"files" is not a Panel.');
+    await expect(main.api.invoke('settings.setPanelPlace', { kind: 'changes', area: 'top' as never })).rejects.toThrow('not "top"');
+    await expect(main.api.invoke('settings.setPanelPlace', { kind: 'changes', area: 'side', stack: 'third' as never })).rejects.toThrow('not "third"');
     expect((await waitFor(main.api, 'settings', () => true)).layout.area).toEqual({});
   });
 

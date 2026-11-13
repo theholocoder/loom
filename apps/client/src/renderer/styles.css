@@ -505,11 +505,11 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 /* An area's Panel stacks: one, or two split, the Side area's one above the other, the Dock's side by side; the second takes its Panel's size along the area. */
 .panel-area.dock { flex-direction: row; }
 .panel-stack { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.panel-area.split > .panel-stack.second { flex: none; }
-.panel-area.side.split > .panel-stack.first { min-height: 120px; }
-.panel-area.side.split > .panel-stack.second { max-height: calc(100% - 120px); border-top: 1px solid var(--line); }
-.panel-area.dock.split > .panel-stack.first { min-width: 280px; }
-.panel-area.dock.split > .panel-stack.second { max-width: calc(100% - 280px); border-left: 1px solid var(--line); }
+.panel-area.two-stacks > .panel-stack.second { flex: none; }
+.panel-area.side.two-stacks > .panel-stack.first { min-height: 120px; }
+.panel-area.side.two-stacks > .panel-stack.second { max-height: calc(100% - 120px); border-top: 1px solid var(--line); }
+.panel-area.dock.two-stacks > .panel-stack.first { min-width: 280px; }
+.panel-area.dock.two-stacks > .panel-stack.second { max-width: calc(100% - 280px); border-left: 1px solid var(--line); }
 /* Dragging a tab: where it would go, among the tabs or into a stack, half of an unsplit area splitting it; a strip for an area that isn't shown. */
 .panel-tab[draggable="true"] { -webkit-user-drag: element; }
 .panel-tab.dragged { opacity: 0.5; }

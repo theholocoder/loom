@@ -18,6 +18,6 @@ We rejected one app-wide set of open Panels because Terminals belong to one Sess
 
 ## Split areas (#193)
 
-Either area can be split into two **Panel stacks**: the Side area's one above the other, the Dock's side by side. Which stack each kind sits in is part of the Layout, like its area, so a split holds in every Session: an area shows as split only while both its stacks have Panels open. A tab moves between areas and stacks from its menu, or by dragging it.
+Either area can be split into two **Panel stacks**: the Side area's one above the other, the Dock's side by side. Which stack each kind sits in is part of the Layout, like its area, so a split holds in every Session: an area shows as split only while both its stacks have Panels open. A tab moves between areas and stacks from its menu, or by dragging it. As every Panel of a kind sits in one place, an area splits only with Panels of two kinds in it: a Dock of Terminals alone can't be split.
 
 We kept one size per kind rather than adding a split ratio. A split area takes the larger of its two shown Panels' sizes across it, and dragging its edge sizes both. Its second stack takes the size of the Panel it shows along the area (its height in the Side area, its width in the Dock), which each kind already has from sitting in the other area.

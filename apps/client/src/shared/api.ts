@@ -1588,7 +1588,7 @@ export interface Commands {
   /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */
   'settings.setPanelSize': { params: { kind: PanelKind; dimension: PanelDimension; size: number }; result: Settings };
   /** Sets the area a Panel kind sits in, in the Layout, and the stack of it: its first, unless `stack` says its second. Rejects a kind, an area or a stack Loom has not. */
-  'settings.setPanelArea': { params: { kind: PanelKind; area: PanelArea; stack?: PanelStack }; result: Settings };
+  'settings.setPanelPlace': { params: { kind: PanelKind; area: PanelArea; stack?: PanelStack }; result: Settings };
   /** Sets the Inbox's width (kept within its least and most), whether it is shown, or both. */
   'settings.setInbox': { params: Partial<InboxSettings>; result: Settings };
   /** Sets the Changes view's layout, all of it. Rejects anything but true or false. */

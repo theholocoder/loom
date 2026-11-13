@@ -972,7 +972,8 @@ export function SessionView({
         {panels.ready && (sideShown || panels.review) && (
           <PanelArea area="side" session={session} terminals={terminals} control={panels} canReview={canReview} render={renderPanel} />
         )}
-        {panels.ready && <PanelDropStrips control={panels} shown={{ side: sideShown, dock: hasDock && dock.open }} />}
+        {/* In Review mode the reviewed Panel holds the Side area's place: no strip over it. */}
+        {panels.ready && <PanelDropStrips control={panels} shown={{ side: sideShown || !!panels.review, dock: hasDock && dock.open }} />}
       </div>
       {panels.ready && hasDock && dock.open && (
         <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
