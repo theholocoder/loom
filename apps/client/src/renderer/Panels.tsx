@@ -52,6 +52,7 @@ import {
   type PanelStack,
   type SessionPanels,
 } from '../shared/panels';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { addToContextMenu, MenuButtonMenu, type ContextMenuSection } from './ContextMenu';
 import { countText } from './MergeRequestLooks';
@@ -914,9 +915,9 @@ function PanelStackView({
         onDrop={dragging && !reviewing ? (event) => dropped(event, intoView(event)) : undefined}
       >
         {area === control.areaFor('terminal') && (!twoStacks || stack === control.placeFor('terminal').stack) && control.error && (
-          <p className="panel-error" role="alert">
-            {control.error}
-          </p>
+          <div className="panel-error" role="alert">
+            <ErrorText text={control.error} />
+          </div>
         )}
         {reviewing ? render(reviewing) : state.shown ? render(state.shown) : <div className="panel-empty">No Panels here. Add one with +, or drag a tab here.</div>}
         {zone && <div className={`panel-drop-zone ${zone}`} aria-hidden="true" />}

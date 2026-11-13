@@ -5,6 +5,7 @@
 import { ArrowUp, Box, ClipboardPaste, Copy, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, MessageSquareQuote, Paperclip, Scissors, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { diffCommentRange, isConversationComment, isImage, type AgentCommand, type Attachment, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
+import { splitDetails } from '../shared/errors';
 import { addToContextMenu, copyText } from './ContextMenu';
 import { useKeptState } from './drafts';
 import { Popover, stepIndex } from './Popover';
@@ -520,7 +521,7 @@ function MenuList({ id, open, optionId, onHover, onPick }: { id: string; open: O
       {children}
     </div>
   );
-  const empty = open.kind === 'mention' ? (open.error ?? (open.loading ? 'Listing files…' : 'No file matches.')) : 'Nothing matches.';
+  const empty = open.kind === 'mention' ? (open.error ? splitDetails(open.error).message : (open.loading ? 'Listing files…' : 'No file matches.')) : 'Nothing matches.';
   return (
     <div id={id} className="composer-menu" role="listbox" aria-label={open.kind === 'command' ? 'Skills and commands' : 'Files'}>
       {open.kind === 'command'

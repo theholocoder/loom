@@ -3,6 +3,7 @@
 // focus on that Session. Showing one is the Electron entry point's; deciding
 // whether to, and what it says, is here.
 import { notificationKindOf, type NotificationSettings, type Session, type WaitingReason } from '../shared/api';
+import { splitDetails } from '../shared/errors';
 
 /** A desktop notification to show, and what a click on it does. */
 export interface DesktopNotification {
@@ -44,7 +45,7 @@ function newsOf(session: Session, reason: WaitingReason): string {
     case 'finished':
       return 'Finished';
     case 'error':
-      return session.error ? `Stopped on an error: ${cut(session.error)}` : 'Stopped on an error';
+      return session.error ? `Stopped on an error: ${cut(splitDetails(session.error).message)}` : 'Stopped on an error';
     case 'question':
       return 'Asks you a question';
     case 'approval':

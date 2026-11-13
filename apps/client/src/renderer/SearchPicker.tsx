@@ -3,6 +3,7 @@
 // worktrees.
 import { ChevronDown } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
+import { ErrorText } from './ErrorText';
 import { Popover } from './Popover';
 
 /** What main gave for a request, or why it failed; undefined while it runs. */
@@ -99,7 +100,7 @@ export function SearchPicker<T>({
           />
           {options && 'error' in options && (
             <div className="err" role="alert">
-              {options.error}
+              <ErrorText text={options.error} />
             </div>
           )}
           {!options && <div className="muted">{loading}</div>}

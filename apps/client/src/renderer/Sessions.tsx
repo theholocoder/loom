@@ -5,7 +5,9 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, modelNameIn, type ModelChoice, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { goingOn } from '../shared/going-on';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
+import { splitDetails, withDetails } from '../shared/errors';
 import { kindOf, panelsIn, terminalOf, type PanelId } from '../shared/panels';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useDates } from './dates';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -286,20 +288,21 @@ export function NewSession({
               <>
                 {branchError && (
                   <div className="err" role="alert" id={branchErrorId}>
-                    {branchError}
+                    <ErrorText text={branchError} />
                   </div>
                 )}
                 {stale && (
-                  <div className="muted" role="status" title={stale}>
-                    Couldn't refresh origin, using what's here.
-                    <button type="button" className="link" disabled={refreshing} onClick={refresh}>
-                      Retry
-                    </button>
+                  <div className="muted" role="status" title={splitDetails(stale).message}>
+                    <ErrorText text={withDetails("Couldn't refresh origin, using what's here.", splitDetails(stale).details)}>
+                      <button type="button" className="link" disabled={refreshing} onClick={refresh}>
+                        Retry
+                      </button>
+                    </ErrorText>
                   </div>
                 )}
                 {error && (
                   <div className="err" role="alert">
-                    {error}
+                    <ErrorText text={error} />
                   </div>
                 )}
               </>
@@ -911,7 +914,7 @@ export function SessionView({
             )}
             {error && (
               <div className="err" role="alert">
-                {error}
+                <ErrorText text={error} />
               </div>
             )}
             <div ref={end} />
@@ -1156,9 +1159,9 @@ function ErrorCard({ message, onRetry, onContinue }: { message: string; onRetry?
         <div className="tool-head">
           <OctagonX className="sm" />
           <span className="name">error</span>
-          <span className="grow" role="alert">
-            {message}
-          </span>
+          <div className="grow" role="alert">
+            <ErrorText text={message} />
+          </div>
           {onRetry && (
             <button type="button" onClick={onRetry}>
               <RotateCw className="sm" />

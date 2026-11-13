@@ -9,6 +9,7 @@
 import { Bot, ExternalLink, Eye, GitBranch, GitCommitHorizontal, GitMerge, GitPullRequest, GitPullRequestCreate, GitPullRequestDraft, Link, MessageSquare, RotateCw, User } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type MergeRequestDetails, type MergeRequestReview, type Project, type ReviewVerdict, type Session } from '../shared/api';
+import { ErrorText } from './ErrorText';
 import { useApi } from './api';
 import { useDates } from './dates';
 import type { DiffComments } from './Changes';
@@ -238,12 +239,14 @@ export function MergeRequestPanel({
             </p>
           )}
           {read.error && (
-            <p className="err" role="alert">
-              {`Couldn't read it from ${forgeName}: ${read.error}`}{' '}
-              <button type="button" className="link" onClick={refresh}>
-                Try again
-              </button>
-            </p>
+            <div className="err" role="alert">
+              <ErrorText text={`Couldn't read it from ${forgeName}: ${read.error}`}>
+                {' '}
+                <button type="button" className="link" onClick={refresh}>
+                  Try again
+                </button>
+              </ErrorText>
+            </div>
           )}
         </header>
         {(watchable || canAct) && (
@@ -505,7 +508,7 @@ function LinkMergeRequestForm({ session, onLinked, onCancel }: { session: Sessio
       </label>
       {error && (
         <div className="err" role="alert">
-          {error}
+          <ErrorText text={error} />
         </div>
       )}
       <div className="acts">

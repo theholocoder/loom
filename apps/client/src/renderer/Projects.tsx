@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type R
 import { FORGE_CLI, OPENCODE_NAME, type ForgeKind, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { branchPrefixError, branchPrefixOf } from '../shared/branches';
 import { AVATAR_MAX, avatarError, avatarText, PROJECT_COLOR_NAMES, PROJECT_COLORS, projectNameError, type ProjectColor } from '../shared/projects';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { unsavedWorkSummary } from './Archive';
 import { useCheckoutModels } from './checkout';
@@ -152,7 +153,7 @@ export function Projects({ adder, onStartSession }: { adder: ProjectAdder; onSta
       {adder.error && (
         <div className="row page-error" style={{ marginTop: 8 }}>
           <div className="err" role="alert">
-            {adder.error}
+            <ErrorText text={adder.error} />
           </div>
           <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={dismiss}>
             <X />
@@ -374,7 +375,7 @@ function EditProject({ project, onClose }: { project: Project; onClose: () => vo
         <div className="muted project-hint">New Sessions in {project.name} start on it, until another is picked.</div>
         {error && (
           <div className="err" role="alert">
-            {error}
+            <ErrorText text={error} />
           </div>
         )}
         <div className="row modal-actions">
@@ -452,7 +453,7 @@ function RemoveProject({ project }: { project: Project }) {
             )}
             {error && (
               <div className="err" role="alert">
-                {error}
+                <ErrorText text={error} />
               </div>
             )}
             <div className="row modal-actions">
@@ -556,7 +557,7 @@ function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode
         </>
       );
     case 'error':
-      return `Forge features are off: Loom couldn't check the Forge: ${forge.error}`;
+      return <ErrorText text={`Forge features are off: Loom couldn't check the Forge: ${forge.error}`} />;
     default:
       return undefined;
   }
@@ -616,7 +617,7 @@ function BranchPrefix({ project }: { project: Project }) {
       />
       {error ? (
         <div id={id} className="err" role="alert">
-          {error}
+          <ErrorText text={error} />
         </div>
       ) : (
         <div id={id} className="muted prefix-preview">

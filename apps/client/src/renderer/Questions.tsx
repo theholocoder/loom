@@ -6,6 +6,7 @@ import { MessageCircleQuestionMark, ShieldQuestionMark, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { fieldProblem, isBlank } from '../shared/answers';
 import type { Answer, AnswerValue, QuestionField, QuestionState, TranscriptItem, TrustState } from '../shared/api';
+import { ErrorText } from './ErrorText';
 
 type Question = Extract<TranscriptItem, { kind: 'question' }>;
 type Trust = Extract<TranscriptItem, { kind: 'trust' }>;
@@ -158,7 +159,7 @@ export function useAction() {
 export function ErrorAlert({ error }: { error?: string }) {
   return error ? (
     <div className="err" role="alert">
-      {error}
+      <ErrorText text={error} />
     </div>
   ) : null;
 }

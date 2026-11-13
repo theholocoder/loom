@@ -6,6 +6,7 @@
 import { CircleCheck, CircleDot, ExternalLink, Link2Off, MessageSquare, RotateCw, User } from 'lucide-react';
 import { useState } from 'react';
 import { FORGE_NAMES, type Project, type Session } from '../shared/api';
+import { ErrorText } from './ErrorText';
 import { useApi } from './api';
 import { useDates } from './dates';
 import { useForgeRead } from './forge-read';
@@ -98,12 +99,14 @@ export function IssuePanel({ session, project, onUnlinked, onError }: { session:
             </p>
           )}
           {read.error && (
-            <p className="err" role="alert">
-              {`Couldn't read it from ${forgeName}: ${read.error}`}{' '}
-              <button type="button" className="link" onClick={refresh}>
-                Try again
-              </button>
-            </p>
+            <div className="err" role="alert">
+              <ErrorText text={`Couldn't read it from ${forgeName}: ${read.error}`}>
+                {' '}
+                <button type="button" className="link" onClick={refresh}>
+                  Try again
+                </button>
+              </ErrorText>
+            </div>
           )}
         </header>
         {details && (

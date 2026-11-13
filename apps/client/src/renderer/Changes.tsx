@@ -9,6 +9,7 @@ import { ArrowRightToLine, ChevronDown, ChevronRight, CircleHelp, Columns2, Fold
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { DEFAULT_DIFF_VIEW, DIFF_SCOPES, diffCommentRange, type DiffBaseSource, type DiffComment, type DiffCounts, type DiffFile, type DiffScope, type DiffSummary, type DiffViewSettings, type FileDiff, type ReviewThread, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useTheme } from './appearance';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
@@ -114,7 +115,7 @@ function SessionDiff({ session, comments, reviews, focus }: { session: Session; 
       ) : loaded.state === 'error' ? (
         <div className="scroll">
           <div className="empty" role="alert">
-            {loaded.message}
+            <ErrorText text={loaded.message} />
           </div>
         </div>
       ) : !loaded.summary.available ? (
@@ -197,9 +198,9 @@ function DiffBase({ session, base, onChanged }: { session: Session; base: string
         onChange={(chosen) => void choose(chosen)}
       />
       {error && (
-        <span className="err" role="alert">
-          {error}
-        </span>
+        <div className="err" role="alert">
+          <ErrorText text={error} />
+        </div>
       )}
     </span>
   );
@@ -539,7 +540,7 @@ function FileSection({
         <div className="diff-note">Binary file</div>
       ) : text.state === 'error' ? (
         <div className="diff-note" role="alert">
-          {text.message}
+          <ErrorText text={text.message} />
         </div>
       ) : text.state === 'done' ? (
         <>

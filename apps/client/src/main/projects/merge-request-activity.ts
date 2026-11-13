@@ -3,6 +3,7 @@
 // whether it conflicts. The user's own comments are already left out.
 import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState, type ReviewCount, type ReviewThread } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 
 const ACTIVITY_TIMEOUT_MS = 30_000;
 /** How much of a comment Loom quotes: the agent gets a link to the rest. */
@@ -337,7 +338,7 @@ export async function runJson(call: BridgeCall, kind: keyof typeof FORGE_CLI, ar
   const cli = FORGE_CLI[kind];
   const result = await exec(call, cli, args, ACTIVITY_TIMEOUT_MS, workingCopy);
   const what = `${cli} ${args[0]} ${args[1]}`;
-  if (result.exitCode !== 0) throw new Error(`${what} exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);
+  if (result.exitCode !== 0) throw new Error(`${what} failed: ${describeFailure(cli, result)}`);
   try {
     return JSON.parse(result.stdout);
   } catch {

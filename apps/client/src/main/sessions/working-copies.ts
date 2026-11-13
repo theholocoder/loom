@@ -2,6 +2,7 @@
 // it for unsaved work, and removing it on archive while keeping its branch.
 // Everything runs in the Project's Environment, through its bridge (ADR 0008).
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { Branches, ExistingBranch, ExistingWorktree, UnsavedWork } from '../../shared/api';
 import { checkWorktreeRoot } from '../settings';
@@ -249,7 +250,7 @@ type Fetched = { state: 'fetched' } | { state: 'failed'; error: string } | { sta
 async function tryFetchOrigin(environment: GitRunner, checkout: string): Promise<Fetched> {
   if ((await git(environment, ['-C', checkout, 'remote', 'get-url', 'origin'])).exitCode !== 0) return { state: 'none' };
   const result = await git(environment, ['-C', checkout, 'fetch', '--quiet', 'origin'], FETCH_TIMEOUT_MS);
-  return result.exitCode === 0 ? { state: 'fetched' } : { state: 'failed', error: message(result) };
+  return result.exitCode === 0 ? { state: 'fetched' } : { state: 'failed', error: describeFailure('git', result) };
 }
 
 /** The ref an `origin` or a local branch has in the checkout. */
@@ -406,12 +407,8 @@ async function git(environment: GitRunner, args: string[], timeoutMs = GIT_TIMEO
 /** Runs git, rejecting with `what` and git's message if it fails. */
 async function gitOrThrow(environment: GitRunner, args: string[], what: string, timeoutMs?: number): Promise<ExecResult> {
   const result = await git(environment, args, timeoutMs);
-  if (result.exitCode !== 0) throw new Error(`${what}: ${message(result)}`);
+  if (result.exitCode !== 0) throw new Error(`${what}: ${describeFailure('git', result)}`);
   return result;
-}
-
-function message(result: ExecResult): string {
-  return (result.stderr || result.stdout).trim() || `git exited with code ${result.exitCode}`;
 }
 
 /** What the bridge keeps of a command's stdout (`maxOutput` in bridge/protocol/exec.go), past which the listing is cut short. */

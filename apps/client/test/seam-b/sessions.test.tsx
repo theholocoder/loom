@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session } from '../../src/shared/api';
+import { withDetails } from '../../src/shared/errors';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -193,6 +194,28 @@ describe('starting a Session', () => {
     fireEvent.click(within(pane).getByRole('button', { name: 'Branch from' }));
 
     expect((await screen.findByRole('alert')).textContent).toBe("Couldn't list the branches: not a git repository");
+  });
+
+  it("says what went wrong in a sentence, with git's own output folded under Details", async () => {
+    const raw = "fatal: '/srv/git/billing-api.git' does not appear to be a git repository\nfatal: Could not read from remote repository.";
+    renderApp(
+      new FakeMain({ projects: [project] }, {
+        'projects.branches': () => {
+          throw new Error(withDetails("Couldn't list the branches: the repository wasn't found, or you don't have access to it", raw));
+        },
+      }),
+    );
+    const pane = startNewSession();
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Branch from' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.firstChild?.textContent).toBe("Couldn't list the branches: the repository wasn't found, or you don't have access to it");
+    const details = within(alert).getByRole('group');
+    expect(details).toHaveProperty('open', false);
+    fireEvent.click(within(details).getByText('Details'));
+    expect(details).toHaveProperty('open', true);
+    expect(details.querySelector('pre')?.textContent).toBe(raw);
   });
 
   it("says quietly when origin couldn't be refreshed, by the branch pickers, and lists again on Retry", async () => {

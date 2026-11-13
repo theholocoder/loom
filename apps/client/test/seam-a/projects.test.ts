@@ -7,6 +7,7 @@ import { openDatabase } from '../../src/main/storage/database';
 import { migrations } from '../../src/main/storage/migrations';
 import { startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus } from '../../src/shared/api';
+import { splitDetails } from '../../src/shared/errors';
 
 const connected = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.state === 'connected';
 
@@ -61,7 +62,8 @@ describe('linking an existing checkout', () => {
     const path = machine.folder('notes');
     const main = await started(machine);
 
-    await expect(main.api.invoke('projects.link', { path })).rejects.toThrow(`${path} is not a git repository`);
+    const refusal = await main.api.invoke('projects.link', { path }).catch((error: Error) => error.message);
+    expect(splitDetails(refusal as string)).toEqual({ message: `${path} isn't in a git repository`, details: expect.stringContaining('fatal: not a git repository') });
     expect(await main.api.invoke('projects.list')).toEqual([]);
   });
 

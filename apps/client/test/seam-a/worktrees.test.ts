@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { git, processEnded, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus, Session } from '../../src/shared/api';
+import { splitDetails } from '../../src/shared/errors';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
 const signedIn = [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }];
@@ -540,7 +541,10 @@ describe('a worktree Session without a reachable origin', () => {
       ],
       existing: [{ name: 'release/1.2', remote: true }],
     });
-    expect(branches.fetchError).toContain("Couldn't fetch origin");
+    expect(splitDetails(branches.fetchError!)).toEqual({
+      message: "Couldn't fetch origin: the repository wasn't found, or you don't have access to it",
+      details: expect.stringContaining('does not appear to be a git repository'),
+    });
   });
 
   it("starts from origin's branches as last fetched, new or existing, when origin can't be fetched", async () => {

@@ -5,6 +5,7 @@
 import type { ForgeKind, ForgeStatus, Issue, IssueDetails } from '../../shared/api';
 import { FORGE_CLI } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 import { runJson, timeOf } from './merge-request-activity';
 
 const ISSUE_LIST_TIMEOUT_MS = 20_000;
@@ -27,7 +28,7 @@ export async function listIssues(call: BridgeCall, status: ForgeStatus, checkout
   // glab resolves the repository from the checkout when given one; it knows the SSH/web host mapping.
   const result = await exec(call, cli, args, ISSUE_LIST_TIMEOUT_MS, forge.kind === 'gitlab' ? checkoutPath : undefined);
   if (result.exitCode !== 0) {
-    throw new Error(`${cli} issue list exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);
+    throw new Error(`${cli} issue list failed: ${describeFailure(cli, result)}`);
   }
   let listed: unknown;
   try {

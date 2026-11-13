@@ -4,6 +4,7 @@
 // never fetches.
 import { createHash } from 'node:crypto';
 import { exec, type ExecResult } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { DiffBaseSource, DiffCounts, DiffFile, DiffFileChange, DiffScope, DiffStat, DiffSummary, FileDiff } from '../../shared/api';
 import type { GitEnvironment } from './working-copies';
@@ -123,7 +124,7 @@ export class WorkingCopyDiff {
       result = await this.git(['--literal-pathspecs', 'diff', '-M', ...BASE_FLAGS, ...this.range(from, scope), '--', ...paths]);
     }
     // `--no-index` exits 1 when the files differ.
-    if (result.exitCode > 1) throw new Error(`Couldn't read the diff of ${file.path}: ${message(result)}`);
+    if (result.exitCode > 1) throw new Error(`Couldn't read the diff of ${file.path}: ${describeFailure('git', result)}`);
     const text = result.stdout;
     return text.length > MAX_FILE_DIFF_CHARS ? { text: text.slice(0, MAX_FILE_DIFF_CHARS), truncated: true } : { text, truncated: false };
   }
@@ -274,7 +275,7 @@ export class WorkingCopyDiff {
 
   private async gitOrThrow(args: string[]): Promise<ExecResult> {
     const result = await this.git(args);
-    if (result.exitCode !== 0) throw new Error(`Couldn't work out the diff: ${message(result)}`);
+    if (result.exitCode !== 0) throw new Error(`Couldn't work out the diff: ${describeFailure('git', result)}`);
     return result;
   }
 }
@@ -360,8 +361,4 @@ export function statusPaths(text: string): string[] {
 export function parseShortstat(text: string): DiffStat {
   const count = (pattern: RegExp) => Number(pattern.exec(text)?.[1] ?? 0);
   return { files: count(/(\d+) files? changed/), added: count(/(\d+) insertions?\(\+\)/), removed: count(/(\d+) deletions?\(-\)/) };
-}
-
-function message(result: ExecResult): string {
-  return (result.stderr || result.stdout).trim() || `git exited with code ${result.exitCode}`;
 }

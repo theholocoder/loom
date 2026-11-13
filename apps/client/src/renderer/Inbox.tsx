@@ -6,6 +6,7 @@ import { AlarmClock, AlarmClockOff, Archive, ChevronDown, ChevronRight, CircleDo
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { PROJECT_COLOR_NAMES } from '../shared/projects';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useDates } from './dates';
 import { useNow } from './now';
@@ -230,7 +231,7 @@ function SessionCard({ session, project, showProject = false, projectRemoved = f
       </button>
       {error && (
         <div className="err row-error" role="alert">
-          {error}
+          <ErrorText text={error} />
         </div>
       )}
       {actions.length > 0 && <div className="hover-actions">{actions}</div>}

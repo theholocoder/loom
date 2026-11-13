@@ -6,6 +6,7 @@
 import { FolderX, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { CloseSessionParams, RemovedProject, Session, UnsavedWork } from '../shared/api';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useToast } from './Toast';
 
@@ -176,7 +177,7 @@ export function CloseSessionDialog({
         </div>
         {error && (
           <div className="err" role="alert">
-            {error}
+            <ErrorText text={error} />
           </div>
         )}
         <div className="row modal-actions">

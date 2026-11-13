@@ -226,3 +226,12 @@ func TestACommandRunsInTheRequestedDirectory(t *testing.T) {
 		t.Errorf("pwd = %q, want %q", got, dir)
 	}
 }
+
+func TestCommandsRunInTheCLocaleSoTheirMessagesAreInEnglish(t *testing.T) {
+	shell := fakeShell(t, `LANG=fr_FR.UTF-8 LC_ALL=fr_FR.UTF-8 LANGUAGE=fr exec /bin/sh -c "$2"`)
+	p := startBridgeOn(t, protocol.Machine{Shell: shell, Environ: launcherEnv})
+
+	if got := p.run(1, "sh", "-c", `printf %s "$LC_ALL"`)["stdout"]; got != "C" {
+		t.Errorf("LC_ALL = %q, want C", got)
+	}
+}
