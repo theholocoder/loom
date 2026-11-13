@@ -4,16 +4,17 @@
 // holds (a Merge request's description) is rendered as the Forge would: its
 // mermaid diagrams drawn, by Pele, and its HTML comments hidden.
 import type { Element, ElementContent } from 'hast';
-import { Check, Copy, TriangleAlert } from 'lucide-react';
+import { Check, Copy, ExternalLink, Link as LinkIcon, TriangleAlert } from 'lucide-react';
 import type { Html, Nodes, PhrasingContent, Root } from 'mdast';
 import { renderAsync } from 'pele/lazy';
-import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { isWebLink } from '../shared/links';
 import { useApi } from './api';
+import { addToContextMenu, copyText } from './ContextMenu';
 
 /** Nodes whose children are blocks, where raw HTML stands as a block of its own. */
 const BLOCK_CONTAINERS = new Set(['root', 'blockquote', 'listItem', 'footnoteDefinition']);
@@ -101,9 +102,23 @@ function CodeBlock({ node, children }: { node?: Element; children?: ReactNode })
   return diagrams && language === 'mermaid' ? <Diagram source={text} code={figure} /> : figure;
 }
 
+/** The code of the code block each right-click is on, by its native event: set as the event goes through the block. */
+const rightClickedCode = new WeakMap<Event, string>();
+
+/** The code of the code block this right-click is on, if it is on one: what its Copy code copies. */
+export function codeRightClicked(event: ReactMouseEvent): string | undefined {
+  return rightClickedCode.get(event.nativeEvent);
+}
+
+/** Offers Copy code on a right-click of a code block, its code kept for the menus of the elements around it. */
+function offerCopyCode(event: ReactMouseEvent, code: string) {
+  rightClickedCode.set(event.nativeEvent, code);
+  addToContextMenu(event, [{ label: 'Copy code', icon: Copy, run: () => copyText(code) }]);
+}
+
 function CodeFigure({ language, text, children }: { language: string | undefined; text: string; children?: ReactNode }) {
   return (
-    <figure className="code-block">
+    <figure className="code-block" onContextMenu={(event) => offerCopyCode(event, text)}>
       <figcaption>
         <span className="grow tech">{language}</span>
         <CopyButton text={text} label="Copy code" />
@@ -133,7 +148,7 @@ function Diagram({ source, code }: { source: string; code: ReactNode }) {
     };
   }, [source, idPrefix]);
   const mine = drawn?.source === source ? drawn : undefined;
-  if (mine?.svg) return <figure className="diagram" role="img" aria-label="Diagram" dangerouslySetInnerHTML={{ __html: mine.svg }} />;
+  if (mine?.svg) return <figure className="diagram" role="img" aria-label="Diagram" onContextMenu={(event) => offerCopyCode(event, source)} dangerouslySetInnerHTML={{ __html: mine.svg }} />;
   return (
     <>
       {code}
@@ -207,14 +222,21 @@ function Link({ href, children, ...rest }: { href?: string; children?: ReactNode
       </a>
     );
   if (!href || !isWebLink(href)) return <span title={href}>{children}</span>;
+  const open = () => void api.invoke('links.open', { url: href }).catch(() => {});
   return (
     <a
       href={href}
       title={href}
       onClick={(event) => {
         event.preventDefault();
-        api.invoke('links.open', { url: href }).catch(() => {});
+        open();
       }}
+      onContextMenu={(event) =>
+        addToContextMenu(event, [
+          { label: 'Open link', icon: ExternalLink, run: open },
+          { label: 'Copy link address', icon: LinkIcon, run: () => copyText(href) },
+        ])
+      }
     >
       {children}
     </a>
