@@ -85,7 +85,11 @@ One tool shown in a tab beside an open **Session**'s conversation: Changes, the 
 _Avoid_: Applet, widget, view, tab (the tab is only its handle)
 
 **Panel area**:
-A place an open **Session**'s **Panels** sit, as tabs, one shown at a time. There are two: the **Side area** and the **Dock**. A Panel can be moved from one to the other.
+A place an open **Session**'s **Panels** sit, as tabs. There are two: the **Side area** and the **Dock**. A Panel can be moved, or its tab dragged, from one to the other. Either can be split into two **Panel stacks**.
+
+**Panel stack**:
+One row of tabs in a **Panel area**, one Panel shown at a time. An area has one, or two once split: the **Side area**'s one above the other, the **Dock**'s side by side. The second takes the size of the Panel it shows along the area. A stack left with no Panel goes, and its area is one again.
+_Avoid_: Pane, group, split (the act, not the thing)
 
 **Side area**:
 The **Panel area** to the right of the conversation, running from the **Glance strip** to the bottom. In a narrow window it slides over the conversation instead of sitting beside it.
@@ -96,7 +100,7 @@ The **Panel area** under an open **Session**'s conversation and composer. **Term
 _Avoid_: Bottom bar, bottom area
 
 **Layout**:
-Which kind of **Panel** sits in which **Panel area**, and each kind's size. One for the whole app, kept when Loom quits. Which Panels are open, which one is shown and whether each Panel area is shown belong to each **Session**.
+Which kind of **Panel** sits in which **Panel area** and **Panel stack**, and each kind's size. One for the whole app, kept when Loom quits. Which Panels are open, which one is shown and whether each Panel area is shown belong to each **Session**.
 
 **Glance strip**:
 The row under an open **Session**'s header showing what is changing right now (its **Merge request** and checks, its changes, the context used, its issue), each opening its detail.

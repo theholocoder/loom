@@ -5,7 +5,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, modelNameIn, type ModelChoice, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { goingOn } from '../shared/going-on';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
-import { kindOf, terminalOf, type PanelId } from '../shared/panels';
+import { kindOf, panelsIn, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
 import { useDates } from './dates';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
@@ -16,7 +16,7 @@ import { IssuePanel } from './IssuePanel';
 import type { ReviewNotes } from './ReviewNotes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from './MergeRequestPanel';
-import { canRunTerminals, PanelArea, usePanels } from './Panels';
+import { canRunTerminals, PanelArea, PanelDropStrips, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
 import { Select } from './Popover';
 import { codeRightClicked, Markdown } from './Markdown';
@@ -527,7 +527,7 @@ export function SessionView({
   const { side, dock } = panels.state;
   const sideShown = panels.sideShown;
   // The Dock holds Terminals, and whatever Panels were moved there, which any Session can show.
-  const hasDock = runsTerminals || dock.panels.length > 0;
+  const hasDock = runsTerminals || panelsIn(dock).length > 0;
   const archiver = useArchive();
   const deleter = useDelete();
   const toast = useToast();
@@ -972,6 +972,8 @@ export function SessionView({
         {panels.ready && (sideShown || panels.review) && (
           <PanelArea area="side" session={session} terminals={terminals} control={panels} canReview={canReview} render={renderPanel} />
         )}
+        {/* In Review mode the reviewed Panel holds the Side area's place: no strip over it. */}
+        {panels.ready && <PanelDropStrips control={panels} shown={{ side: sideShown || !!panels.review, dock: hasDock && dock.open }} />}
       </div>
       {panels.ready && hasDock && dock.open && (
         <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
