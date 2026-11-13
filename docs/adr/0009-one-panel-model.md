@@ -21,3 +21,9 @@ We rejected one app-wide set of open Panels because Terminals belong to one Sess
 Either area can be split into two **Panel stacks**: the Side area's one above the other, the Dock's side by side. Which stack each kind sits in is part of the Layout, like its area, so a split holds in every Session: an area shows as split only while both its stacks have Panels open. A tab moves between areas and stacks from its menu, or by dragging it. As every Panel of a kind sits in one place, an area splits only with Panels of two kinds in it: a Dock of Terminals alone can't be split.
 
 We kept one size per kind rather than adding a split ratio. A split area takes the larger of its two shown Panels' sizes across it, and dragging its edge sizes both. Its second stack takes the size of the Panel it shows along the area (its height in the Side area, its width in the Dock), which each kind already has from sitting in the other area.
+
+## Main applies the Layout (#230)
+
+A Session's stored Panels also record where each one sits, by which area and stack it is in, so they can disagree with the Layout: a Session not opened since a kind was moved still has it where it was. Main is the one place that reconciles the two. It serves each Session's Panels with every Panel in the place the Layout has for its kind, without those of Terminals that ended. It serves them again to those watching when the Layout changes or a Terminal ends. It also keeps Panels the renderer sends in that same shape. The renderer shows what main serves and sends Panels back only for the user's own changes.
+
+We kept placement in the stored format rather than dropping it. Dropping it would need a migration, and once main is the one reconciler a stale placement does no harm: main moves it when it serves it.

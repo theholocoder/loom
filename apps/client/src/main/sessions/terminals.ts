@@ -19,6 +19,8 @@ export interface TerminalsOptions {
   session(id: number): Session | undefined;
   /** The Session's Environment, if Loom has it. */
   environment(session: Session): TerminalEnvironment | undefined;
+  /** A Terminal of Session `sessionId` opened, ended or closed. */
+  onChange?(sessionId: number): void;
 }
 
 interface RunningTerminal {
@@ -107,6 +109,11 @@ export class Terminals {
     await terminal.channel.kill().catch(() => {});
   }
 
+  /** Whether Terminal `id` ran and no longer does: exited, closed, or its Session archived. */
+  ended(id: number): boolean {
+    return id < this.nextId && !this.running.has(id);
+  }
+
   /** Closes the terminals of every Session that is archived, or gone. */
   sessionsChanged(sessions: Session[]): void {
     const live = new Set(sessions.filter((s) => s.status !== 'archived').map((s) => s.id));
@@ -173,6 +180,7 @@ export class Terminals {
   }
 
   private listChanged(sessionId: number): void {
+    this.options.onChange?.(sessionId);
     const listeners = this.listListeners.get(sessionId);
     if (!listeners) return;
     const list = this.list(sessionId);

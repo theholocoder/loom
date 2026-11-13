@@ -277,11 +277,33 @@ export function checkSessionPanels(value: unknown): SessionPanels {
   return areas;
 }
 
-/** `panels` without its Terminals, which end when Loom quits: an area left with none is hidden. */
-export function withoutTerminals(panels: SessionPanels): SessionPanels {
+/**
+ * `panels` without the Terminals that `ended` says have, every one without
+ * it, as all end when Loom quits: an area left with none is hidden.
+ */
+export function withoutTerminals(panels: SessionPanels, ended: (terminal: number) => boolean = () => true): SessionPanels {
   let next = panels;
-  for (const area of PANEL_AREAS) for (const panel of panelsIn(panels[area])) if (terminalOf(panel) !== undefined) next = withoutPanel(next, panel);
+  for (const area of PANEL_AREAS) {
+    for (const panel of panelsIn(panels[area])) {
+      const terminal = terminalOf(panel);
+      if (terminal !== undefined && ended(terminal)) next = withoutPanel(next, panel);
+    }
+  }
   return next;
+}
+
+/** Whether `a` and `b` are the same Panels, shown the same way, however their objects were built. */
+export function sameSessionPanels(a: SessionPanels, b: SessionPanels): boolean {
+  return PANEL_AREAS.every((area) => a[area].open === b[area].open && PANEL_STACKS.every((stack) => sameStack(stackOf(a[area], stack), stackOf(b[area], stack))));
+}
+
+function sameStack(a: PanelStackState, b: PanelStackState): boolean {
+  return a.shown === b.shown && a.panels.length === b.panels.length && a.panels.every((panel, i) => panel === b.panels[i]);
+}
+
+/** Whether `a` and `b` are the same Layout, however their objects were built. */
+export function sameLayout(a: LayoutSettings, b: LayoutSettings): boolean {
+  return (['area', 'stack', ...PANEL_DIMENSIONS] as const).every((part) => PANEL_KINDS.every((kind) => a[part][kind] === b[part][kind]));
 }
 
 /** The place `panel` is open in, if it is. */

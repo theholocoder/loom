@@ -153,11 +153,13 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   removedProjects.set(projectService.listRemoved());
 
   let highlights: Highlights | undefined;
+  let panels: Panels | undefined;
   const settingsService = await Settings.load(
     db,
     (value) => {
       settings.set(value);
       highlights?.settingsChanged();
+      panels?.settingsChanged();
     },
     // Checked where worktrees go, when Loom can: an Environment not up yet tells at the next worktree Session.
     { checkWorktreeRootFolder: (root) => (native.status.state === 'connected' ? checkWorktreeRootFolder(nativeForSessions, root) : Promise.resolve()) },
@@ -209,6 +211,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       const environment = sessionEnvironment(session);
       return environment && { label: environment.status.label, os: () => environment.status.bridge?.os, ready: () => environment.ready(), openChannel: (params) => environment.openChannel(params) };
     },
+    onChange: (sessionId) => panels?.terminalsChanged(sessionId),
   });
   const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
   const sessionService = await Sessions.load({
@@ -237,7 +240,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
   sessions.set(sessionService.list());
-  const panels = await Panels.load(db);
+  panels = await Panels.load(db, { layout: () => settingsService.value.layout, ended: (id) => terminals.ended(id) });
+  const sessionPanels = panels;
   highlights = await Highlights.load({
     db,
     clock: options.clock,
@@ -281,7 +285,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database, openSession };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
-    panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
+    panels: ({ sessionId }, listener) => sessionPanels.subscribe(sessionId, listener),
     highlights: ({ sessionId }, listener) => highlighter.subscribe(sessionId, listener),
     terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
     terminalOutput: ({ id }, listener) => terminals.subscribeOutput(id, listener),
@@ -388,9 +392,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.linkIssue': (params) => sessionService.linkIssue(params),
     'sessions.unlinkIssue': (params) => sessionService.unlinkIssue(params),
     'sessions.issue': (params) => sessionService.issue(params),
-    'sessions.setPanels': ({ id, panels: state }) => {
+    'sessions.setPanels': async ({ id, panels: state }) => {
       if (!sessionService.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
-      return panels.set(id, state);
+      // Kept in the Layout a move asked for just before, not the one it replaces.
+      await settingsService.layoutKept();
+      return sessionPanels.set(id, state);
     },
     'sessions.resolveHighlight': (params) => highlighter.resolve(params),
     'sessions.seeHighlights': (params) => highlighter.see(params),

@@ -3,9 +3,10 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/main/storage/database';
 import { migrations } from '../../src/main/storage/migrations';
-import { DEFAULT_SESSION_PANELS, PANEL_MAX_SIZE, type SessionPanels } from '../../src/shared/panels';
+import { DEFAULT_SESSION_PANELS, PANEL_MAX_SIZE, sameSessionPanels, type SessionPanels } from '../../src/shared/panels';
+import type { EnvironmentStatus, Session } from '../../src/shared/api';
 import { DEFAULT_INBOX, INBOX_WIDTH } from '../../src/shared/window';
-import { startMain, tempDir, waitFor } from './harness';
+import { startMain, tempDir, tempMachine, waitFor } from './harness';
 
 /** The migration that brought in the Panel model. */
 const PANELS_MIGRATION = 18;
@@ -131,9 +132,13 @@ describe("a Session's Panels", () => {
   it("keep a split area's second stack, its Terminals going with Loom and a stack left with none going too", async () => {
     const userDataDir = await before();
     const main = await startMain({ userDataDir });
+    // Where the Layout has each kind: main keeps each Panel there.
+    await main.api.invoke('settings.setPanelPlace', { kind: 'highlights', area: 'side', stack: 'second' });
+    await main.api.invoke('settings.setPanelPlace', { kind: 'issue', area: 'dock' });
+    await main.api.invoke('settings.setPanelPlace', { kind: 'terminal', area: 'dock', stack: 'second' });
     const panels: SessionPanels = {
-      side: { panels: ['changes'], shown: 'changes', open: true, second: { panels: ['highlights', 'terminal:2'], shown: 'terminal:2' } },
-      dock: { panels: ['issue'], shown: 'issue', open: true, second: { panels: ['terminal:3'], shown: 'terminal:3' } },
+      side: { panels: ['changes'], shown: 'changes', open: true, second: { panels: ['highlights'], shown: 'highlights' } },
+      dock: { panels: ['issue'], shown: 'issue', open: true, second: { panels: ['terminal:2', 'terminal:3'], shown: 'terminal:3' } },
     };
     await main.api.invoke('sessions.setPanels', { id: 7, panels });
     expect(await panelsOf(main, 7)).toEqual(panels);
@@ -168,6 +173,99 @@ describe("a Session's Panels", () => {
     const db = new Database(join(userDataDir, 'loom.db'), { readonly: true });
     expect(db.prepare('select session_id from session_panels order by session_id').all()).toEqual([{ session_id: 7 }]);
     db.close();
+  });
+});
+
+describe("each Session's Panels, as main serves them", () => {
+  it('sit where the Layout has their kind, in a Session not opened since it changed and in a new one', async () => {
+    const userDataDir = await before();
+    const main = await startMain({ userDataDir });
+    const sideOnly: SessionPanels = { side: { panels: ['changes', 'issue'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } };
+    await main.api.invoke('sessions.setPanels', { id: 8, panels: sideOnly });
+
+    // Changes moved to the Dock in Session 7, as the renderer asks for it.
+    await main.api.invoke('settings.setPanelPlace', { kind: 'changes', area: 'dock' });
+    await main.api.invoke('sessions.setPanels', { id: 7, panels: { side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: true } } });
+
+    expect(await panelsOf(main, 8)).toEqual({ side: { panels: ['issue'], shown: 'issue', open: true }, dock: { panels: ['changes'], shown: 'changes', open: true } });
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.prepare("insert into sessions (id, project_id, title, working_copy_kind, working_copy_path, agent, status, created_at, updated_at, archived_at) values (9, 1, 'New', 'checkout', ?, 'OpenCode', 'archived', 1, 1, 1)").run(userDataDir);
+    db.close();
+    expect(await panelsOf(main, 9)).toEqual({ side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: true } });
+  });
+
+  it('move for those watching them as the Layout changes, and are kept as it has them', async () => {
+    const userDataDir = await before();
+    const main = await startMain({ userDataDir });
+    await main.api.invoke('sessions.setPanels', { id: 7, panels: { side: { panels: ['changes', 'issue'], shown: 'issue', open: true }, dock: { panels: [], shown: null, open: false } } });
+    const seen: SessionPanels[] = [];
+    const unsubscribe = main.api.subscribe('panels', (panels) => seen.push(panels), { sessionId: 7 });
+
+    await main.api.invoke('settings.setPanelPlace', { kind: 'issue', area: 'side', stack: 'second' });
+    expect(seen.at(-1)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true, second: { panels: ['issue'], shown: 'issue' } }, dock: { panels: [], shown: null, open: false } });
+    const published = seen.length;
+    await main.api.invoke('settings.setPanelSize', { kind: 'issue', dimension: 'width', size: 500 });
+    expect(seen).toHaveLength(published);
+
+    // One put back where its kind no longer sits goes where the Layout has it.
+    await main.api.invoke('sessions.setPanels', { id: 7, panels: { side: { panels: ['changes', 'issue'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } } });
+    expect(seen.at(-1)?.side.second).toEqual({ panels: ['issue'], shown: 'issue' });
+    unsubscribe();
+    await main.close();
+
+    const db = new Database(join(userDataDir, 'loom.db'), { readonly: true });
+    const row = db.prepare('select state from session_panels where session_id = 7').get() as { state: string };
+    db.close();
+    expect(JSON.parse(row.state)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true, second: { panels: ['issue'], shown: 'issue' } }, dock: { panels: [], shown: null, open: false } });
+  });
+
+  it.skipIf(process.platform === 'win32')('lose the Panel of a Terminal that ends, with no one watching them', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }], acp: { turns: [{ chunks: ['Done'] }] } });
+    const checkout = machine.gitRepo('billing-api');
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready');
+    const project = await main.api.invoke('projects.link', { path: checkout });
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix it' });
+    await waitFor(main.api, 'sessions', (list: Session[]) => list.some((s) => s.id === id && s.status === 'waiting'));
+
+    const first = await main.api.invoke('terminals.open', { sessionId: id, cols: 80, rows: 24 });
+    const second = await main.api.invoke('terminals.open', { sessionId: id, cols: 80, rows: 24 });
+    const panels: SessionPanels = { side: DEFAULT_SESSION_PANELS.side, dock: { panels: [`terminal:${first.id}`, `terminal:${second.id}`], shown: `terminal:${second.id}`, open: true } };
+    await main.api.invoke('sessions.setPanels', { id, panels });
+    expect(await panelsOf(main, id)).toEqual(panels);
+
+    await main.api.invoke('terminals.write', { id: second.id, data: 'exit\r' });
+    await waitFor(main.api, 'terminals', (list) => list.length === 1, { sessionId: id });
+    expect((await panelsOf(main, id)).dock).toEqual({ panels: [`terminal:${first.id}`], shown: `terminal:${first.id}`, open: true });
+
+    await main.api.invoke('terminals.close', { id: first.id });
+    expect((await panelsOf(main, id)).dock).toEqual({ panels: [], shown: null, open: false });
+    // Nor does one that ended come back with Panels that still have it.
+    await main.api.invoke('sessions.setPanels', { id, panels });
+    expect((await panelsOf(main, id)).dock).toEqual({ panels: [], shown: null, open: false });
+  });
+});
+
+describe('sameSessionPanels', () => {
+  const panels: SessionPanels = { side: { panels: ['changes', 'issue'], shown: 'issue', open: true, second: { panels: ['highlights'], shown: 'highlights' } }, dock: { panels: [], shown: null, open: false } };
+
+  it('holds two alike whatever order their keys were built in', () => {
+    const reordered = {
+      dock: { open: false, shown: null, panels: [] },
+      side: { second: { shown: 'highlights', panels: ['highlights'] }, open: true, shown: 'issue', panels: ['changes', 'issue'] },
+    } as SessionPanels;
+    expect(JSON.stringify(reordered)).not.toBe(JSON.stringify(panels));
+    expect(sameSessionPanels(panels, reordered)).toBe(true);
+  });
+
+  it('tells apart Panels in another order, another shown, an area shown or not, or a second stack', () => {
+    expect(sameSessionPanels(panels, { ...panels, side: { ...panels.side, panels: ['issue', 'changes'] } })).toBe(false);
+    expect(sameSessionPanels(panels, { ...panels, side: { ...panels.side, shown: 'changes' } })).toBe(false);
+    expect(sameSessionPanels(panels, { ...panels, dock: { ...panels.dock, open: true } })).toBe(false);
+    const { second: _, ...unsplit } = panels.side;
+    expect(sameSessionPanels(panels, { ...panels, side: unsplit })).toBe(false);
+    expect(sameSessionPanels(panels, { ...panels, side: { ...panels.side, second: { panels: ['highlights'], shown: null } } })).toBe(false);
   });
 });
 

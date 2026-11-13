@@ -40,7 +40,9 @@ import {
   withoutPanel,
   withPanelAt,
   withPanelPlace,
+  sameLayout,
   samePlace,
+  sameSessionPanels,
   type LayoutSettings,
   type PanelArea as PanelAreaName,
   type PanelAreaState,
@@ -219,31 +221,29 @@ export interface PanelsControl {
 
 /**
  * Session `sessionId`'s Panels: main's, or what the user changed them to
- * until main holds the same. A change main refuses is undone, unless a later
- * one has replaced it. A Terminal's Panel goes once `terminals` no longer
- * lists it, and the area it leaves empty is hidden.
+ * until main has kept it. A change main refuses is undone, unless a later
+ * one has replaced it. Main is the one that applies the Layout and the
+ * Terminals that run (ADR 0009): it serves each Panel where its kind sits,
+ * without those of Terminals that ended, so they are shown as it serves them
+ * and only the user's own changes are sent back.
  *
  * In a narrow window the Side area is a drawer, closed until a Panel is
  * shown in it or the area is toggled, and closed again when the window
  * crosses the breakpoint or the area is left with no Panel. Whether it is open is not kept: the Session's
  * Panels say whether the area shows in a wide window.
  *
- * Each Panel sits in the area the Layout has for its kind, once settings
- * say what that is: one the Session left in the other is moved there, and
- * kept so.
- *
  * Review mode isn't kept either: it lasts while the Session stays open. It
  * hides the Side area without changing the Session's Panels, so leaving it
  * brings the area back as it was. Showing another Panel of the Side area, or
  * the area itself, leaves it.
  */
-export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefined): PanelsControl {
+export function usePanels(sessionId: number): PanelsControl {
   const { narrow } = useWindowLayout();
   const api = useApi();
   const stored = useTopic('panels', { sessionId });
   const [local, setLocal] = useState<SessionPanels>();
   useEffect(() => {
-    if (stored) setLocal((pending) => (pending && same(pending, stored) ? undefined : pending));
+    if (stored) setLocal((pending) => (pending && sameSessionPanels(pending, stored) ? undefined : pending));
   }, [stored]);
   const layout = useLayout();
   const [error, setError] = useState<string>();
@@ -256,27 +256,20 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
   const reviewing = useRef(review);
   reviewing.current = review;
   useEffect(() => setReview(undefined), [sessionId]);
-  /** Terminals just opened that `terminals` doesn't list yet. */
-  const starting = useRef(new Set<number>());
   const opening = useRef(false);
 
-  useEffect(() => {
-    for (const { id } of terminals ?? []) starting.current.delete(id);
-  }, [terminals]);
-  const base = local ?? stored ?? DEFAULT_SESSION_PANELS;
-  const running = terminals ? withTerminals(base, new Set([...terminals.map((t) => t.id), ...starting.current])) : base;
-  // Not before settings say where each kind sits: it would move them back to where their kinds open.
-  const current = layout.loaded ? inLayout(running, layout.value) : running;
+  const current = local ?? stored ?? DEFAULT_SESSION_PANELS;
   const latest = useRef(current);
   latest.current = current;
 
   const save = (next: SessionPanels) => {
     latest.current = next;
     setLocal(next);
-    api.invoke('sessions.setPanels', { id: sessionId, panels: next }).catch((e: unknown) => {
-      console.error("could not keep the Session's Panels:", e);
-      setLocal((pending) => (pending && same(pending, next) ? undefined : pending));
-    });
+    // Main serves what it kept before it answers: its Panels take over then, as it may have kept them otherwise.
+    api
+      .invoke('sessions.setPanels', { id: sessionId, panels: next })
+      .catch((e: unknown) => console.error("could not keep the Session's Panels:", e))
+      .finally(() => setLocal((pending) => (pending === next ? undefined : pending)));
   };
   const loaded = useRef(false);
   loaded.current = !!stored;
@@ -287,13 +280,6 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     save(next);
     return next;
   };
-  // Terminals that ended are kept closed, and Panels the Layout moved are kept where it has them.
-  // Keyed on what to keep, so that a change coming before main holds the last one is kept too.
-  const unkept = stored && !same(current, base) ? JSON.stringify(current) : undefined;
-  useEffect(() => {
-    if (unkept) save(current);
-  }, [unkept]);
-
   // `layoutNow`: the Layout as just changed, before this render has it.
   const show = (panel: PanelId, layoutNow = layout.value) => {
     if (reviewing.current === panel) return;
@@ -317,7 +303,6 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     }
     try {
       const terminal = await api.invoke('terminals.open', { sessionId, ...START_SIZE });
-      starting.current.add(terminal.id);
       show(terminalPanel(terminal.id), layoutNow);
       setFocus(terminalPanel(terminal.id));
     } catch (e) {
@@ -455,8 +440,6 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
  * unless a later one has replaced it.
  */
 function useLayout(): {
-  /** Whether settings have said what the Layout is. */
-  loaded: boolean;
   value: LayoutSettings;
   resize: PanelsControl['resize'];
   /** Puts Panels of `kind` in `place`, and gives the Layout that has them there. */
@@ -466,7 +449,7 @@ function useLayout(): {
   const stored = useTopic('settings')?.layout;
   const [local, setLocal] = useState<LayoutSettings>();
   useEffect(() => {
-    if (stored) setLocal((pending) => (pending && same(pending, stored) ? undefined : pending));
+    if (stored) setLocal((pending) => (pending && sameLayout(pending, stored) ? undefined : pending));
   }, [stored]);
   const value = local ?? stored ?? DEFAULT_LAYOUT;
   const latest = useRef(value);
@@ -476,11 +459,10 @@ function useLayout(): {
     setLocal(next);
     saving?.catch((e: unknown) => {
       console.error(`could not keep the Panel ${what}:`, e);
-      setLocal((pending) => (pending && same(pending, next) ? undefined : pending));
+      setLocal((pending) => (pending && sameLayout(pending, next) ? undefined : pending));
     });
   };
   return {
-    loaded: !!stored,
     value,
     resize: (kind, dimension, size, done) => {
       const next = { ...latest.current, [dimension]: { ...latest.current[dimension], [kind]: size } };
@@ -494,10 +476,6 @@ function useLayout(): {
   };
 }
 
-function same(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 /** `state` with `panel` shown in its stack, opened at the end of the place its kind sits in, in `layout`, if it wasn't open. */
 function showing(state: SessionPanels, panel: PanelId, layout: LayoutSettings): SessionPanels {
   const at = placeOf(state, panel);
@@ -505,18 +483,6 @@ function showing(state: SessionPanels, panel: PanelId, layout: LayoutSettings): 
   const area = state[at.area];
   const stack = stackOf(area, at.stack);
   return { ...state, [at.area]: at.stack === 'first' ? { ...area, shown: panel, open: true } : { ...area, open: true, second: { ...stack, shown: panel } } };
-}
-
-/** `state` keeping only the Terminals in `running`. */
-function withTerminals(state: SessionPanels, running: Set<number>): SessionPanels {
-  let next = state;
-  for (const area of PANEL_AREAS) {
-    for (const panel of panelsIn(state[area])) {
-      const terminal = terminalOf(panel);
-      if (terminal !== undefined && !running.has(terminal)) next = withoutPanel(next, panel);
-    }
-  }
-  return next;
 }
 
 /** How large `area` can be in the window as it is now: the Side area leaves the conversation its least width. */
@@ -698,6 +664,12 @@ function tabIdOf(area: PanelAreaName, panel: PanelId): string {
 /** Where a tab dragged over a stack would go: among its tabs, at `at`; or into a stack, the whole Panel or half of it lit. */
 type DropTarget = { at: number } | { stack: PanelStack; half: boolean };
 
+function sameDrop(a: DropTarget | undefined, b: DropTarget): boolean {
+  if (!a) return false;
+  if ('at' in a) return 'at' in b && a.at === b.at;
+  return 'stack' in b && a.stack === b.stack && a.half === b.half;
+}
+
 /** One Panel stack of a shown area: see PanelArea. */
 function PanelStackView({
   area,
@@ -794,7 +766,7 @@ function PanelStackView({
   const target = dragging && drop;
   const over = (event: ReactDragEvent, to: DropTarget) => {
     takeDrop(event);
-    setDrop((was) => (same(was, to) ? was : to));
+    setDrop((was) => (sameDrop(was, to) ? was : to));
   };
   const leave = (event: ReactDragEvent) => {
     if (leftFor(event)) setDrop(undefined);
