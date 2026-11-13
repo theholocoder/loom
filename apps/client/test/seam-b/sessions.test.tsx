@@ -56,6 +56,7 @@ function startNewSession() {
 /** Opens the Session from the sidebar. */
 function open(main: FakeMain, session: Session) {
   if (session.status === 'working') fireEvent.click(screen.getByRole('button', { name: 'Working' }));
+  if (session.status === 'archived') fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
   fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: session.title }));
   return main;
 }
@@ -489,18 +490,29 @@ describe('a Session', () => {
     expect(within(glance()).getByText('loom/login-v2')).toBeTruthy();
   });
 
-  it('archives from its ⋯ menu, which an archived Session no longer offers', async () => {
+  it('archives from its ⋯ menu, which offers an archived Session Reopen instead, as a reply does', async () => {
     const main = open(renderApp(new FakeMain({ projects: [project], sessions: [inWorktree] })), inWorktree);
 
     fireEvent.click(within(sessionMenu()).getByRole('menuitem', { name: 'Archive' }));
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive')).toEqual([{ command: 'sessions.archive', params: { id: inWorktree.id } }]));
 
     act(() => main.publish('sessions', [{ ...inWorktree, status: 'archived', waitingReason: undefined }]));
-    expect((within(sessionMenu()).getByRole('menuitem', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.keyDown(sessionMenu(), { key: 'Escape' });
+    expect(within(sessionMenu()).queryByRole('menuitem', { name: 'Archive' })).toBeNull();
+    expect(within(sessionMenu()).queryByRole('menuitem', { name: 'Snooze…' })).toBeNull();
+    fireEvent.click(within(sessionMenu()).getByRole('menuitem', { name: 'Reopen' }));
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.unarchive').map((i) => i.params)).toEqual([{ id: inWorktree.id }]));
     // Its Project is still there, so a new message reopens it.
-    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Reply to OpenCode… @ to mention a file');
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Reply to reopen this Session… @ to mention a file');
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("says an archived Session's worktree was removed, made again when it reopens", () => {
+    const archived: Session = { ...inWorktree, status: 'archived', waitingReason: undefined };
+    open(renderApp(new FakeMain({ projects: [project], sessions: [archived] })), archived);
+
+    const where = within(within(info()).getByRole('region', { name: 'Where' }));
+    expect(where.getByText(/Removed on archiving/)).toBeTruthy();
+    expect(where.queryByRole('button', { name: 'Open in editor' })).toBeNull();
   });
 
   it('can only be archived when its worktree is missing', () => {

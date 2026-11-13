@@ -67,7 +67,7 @@ describe('deleting a Session', () => {
     expect(dialog.textContent).toContain('loom/fix-login');
     expect(deleteCalls(main)).toEqual([]);
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7 }]));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
@@ -84,20 +84,55 @@ describe('deleting a Session', () => {
     expect(deleteCalls(main)).toEqual([]);
   });
 
-  it('warns about unsaved work, and deletes only once told to discard it', async () => {
+  it('asks once, saying up front what unsaved work the worktree has, and deletes once told to discard it', async () => {
+    const unsaved = { uncommitted: true, unpushedCommits: 2, detached: false };
     const main = renderInfo(worktreeSession, {
-      'sessions.delete': ({ discard }) => (discard ? { deleted: true } : { deleted: false, unsavedWork: { uncommitted: true, unpushedCommits: 2, detached: false } }),
+      'sessions.unsavedWork': () => unsaved,
+      'sessions.delete': ({ discard }) => (discard ? { deleted: true } : { deleted: false, unsavedWork: unsaved }),
     });
     deleteFromMenu();
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
 
-    const warning = await screen.findByRole('alertdialog', { name: 'Delete with unsaved work?' });
-    expect(warning.textContent).toMatch(/uncommitted changes and 2 unpushed commits/);
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    await waitFor(() => expect(dialog.textContent).toMatch(/uncommitted changes and 2 unpushed commits/));
+    expect(dialog.textContent).toMatch(/can't be undone/);
+    expect(within(dialog).queryByRole('button', { name: 'Delete' })).toBeNull();
 
-    fireEvent.click(within(warning).getByRole('button', { name: 'Discard and delete' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Discard and delete' }));
 
-    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7 }, { id: 7, discard: true }]));
+    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7, discard: true }]));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  });
+
+  it('keeps the unsaved work, when told to, as a WIP commit on the branch', async () => {
+    const main = renderInfo(worktreeSession, { 'sessions.unsavedWork': () => ({ uncommitted: true, unpushedCommits: 0, detached: false }) });
+    deleteFromMenu();
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Commit and delete' }));
+
+    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7, commitWork: true }]));
+  });
+
+  it("can't keep the work of a worktree on no branch, whose commits are lost", async () => {
+    renderInfo(worktreeSession, { 'sessions.unsavedWork': () => ({ uncommitted: true, unpushedCommits: 1, detached: true }) });
+    deleteFromMenu();
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    await within(dialog).findByRole('button', { name: 'Discard and delete' });
+    expect(within(dialog).queryByRole('button', { name: 'Commit and delete' })).toBeNull();
+    expect(dialog.textContent).toMatch(/on no branch/);
+  });
+
+  it('asks about unsaved work found only once Delete is pressed, in the same dialog', async () => {
+    const main = renderInfo(worktreeSession, {
+      'sessions.delete': ({ discard }) => (discard ? { deleted: true } : { deleted: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } }),
+    });
+    deleteFromMenu();
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete' }));
+
+    fireEvent.click(await within(screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' })).findByRole('button', { name: 'Discard and delete' }));
+    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7 }, { id: 7, discard: true }]));
   });
 
   it('shows why the deletion failed, in the dialog', async () => {

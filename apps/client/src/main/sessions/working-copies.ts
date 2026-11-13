@@ -218,6 +218,18 @@ export async function unsavedWork(environment: GitEnvironment, path: string): Pr
 }
 
 /**
+ * Commits everything uncommitted in the worktree, untracked files included,
+ * to the branch it is on, as `message`, skipping the hooks: a commit kept so
+ * that removing the worktree loses nothing. Nothing to commit commits nothing.
+ */
+export async function commitWork(environment: GitEnvironment, path: string, message: string): Promise<void> {
+  const status = await gitOrThrow(environment, ['-C', path, 'status', '--porcelain'], "Couldn't check the worktree for changes");
+  if (status.stdout.trim() === '') return;
+  await gitOrThrow(environment, ['-C', path, 'add', '--all'], "Couldn't stage the worktree's changes");
+  await gitOrThrow(environment, ['-C', path, 'commit', '--quiet', '--no-verify', '-m', message], "Couldn't commit the worktree's changes");
+}
+
+/**
  * Removes the worktree from the checkout, keeping its branch; `force` discards
  * its changes. A worktree already gone is only forgotten. The remote is never
  * touched.

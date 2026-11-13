@@ -1,7 +1,7 @@
 // A Session's right-click menu, on its Inbox card and its header, and the
 // header's ⋯ menu: a new Session on the same working copy, Snooze, Rename,
-// Mark unread, Archive and Delete.
-import { AlarmClock, AlarmClockOff, Archive, Mail, MessageSquarePlus, Pencil, Trash2 } from 'lucide-react';
+// Mark unread, Archive (Reopen, for an archived one) and Delete.
+import { AlarmClock, AlarmClockOff, Archive, ArchiveRestore, Mail, MessageSquarePlus, Pencil, Trash2 } from 'lucide-react';
 import { createContext, useContext, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import type { Session } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -61,14 +61,20 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
           disabled: !waiting,
           open: (anchor, close) => <SnoozeMenu anchor={anchor} session={session} onClose={close} onError={onError} />,
         };
+    const archived = session.status === 'archived';
+    const close: ContextMenuItem = archived
+      ? // A removed Project's Sessions are read-only.
+        { label: 'Reopen', icon: ArchiveRestore, disabled: !project, run: () => void api.invoke('sessions.unarchive', { id: session.id }).catch(fail) }
+      : { label: 'Archive', icon: Archive, run: () => void archiver.archive(session).catch(fail) };
     return [
-      [{ label: same?.label ?? 'New Session here', icon: MessageSquarePlus, disabled: !same, run: () => same && newSession(session.projectId, same.start) }, snooze],
+      // An archived Session isn't Waiting, so it has no snooze to offer.
+      [{ label: same?.label ?? 'New Session here', icon: MessageSquarePlus, disabled: !same, run: () => same && newSession(session.projectId, same.start) }, ...(archived ? [] : [snooze])],
       [
         { label: 'Rename…', icon: Pencil, disabled: !project, open: (anchor, close) => <RenameSession anchor={anchor} session={session} onClose={close} onError={onError} /> },
         { label: 'Mark unread', icon: Mail, disabled: session.unread, run: () => void api.invoke('sessions.setUnread', { id: session.id, unread: true }).catch(fail) },
       ],
       [
-        { label: 'Archive', icon: Archive, disabled: session.status === 'archived', run: () => void archiver.archive(session).catch(fail) },
+        close,
         { label: 'Delete…', icon: Trash2, run: () => deleter.delete(session) },
       ],
     ];

@@ -108,15 +108,17 @@ describe("a Session's right-click menu", () => {
     expect(invoked(main, 'sessions.archive')).toEqual([{ id: main.value('sessions')[0]!.id }]);
   });
 
-  it("can't snooze a Working Session, nor archive an archived one, nor mark an unread one unread", () => {
-    renderApp([session({ title: 'Busy', status: 'working', waitingReason: undefined }), session({ title: 'Done', status: 'archived', waitingReason: undefined, unread: true })]);
+  it("can't snooze a Working Session nor mark an unread one unread, and offers an archived one Reopen instead of Snooze and Archive", async () => {
+    const main = renderApp([session({ title: 'Busy', status: 'working', waitingReason: undefined }), session({ title: 'Done', status: 'archived', waitingReason: undefined, unread: true })]);
     fireEvent.click(screen.getByRole('button', { name: 'Working' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Busy' }));
     expect(items()).toContain('(Snooze…)');
     fireEvent.keyDown(menu(), { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Done' }));
-    expect(items()).toEqual(['New Session on this branch', '(Snooze…)', '—', 'Rename…', '(Mark unread)', '—', '(Archive)', 'Delete…']);
+    expect(items()).toEqual(['New Session on this branch', '—', 'Rename…', '(Mark unread)', '—', 'Reopen', 'Delete…']);
+    pick('Reopen');
+    await waitFor(() => expect(invoked(main, 'sessions.unarchive')).toEqual([{ id: main.value('sessions').find((s) => s.title === 'Done')!.id }]));
   });
 
   it('snoozes from the snooze times the Inbox card offers', async () => {

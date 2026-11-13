@@ -207,8 +207,19 @@ describe('running palette actions', () => {
 
     runAction('Archive this Session');
     const warning = await screen.findByRole('alertdialog', { name: 'Archive with unsaved work?' });
-    fireEvent.click(within(warning).getByRole('button', { name: 'Discard' }));
+    fireEvent.click(within(warning).getByRole('button', { name: 'Discard and archive' }));
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: 1 }, { id: 1, discard: true }]));
+  });
+
+  it('reopens the open archived Session, unless its Project was removed', async () => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Done', status: 'archived', waitingReason: undefined })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    runAction('Reopen this Session');
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.unarchive').map((i) => i.params)).toEqual([{ id: 1 }]));
+    ctrlK();
+    expect(within(palette()).queryByRole('option', { name: 'Archive this Session' })).toBeNull();
   });
 
   it('shows in a toast why an action on the Session failed', async () => {

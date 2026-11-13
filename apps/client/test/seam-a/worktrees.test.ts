@@ -670,6 +670,35 @@ describe('archiving a worktree Session', () => {
     expect(remoteRefs(origin)).toBe(before);
   });
 
+  it('keeps uncommitted changes, when told to, as a WIP commit on its local branch that reopening brings back', async () => {
+    const { machine, origin, checkout, main, id, path } = await worktreeSession();
+    writeFileSync(join(machine.home, '.gitconfig'), '[user]\n\tname = Dev\n\temail = dev@example.com\n[commit]\n\tgpgsign = false\n');
+    const before = remoteRefs(origin);
+    writeFileSync(join(path, 'README.md'), 'half done\n');
+    writeFileSync(join(path, 'notes.txt'), 'untracked\n');
+
+    expect(await main.api.invoke('sessions.archive', { id, commitWork: true })).toEqual({ archived: true });
+
+    expect(existsSync(path)).toBe(false);
+    expect(git(checkout, 'log', '-1', '--format=%s', 'loom/fix-the-login-bug')).toBe('WIP: Fix the login bug');
+    expect(git(checkout, 'show', 'loom/fix-the-login-bug:notes.txt')).toBe('untracked');
+    expect(remoteRefs(origin)).toBe(before);
+
+    await main.api.invoke('sessions.unarchive', { id });
+    expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('half done\n');
+    expect(readFileSync(join(path, 'notes.txt'), 'utf8')).toBe('untracked\n');
+  });
+
+  it("won't commit the work of a worktree on no branch, where the commit would be lost, and archives nothing", async () => {
+    const { main, id, path } = await worktreeSession();
+    git(path, 'checkout', '--quiet', '--detach');
+    writeFileSync(join(path, 'notes.txt'), 'untracked\n');
+
+    await expect(main.api.invoke('sessions.archive', { id, commitWork: true })).rejects.toThrow("This Session's worktree is on no branch, so its work can't be committed to one.");
+    expect(readFileSync(join(path, 'notes.txt'), 'utf8')).toBe('untracked\n');
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting' });
+  });
+
   it('archives a pushed branch without asking', async () => {
     const { machine, main, id, path } = await worktreeSession();
     machine.commit(path, 'fix.txt', 'fixed\n');

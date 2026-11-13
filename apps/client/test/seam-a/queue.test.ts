@@ -247,7 +247,7 @@ describe("a Working Session's queue", () => {
     expect(kept).toMatchObject({ status: 'waiting', waitingReason: 'interrupted', queue: [{ id: expect.any(Number), text: 'Third, edited' }] });
   });
 
-  it('goes with the Session when it is archived', async () => {
+  it('is kept when the Session is archived, and is there again once it is reopened', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Working on it'], hold: 'never' }]);
     const { main, id } = await withSession(machine, checkout);
     await main.api.invoke('sessions.send', { id, prompt: 'Second' });
@@ -256,7 +256,12 @@ describe("a Working Session's queue", () => {
 
     const [archived] = (await main.api.invoke('sessions.list')).filter((s) => s.id === id);
     expect(archived).toMatchObject({ status: 'archived' });
-    expect(archived!.queue).toBeUndefined();
+    expect(queued(archived!)).toEqual(['Second']);
+
+    await main.api.invoke('sessions.unarchive', { id });
+    const [reopened] = (await main.api.invoke('sessions.list')).filter((s) => s.id === id);
+    expect(reopened).toMatchObject({ status: 'waiting', waitingReason: 'stopped' });
+    expect(queued(reopened!)).toEqual(['Second']);
   });
 
   it("can't be steered on OpenCode, whose queued messages are sent with Send now", async () => {

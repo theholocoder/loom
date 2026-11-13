@@ -83,6 +83,9 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
           <span className="tech path" {...copyable(workingCopy.kind === 'worktree' ? 'worktree path' : 'path', workingCopy.path)}>
             {workingCopy.kind === 'worktree' ? <span {...copyable('worktree name', baseName(workingCopy.path))}>{breakable(workingCopy.path)}</span> : breakable(workingCopy.path)}
           </span>
+          {workingCopy.kind === 'worktree' && session.status === 'archived' && (
+            <span className="muted">{removedProject ? 'Removed on archiving.' : 'Removed on archiving; made again here when the Session reopens.'}</span>
+          )}
         </Fact>
         <Fact label="Branch" actions={session.branch && <CopyAction text={session.branch} label="Copy branch name" />}>
           {session.branch ? (

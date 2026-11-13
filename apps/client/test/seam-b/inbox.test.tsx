@@ -278,7 +278,7 @@ describe('the Inbox', () => {
     expect(main.invoked.filter((i) => i.command === 'sessions.archive')).toEqual([{ command: 'sessions.archive', params: { id: waiting.id } }]);
   });
 
-  it('warns before archiving a row with unsaved work: Cancel keeps it, Discard archives it', async () => {
+  it('warns before archiving a row with unsaved work: Cancel keeps it, Discard and archive archives it', async () => {
     const dirty = session({ title: 'Half done', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/loom/half' } });
     const main = renderApp(
       new FakeMain({ projects: [loom], sessions: [dirty] }, { 'sessions.archive': ({ discard }) => (discard ? { archived: true } : { archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 2, detached: false } }) }),
@@ -292,9 +292,34 @@ describe('the Inbox', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
 
     archive();
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard and archive' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: dirty.id }, { id: dirty.id }, { id: dirty.id, discard: true }]);
+  });
+
+  it('keeps unsaved work, when told to, as a WIP commit on the branch, and says the archive can be undone', async () => {
+    const dirty = session({ title: 'Half done', branch: 'loom/half', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/loom/half' } });
+    const main = renderApp(
+      new FakeMain({ projects: [loom], sessions: [dirty] }, { 'sessions.archive': ({ commitWork }) => (commitWork ? { archived: true } : { archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } }) }),
+    );
+    fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Half done' })).getByRole('button', { name: 'Archive' }));
+
+    const warning = await screen.findByRole('alertdialog', { name: 'Archive with unsaved work?' });
+    expect(warning.textContent).toContain('loom/half');
+    fireEvent.click(within(warning).getByRole('button', { name: 'Commit and archive' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: dirty.id }, { id: dirty.id, commitWork: true }]));
+    const toast = await screen.findByRole('group', { name: 'What was done' });
+    expect(toast.textContent).toContain('Archived “Half done”');
+    expect(within(toast).getByRole('button', { name: /Undo/ })).toBeTruthy();
+  });
+
+  it('says, archiving a Session with queued messages, that they wait for it to reopen', async () => {
+    const queued = session({ title: 'Busy', queue: [{ id: 1, text: 'Next' }, { id: 2, text: 'After' }] });
+    renderApp(new FakeMain({ projects: [loom], sessions: [queued] }));
+    fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Busy' })).getByRole('button', { name: 'Archive' }));
+
+    expect((await screen.findByText(/its 2 queued messages wait for it to reopen/)).textContent).toContain('Archived “Busy”');
   });
 
   it('flags a Session whose worktree is missing, offering only Archive', () => {
