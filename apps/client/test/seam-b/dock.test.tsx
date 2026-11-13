@@ -176,8 +176,11 @@ describe('the dock', () => {
     expect(terminalTabs()[0]!.getAttribute('aria-selected')).toBe('true');
     expect(within(dock()!).getByRole('tabpanel').contains(screens[0]!.element)).toBe(true);
 
+    const kept = calls(main, 'sessions.setPanels').length;
     fireEvent.click(within(dock()!).getByRole('button', { name: 'Close Terminal 1' }));
     await waitFor(() => expect(terminalTabs().map((t) => t.textContent)).toEqual(['Terminal 2']));
+    // Main drops the Panel of a Terminal that ends: nothing for the renderer to keep.
+    expect(calls(main, 'sessions.setPanels')).toHaveLength(kept);
     expect(screens[0]!.disposed).toBe(true);
     fireEvent.click(within(dock()!).getByRole('button', { name: 'Close Terminal 2' }));
 

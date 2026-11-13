@@ -156,9 +156,10 @@ describe('moving a Panel', () => {
     main.publish('settings', { ...main.value('settings'), layout: { ...main.value('settings').layout, area: { changes: 'dock' } } });
     renderApp(main);
     openSession('Fix login');
-    // Where the Layout has it, though the Session left it in the Side area.
+    // Where the Layout has it, though the Session left it in the Side area: main serves it there, with nothing to keep.
     expect(sideArea()).toBeNull();
     expect(tabNames(dock())).toEqual(['Changes']);
+    expect(calls(main, 'sessions.setPanels')).toEqual([]);
 
     fireEvent.click(within(dock()!).getByRole('button', { name: 'More for Changes' }));
     const menu = screen.getByRole('menu', { name: 'More for Changes' });
@@ -179,7 +180,8 @@ describe('moving a Panel', () => {
     openSession('Fix billing');
     expect(sideArea()).toBeNull();
     expect(tabNames(dock())).toEqual(['Changes']);
-    expect(kept(main, 8)).toEqual({ side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: true } });
+    // Main serves it there: the renderer has nothing to keep.
+    expect(kept(main, 8)).toBeUndefined();
   });
 
   it('goes back where it was when settings refuse to keep the move', async () => {
@@ -195,7 +197,7 @@ describe('moving a Panel', () => {
     fireEvent.click(within(rightClick(tab(sideArea(), 'Changes'))).getByRole('menuitem', { name: 'Move to the Dock' }));
     await waitFor(() => expect(tabNames(sideArea())).toEqual(['Changes']));
     expect(dock()).toBeNull();
-    await waitFor(() => expect(kept(main, 7)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } }));
+    expect(main.value('panels', { sessionId: 7 })).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } });
     vi.restoreAllMocks();
   });
 

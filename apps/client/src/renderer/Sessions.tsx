@@ -512,7 +512,7 @@ export function SessionView({
   const [mergeRequestTab, setMergeRequestTab] = useState<MergeRequestTab>('overview');
   const runsTerminals = canRunTerminals(session);
   const terminals = useTopic('terminals', { sessionId: session.id });
-  const panels = usePanels(session.id, terminals);
+  const panels = usePanels(session.id);
   /** Shows the Merge request Panel, at its link form or its reviews when asked. */
   const showMergeRequest = (to?: MergeRequestFocus['to']) => {
     panels.show('merge-request');

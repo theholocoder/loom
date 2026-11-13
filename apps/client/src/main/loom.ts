@@ -153,11 +153,14 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   removedProjects.set(projectService.listRemoved());
 
   let highlights: Highlights | undefined;
+  // Each Session's Panels, served in the Layout without the Terminals that ended (ADR 0009).
+  const panels = await Panels.load(db, { layout: () => settingsService.value.layout, ended: (id) => terminals.ended(id) });
   const settingsService = await Settings.load(
     db,
     (value) => {
       settings.set(value);
       highlights?.settingsChanged();
+      panels.settingsChanged();
     },
     // Checked where worktrees go, when Loom can: an Environment not up yet tells at the next worktree Session.
     { checkWorktreeRootFolder: (root) => (native.status.state === 'connected' ? checkWorktreeRootFolder(nativeForSessions, root) : Promise.resolve()) },
@@ -209,6 +212,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       const environment = sessionEnvironment(session);
       return environment && { label: environment.status.label, os: () => environment.status.bridge?.os, ready: () => environment.ready(), openChannel: (params) => environment.openChannel(params) };
     },
+    onChange: (sessionId) => panels.terminalsChanged(sessionId),
   });
   const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
   const sessionService = await Sessions.load({
@@ -237,7 +241,6 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
   sessions.set(sessionService.list());
-  const panels = await Panels.load(db);
   highlights = await Highlights.load({
     db,
     clock: options.clock,
@@ -388,8 +391,10 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.linkIssue': (params) => sessionService.linkIssue(params),
     'sessions.unlinkIssue': (params) => sessionService.unlinkIssue(params),
     'sessions.issue': (params) => sessionService.issue(params),
-    'sessions.setPanels': ({ id, panels: state }) => {
+    'sessions.setPanels': async ({ id, panels: state }) => {
       if (!sessionService.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
+      // Kept in the Layout a move asked for just before, not the one it replaces.
+      await settingsService.layoutKept();
       return panels.set(id, state);
     },
     'sessions.resolveHighlight': (params) => highlighter.resolve(params),

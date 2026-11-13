@@ -180,6 +180,11 @@ export class Settings {
   /** The Layout changes asked for, one after another. */
   private layoutChanges: Promise<unknown> = Promise.resolve();
 
+  /** Resolves once the Layout changes asked for so far are kept, or refused. */
+  layoutKept(): Promise<void> {
+    return this.layoutChanges.then(() => {});
+  }
+
   /** Changes the Layout once those asked for before are kept, from the Layout they left, so that two asked for at once both stay. */
   private changeLayout(change: (layout: LayoutSettings) => LayoutSettings): Promise<SettingsValues> {
     const changing = this.layoutChanges.then(() => this.set('layout', change(this.current.layout)));

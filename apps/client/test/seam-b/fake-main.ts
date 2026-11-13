@@ -3,7 +3,7 @@
 import { ownLocale } from '../../src/shared/dates';
 import { DEFAULT_KEYBINDINGS, remap } from '../../src/shared/shortcuts';
 import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
-import { clampPanelSize, DEFAULT_SESSION_PANELS, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
+import { clampPanelSize, DEFAULT_SESSION_PANELS, servedPanels, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
 import { clampInboxWidth } from '../../src/shared/window';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
@@ -268,17 +268,35 @@ export class FakeMain implements LoomApi {
     };
   }
 
-  /** The topic's current value. */
+  /**
+   * The topic's current value. A Session's Panels are served as main serves
+   * them: each where the Layout has its kind, without the Terminals the
+   * Session's list doesn't have.
+   */
   value<T extends TopicName>(topic: T, ...params: TopicArgs<T>): Topics[T] {
     const k = key(topic, params);
-    return (this.values.has(k) ? this.values.get(k) : EMPTY[topic]) as Topics[T];
+    const value = (this.values.has(k) ? this.values.get(k) : EMPTY[topic]) as Topics[T];
+    if (topic !== 'panels') return value;
+    const running = new Set(this.value('terminals', ...(params as TopicArgs<'terminals'>)).map((t) => t.id));
+    return servedPanels(value as SessionPanels, this.value('settings').layout, (id) => !running.has(id)) as Topics[T];
   }
 
-  /** Publishes a new value on `topic`, as main does when its state changes. */
+  /** Publishes a new value on `topic`, as main does when its state changes; the Panels it changes with it too. */
   publish<T extends TopicName>(topic: T, value: Topics[T], ...params: TopicArgs<T>): void {
     const k = key(topic, params);
     this.values.set(k, value);
-    for (const listener of this.listeners.get(k) ?? []) (listener as (value: Topics[T]) => void)(value);
+    this.notify(k, this.value(topic, ...params));
+    if (topic === 'settings') {
+      for (const listened of this.listeners.keys()) {
+        const [name, panelParams] = JSON.parse(listened) as [TopicName, TopicArgs<'panels'>[0]];
+        if (name === 'panels') this.notify(listened, this.value('panels', panelParams));
+      }
+    }
+    if (topic === 'terminals') this.notify(key('panels', params), this.value('panels', ...(params as TopicArgs<'panels'>)));
+  }
+
+  private notify(k: string, value: unknown): void {
+    for (const listener of this.listeners.get(k) ?? []) (listener as (value: unknown) => void)(value);
   }
 
   invoke: LoomApi['invoke'] = async (command, ...params) => {
