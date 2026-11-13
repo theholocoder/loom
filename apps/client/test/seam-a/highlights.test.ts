@@ -192,6 +192,16 @@ describe('Session highlights', () => {
     expect(checkPrompts(machine)[1]).not.toContain('Prompt two');
   });
 
+  it('means something for a Session made while it is on, before its first turn is checked', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }], [answer({ highlights: [], resolved: [] })]);
+    const { main, project } = await start(machine, checkout);
+    await main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    // Looked at as soon as it is made, before its first turn has ended and been checked.
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    const sessions = await main.api.invoke('sessions.list');
+    expect(sessions.find((s) => s.id === id)!.highlights).toEqual({ count: 0, unseen: 0 });
+  });
+
   it('starts from the next turn when turned on, without going back over the Session', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Before.'] }, { chunks: ['After.'] }]);
     const { main, project } = await start(machine, checkout);

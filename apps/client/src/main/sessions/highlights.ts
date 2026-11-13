@@ -125,7 +125,7 @@ export class Highlights {
     this.countAll();
   }
 
-  /** The Sessions Loom has now: a deleted one's Highlights are gone with it. */
+  /** The Sessions Loom has now: a deleted one's Highlights are gone with it, and a new one is told what its Panel means. */
   sessionsChanged(sessions: Session[]): void {
     const ids = new Set(sessions.map((s) => s.id));
     for (const id of [...this.states.keys()]) {
@@ -133,6 +133,8 @@ export class Highlights {
       this.states.delete(id);
       this.topics.delete(id);
     }
+    // Not counted yet: made since Loom started, so not before its first check.
+    for (const session of sessions) if (!session.highlights) this.count(session.id);
   }
 
   /** Resolves a Highlight by hand, or reopens it. */
