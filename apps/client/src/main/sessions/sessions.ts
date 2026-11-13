@@ -13,7 +13,7 @@ import { diffCommentBlocks } from './diff-comment-prompt';
 import { feedbackPrompt } from './feedback-prompt';
 import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, replyToReviewThread, resolveReviewThread, squashAndMerge, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import { readMergeRequestDetails } from '../projects/merge-request-details';
-import { readIssue } from '../projects/issues';
+import { issueNamed, readIssue, readNamedIssue } from '../projects/issues';
 import { readMergeRequestDiff } from '../projects/merge-request-diff';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
@@ -205,8 +205,8 @@ export class Sessions {
   private readonly mergeRequestLookups = this.perSession<number>();
   /** What is being looked up after each Session's last turn, until it is done. */
   private readonly afterTurns = this.perSession<Promise<unknown>>();
-  /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
-  private readonly linkCalls = this.perSession<Set<string>>();
+  /** The calls of Loom's link tools in each Session's run, by tool call id, with what each links, until they complete. */
+  private readonly linkCalls = this.perSession<Map<string, LinkTool>>();
   /** The plan card of each Session's run, by its item id, once the agent has given one. */
   private readonly plans = this.perSession<number>();
   /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
@@ -2184,28 +2184,46 @@ export class Sessions {
   }
 
   /**
-   * Links the Merge request the agent named with Loom's `link_merge_request`
-   * tool, once the call has completed: Loom's MCP server only answers it.
+   * Links the Merge request or issue the agent named with Loom's
+   * `link_merge_request` or `link_issue` tool, once the call has completed:
+   * Loom's MCP server only answers it.
    */
   private noticeLinkCall(id: number, { toolCallId, title, status }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
     let calls = this.linkCalls.get(id);
-    if (title !== undefined && LINK_TOOL.test(title.trim())) {
-      if (!calls) this.linkCalls.set(id, (calls = new Set()));
-      calls.add(toolCallId);
+    const tool = title === undefined ? undefined : linkToolOf(title);
+    if (tool) {
+      if (!calls) this.linkCalls.set(id, (calls = new Map()));
+      calls.set(toolCallId, tool);
     }
-    if (!calls?.has(toolCallId) || (status !== 'completed' && status !== 'failed')) return;
+    const linking = calls?.get(toolCallId);
+    if (!calls || !linking || (status !== 'completed' && status !== 'failed')) return;
     calls.delete(toolCallId);
     if (calls.size === 0) this.linkCalls.delete(id);
     if (status === 'failed') return;
     const card = this.transcript(id).value.findLast((i) => i.kind === 'tool' && i.toolCallId === toolCallId);
     const named = card?.kind === 'tool' ? linkToolInput(card.input) : undefined;
     if (!named) return;
+    const [linked, refusal] =
+      linking === 'merge-request'
+        ? [this.linkMergeRequest({ id, mergeRequest: named }), (reason: string): NewItem => ({ kind: 'merge-request-refused', mergeRequest: named, reason })]
+        : [this.linkNamedIssue(id, named), (reason: string): NewItem => ({ kind: 'issue-refused', issue: named, reason })];
     // The agent was only told Loom checks it; the user sees why it wasn't linked.
-    this.linkMergeRequest({ id, mergeRequest: named }).catch((error: unknown) => {
+    linked.catch((error: unknown) => {
       if (this.shuttingDown || this.get(id).status === 'archived') return;
       this.endStreaming(id);
-      this.addItem(id, { kind: 'merge-request-refused', mergeRequest: named, reason: (error as Error).message });
+      this.addItem(id, refusal((error as Error).message));
     });
+  }
+
+  /** Links the issue `issue` names (its number, `#12`, or its URL) to the Session, once the Forge has it. */
+  private async linkNamedIssue(id: number, issue: string): Promise<void> {
+    const named = issueNamed(issue);
+    if (!named) throw new Error('Name an issue by its number, such as 12, or by its URL.');
+    const session = this.get(id);
+    const { call, forge, workingCopy } = this.forgeRead(session);
+    const found = await readNamedIssue(call, forge, workingCopy, named);
+    if (this.shuttingDown || this.get(id).status === 'archived') return;
+    this.linkIssue({ id, issue: { number: found.number, url: found.url } });
   }
 
   private recordDiffStat(id: number, diffStat: DiffStat): void {
@@ -2651,10 +2669,19 @@ interface MergeRequestLinkage {
   byHand: boolean;
 }
 
-/** Loom's `link_merge_request` tool, as agents name it: prefixed with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others. */
-const LINK_TOOL = /^(?:mcp__)?loom(?:__|[_.:-])link_merge_request$/i;
+/** What one of Loom's link tools links. */
+type LinkTool = 'merge-request' | 'issue';
 
-/** What the agent gave Loom's `link_merge_request` tool, as `linkMergeRequest` takes it: the number, or else the URL. */
+/**
+ * Which of Loom's link tools `title` names, as agents name them: prefixed
+ * with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others.
+ */
+function linkToolOf(title: string): LinkTool | undefined {
+  const tool = /^(?:mcp__)?loom(?:__|[_.:-])link_(merge_request|issue)$/i.exec(title.trim())?.[1]?.toLowerCase();
+  return tool === 'merge_request' ? 'merge-request' : tool === 'issue' ? 'issue' : undefined;
+}
+
+/** What the agent gave one of Loom's link tools, as `linkMergeRequest` and `linkNamedIssue` take it: the number, or else the URL. */
 function linkToolInput(input: string | undefined): string | undefined {
   try {
     const { number, url } = JSON.parse(input ?? '') as { number?: unknown; url?: unknown };

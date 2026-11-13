@@ -1,6 +1,7 @@
 // Picking an open issue, for a new Session to start from or for a Session to
 // link: a searchable list of the Project's open issues, listed by main through
 // the Forge's CLI. Only offered when the Project's Forge features are on.
+// Pasting an issue's number or URL finds that issue (main does: searchIssues).
 import { ChevronDown, CircleDot, X } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { FORGE_CLI, type ForgeStatus, type Issue, type Project } from '../shared/api';
@@ -101,7 +102,7 @@ export function IssueSearch({ project, anchor, onPick, onClose }: { project: Pro
     <Popover anchor={anchor} role="dialog" label="Pick an issue" className="issue-popover" onClose={onClose}>
       <input
         aria-label="Search issues"
-        placeholder="Search open issues…"
+        placeholder="Search open issues, or paste a number or URL…"
         data-autofocus
         value={search}
         onChange={(event) => setSearch(event.target.value)}

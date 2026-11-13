@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { git, startMain, tempDir, tempMachine, waitFor, type ForgeCliScript, type Machine } from './harness';
+import { git, startMain, tempDir, tempMachine, waitFor, type AcpTurn, type ForgeCliScript, type Machine } from './harness';
 import type { EnvironmentStatus, Issue, Session } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -21,7 +21,7 @@ async function withProject(machine: Machine, checkout: string, userDataDir?: str
   return { main, project };
 }
 
-function machineOn(cli: 'gh' | 'glab', origin: string, turns = [{ chunks: ['On it.'] }]) {
+function machineOn(cli: 'gh' | 'glab', origin: string, turns: AcpTurn[] = [{ chunks: ['On it.'] }]) {
   const machine = tempMachine();
   machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns } });
   machine.installForgeCli(cli, { signedInHosts: [cli === 'gh' ? 'github.com' : 'gitlab.example.org'], issues });
@@ -66,6 +66,53 @@ describe('the issue picker', () => {
     expect(list).toEqual(expect.arrayContaining(['issue', 'list', '--per-page', '100', '--search', 'login']));
     expect(list).not.toContain('--repo');
     expect(machine.forgeCliCwds('glab')[machine.forgeCliInvocations('glab').findIndex((args) => args[0] === 'issue')]).toBe(checkout);
+  });
+
+  it('finds the issue a pasted number or URL names, whatever its state, ahead of what the search finds', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [] } });
+    const closed = { ...darkMode, state: 'closed' as const };
+    const mentions = { number: 12, title: 'Mentions #7 in passing', body: '', url: 'https://github.com/theholocoder/loom/issues/12' };
+    machine.installForgeCli('gh', { signedInHosts: ['github.com'], issues: [loginBug, closed, mentions] });
+    const { main, project } = await withProject(machine, machine.gitRepo('loom', { origin: 'https://github.com/theholocoder/loom.git' }));
+    const darkModeFound = { number: 7, title: 'Dark mode', body: 'Assigned to someone else.', url: darkMode.url };
+
+    expect(await main.api.invoke('projects.issues', { id: project.id, search: '#7' })).toEqual([darkModeFound, mentions]);
+    expect(await main.api.invoke('projects.issues', { id: project.id, search: ' 31 ' })).toEqual([loginBug]);
+    expect(await main.api.invoke('projects.issues', { id: project.id, search: `${loginBug.url}#issuecomment-1` })).toEqual([loginBug]);
+    // A number that's no issue is searched for as words.
+    expect(await main.api.invoke('projects.issues', { id: project.id, search: '99' })).toEqual([]);
+  });
+
+  it("refuses a pasted URL that isn't one of the repository's issues", async () => {
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git');
+    const { main, project } = await withProject(machine, checkout);
+
+    await expect(main.api.invoke('projects.issues', { id: project.id, search: 'https://github.com/someone/else/issues/31' })).rejects.toThrow(
+      "https://github.com/someone/else/issues/31 isn't an issue of this Project's repository.",
+    );
+    // Refused before reading this repository's issue of that number, which there isn't.
+    await expect(main.api.invoke('projects.issues', { id: project.id, search: 'https://github.com/someone/else/issues/9999' })).rejects.toThrow(
+      "https://github.com/someone/else/issues/9999 isn't an issue of this Project's repository.",
+    );
+    expect(machine.forgeCliInvocations('gh').filter((args) => args[0] === 'api' && args[1]?.endsWith('/issues/9999'))).toEqual([]);
+    await expect(main.api.invoke('projects.issues', { id: project.id, search: 'https://github.com/theholocoder/loom/pull/31' })).rejects.toThrow(
+      "https://github.com/theholocoder/loom/pull/31 isn't an issue's page.",
+    );
+  });
+
+  it('finds a GitLab issue by its URL, read through glab in the checkout', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [] } });
+    const onGitLab = { ...loginBug, url: 'https://gitlab.example.org/acme/loom/-/issues/31' };
+    machine.installForgeCli('glab', { signedInHosts: ['gitlab.example.org'], issues: [onGitLab] });
+    const checkout = machine.gitRepo('loom', { origin: 'git@gitlab.example.org:acme/loom.git' });
+    const { main, project } = await withProject(machine, checkout);
+
+    expect(await main.api.invoke('projects.issues', { id: project.id, search: onGitLab.url })).toEqual([onGitLab]);
+    // Newer GitLab's page for it.
+    expect(await main.api.invoke('projects.issues', { id: project.id, search: 'https://gitlab.example.org/acme/loom/-/work_items/31' })).toEqual([onGitLab]);
+    expect(machine.forgeCliInvocations('glab').filter((args) => args[0] === 'issue')).toEqual([]);
   });
 
   it("is refused when the Project's Forge is off", async () => {
@@ -163,6 +210,38 @@ describe('linking an issue to a Session', () => {
     await expect(main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 31, url: 'file:///etc/passwd' } })).rejects.toThrow('An issue needs a number and an http(s) link.');
     await expect(main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 0, url: loginBug.url } })).rejects.toThrow('An issue needs a number and an http(s) link.');
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)?.issue).toBeUndefined();
+  });
+});
+
+describe("the agent's Link issue tool", () => {
+  const toolCall = (title: string, rawInput: Record<string, unknown>): AcpTurn['chunks'] => [
+    { update: { sessionUpdate: 'tool_call', toolCallId: 'call_issue', title, kind: 'other', status: 'pending', rawInput } },
+    { update: { sessionUpdate: 'tool_call_update', toolCallId: 'call_issue', status: 'completed' } },
+    'Done.',
+  ];
+
+  it('links the issue the agent names when it calls the tool, in place of any the Session had', async () => {
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git', [{ chunks: toolCall('loom_link_issue', { number: 7 }) }, { chunks: toolCall('mcp__loom__link_issue', { url: loginBug.url }) }]);
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix SSO' });
+
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.issue?.number === 7));
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)!.issue).toEqual({ number: 7, url: darkMode.url });
+
+    await main.api.invoke('sessions.send', { id: created.id, prompt: 'It was the other one' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.issue?.number === 31));
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)!.issue).toEqual({ number: 31, url: loginBug.url });
+  });
+
+  it("shows why Loom couldn't link what the agent's tool named, and keeps the issue it had", async () => {
+    const elsewhere = 'https://github.com/someone/else/issues/31';
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git', [{ chunks: toolCall('loom_link_issue', { url: elsewhere }) }]);
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', issue: darkMode, prompt: '' });
+
+    const items = await waitFor(main.api, 'transcript', (list) => list.some((i) => i.kind === 'issue-refused'), { sessionId: created.id });
+    expect(items.find((i) => i.kind === 'issue-refused')).toEqual({ kind: 'issue-refused', id: expect.any(Number), issue: elsewhere, reason: `${elsewhere} isn't an issue of this Project's repository.` });
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)!.issue).toEqual({ number: 7, url: darkMode.url });
   });
 });
 

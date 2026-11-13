@@ -175,6 +175,34 @@ describe("a Session's linked issue", () => {
     await waitFor(() => expect(within(glance()).getByRole('button', { name: '#7' })).toBeTruthy());
   });
 
+  it('links the issue a pasted URL names, with Enter', async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project], sessions: [plain] }, {
+        // Main reads the issue a URL names (searchIssues).
+        'projects.issues': ({ search }) => (search === darkMode.url ? [darkMode] : [loginBug]),
+        'sessions.linkIssue': ({ issue }) => main.publish('sessions', [{ ...plain, issue }]),
+      }),
+    );
+    openSession('Fix SSO');
+    fireEvent.click(within(glance()).getByRole('button', { name: 'Link issue' }));
+    const search = within(screen.getByRole('dialog', { name: 'Pick an issue' })).getByRole('textbox', { name: 'Search issues' });
+    expect(search.getAttribute('placeholder')).toBe('Search open issues, or paste a number or URL…');
+
+    fireEvent.change(search, { target: { value: darkMode.url } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.linkIssue', params: { id: 9, issue: { number: 7, url: darkMode.url } } }));
+    expect(main.invoked.filter((c) => c.command === 'sessions.linkIssue')).toHaveLength(1);
+  });
+
+  it("shows why the agent's Link issue tool couldn't link one", () => {
+    const main = renderApp(new FakeMain({ projects: [project], sessions: [plain] }));
+    const reason = "https://github.com/someone/else/issues/31 isn't an issue of this Project's repository.";
+    main.publish('transcript', [{ kind: 'issue-refused', id: 0, issue: 'https://github.com/someone/else/issues/31', reason }], { sessionId: 9 });
+    openSession('Fix SSO');
+    expect(within(screen.getByRole('log', { name: 'Conversation' })).getByRole('note').textContent).toBe(`Couldn't link issue https://github.com/someone/else/issues/31: ${reason}`);
+  });
+
   it('says why linking one failed', async () => {
     renderApp(
       new FakeMain({ projects: [project], sessions: [plain] }, {

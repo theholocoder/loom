@@ -9,7 +9,7 @@ import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environme
 import { describeFailure, NOT_A_REPOSITORY } from '../environments/failures';
 import type { LoomDatabase } from '../storage/database';
 import { detectForge, GIT_TIMEOUT_MS, parseRemote } from './forge';
-import { listIssues } from './issues';
+import { searchIssues } from './issues';
 
 /** What the Projects service needs from an Environment. */
 export interface ProjectEnvironment {
@@ -271,13 +271,13 @@ export class Projects {
     return check;
   }
 
-  /** The open issues on the Project's Forge, matching `search` if given. */
+  /** The open issues on the Project's Forge, matching `search` if given, or the issue it names (searchIssues). */
   async issues(id: number, search?: string): Promise<Issue[]> {
     const project = this.projects.get(id);
     if (!project) throw new Error(`unknown Project ${id}`);
     const environment = this.environment(project.checkout.environmentId);
     if (!environment.connected()) throw new Error(`${environment.label} isn't connected.`);
-    return listIssues(environment.request, project.forge, project.checkout.path, search);
+    return searchIssues(environment.request, project.forge, project.checkout.path, search);
   }
 
   /** Checks the Forge of every Project, or of those in the Environment `environmentId`. */

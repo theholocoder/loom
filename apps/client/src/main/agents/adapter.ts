@@ -109,8 +109,8 @@ export interface OpenOptions {
   toolsOff?: boolean;
   /**
    * Loom's own MCP server, run in the Environment as `command args` over
-   * stdio: its tools (`link_merge_request`) are for Loom to see the agent
-   * call. None when the Environment can't run it.
+   * stdio: its tools (`link_merge_request`, `link_issue`) are for Loom to see
+   * the agent call. None when the Environment can't run it.
    */
   loomTools?: { command: string; args: string[] };
   /**

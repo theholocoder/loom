@@ -879,6 +879,13 @@ export function SessionView({
                     Couldn't link Merge request <span className="tech">{item.mergeRequest}</span>: {item.reason}
                   </span>
                 </div>
+              ) : item.kind === 'issue-refused' ? (
+                <div key={item.id} className="interruption" role="note">
+                  <TriangleAlert className="sm" />
+                  <span>
+                    Couldn't link issue <span className="tech">{item.issue}</span>: {item.reason}
+                  </span>
+                </div>
               ) : item.kind === 'merge-request' ? (
                 <MergeRequestCard key={item.id} item={item} forge={project?.forge.kind} onOpen={() => openLink(item.url)} />
               ) : item.kind === 'feedback' ? (
