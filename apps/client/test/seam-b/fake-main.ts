@@ -193,6 +193,7 @@ export class FakeMain implements LoomApi {
       'sessions.setUnread': () => {},
       'sessions.snooze': () => {},
       'sessions.rename': () => {},
+      'sessions.searchConversations': () => [],
       'sessions.setPanels': ({ id, panels }) => this.publish('panels', panels, { sessionId: id }),
       'sessions.resolveHighlight': () => {},
       'sessions.seeHighlights': () => {},

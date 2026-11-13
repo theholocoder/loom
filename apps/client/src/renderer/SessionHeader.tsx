@@ -35,7 +35,8 @@ import { contextPercent } from './ModelPicker';
 import { Popover } from './Popover';
 import { projectColor } from './ProjectAvatar';
 import { attempt, openable, SessionDetails, workingMs } from './SessionDetails';
-import type { SessionMenu } from './SessionMenu';
+import { RenameSession, type SessionMenu } from './SessionMenu';
+import { SnoozeMenu } from './Snooze';
 import { canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
 
 /** Where Session details opens from: the title, the branch chip, the context meter or the ⋯ menu. */
@@ -46,7 +47,10 @@ export type HeaderPopover =
   | { kind: 'details'; from: DetailsAnchor }
   | { kind: 'checks' }
   | { kind: 'issue' }
-  | { kind: 'menu' };
+  | { kind: 'menu' }
+  /** Snooze and Rename, asked from the palette: beside the title. */
+  | { kind: 'snooze' }
+  | { kind: 'rename' };
 
 /** What the header shows of the Session's status: in words, as an icon and its class. */
 export interface StatusLook {
@@ -188,6 +192,8 @@ export function SessionHeader({
         </button>
         {popover?.kind === 'menu' && <MenuButtonMenu anchor={anchors.menu} label="Session actions" sections={menuSections()} onClose={close} />}
         {details && <SessionDetails session={session} project={project} anchor={anchors[details]} onClose={close} onError={onError} />}
+        {popover?.kind === 'snooze' && <SnoozeMenu anchor={anchors.title} session={session} onClose={close} onError={onError} />}
+        {popover?.kind === 'rename' && <RenameSession anchor={anchors.title} session={session} onClose={close} onError={onError} />}
         {children}
       </div>
       <div className="glance" role="group" aria-label="Session at a glance" onContextMenu={menu.onContextMenu}>

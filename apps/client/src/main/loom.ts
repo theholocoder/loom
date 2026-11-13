@@ -353,6 +353,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.snooze': (params) => sessionService.snooze(params),
     'sessions.rename': (params) => sessionService.rename(params),
+    'sessions.searchConversations': (params) => sessionService.searchConversations(params),
     'sessions.linkIssue': (params) => sessionService.linkIssue(params),
     'sessions.unlinkIssue': (params) => sessionService.unlinkIssue(params),
     'sessions.issue': (params) => sessionService.issue(params),

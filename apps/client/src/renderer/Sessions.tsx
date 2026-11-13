@@ -455,6 +455,9 @@ export type SessionCommand =
   | 'openInTerminal'
   | 'retry'
   | 'markUnread'
+  | 'snooze'
+  | 'wake'
+  | 'rename'
   | 'toggleSideArea'
   | 'toggleChanges'
   | 'reviewChanges'
@@ -590,6 +593,9 @@ export function SessionView({
         await api.invoke('sessions.setUnread', { id, unread: true });
         toast.show({ message: `Marked “${session.title}” unread`, undo: () => api.invoke('sessions.setUnread', { id, unread: false }) });
       },
+      snooze: async () => setPopover({ kind: 'snooze' }),
+      wake: () => api.invoke('sessions.snooze', { id, until: null }),
+      rename: async () => setPopover({ kind: 'rename' }),
       toggleSideArea: async () => panels.toggleArea('side'),
       toggleChanges: async () => panels.toggle('changes'),
       reviewChanges: async () => panels.toggleReview('changes'),

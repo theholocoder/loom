@@ -562,6 +562,15 @@ export type ArchiveResult = { archived: true } | { archived: false; unsavedWork:
 /** What `sessions.delete` did: deleted, or held back by unsaved work. */
 export type DeleteResult = { deleted: true } | { deleted: false; unsavedWork: UnsavedWork };
 
+/** A Session whose conversation holds some of the words searched for (see `sessions.searchConversations`). */
+export interface ConversationMatch {
+  id: number;
+  /** The words searched for that it holds, as given. */
+  words: string[];
+  /** The message holding the most of them, cut down to around the first found, on one line. */
+  excerpt: string;
+}
+
 export interface Session {
   id: number;
   projectId: number;
@@ -1494,6 +1503,12 @@ export interface Commands {
    */
   'settings.setHighlights': { params: HighlightsSettings; result: Settings };
   'sessions.list': { params: void; result: Session[] };
+  /**
+   * The Sessions whose conversations hold any of `words`, in what the user
+   * and the agent said: case aside, as plain text. Each says the words it
+   * holds and an excerpt of the first message holding the most of them.
+   */
+  'sessions.searchConversations': { params: { words: string[] }; result: ConversationMatch[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with
    * the new Session, Working, once its record exists; the run goes on after.

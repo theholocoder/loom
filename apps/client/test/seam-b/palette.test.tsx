@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { Project, Session } from '../../src/shared/api';
+import type { ConversationMatch, Project, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -122,6 +122,8 @@ describe('palette actions', () => {
       'Toggle Review mode for Changes',
       'Show Session details',
       'Mark this Session unread',
+      'Snooze this Session…',
+      'Rename this Session…',
       'Archive this Session',
       'Delete this Session…',
       'Theme: Midnight',
@@ -387,6 +389,23 @@ describe('Session search', () => {
     expect(sessionNames()).toEqual(['Fix login', 'Login copy', 'Dark mode', 'Old invoice export']);
   });
 
+  it('shows the Sessions before the actions until something is typed, the first Session highlighted', () => {
+    open();
+    const groups = () => within(within(palette()).getByRole('listbox', { name: 'Results' })).getAllByRole('group').map((g) => g.getAttribute('aria-label'));
+    const highlighted = () => within(palette()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
+    expect(groups()).toEqual(['Sessions', 'Actions']);
+    expect(highlighted()).toBe('Fix login');
+    for (let i = 0; i < 4; i++) press('ArrowDown', search());
+    expect(highlighted()).toBe('New Session');
+    press('ArrowUp', search());
+    press('Enter', search());
+    expect(openSessionTitle()).toBe('Old invoice export');
+
+    ctrlK();
+    type('o');
+    expect(groups()).toEqual(['Actions', 'Sessions']);
+  });
+
   it('finds Sessions by title, branch, Project and issue or Merge request number, archived ones too', () => {
     open();
     type('login');
@@ -460,6 +479,137 @@ describe('Session search', () => {
     type('is:waiting');
     fireEvent.click(within(palette()).getByRole('option', { name: 'Login copy' }));
     expect(openSessionTitle()).toBe('Login copy');
+  });
+});
+
+describe('searching conversations', () => {
+  const sessions = [
+    session(1, { title: 'Fix login', updatedAt: 3 }),
+    session(2, { title: 'Dark mode', updatedAt: 5 }),
+    session(3, { title: 'Old export', status: 'archived', waitingReason: undefined, updatedAt: 9 }),
+  ];
+  const open = (search: (words: string[]) => ConversationMatch[]) => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions }, { 'sessions.searchConversations': ({ words }) => search(words) }));
+    ctrlK();
+    return main;
+  };
+  const excerptOf = (name: string) => within(palette()).getByRole('option', { name }).getAttribute('aria-description') ?? undefined;
+
+  it('finds Sessions by what was said in them, showing where', async () => {
+    const main = open((words) => (words.includes('renderer') ? [{ id: 3, words: ['renderer'], excerpt: 'The PDF renderer blocks on fonts.' }] : []));
+
+    type('renderer');
+    await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
+    expect(excerptOf('Old export')).toBe('The PDF renderer blocks on fonts.');
+    expect(main.invoked.filter((i) => i.command === 'sessions.searchConversations').at(-1)?.params).toEqual({ words: ['renderer'] });
+  });
+
+  it('takes each word from the title or the conversation, the excerpt only when the conversation gave one', async () => {
+    open((words) => [
+      { id: 1, words: words.filter((w) => w === 'token'), excerpt: 'The token expires too soon.' },
+      { id: 2, words: words.filter((w) => w === 'login' || w === 'token'), excerpt: 'Dark mode broke the login token.' },
+    ].filter((m) => m.words.length));
+
+    type('login token');
+    await waitFor(() => expect(sessionNames()).toEqual(['Dark mode', 'Fix login']));
+    expect(excerptOf('Fix login')).toBe('The token expires too soon.');
+    type('login');
+    await waitFor(() => expect(excerptOf('Dark mode')).toBe('Dark mode broke the login token.'));
+    expect(excerptOf('Fix login')).toBeUndefined();
+    // Found in itself first, though Dark mode changed later: the conversations' answer adds after what was shown.
+    expect(sessionNames()).toEqual(['Fix login', 'Dark mode']);
+  });
+
+  it('keeps what the last answer found while the next is under way, for a word it holds', async () => {
+    open((words) => (words.some((w) => 'fonts'.includes(w)) ? [{ id: 3, words, excerpt: 'Blocks on fonts.' }] : []));
+    type('fonts');
+    await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
+    type('font');
+    expect(sessionNames()).toEqual(['Old export']);
+    type('fontz');
+    expect(sessionNames()).toEqual([]);
+  });
+
+  it('narrows conversation matches with filters too, and asks nothing for filters alone', async () => {
+    const main = open(() => [{ id: 3, words: ['fonts'], excerpt: 'fonts' }, { id: 1, words: ['fonts'], excerpt: 'fonts' }]);
+    type('is:archived');
+    type('is:archived fonts');
+    await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
+    expect(main.invoked.filter((i) => i.command === 'sessions.searchConversations').map((i) => i.params)).toEqual([{ words: ['fonts'] }]);
+  });
+
+  it('keeps the title matches when the conversation search fails', async () => {
+    open(() => {
+      throw new Error('database locked');
+    });
+    type('login');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sessionNames()).toEqual(['Fix login']);
+  });
+});
+
+describe('snoozed Sessions in the palette', () => {
+  const later = Date.now() + 3_600_000;
+  const sessions = [session(1, { title: 'Fix login', updatedAt: 3 }), session(2, { title: 'Later', snoozedUntil: later, updatedAt: 5 })];
+
+  it('finds them with is:snoozed, whose chip toggles it', () => {
+    renderApp(new FakeMain({ projects: [billing], sessions }));
+    ctrlK();
+    type('is:snoozed');
+    expect(sessionNames()).toEqual(['Later']);
+    type('');
+    fireEvent.click(within(palette()).getByRole('button', { name: 'is:snoozed' }));
+    expect(sessionNames()).toEqual(['Later']);
+  });
+
+  it('snoozes the open Session from the palette, and wakes a snoozed one', async () => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
+
+    runAction('Snooze this Session…');
+    const menu = screen.getByRole('menu', { name: 'Snooze' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: '1 hour' }));
+    await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.snooze')?.params).toMatchObject({ id: 1, until: expect.any(Number) }));
+
+    ctrlK();
+    type('later');
+    press('Enter', search());
+    ctrlK();
+    expect(actionNames()).not.toContain('Snooze this Session…');
+    fireEvent.click(within(palette()).getByRole('option', { name: 'Wake this Session' }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.snooze', params: { id: 2, until: null } }));
+  });
+
+  it('offers no Snooze for a Working Session, but Rename', () => {
+    renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Busy', status: 'working', waitingReason: undefined })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Working' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Busy' }));
+    ctrlK();
+    expect(actionNames()).not.toContain('Snooze this Session…');
+    expect(actionNames()).toContain('Rename this Session…');
+  });
+});
+
+describe('renaming from the palette', () => {
+  it('renames the open Session', async () => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Fix login' })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
+
+    runAction('Rename this Session…');
+    const form = screen.getByRole('dialog', { name: 'Rename Session' });
+    const title = within(form).getByRole('textbox', { name: 'Title' });
+    expect(document.activeElement).toBe(title);
+    fireEvent.change(title, { target: { value: 'Fix the login page' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.rename', params: { id: 1, title: 'Fix the login page' } }));
+  });
+
+  it('is not offered once the Project is removed', () => {
+    renderApp(new FakeMain({ projects: [], sessions: [session(1, { title: 'Orphan', status: 'archived', waitingReason: undefined })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Orphan' }));
+    ctrlK();
+    expect(actionNames()).not.toContain('Rename this Session…');
   });
 });
 

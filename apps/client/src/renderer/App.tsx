@@ -3,6 +3,8 @@
 // Dashboard or Settings in a window over them. Also the Ctrl+K palette and
 // the keyboard shortcuts, which run the same actions.
 import {
+  AlarmClock,
+  AlarmClockOff,
   Archive,
   ArchiveRestore,
   ArrowLeftToLine,
@@ -27,6 +29,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
+  Pencil,
   Plus,
   Reply,
   RotateCw,
@@ -55,6 +58,7 @@ import { NewSession, SessionView, type NewSessionWorkingCopy, type SessionComman
 import { NewSessionContext } from './SessionMenu';
 import { ContextMenuHost } from './ContextMenu';
 import { Settings } from './Settings';
+import { canSnooze, isSnoozed } from './Snooze';
 import { ShortcutHelp } from './ShortcutHelp';
 import { isTerminalShortcut, matchesShortcut, SHORTCUTS, typingGuard, type ShortcutName } from './shortcuts';
 import { ToastHost, useToast } from './Toast';
@@ -496,6 +500,10 @@ function paletteActions(app: {
     session && shortcutAction('reviewChanges', Maximize2, () => app.command('reviewChanges')),
     session && shortcutAction('sessionDetails', Info, () => app.command('sessionDetails')),
     active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
+    session && canSnooze(session) && { label: 'Snooze this Session…', icon: AlarmClock, run: () => app.command('snooze') },
+    session && isSnoozed(session) && { label: 'Wake this Session', icon: AlarmClockOff, run: () => app.command('wake') },
+    // A removed Project's Sessions are read-only.
+    session && project && { label: 'Rename this Session…', icon: Pencil, run: () => app.command('rename') },
     open && shortcutAction('archive', Archive, () => app.command('archive')),
     // A removed Project's archived Sessions are read-only.
     session?.status === 'archived' && project && { label: 'Reopen this Session', icon: ArchiveRestore, run: () => app.command('reopen') },

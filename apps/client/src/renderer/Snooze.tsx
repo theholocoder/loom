@@ -17,6 +17,11 @@ export function isSnoozed(session: Session): boolean {
   return session.status === 'waiting' && session.snoozedUntil !== undefined;
 }
 
+/** Whether the Session can be snoozed: Waiting, not Snoozed already, with its worktree there. */
+export function canSnooze(session: Session): boolean {
+  return session.status === 'waiting' && !isSnoozed(session) && !session.worktreeMissing;
+}
+
 /** The snooze times offered first, as of `now`: in 1 and 3 hours, tomorrow and next Monday at 9:00. */
 export function snoozePresets(now: number): Array<{ label: string; until: number }> {
   const morningIn = (days: number) => {
