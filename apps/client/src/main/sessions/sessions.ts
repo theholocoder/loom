@@ -112,8 +112,8 @@ type OpenSpan = { kind: 'run' | 'wait'; since: number; carried?: number };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
 /** What the user sends the agent: text, and the files attached to it, stored already. */
 type Message = { text: string; attachments?: Attachment[] };
-/** What to do with a worktree's unsaved work on archiving: hold back (neither), discard it, or commit it to keep it. */
-type UnsavedChoice = Required<Pick<CloseSessionParams, 'discard' | 'commitWork'>>;
+/** What archiving does with a worktree's unsaved work: hold back (neither flag), discard it, or commit it to keep it. */
+type UnsavedHandling = Required<Pick<CloseSessionParams, 'discard' | 'commitWork'>>;
 const NO_BRANCH_TO_COMMIT_TO = "This Session's worktree is on no branch, so its work can't be committed to one.";
 /** A transcript item before it has its place in the transcript. */
 type NewItem = TranscriptItem extends infer I ? (I extends TranscriptItem ? Omit<I, 'id'> : never) : never;
@@ -1174,7 +1174,7 @@ export class Sessions {
     return this.archiveTracked(id, { discard, commitWork });
   }
 
-  private async archiveTracked(id: number, unsaved: UnsavedChoice): Promise<ArchiveResult> {
+  private async archiveTracked(id: number, unsaved: UnsavedHandling): Promise<ArchiveResult> {
     // An agent still starting up for this Session waits for this, and is closed if the Session is archived.
     const archiving = this.archiveSession(id, unsaved);
     this.archiving.set(id, archiving);
@@ -1216,7 +1216,7 @@ export class Sessions {
     return (await unsavedWork(environment, session.workingCopy.path)) ?? null;
   }
 
-  private async deleteSession(id: number, unsaved: UnsavedChoice): Promise<DeleteResult> {
+  private async deleteSession(id: number, unsaved: UnsavedHandling): Promise<DeleteResult> {
     const session = this.get(id);
     // An archived worktree Session's worktree may be left over: its Environment must say, or the worktree would outlive the Session.
     if (session.status === 'archived' && session.workingCopy.kind === 'worktree' && this.options.project(session.projectId)) {
@@ -1307,7 +1307,7 @@ export class Sessions {
     }
   }
 
-  private async archiveSession(id: number, { discard, commitWork: keep }: UnsavedChoice): Promise<ArchiveResult> {
+  private async archiveSession(id: number, { discard, commitWork: keep }: UnsavedHandling): Promise<ArchiveResult> {
     // Ending the agent's text needs the transcript, so it is read first.
     this.get(id);
     await this.loadTranscript(id);
@@ -1348,7 +1348,8 @@ export class Sessions {
     if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
       // Kept, its unpushed commits are on its local branch, which archiving keeps.
-      if (work && !(keep && !work.uncommitted && !work.detached)) {
+      const keptOnBranch = keep && work && !work.uncommitted && !work.detached;
+      if (work && !keptOnBranch) {
         this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.', { evenIfWaiting });
         return { archived: false, unsavedWork: work };
       }

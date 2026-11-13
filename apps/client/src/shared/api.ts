@@ -1632,9 +1632,10 @@ export interface Commands {
   /**
    * Deletes a Session for good, whatever its status: its agent is stopped
    * and its worktree removed as `sessions.archive` would (its local branch
-   * kept, held back by unsaved work unless `discard` or `commitWork`), then its record, its
-   * conversation and its attachments are gone. Its usage still counts on the
-   * dashboard. Rejects while the Session is being archived or reopened.
+   * kept, held back by unsaved work unless `discard` or `commitWork`), then
+   * its record, its conversation and its attachments are gone. Its usage
+   * still counts on the dashboard. Rejects while the Session is being
+   * archived or reopened.
    */
   'sessions.delete': { params: CloseSessionParams; result: DeleteResult };
   /**

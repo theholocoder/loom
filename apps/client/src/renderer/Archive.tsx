@@ -28,7 +28,7 @@ export function useArchive(): Archiver {
   /** Says the Session was archived, in a toast whose Undo reopens it. */
   const archived = (session: Session) => {
     const queued = session.queue?.length ?? 0;
-    const kept = queued === 0 ? '' : queued === 1 ? '; its queued message waits for it to reopen' : `; its ${queued} queued messages wait for it to reopen`;
+    const kept = queued === 0 ? '' : queued === 1 ? '; its queued message is kept for when it reopens' : `; its ${queued} queued messages are kept for when it reopens`;
     toast.show({ message: `Archived “${session.title}”${kept}`, undo: () => api.invoke('sessions.unarchive', { id: session.id }) });
   };
   const dialog = held && (
@@ -96,7 +96,7 @@ export function unsavedWorkSummary({ uncommitted, unpushedCommits }: UnsavedWork
 }
 
 /** How the user closes a Session whose worktree has unsaved work: keeping it as a commit on its branch, or discarding it. */
-export type UnsavedChoice = Pick<CloseSessionParams, 'discard' | 'commitWork'>;
+export type CloseChoice = Pick<CloseSessionParams, 'discard' | 'commitWork'>;
 
 /** What the worktree's unsaved work is, and what happens to it either way, in words. */
 export function unsavedWorkText(work: UnsavedWork, branch: string | undefined): string {
@@ -105,11 +105,11 @@ export function unsavedWorkText(work: UnsavedWork, branch: string | undefined): 
   if (detached) return `${has} Its HEAD is on no branch, so nothing can keep it: removing the worktree loses it all.`;
   const on = branch ? `its branch ${branch}` : 'its branch';
   if (!uncommitted) return `${has} ${unpushedCommits === 1 ? 'It stays' : 'They stay'} on ${on} when the worktree is removed.`;
-  return `${has} Commit them to keep them on ${on} as a WIP commit, which reopening brings back, or discard them with the worktree.${unpushedCommits ? ` Its commits stay on ${on}.` : ''}`;
+  return `${has} Commit them to keep them on ${on} as a WIP commit, there when the Session reopens, or discard them with the worktree.${unpushedCommits ? ` Its commits stay on ${on}.` : ''}`;
 }
 
 /** The buttons closing a Session with unsaved work offers, for `verb` ("archive", "delete"): keep it if it can be, else discard it. */
-function unsavedChoices(work: UnsavedWork, verb: string): Array<{ label: string; className: string; choice: UnsavedChoice }> {
+function unsavedChoices(work: UnsavedWork, verb: string): Array<{ label: string; className: string; choice: CloseChoice }> {
   const Verb = verb.charAt(0).toUpperCase() + verb.slice(1);
   // On no branch, nothing can keep it; with only commits, on a branch, nothing is lost. Committing whatever came meanwhile loses nothing either.
   if (work.detached) return [{ label: `Discard and ${verb}`, className: 'danger', choice: { discard: true } }];
@@ -145,14 +145,14 @@ export function CloseSessionDialog({
   plain?: string;
   branch: string | undefined;
   unsavedWork?: UnsavedWork;
-  onClose: (choice: UnsavedChoice) => Promise<void>;
+  onClose: (choice: CloseChoice) => Promise<void>;
   onCancel: () => void;
 }) {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
-  const close = (choice: UnsavedChoice) => {
+  const close = (choice: CloseChoice) => {
     setError(undefined);
     setBusy(true);
     onClose(choice)

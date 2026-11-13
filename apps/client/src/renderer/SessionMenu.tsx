@@ -62,7 +62,7 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
           open: (anchor, close) => <SnoozeMenu anchor={anchor} session={session} onClose={close} onError={onError} />,
         };
     const archived = session.status === 'archived';
-    const close: ContextMenuItem = archived
+    const archiveOrReopen: ContextMenuItem = archived
       ? // A removed Project's Sessions are read-only.
         { label: 'Reopen', icon: ArchiveRestore, disabled: !project, run: () => void api.invoke('sessions.unarchive', { id: session.id }).catch(fail) }
       : { label: 'Archive', icon: Archive, run: () => void archiver.archive(session).catch(fail) };
@@ -74,7 +74,7 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
         { label: 'Mark unread', icon: Mail, disabled: session.unread, run: () => void api.invoke('sessions.setUnread', { id: session.id, unread: true }).catch(fail) },
       ],
       [
-        close,
+        archiveOrReopen,
         { label: 'Delete…', icon: Trash2, run: () => deleter.delete(session) },
       ],
     ];

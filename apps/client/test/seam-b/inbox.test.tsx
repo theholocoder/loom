@@ -314,12 +314,12 @@ describe('the Inbox', () => {
     expect(within(toast).getByRole('button', { name: /Undo/ })).toBeTruthy();
   });
 
-  it('says, archiving a Session with queued messages, that they wait for it to reopen', async () => {
+  it('says, archiving a Session with queued messages, that they are kept for when it reopens', async () => {
     const queued = session({ title: 'Busy', queue: [{ id: 1, text: 'Next' }, { id: 2, text: 'After' }] });
     renderApp(new FakeMain({ projects: [loom], sessions: [queued] }));
     fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Busy' })).getByRole('button', { name: 'Archive' }));
 
-    expect((await screen.findByText(/its 2 queued messages wait for it to reopen/)).textContent).toContain('Archived “Busy”');
+    expect((await screen.findByText(/its 2 queued messages are kept for when it reopens/)).textContent).toContain('Archived “Busy”');
   });
 
   it('flags a Session whose worktree is missing, offering only Archive', () => {

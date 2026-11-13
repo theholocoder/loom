@@ -515,6 +515,14 @@ describe('a Session', () => {
     expect(where.queryByRole('button', { name: 'Open in editor' })).toBeNull();
   });
 
+  it("doesn't say an archived Session's worktree was removed while another Session still works in it", () => {
+    const archived: Session = { ...inWorktree, status: 'archived', waitingReason: undefined };
+    const sharer: Session = { ...inWorktree, id: inWorktree.id + 1, title: 'Still at it' };
+    open(renderApp(new FakeMain({ projects: [project], sessions: [archived, sharer] })), archived);
+
+    expect(within(info()).queryByText(/Removed on archiving/)).toBeNull();
+  });
+
   it('can only be archived when its worktree is missing', () => {
     const missing = { ...inWorktree, worktreeMissing: true };
     open(renderApp(new FakeMain({ projects: [project], sessions: [missing] })), missing);
