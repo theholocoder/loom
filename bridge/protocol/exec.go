@@ -36,8 +36,9 @@ type execResult struct {
 	Stderr   string `json:"stderr"`
 }
 
-// runCommand runs a command to completion in env, with no stdin. A command
-// not on the PATH is a not_found error; one that outlives its timeout is
+// runCommand runs a command to completion in env, with no stdin, in the C
+// locale: what it prints is for Loom to parse, and its messages are then in
+// English whatever the user's language. A command not on the PATH is a not_found error; one that outlives its timeout is
 // killed, with its process group, and is a timeout error.
 func runCommand(ctx context.Context, env shellenv.Env, params execParams) (*execResult, *Error) {
 	if params.Command == "" {
@@ -55,7 +56,8 @@ func runCommand(ctx context.Context, env shellenv.Env, params execParams) (*exec
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, params.Args...)
 	cmd.Dir = params.Cwd
-	cmd.Env = env.ForTools()
+	// The last LC_ALL wins; it overrides LANG and LC_*, and gettext then ignores LANGUAGE.
+	cmd.Env = append(env.ForTools(), "LC_ALL=C")
 	proc.Isolate(cmd)
 	cmd.WaitDelay = time.Second
 	stdout, stderr := &cappedBuffer{}, &cappedBuffer{}

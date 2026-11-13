@@ -170,7 +170,7 @@ describe('Link Merge request, by hand', () => {
     const { main, id } = await withSession(machine, checkout);
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
 
-    await expect(main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: '#99' })).rejects.toThrow('gh pr view exited with code 1');
+    await expect(main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: '#99' })).rejects.toThrow(/^gh pr view failed: there's no such pull request\n\nDetails:\nGraphQL: Could not resolve to a PullRequest/);
     await expect(main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: '!41' })).rejects.toThrow('That Merge request is closed: only an open one can be linked.');
     await expect(main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: 'https://github.com/someone/else/pull/40' })).rejects.toThrow("isn't a Merge request of this Project's repository");
     await expect(main.api.invoke('sessions.linkMergeRequest', { id, mergeRequest: 'the one from yesterday' })).rejects.toThrow('Name a Merge request by its number');

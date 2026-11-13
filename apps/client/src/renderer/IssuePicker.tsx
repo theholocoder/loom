@@ -4,6 +4,8 @@
 import { ChevronDown, CircleDot, X } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { FORGE_CLI, type ForgeStatus, type Issue, type Project } from '../shared/api';
+import { splitDetails } from '../shared/errors';
+import { ErrorText } from './ErrorText';
 import { useApi } from './api';
 import { Popover } from './Popover';
 
@@ -113,7 +115,7 @@ export function IssueSearch({ project, anchor, onPick, onClose }: { project: Pro
       />
       {error && (
         <div className="err" role="alert">
-          {error}
+          <ErrorText text={error} />
         </div>
       )}
       {issues?.length === 0 && <div className="muted">No open issues found.</div>}
@@ -130,6 +132,7 @@ export function IssueSearch({ project, anchor, onPick, onClose }: { project: Pro
 
 /** Why the Issue button is off, and what to do about it. */
 function unavailableHint(forge: ForgeStatus): string {
+  const said = forge.error && splitDetails(forge.error).message;
   const cli = forge.kind ? FORGE_CLI[forge.kind] : 'gh or glab';
   const host = forge.host ?? 'the host';
   switch (forge.state) {
@@ -140,8 +143,8 @@ function unavailableHint(forge: ForgeStatus): string {
     case 'no-remote':
       return 'Starting from an issue needs an origin remote on GitHub or GitLab.';
     case 'unsupported':
-      return `Starting from an issue needs an origin on GitHub or GitLab${forge.host ? `; ${forge.host} isn't one gh or glab is signed in to` : ''}${forge.error ? `. glab said: ${forge.error}` : '.'}`;
+      return `Starting from an issue needs an origin on GitHub or GitLab${forge.host ? `; ${forge.host} isn't one gh or glab is signed in to` : ''}${said ? `. glab said: ${said}` : '.'}`;
     default:
-      return `Couldn't check the Forge${forge.error ? `: ${forge.error}` : '.'}`;
+      return `Couldn't check the Forge${said ? `: ${said}` : '.'}`;
   }
 }

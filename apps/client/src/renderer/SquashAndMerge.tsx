@@ -7,6 +7,7 @@ import { GitMerge, TriangleAlert } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mergeRequestRef, type BabysitCheck, type ForgeKind, type MergeRequestDetails, type MergeRequestReview, type MergeRequestState, type Session } from '../shared/api';
+import { ErrorText } from './ErrorText';
 import { useApi } from './api';
 import { countText } from './MergeRequestLooks';
 
@@ -111,7 +112,7 @@ export function SquashAndMergeDialog({
         )}
         {error && (
           <div className="err" role="alert">
-            {error}
+            <ErrorText text={error} />
           </div>
         )}
         <div className="row modal-actions">

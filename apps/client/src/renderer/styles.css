@@ -334,9 +334,15 @@ button.search { border: 0; width: 100%; text-align: left; }
 .side-foot .icon-btn[aria-current="page"] { color: var(--accent); }
 /* Empty states, styled like the prototype's diff loading line. */
 .empty { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; align-items: center; }
+.empty:has(> .error-details) { flex-direction: column; }
 .st-connected { color: var(--ok); } .st-starting { color: var(--work); } .st-unresponsive { color: var(--wait); }
 .st-disconnected, .st-failed { color: var(--err); }
 .err { color: var(--err); font-size: 12px; }
+/* The raw output behind an error message, folded under "Details" (ErrorText). */
+.error-details { margin-top: 4px; color: var(--muted); font-size: 12px; text-align: left; }
+.error-details summary { cursor: pointer; width: max-content; }
+.error-details summary:hover { color: var(--text); }
+.error-details pre { margin: 4px 0 0; padding: 6px 8px; max-height: 14em; max-width: min(70ch, 100%); font-size: 11.5px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .warn { color: var(--wait); font-size: 12px; max-width: 46ch; margin-top: 2px; }
 .ag-ready { color: var(--ok); } .ag-checking { color: var(--work); } .ag-signed-out, .ag-unsupported { color: var(--wait); }
 .ag-missing, .ag-error { color: var(--err); } .ag-unknown { color: var(--muted); }

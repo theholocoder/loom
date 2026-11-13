@@ -3,6 +3,7 @@
 import { Coins, DatabaseZap, GitMerge, MessagesSquare, Receipt, Timer, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useDates } from './dates';
 import { RemovedTag } from './Archive';
@@ -54,7 +55,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
       </div>
       {error && (
         <div className="err" role="alert">
-          {error}
+          <ErrorText text={error} />
         </div>
       )}
       {shown && <Content data={shown} projects={projects} sessions={sessions} colorOf={colorOf} onOpenSession={onOpenSession} />}

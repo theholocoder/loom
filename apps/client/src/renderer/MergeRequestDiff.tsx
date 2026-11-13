@@ -5,6 +5,7 @@
 // Panel's refresh.
 import { useRef } from 'react';
 import { FORGE_NAMES, type DiffFile, type ForgeKind, type Session } from '../shared/api';
+import { ErrorText } from './ErrorText';
 import { useTopic } from './api';
 import { useTheme } from './appearance';
 import { DiffFiles, DiffViewToggles, useDiffView, useWide, WIDE_CHANGES_PX, type DiffComments } from './Changes';
@@ -48,12 +49,14 @@ export function MergeRequestDiffView({
         <DiffViewToggles view={view} onChange={changeView} />
       </div>
       {read.error && (
-        <p className="err mr-diff-error" role="alert">
-          {`Couldn't read the diff from ${forgeName}: ${read.error}`}{' '}
-          <button type="button" className="link" onClick={onRefresh}>
-            Try again
-          </button>
-        </p>
+        <div className="err mr-diff-error" role="alert">
+          <ErrorText text={`Couldn't read the diff from ${forgeName}: ${read.error}`}>
+            {' '}
+            <button type="button" className="link" onClick={onRefresh}>
+              Try again
+            </button>
+          </ErrorText>
+        </div>
       )}
       {!diff ? (
         !read.error && (

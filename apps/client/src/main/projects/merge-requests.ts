@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { FORGE_CLI, type ForgeKind, type ForgeLink, type ForgeStatus, type MergeRequestState } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 
 const MERGE_REQUEST_TIMEOUT_MS = 20_000;
 /** Merging waits on the Forge, which may take a while over a big Merge request. */
@@ -137,7 +138,7 @@ async function run(call: BridgeCall, kind: ForgeKind, args: string[], workingCop
 async function runCli(call: BridgeCall, kind: ForgeKind, args: string[], workingCopy: string, timeoutMs: number): Promise<string> {
   const cli = FORGE_CLI[kind];
   const result = await exec(call, cli, args, timeoutMs, kind === 'gitlab' ? workingCopy : undefined);
-  if (result.exitCode !== 0) throw new Error(`${cli} ${args[0]} ${args[1]} exited with code ${result.exitCode}: ${(result.stderr || result.stdout).trim()}`);
+  if (result.exitCode !== 0) throw new Error(`${cli} ${args[0]} ${args[1]} failed: ${describeFailure(cli, result)}`);
   return result.stdout;
 }
 

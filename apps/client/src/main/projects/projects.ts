@@ -3,6 +3,7 @@
 import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type ModelPick, type Project, type ProjectEdit, type RemovedProject, type RestorableProject } from '../../shared/api';
 import { branchPrefixError, branchPrefixOf } from '../../shared/branches';
 import { avatarError, isProjectColor, nextProjectColor, projectColorOf, projectNameError } from '../../shared/projects';
+import { withDetails } from '../../shared/errors';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { LoomDatabase } from '../storage/database';
@@ -334,6 +335,6 @@ async function topLevelOf(environment: ProjectEnvironment, path: string): Promis
     }
     throw error;
   }
-  if (result.exitCode !== 0) throw new Error(`${path} is not a git repository`);
+  if (result.exitCode !== 0) throw new Error(withDetails(`${path} isn't in a git repository`, result.stderr || result.stdout));
   return result.stdout.trim();
 }

@@ -4,6 +4,7 @@
 // Loom reaches the Forge only through that login (ADR 0002).
 import { FORGE_CLI, type ForgeKind, type ForgeStatus } from '../../shared/api';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 
 export const GIT_TIMEOUT_MS = 10_000;
 const AUTH_STATUS_TIMEOUT_MS = 15_000;
@@ -20,7 +21,7 @@ async function glabRepoView(call: BridgeCall, checkoutPath: string): Promise<Rep
     if (isNotFound(error)) return { kind: 'missing' };
     return { kind: 'error', error: `glab repo view failed: ${(error as Error).message}` };
   }
-  if (result.exitCode !== 0) return { kind: 'error', error: (result.stderr || result.stdout).trim() || `glab repo view exited with code ${result.exitCode}` };
+  if (result.exitCode !== 0) return { kind: 'error', error: describeFailure('glab', result) };
   try {
     const view = JSON.parse(result.stdout) as { path_with_namespace?: unknown; web_url?: unknown };
     const host = new URL(String(view.web_url)).host.toLowerCase();
@@ -42,7 +43,7 @@ export async function detectForge(call: BridgeCall, checkoutPath: string): Promi
   // git exits with 2 when the remote doesn't exist.
   if (remote.exitCode === 2) return { state: 'no-remote' };
   if (remote.exitCode !== 0) {
-    return { state: 'error', error: `git remote get-url origin exited with code ${remote.exitCode}: ${(remote.stderr || remote.stdout).trim()}` };
+    return { state: 'error', error: `git remote get-url origin failed: ${describeFailure('git', remote)}` };
   }
   const url = remote.stdout.trim();
   const parsed = parseRemote(url);

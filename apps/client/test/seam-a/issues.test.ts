@@ -224,7 +224,7 @@ describe("the Issue Panel's read of the linked issue", () => {
     await expect(main.api.invoke('sessions.issue', { id: created.id })).rejects.toThrow('This Session has no issue.');
 
     await main.api.invoke('sessions.linkIssue', { id: created.id, issue: { number: 99, url: 'https://github.com/theholocoder/loom/issues/99' } });
-    await expect(main.api.invoke('sessions.issue', { id: created.id })).rejects.toThrow('gh api repos/theholocoder/loom/issues/99 exited with code 1: gh: Not Found (HTTP 404)');
+    await expect(main.api.invoke('sessions.issue', { id: created.id })).rejects.toThrow("gh api repos/theholocoder/loom/issues/99 failed: it wasn't found, or you don't have access to it\n\nDetails:\ngh: Not Found (HTTP 404)");
   });
 
   it("rejects one of GitHub's pull requests linked as an issue", async () => {

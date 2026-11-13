@@ -3,6 +3,7 @@ import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi, type NotificationKind } from '../shared/api';
 import { assignedBindings, checkShortcut, DEFAULT_KEYBINDINGS, isDefaultKeybindings, MODIFIER_KEYS, REMAPPABLE_SHORTCUTS, sameShortcut, SHORTCUTS, shortcutLabel, takenBy, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { ACCENTS, accentColours, DENSITIES, FONT_SIZES, isDarkTheme, isLightTheme, MATCH_SYSTEM_LABEL, MONO_FONTS, THEMES, UI_FONTS, type Accent, type Appearance, type Theme, type ThemeChoice } from '../shared/appearance';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useSystemLocale } from './dates';
 import { DATE_FORMATS, dateSettingsOf, Dates, HOUR_CYCLES, type DateSettings } from '../shared/dates';
@@ -242,7 +243,7 @@ function SaveFeedback({ saved, error, errorId }: { saved?: boolean; error?: stri
       </span>
       {error && (
         <div className="err" role="alert" id={errorId}>
-          {error}
+          <ErrorText text={error} />
         </div>
       )}
     </>
@@ -1033,7 +1034,7 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
       <td>{env.label}</td>
       <td>
         <EnvironmentState env={env} />
-        {env.error && <div className="err">{env.error}</div>}
+        {env.error && <div className="err"><ErrorText text={env.error} /></div>}
       </td>
       <td>
         {env.agent ? <AgentCell agent={env.agent} /> : <span className="muted">—</span>}
@@ -1052,7 +1053,7 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
           </span>
           Reload
         </button>
-        {reloadError && <div className="err">{reloadError}</div>}
+        {reloadError && <div className="err"><ErrorText text={reloadError} /></div>}
       </td>
     </tr>
   );
@@ -1079,7 +1080,7 @@ export function EnvironmentCheck() {
               </>
             )}
           </div>
-          {env.error && <div className="err">{env.error}</div>}
+          {env.error && <div className="err"><ErrorText text={env.error} /></div>}
           <EnvironmentWarnings env={env} />
         </li>
       ))}

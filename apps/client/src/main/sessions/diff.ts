@@ -4,6 +4,7 @@
 // never fetches.
 import { createHash } from 'node:crypto';
 import { exec, type ExecResult } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { DiffBaseSource, DiffCounts, DiffFile, DiffFileChange, DiffScope, DiffStat, DiffSummary, FileDiff } from '../../shared/api';
 import type { GitEnvironment } from './working-copies';
@@ -363,5 +364,5 @@ export function parseShortstat(text: string): DiffStat {
 }
 
 function message(result: ExecResult): string {
-  return (result.stderr || result.stdout).trim() || `git exited with code ${result.exitCode}`;
+  return describeFailure('git', result);
 }

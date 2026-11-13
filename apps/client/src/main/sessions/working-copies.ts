@@ -2,6 +2,7 @@
 // it for unsaved work, and removing it on archive while keeping its branch.
 // Everything runs in the Project's Environment, through its bridge (ADR 0008).
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
+import { describeFailure } from '../environments/failures';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { Branches, ExistingBranch, ExistingWorktree, UnsavedWork } from '../../shared/api';
 import { checkWorktreeRoot } from '../settings';
@@ -411,7 +412,7 @@ async function gitOrThrow(environment: GitRunner, args: string[], what: string, 
 }
 
 function message(result: ExecResult): string {
-  return (result.stderr || result.stdout).trim() || `git exited with code ${result.exitCode}`;
+  return describeFailure('git', result);
 }
 
 /** What the bridge keeps of a command's stdout (`maxOutput` in bridge/protocol/exec.go), past which the listing is cut short. */

@@ -5,6 +5,7 @@
 // one takes the place of the last.
 import { OctagonX, Undo2, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ErrorText } from './ErrorText';
 import { shortcutLabel, useBindings } from './shortcuts';
 
 /** How long a toast stays, unless it says why an action failed. */
@@ -88,9 +89,9 @@ export function ToastHost({ children }: { children: ReactNode }) {
             onBlur={(event) => !event.currentTarget.contains(event.relatedTarget as Node | null) && setHeld((h) => ({ ...h, focus: false }))}
           >
             {toast.failed && <OctagonX className="sm" />}
-            <span className="grow" role={toast.failed ? 'alert' : undefined}>
-              {toast.message}
-            </span>
+            <div className="grow" role={toast.failed ? 'alert' : undefined}>
+              <ErrorText text={toast.message} />
+            </div>
             {toast.undo && (
               <button type="button" className="link" title={undoKeys ? `Undo (${undoKeys})` : 'Undo'} onClick={toaster.undo}>
                 <Undo2 className="sm" />
