@@ -737,6 +737,46 @@ export interface HighlightsSettings {
 
 export const DEFAULT_HIGHLIGHTS: HighlightsSettings = { on: false };
 
+/**
+ * The kinds of news a desktop notification tells when a Session goes
+ * Waiting, each turned on or off in Settings: its run finished (or failed),
+ * its agent asked a question or for approval, Babysit brought new feedback on
+ * its Merge request, or it got stuck. A Session stopped by the user, or
+ * interrupted by Loom quitting, notifies nothing.
+ */
+export const NOTIFICATION_KINDS = ['finished', 'question', 'approval', 'feedback', 'stuck'] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+export function isNotificationKind(value: unknown): value is NotificationKind {
+  return typeof value === 'string' && (NOTIFICATION_KINDS as readonly string[]).includes(value);
+}
+
+/** Whether each kind of news notifies. */
+export type NotificationSettings = Record<NotificationKind, boolean>;
+
+/** Notifications until the user turns them on: none. */
+export const DEFAULT_NOTIFICATIONS: NotificationSettings = { finished: false, question: false, approval: false, feedback: false, stuck: false };
+
+/** The kind of notification a Session gone Waiting for `reason` gives, if any. */
+export function notificationKindOf(reason: WaitingReason): NotificationKind | undefined {
+  switch (reason) {
+    case 'finished':
+    case 'error':
+      return 'finished';
+    case 'question':
+    case 'approval':
+    case 'feedback':
+    case 'stuck':
+      return reason;
+    // Its Merge request merged or closed with unsaved work in its worktree: Babysit's news.
+    case 'unsaved-work':
+      return 'feedback';
+    case 'stopped':
+    case 'interrupted':
+      return undefined;
+  }
+}
+
 /** A Session's usage so far. */
 export interface SessionUsage {
   /** Tokens of every kind, summed. */
@@ -957,6 +997,12 @@ export interface Settings extends Appearance {
   diffView: DiffViewSettings;
   /** Session highlights: off until the user turns it on with a model. */
   highlights: HighlightsSettings;
+  /**
+   * Which kinds of news a desktop notification tells, when a Session goes
+   * Waiting; none while the window has the focus on that Session. All off
+   * until the user turns them on.
+   */
+  notifications: NotificationSettings;
 }
 
 /** The Changes view's layout, kept in settings. */
@@ -1052,6 +1098,7 @@ export const DEFAULT_SETTINGS: Settings = {
   inbox: DEFAULT_INBOX,
   diffView: DEFAULT_DIFF_VIEW,
   highlights: DEFAULT_HIGHLIGHTS,
+  notifications: DEFAULT_NOTIFICATIONS,
   ...DEFAULT_APPEARANCE,
 };
 
@@ -1486,6 +1533,8 @@ export interface Commands {
    * at once; going to Ask, only for agents started after.
    */
   'settings.setApproval': { params: { category: ApprovalCategory; setting: ApprovalSetting }; result: Settings };
+  /** Turns desktop notifications of one kind of news on or off. Rejects an unknown kind. */
+  'settings.setNotification': { params: { kind: NotificationKind; on: boolean }; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
   /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */
@@ -1502,6 +1551,12 @@ export interface Commands {
    * `effort`. Off, no Session is checked, and its Highlights stay.
    */
   'settings.setHighlights': { params: HighlightsSettings; result: Settings };
+  /**
+   * Tells main which Session the window shows, null for none (another view,
+   * or a Page over it): while the window has the focus, that Session's news
+   * notifies nothing, as the user sees it come.
+   */
+  'window.showing': { params: { sessionId: number | null }; result: void };
   'sessions.list': { params: void; result: Session[] };
   /**
    * The Sessions whose conversations hold any of `words`, in what the user
@@ -1891,6 +1946,19 @@ export interface Topics {
    */
   terminalOutput: TerminalOutput;
   database: DatabaseStatus;
+  /**
+   * The Session a click on a desktop notification last asked the window to
+   * open, numbered so that each click counts, even on the same Session; null
+   * until one does.
+   */
+  openSession: OpenSessionRequest | null;
+}
+
+/** A click on a desktop notification, asking the window to open its Session. */
+export interface OpenSessionRequest {
+  sessionId: number;
+  /** Counts the clicks, from 1, so that each one is told apart. */
+  click: number;
 }
 
 /** What the topics that need one are subscribed with. */

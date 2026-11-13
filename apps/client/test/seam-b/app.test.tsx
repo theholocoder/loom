@@ -587,7 +587,7 @@ describe('Settings: sections, search and feedback', () => {
   it('groups the settings in sections, listed beside them, the first one current', () => {
     openSettings();
 
-    expect(sectionNames()).toEqual(['Appearance', 'Sessions', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Environments']);
+    expect(sectionNames()).toEqual(['Appearance', 'Sessions', 'Notifications', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Environments']);
     expect(within(screen.getByRole('dialog', { name: 'Settings' })).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(sectionNames());
     expect(sections().filter((link) => link.getAttribute('aria-current') === 'true').map((link) => link.textContent)).toEqual(['Appearance']);
     const worktrees = screen.getByRole('region', { name: 'Worktrees' });
@@ -613,7 +613,7 @@ describe('Settings: sections, search and feedback', () => {
     expect(screen.queryByRole('textbox', { name: 'Worktree root' })).toBeNull();
 
     search('stuck');
-    expect(sectionNames()).toEqual(['Sessions']);
+    expect(sectionNames()).toEqual(['Sessions', 'Notifications']);
     expect(screen.getByRole('textbox', { name: 'Stuck after (minutes)' })).toBeTruthy();
     expect(screen.queryByRole('checkbox', { name: 'Auto-prompt new Sessions' })).toBeNull();
 
@@ -630,7 +630,7 @@ describe('Settings: sections, search and feedback', () => {
     expect(screen.getByText(/No setting matches “nothing like this”/)).toBeTruthy();
 
     fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Search settings' }), { key: 'Escape' });
-    expect(sections()).toHaveLength(7);
+    expect(sections()).toHaveLength(8);
   });
 
   it('says Saved once main kept a change', async () => {

@@ -1,12 +1,13 @@
 // The Electron entry point: wires createLoom to the window and IPC.
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, Notification, shell } from 'electron';
 import { THEMES, type Theme } from '../shared/appearance';
 import { MIN_WINDOW } from '../shared/window';
 import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { serveApi } from './ipc';
 import { createLoom, type Loom } from './loom';
+import type { DesktopNotification } from './notifications';
 import { isWebLink } from '../shared/links';
 import { guardQuit, quitQuestion } from './quit';
 import type { Session } from '../shared/api';
@@ -61,6 +62,27 @@ function createWindow(theme: Theme): BrowserWindow {
   return win;
 }
 
+/** Notifications shown and not yet clicked or closed: held, so that a click still reaches its handler. */
+const shownNotifications = new Set<Notification>();
+
+/** Shows a desktop notification; a click brings the window up front and opens its Session. */
+function notify({ title, body, onClick }: DesktopNotification): void {
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({ title, body });
+  shownNotifications.add(notification);
+  notification.on('click', () => {
+    shownNotifications.delete(notification);
+    if (window) {
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+    }
+    onClick();
+  });
+  notification.on('close', () => shownNotifications.delete(notification));
+  notification.show();
+}
+
 function bridgeDir(): string {
   return app.isPackaged ? join(process.resourcesPath, 'bridge') : join(app.getAppPath(), '../../bridge/dist');
 }
@@ -101,6 +123,8 @@ if (!app.requestSingleInstanceLock()) {
           return result.canceled ? null : (result.filePaths[0] ?? null);
         },
         openExternal: (url) => shell.openExternal(url),
+        notify,
+        windowFocused: () => !!window && window.isFocused(),
       });
     } catch (error) {
       console.error('Loom could not start:', error);

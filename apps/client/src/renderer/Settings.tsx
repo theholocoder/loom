@@ -1,6 +1,6 @@
-import { Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, LoaderCircle, MessagesSquare, Palette, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Bell, Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, LoaderCircle, MessagesSquare, Palette, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi } from '../shared/api';
+import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi, type NotificationKind } from '../shared/api';
 import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useCheckoutModels } from './checkout';
@@ -320,6 +320,26 @@ function AutoPromptDefault({ label }: { label: string }) {
   return <Toggle label={label} on={on} change={(api, next) => api.invoke('settings.setAutoPromptDefault', { on: next })} />;
 }
 
+/** Whether one kind of news shows a desktop notification. */
+function NotificationToggle({ label, kind }: { label: string; kind: NotificationKind }) {
+  const on = useTopic('settings')?.notifications[kind] ?? false;
+  return <Toggle label={label} on={on} change={(api, next) => api.invoke('settings.setNotification', { kind, on: next })} />;
+}
+
+/** Each kind of desktop notification, as Settings lists it. */
+const NOTIFICATION_SETTINGS: { kind: NotificationKind; title: string; description: string; keywords?: string }[] = [
+  { kind: 'finished', title: 'When a Session finishes', description: "Its agent's run ended, or failed on an error.", keywords: 'done error' },
+  { kind: 'question', title: 'When the agent asks a question', description: 'It waits for your answer, or for you to trust the Project.', keywords: 'trust' },
+  { kind: 'approval', title: 'When the agent asks for approval', description: 'It is held on an Approval request.', keywords: 'approval request permission' },
+  {
+    kind: 'feedback',
+    title: 'When a Merge request has new feedback',
+    description: "Babysit saw new review comments, failed checks or a conflict, or the Merge request was merged or closed with unsaved work in the Session's worktree. Feedback that auto-prompt sends straight to the agent doesn't notify.",
+    keywords: 'babysit review ci merged closed',
+  },
+  { kind: 'stuck', title: 'When a Session is stuck', description: 'Its agent has said nothing for the minutes set in Stuck after.', keywords: 'timeout idle' },
+];
+
 /** Whether a model checks each turn for Session highlights; only once one is picked. */
 function HighlightsOn({ label }: { label: string }) {
   const highlights = useTopic('settings')?.highlights;
@@ -566,6 +586,16 @@ const SECTIONS: SettingsSection[] = [
         Control: HighlightsModel,
       },
     ],
+  },
+  {
+    id: 'notifications',
+    title: 'Notifications',
+    icon: Bell,
+    description: 'A desktop notification when a Session goes Waiting, which opens it when clicked. None while Loom has the focus on that Session, nor when you stop it yourself.',
+    keywords: 'desktop alert waiting inbox',
+    settings: NOTIFICATION_SETTINGS.map(
+      ({ kind, title, description, keywords }): SettingEntry => ({ title, description, keywords, Control: ({ label }) => <NotificationToggle label={label} kind={kind} /> }),
+    ),
   },
   {
     id: 'approvals',

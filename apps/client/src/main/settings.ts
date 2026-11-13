@@ -1,5 +1,5 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
-import { DEFAULT_APPROVALS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type HighlightsSettings, type Settings as SettingsValues } from '../shared/api';
+import { DEFAULT_APPROVALS, DEFAULT_NOTIFICATIONS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, isNotificationKind, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type HighlightsSettings, type NotificationKind, type Settings as SettingsValues } from '../shared/api';
 import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, readLayout, type PanelArea, type PanelDimension, type PanelKind } from '../shared/panels';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
@@ -38,6 +38,12 @@ export class Settings {
       const approvals = { ...DEFAULT_APPROVALS };
       for (const [category, setting] of Object.entries(stored.approvals)) if (isApprovalCategory(category) && isApprovalSetting(setting)) approvals[category] = setting;
       current.approvals = approvals;
+    }
+    // Each kind stands alone: one Loom no longer has is dropped, a new one is off.
+    if (typeof stored.notifications === 'object' && stored.notifications !== null) {
+      const notifications = { ...DEFAULT_NOTIFICATIONS };
+      for (const [kind, on] of Object.entries(stored.notifications)) if (isNotificationKind(kind) && typeof on === 'boolean') notifications[kind] = on;
+      current.notifications = notifications;
     }
     // Each Panel kind's area and size stand alone: one Loom no longer has is dropped, one never set takes its kind's own.
     current.layout = readLayout(stored.layout);
@@ -109,6 +115,13 @@ export class Settings {
     if (!isApprovalCategory(category)) throw new Error(`"${String(category)}" is not an approval category`);
     if (!isApprovalSetting(setting)) throw new Error(`An approval setting is "allow" or "ask", not "${String(setting)}"`);
     return this.set('approvals', { ...this.current.approvals, [category]: setting });
+  }
+
+  /** Turns desktop notifications of one kind of news on or off; rejects an unknown kind. */
+  async setNotification(kind: NotificationKind, on: boolean): Promise<SettingsValues> {
+    if (!isNotificationKind(kind)) throw new Error(`"${String(kind)}" is not a kind of notification`);
+    if (typeof on !== 'boolean') throw new Error('Whether a notification is on must be true or false.');
+    return this.set('notifications', { ...this.current.notifications, [kind]: on });
   }
 
   /** Sets the theme or fonts given; rejects any not in Loom's lists. */
