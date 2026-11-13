@@ -328,7 +328,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
     'settings.setPanelSize': ({ kind, dimension, size }) => settingsService.setPanelSize(kind, dimension, size),
-    'settings.setPanelArea': ({ kind, area }) => settingsService.setPanelArea(kind, area),
+    'settings.setPanelArea': ({ kind, area, stack }) => settingsService.setPanelArea(kind, area, stack),
     'settings.setInbox': (inbox) => settingsService.setInbox(inbox),
     'settings.setDiffView': (diffView) => settingsService.setDiffView(diffView),
     'settings.setHighlights': (value) => settingsService.setHighlights(value),

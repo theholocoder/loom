@@ -1,6 +1,6 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
 import { DEFAULT_APPROVALS, DEFAULT_NOTIFICATIONS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, isNotificationKind, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type HighlightsSettings, type NotificationKind, type Settings as SettingsValues } from '../shared/api';
-import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, readLayout, type PanelArea, type PanelDimension, type PanelKind } from '../shared/panels';
+import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, isPanelStack, readLayout, withPanelPlace, type PanelArea, type PanelDimension, type PanelKind, type PanelStack } from '../shared/panels';
 import { DEFAULT_KEYBINDINGS, readKeybindings, remap, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
@@ -170,12 +170,12 @@ export class Settings {
     return this.set('layout', { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } });
   }
 
-  /** Sets the area a Panel kind sits in, in the Layout: the Side area or the Dock. */
-  async setPanelArea(kind: PanelKind, area: PanelArea): Promise<SettingsValues> {
+  /** Sets the area a Panel kind sits in, in the Layout, the Side area or the Dock, and the stack of it: its first, unless told its second. */
+  async setPanelArea(kind: PanelKind, area: PanelArea, stack: PanelStack = 'first'): Promise<SettingsValues> {
     if (!isPanelKind(kind)) throw new Error(`"${String(kind)}" is not a Panel.`);
     if (!isPanelArea(area)) throw new Error(`A Panel sits in the Side area or the Dock, not "${String(area)}".`);
-    const { layout } = this.current;
-    return this.set('layout', { ...layout, area: { ...layout.area, [kind]: area } });
+    if (!isPanelStack(stack)) throw new Error(`A Panel sits in its area's first or second stack, not "${String(stack)}".`);
+    return this.set('layout', withPanelPlace(this.current.layout, kind, { area, stack }));
   }
 
   /** Sets the Inbox's width, kept within its least and most, whether it is shown, or both. */

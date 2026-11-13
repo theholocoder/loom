@@ -4,7 +4,7 @@
 // (seam B), so everything the UI can see or do goes through here.
 import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
 import { DEFAULT_DATE_SETTINGS, type DateSettings } from './dates';
-import { DEFAULT_LAYOUT, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type SessionPanels } from './panels';
+import { DEFAULT_LAYOUT, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type PanelStack, type SessionPanels } from './panels';
 import type { ProjectColor } from './projects';
 import { DEFAULT_KEYBINDINGS, type KeybindingSettings, type Shortcut, type ShortcutName } from './shortcuts';
 import { DEFAULT_INBOX, type InboxSettings } from './window';
@@ -1009,7 +1009,7 @@ export interface Settings extends Appearance, DateSettings {
   autoPromptDefault: boolean;
   /** The Approval mode the New Session composer starts on. */
   approvalModeDefault: ApprovalMode;
-  /** The Layout: each Panel kind's size, as the user left it, the same for every Session. */
+  /** The Layout: the area and stack each Panel kind sits in and its size, as the user left them, the same for every Session. */
   layout: LayoutSettings;
   /** The Inbox's width, and whether it is shown or collapsed to a rail: the same for every Session. */
   inbox: InboxSettings;
@@ -1587,8 +1587,8 @@ export interface Commands {
   'settings.systemLocale': { params: void; result: string };
   /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */
   'settings.setPanelSize': { params: { kind: PanelKind; dimension: PanelDimension; size: number }; result: Settings };
-  /** Sets the area a Panel kind sits in, in the Layout. Rejects a kind or an area Loom has not. */
-  'settings.setPanelArea': { params: { kind: PanelKind; area: PanelArea }; result: Settings };
+  /** Sets the area a Panel kind sits in, in the Layout, and the stack of it: its first, unless `stack` says its second. Rejects a kind, an area or a stack Loom has not. */
+  'settings.setPanelArea': { params: { kind: PanelKind; area: PanelArea; stack?: PanelStack }; result: Settings };
   /** Sets the Inbox's width (kept within its least and most), whether it is shown, or both. */
   'settings.setInbox': { params: Partial<InboxSettings>; result: Settings };
   /** Sets the Changes view's layout, all of it. Rejects anything but true or false. */

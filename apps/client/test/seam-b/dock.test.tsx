@@ -277,7 +277,7 @@ describe('the dock', () => {
 
   it('opens at the height the Layout has for Terminals', async () => {
     const main = fakeMain();
-    main.publish('settings', { ...main.value('settings'), layout: { area: {}, width: {}, height: { terminal: 333 } } });
+    main.publish('settings', { ...main.value('settings'), layout: { area: {}, stack: {}, width: {}, height: { terminal: 333 } } });
     renderApp(main);
     openSession('Fix login');
     toggleTerminal();

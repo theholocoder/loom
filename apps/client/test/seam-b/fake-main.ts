@@ -3,7 +3,7 @@
 import { ownLocale } from '../../src/shared/dates';
 import { DEFAULT_KEYBINDINGS, remap } from '../../src/shared/shortcuts';
 import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
-import { clampPanelSize, DEFAULT_SESSION_PANELS, type SessionPanels } from '../../src/shared/panels';
+import { clampPanelSize, DEFAULT_SESSION_PANELS, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
 import { clampInboxWidth } from '../../src/shared/window';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
@@ -163,9 +163,9 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
-      'settings.setPanelArea': ({ kind, area }) => {
+      'settings.setPanelArea': ({ kind, area, stack = 'first' }) => {
         const current = this.value('settings');
-        const settings = { ...current, layout: { ...current.layout, area: { ...current.layout.area, [kind]: area } } };
+        const settings = { ...current, layout: withPanelPlace(current.layout, kind, { area, stack }) };
         this.publish('settings', settings);
         return settings;
       },

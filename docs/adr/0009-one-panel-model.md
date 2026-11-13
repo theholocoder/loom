@@ -15,3 +15,9 @@ We rejected one app-wide set of open Panels because Terminals belong to one Sess
 - **Tab overflow:** the active tab always keeps its label. When tabs don't fit, the inactive ones drop to icon and badge (with a tooltip) first. Those that still don't fit go into a ⌄ menu, last tab first.
 
 `docs/prototypes/side-panels.html` shows all of this.
+
+## Split areas (#193)
+
+Either area can be split into two **Panel stacks**: the Side area's one above the other, the Dock's side by side. Which stack each kind sits in is part of the Layout, like its area, so a split holds in every Session: an area shows as split only while both its stacks have Panels open. A tab moves between areas and stacks from its menu, or by dragging it.
+
+We kept one size per kind rather than adding a split ratio. A split area takes the larger of its two shown Panels' sizes across it, and dragging its edge sizes both. Its second stack takes the size of the Panel it shows along the area (its height in the Side area, its width in the Dock), which each kind already has from sitting in the other area.
