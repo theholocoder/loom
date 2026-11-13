@@ -1,7 +1,7 @@
 // The Electron entry point: wires createLoom to the window and IPC.
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog, Menu, Notification, shell } from 'electron';
-import { THEMES, type Theme } from '../shared/appearance';
+import { app, BrowserWindow, dialog, Menu, nativeTheme, Notification, shell } from 'electron';
+import { DEFAULT_APPEARANCE, windowLook, type Appearance, type WindowLook } from '../shared/appearance';
 import { MIN_WINDOW } from '../shared/window';
 import { systemClock } from './clock';
 import { bridgeBinaryPath } from './environments/bridge-path';
@@ -20,7 +20,7 @@ let window: BrowserWindow | undefined;
 const menuContext: MenuContext = { platform: process.platform, dev: !app.isPackaged };
 let loom: Loom | undefined;
 
-function createWindow(theme: Theme): BrowserWindow {
+function createWindow(look: WindowLook): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -29,8 +29,8 @@ function createWindow(theme: Theme): BrowserWindow {
     minHeight: MIN_WINDOW.height,
     title: 'Loom',
     // The saved theme's background, so the window never shows another first.
-    backgroundColor: THEMES[theme].background,
-    webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), sandbox: true, contextIsolation: true },
+    backgroundColor: look.background,
+    webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), sandbox: true, contextIsolation: true, zoomFactor: look.zoom },
   });
   // The window only ever shows Loom: a link that slips past the renderer's own
   // handling opens in the system browser, if it's a web link, never in here.
@@ -134,24 +134,34 @@ if (!app.requestSingleInstanceLock()) {
     }
     serveApi(loom.api);
     // A topic gives its current value as soon as it's subscribed to, so the
-    // saved theme is known before the window opens. A damaged database serves
-    // no settings or Sessions: the window opens with the default theme and
+    // saved look is known before the window opens. A damaged database serves
+    // no settings or Sessions: the window opens with the default look and
     // closes without asking, and follows both once a snapshot is restored.
-    let theme: Theme | undefined;
+    // Matching the system, the theme follows its light or dark mode too.
+    let appearance: Appearance = DEFAULT_APPEARANCE;
     let sessions: Session[] = [];
     let stopWatching: (() => void)[] | undefined;
     const api = loom.api;
+    const currentLook = () => windowLook(appearance, nativeTheme.shouldUseDarkColors);
+    let shown = currentLook();
+    const showLook = () => {
+      const look = currentLook();
+      if (window && look.background !== shown.background) window.setBackgroundColor(look.background);
+      if (window && look.zoom !== shown.zoom) window.webContents.setZoomFactor(look.zoom);
+      shown = look;
+    };
+    nativeTheme.on('updated', showLook);
     const stopWatchingDatabase = api.subscribe('database', (database) => {
       if (database.state !== 'ok' || stopWatching) return;
       stopWatching = [
         api.subscribe('settings', (settings) => {
-          if (window && settings.theme !== theme) window.setBackgroundColor(THEMES[settings.theme].background);
-          theme = settings.theme;
+          appearance = settings;
+          showLook();
         }),
         api.subscribe('sessions', (list) => (sessions = list)),
       ];
     });
-    const win = (window = createWindow(theme ?? 'midnight'));
+    const win = (window = createWindow(shown));
     win.on(
       'close',
       guardQuit({
@@ -166,6 +176,7 @@ if (!app.requestSingleInstanceLock()) {
     win.on('closed', () => {
       window = undefined;
       stopWatchingDatabase();
+      nativeTheme.off('updated', showLook);
       for (const stop of stopWatching ?? []) stop();
     });
   });

@@ -1,8 +1,9 @@
 import { Bell, Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, LoaderCircle, MessagesSquare, Palette, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
-import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi, type NotificationKind } from '../shared/api';
-import { MONO_FONTS, THEMES, UI_FONTS, type Appearance } from '../shared/appearance';
+import { ACCENTS, accentColours, DENSITIES, FONT_SIZES, isDarkTheme, isLightTheme, MATCH_SYSTEM_LABEL, MONO_FONTS, THEMES, UI_FONTS, type Accent, type Appearance, type Theme, type ThemeChoice } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { useTheme } from './appearance';
 import { useCheckoutModels } from './checkout';
 import { effortsOf, ModelPickers } from './ModelPicker';
 import { Select } from './Popover';
@@ -245,7 +246,11 @@ function SaveFeedback({ saved, error, errorId }: { saved?: boolean; error?: stri
   );
 }
 
-const THEME_OPTIONS = (Object.keys(THEMES) as Appearance['theme'][]).map((value) => ({ value, label: THEMES[value].label }));
+const THEME_NAMES = Object.keys(THEMES) as Theme[];
+const LIGHT_THEME_OPTIONS = THEME_NAMES.filter(isLightTheme).map((value) => ({ value, label: THEMES[value].label }));
+const DARK_THEME_OPTIONS = THEME_NAMES.filter(isDarkTheme).map((value) => ({ value, label: THEMES[value].label }));
+const FONT_SIZE_OPTIONS = (Object.keys(FONT_SIZES) as Appearance['fontSize'][]).map((value) => ({ value, label: `${FONT_SIZES[value].label} (${Math.round(FONT_SIZES[value].zoom * 100)}%)` }));
+const DENSITY_OPTIONS = (Object.keys(DENSITIES) as Appearance['density'][]).map((value) => ({ value, label: DENSITIES[value].label }));
 const UI_FONT_OPTIONS = (Object.keys(UI_FONTS) as Appearance['uiFont'][]).map((value) => ({ value, label: value }));
 const MONO_FONT_OPTIONS = (Object.keys(MONO_FONTS) as Appearance['monoFont'][]).map((value) => ({ value, label: value }));
 
@@ -266,6 +271,96 @@ function AppearanceSelect<K extends keyof Appearance>({ label, field, options, c
   const settings = useTopic('settings');
   if (!settings) return null;
   return <SelectSetting label={label} className={className} value={settings[field]} options={options} change={(api, value) => api.invoke('settings.setAppearance', { [field]: value })} />;
+}
+
+/** A small window drawn in `theme`'s colours, and in `accent`'s shade for it: what the theme looks like. */
+function ThemePreview({ theme, accent }: { theme: Theme; accent: Accent }) {
+  const colours = accentColours(accent, theme);
+  const style = colours && ({ '--accent': colours.accent, '--accent-text': colours.accentText } as CSSProperties);
+  return (
+    <span className="theme-preview" data-theme={theme} style={style} aria-hidden="true">
+      <span className="theme-preview-side">
+        <i />
+        <i />
+        <i />
+      </span>
+      <span className="theme-preview-main">
+        <i className="theme-preview-line" />
+        <i className="theme-preview-line short" />
+        <i className="theme-preview-button" />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The theme, picked from previews of each, or Match system, which shows the
+ * light and dark themes it switches between, and offers to change them.
+ */
+function ThemePicker({ label }: { label: string }) {
+  const api = useApi();
+  const settings = useTopic('settings');
+  const { save, saved, error } = useSaving();
+  const name = useId();
+  if (!settings) return null;
+  const set = (appearance: Partial<Appearance>) => void save(api.invoke('settings.setAppearance', appearance));
+  const choices: ThemeChoice[] = ['system', ...THEME_NAMES];
+  return (
+    <>
+      <div role="radiogroup" aria-label={label} className="theme-picker">
+        {choices.map((choice) => (
+          <label key={choice} className="theme-option">
+            <input type="radio" className="sr-only" name={name} checked={settings.theme === choice} onChange={() => set({ theme: choice })} />
+            <span className="theme-previews">
+              {(choice === 'system' ? [settings.lightTheme, settings.darkTheme] : [choice]).map((theme) => (
+                <ThemePreview key={theme} theme={theme} accent={settings.accent} />
+              ))}
+            </span>
+            <span className="theme-name">{choice === 'system' ? MATCH_SYSTEM_LABEL : THEMES[choice].label}</span>
+          </label>
+        ))}
+      </div>
+      {settings.theme === 'system' && (
+        <div className="theme-system">
+          <span className="muted">In light mode</span>
+          <Select label="Light theme" value={settings.lightTheme} options={LIGHT_THEME_OPTIONS} onChange={(lightTheme) => set({ lightTheme })} />
+          <span className="muted">in dark mode</span>
+          <Select label="Dark theme" value={settings.darkTheme} options={DARK_THEME_OPTIONS} onChange={(darkTheme) => set({ darkTheme })} />
+        </div>
+      )}
+      <SaveFeedback saved={saved} error={error} />
+    </>
+  );
+}
+
+const ACCENT_NAMES = Object.keys(ACCENTS) as Accent[];
+
+/** The accent colour, each swatch in its shade for the theme shown. */
+function AccentPicker({ label }: { label: string }) {
+  const api = useApi();
+  const accent = useTopic('settings')?.accent;
+  const theme = useTheme();
+  const { save, saved, error } = useSaving();
+  const name = useId();
+  if (!accent) return null;
+  return (
+    <>
+      <div role="radiogroup" aria-label={label} className="accent-picker">
+        {ACCENT_NAMES.map((choice) => {
+          const colours = accentColours(choice, theme);
+          return (
+            <label key={choice} className="accent-option">
+              <input type="radio" className="sr-only" name={name} checked={accent === choice} onChange={() => void save(api.invoke('settings.setAppearance', { accent: choice }))} />
+              {/* The theme's own swatch takes the theme's accent from its own data-theme. */}
+              <span className="accent-swatch" aria-hidden="true" data-theme={colours ? undefined : theme} style={colours && { background: colours.accent }} />
+              {ACCENTS[choice].label}
+            </label>
+          );
+        })}
+      </div>
+      <SaveFeedback saved={saved} error={error} />
+    </>
+  );
 }
 
 const APPROVAL_OPTIONS: { value: ApprovalSetting; label: string }[] = [
@@ -545,13 +640,38 @@ const SECTIONS: SettingsSection[] = [
     icon: Palette,
     keywords: 'look',
     settings: [
-      { title: 'Theme', description: 'The colours of the whole window.', keywords: 'color dark light', Control: ({ label }) => <AppearanceSelect label={label} field="theme" options={THEME_OPTIONS} /> },
+      {
+        title: 'Theme',
+        description: 'The colours of the whole window. Match system follows your system’s light or dark mode, with a theme for each.',
+        keywords: 'color dark light mode system preview',
+        wide: true,
+        Control: ThemePicker,
+      },
+      {
+        title: 'Accent colour',
+        description: 'The colour of links, focus rings, what is current or picked, and primary buttons, in a shade that reads on the theme shown.',
+        keywords: 'color highlight',
+        wide: true,
+        Control: AccentPicker,
+      },
       { title: 'UI font', description: 'The font of the text around the code.', keywords: 'typeface', Control: ({ label }) => <AppearanceSelect label={label} field="uiFont" options={UI_FONT_OPTIONS} /> },
       {
         title: 'Monospace font',
         description: 'The font of code, diffs, paths and the Terminal.',
         keywords: 'typeface mono',
         Control: ({ label }) => <AppearanceSelect label={label} field="monoFont" options={MONO_FONT_OPTIONS} className="tech" />,
+      },
+      {
+        title: 'Font size',
+        description: 'Scales the whole window, text with its icons and spacing, so nothing crowds.',
+        keywords: 'text zoom scale larger smaller',
+        Control: ({ label }) => <AppearanceSelect label={label} field="fontSize" options={FONT_SIZE_OPTIONS} />,
+      },
+      {
+        title: 'Density',
+        description: 'How much room the Inbox, the conversation, Panels and pages leave around what they show.',
+        keywords: 'compact comfortable spacing padding',
+        Control: ({ label }) => <AppearanceSelect label={label} field="density" options={DENSITY_OPTIONS} />,
       },
     ],
   },

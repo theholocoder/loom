@@ -4,8 +4,9 @@
 // notes), read when the tab shows, again after each Babysit poll and on the
 // Panel's refresh.
 import { useRef } from 'react';
-import { DEFAULT_SETTINGS, FORGE_NAMES, type DiffFile, type ForgeKind, type Session } from '../shared/api';
+import { FORGE_NAMES, type DiffFile, type ForgeKind, type Session } from '../shared/api';
 import { useTopic } from './api';
+import { useTheme } from './appearance';
 import { DiffFiles, DiffViewToggles, useDiffView, useWide, WIDE_CHANGES_PX, type DiffComments } from './Changes';
 import { useMergeRequestRead } from './forge-read';
 import type { ReviewNotes } from './ReviewNotes';
@@ -31,6 +32,7 @@ export function MergeRequestDiffView({
   onRefresh: () => void;
 }) {
   const settings = useTopic('settings');
+  const theme = useTheme();
   const [view, changeView] = useDiffView(settings?.diffView);
   const root = useRef<HTMLDivElement>(null);
   const wide = useWide(root, WIDE_CHANGES_PX);
@@ -77,7 +79,7 @@ export function MergeRequestDiffView({
           reviews={reviews}
           wide={wide}
           patterns={settings?.diffCollapsedPatterns ?? []}
-          theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
+          theme={theme}
           view={view}
           onViewChange={changeView}
         />

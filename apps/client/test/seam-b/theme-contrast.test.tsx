@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { THEMES } from '../../src/shared/appearance';
+import { ACCENTS, accentColours, THEMES, type Accent, type Theme } from '../../src/shared/appearance';
 
 // Every theme's text stays readable: WCAG AA asks for 4.5:1 between normal
 // text and what it sits on. The tokens are read from styles.css itself.
@@ -51,5 +51,15 @@ describe.each(Object.keys(THEMES))('the %s theme', (theme) => {
 
   it('draws primary button labels at 4.5:1 or more', () => {
     expect(contrast(colour('accent-text'), colour('accent'))).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe.each((Object.keys(ACCENTS) as Accent[]).filter((accent) => accent !== 'theme'))('the %s accent', (accent) => {
+  it.each(Object.keys(THEMES) as Theme[])('in the %s theme, reads as text on every surface and under a primary button’s label', (theme) => {
+    const colour = tokens(theme);
+    const colours = accentColours(accent, theme)!;
+    const low = SURFACES.filter((bg) => contrast(colours.accent, colour(bg)) < 4.5).map((bg) => `on ${bg}: ${contrast(colours.accent, colour(bg)).toFixed(2)}`);
+    expect(low).toEqual([]);
+    expect(contrast(colours.accentText, colours.accent)).toBeGreaterThanOrEqual(4.5);
   });
 });

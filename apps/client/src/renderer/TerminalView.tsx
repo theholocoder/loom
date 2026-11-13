@@ -4,6 +4,7 @@
 import { useEffect, useRef } from 'react';
 import type { TerminalInfo } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { useTheme } from './appearance';
 import { fitTerminal, terminalScreen } from './terminals';
 
 /** Where a terminal's kept screen is shown, fitted to it and following the theme. */
@@ -11,6 +12,7 @@ export function TerminalView({ terminal, focusPending, onFocused }: { terminal: 
   const api = useApi();
   const host = useRef<HTMLDivElement>(null);
   const settings = useTopic('settings');
+  const theme = useTheme();
   useEffect(() => {
     const screen = terminalScreen(api, terminal);
     host.current!.append(screen.element);
@@ -35,6 +37,6 @@ export function TerminalView({ terminal, focusPending, onFocused }: { terminal: 
     // After the theme's tokens are on the page.
     const frame = requestAnimationFrame(() => terminalScreen(api, terminal).restyle());
     return () => cancelAnimationFrame(frame);
-  }, [settings?.theme, settings?.monoFont]);
+  }, [theme, settings?.accent, settings?.monoFont]);
   return <div ref={host} className="terminal-host" />;
 }
