@@ -28,6 +28,8 @@ function createWindow(look: WindowLook): BrowserWindow {
     minWidth: MIN_WINDOW.width,
     minHeight: MIN_WINDOW.height,
     title: 'Loom',
+    // The window and taskbar icon. Linux and Windows take it from here; macOS takes it from the app bundle.
+    icon: join(import.meta.dirname, '../../resources', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     // The saved theme's background, so the window never shows another first.
     backgroundColor: look.background,
     webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), sandbox: true, contextIsolation: true, zoomFactor: look.zoom },

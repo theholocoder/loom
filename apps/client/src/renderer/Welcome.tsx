@@ -1,7 +1,8 @@
 // The main pane on first run, with no Project yet: what Loom is, one way
 // forward, and whether each Environment and its agent are ready.
-import { FolderOpen, Waypoints } from 'lucide-react';
+import { FolderOpen } from 'lucide-react';
 import { OPENCODE_NAME } from '../shared/api';
+import { Logo } from './Logo';
 import { EnvironmentCheck, useAgentCheck } from './Settings';
 import { SHORTCUTS } from './shortcuts';
 
@@ -12,7 +13,7 @@ export function Welcome({ onAddProject }: { onAddProject: () => void }) {
     <main className="main" aria-label="Session">
       <section className="welcome" aria-label="Welcome">
         <h1>
-          <Waypoints /> Welcome to Loom
+          <Logo /> Welcome to Loom
         </h1>
         <p className="muted">Loom runs coding agents on your own machine, one Session per piece of work, each in its own worktree of a Project: a git checkout you add from this machine.</p>
         <button className="primary" type="button" onClick={onAddProject}>

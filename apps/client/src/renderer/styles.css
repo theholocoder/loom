@@ -60,6 +60,13 @@ pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px
 .side { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .side-top { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; }
+/* The logo: woven threads, one in the accent; a light runs along them while an agent works. */
+.logo { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.logo-thread.accent { stroke: var(--accent); }
+.logo.working .logo-thread { opacity: .4; }
+.logo-light { stroke: var(--work); stroke-dasharray: 30 70; animation: logo-light 1.6s linear infinite; }
+@keyframes logo-light { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .logo.working .logo-thread { opacity: 1; } .logo-light { display: none; } }
 .search { display: flex; align-items: center; gap: 8px; background: var(--panel2); border-radius: 22px; padding: 8px 14px; color: var(--muted); cursor: text; }
 .search kbd { margin-left: auto; }
 kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--muted); background: var(--panel); }
@@ -846,7 +853,7 @@ input.toggle:disabled { cursor: not-allowed; }
 /* The welcome, on first run with no Project. */
 .welcome { max-width: 620px; margin: 60px auto; padding: 0 24px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
 .welcome h1 { display: flex; gap: 8px; align-items: center; font-size: 20px; margin: 0; }
-.welcome h1 svg.lucide { width: 22px; height: 22px; color: var(--accent); }
+.welcome h1 .logo { width: 24px; height: 24px; }
 .welcome p { margin: 0; line-height: 1.5; }
 .welcome h2 { font-size: 13px; font-weight: 650; margin: 18px 0 0; color: var(--muted); }
 .environment-check { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; width: 100%; }

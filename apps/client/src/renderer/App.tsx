@@ -37,7 +37,6 @@ import {
   Settings as SettingsIcon,
   SquareTerminal,
   Trash2,
-  Waypoints,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -49,6 +48,7 @@ import { DatesProvider } from './dates';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { DatabaseProblem } from './DatabaseProblem';
 import { inboxOrder, InboxList } from './Inbox';
+import { Logo } from './Logo';
 import { Popover } from './Popover';
 import { PageWindow, type Page } from './PageWindow';
 import { ProjectPicker } from './ProjectPicker';
@@ -315,7 +315,7 @@ function Workspace() {
             />
             <div className="side-top">
               <div className="brand">
-                <Waypoints /> Loom<span className="grow" />
+                <Logo working={sessions.some((s) => s.status === 'working')} /> Loom<span className="grow" />
                 <NewMenu onNewSession={(trigger) => pickProject(trigger)} onAddProject={addProject} />
                 <button className="icon-btn" type="button" title="Collapse the Inbox" aria-label="Collapse the Inbox" aria-expanded="true" aria-controls="inbox" onClick={inbox.toggle}>
                   <PanelLeftClose />

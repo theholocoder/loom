@@ -83,6 +83,17 @@ describe('the Inbox', () => {
     expect(within(loomGroup).getAllByRole('listitem').map((row) => row.getAttribute('aria-label'))).toEqual(['Add Merge request button', 'Fix flaky cleanup test']);
   });
 
+  it('animates the logo while a Session is Working, and only then', () => {
+    const busy = session({ title: 'Busy', status: 'working', waitingReason: undefined });
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Done' }), busy] }));
+    const logo = () => inbox().querySelector('.logo')!;
+    expect(logo().classList.contains('working')).toBe(true);
+
+    act(() => main.publish('sessions', [{ ...busy, status: 'waiting', waitingReason: 'finished' }]));
+
+    expect(logo().classList.contains('working')).toBe(false);
+  });
+
   it('shows why each Session is Waiting', () => {
     const reasons = ['finished', 'stopped', 'question', 'approval', 'stuck', 'error', 'interrupted', 'feedback'] as const;
     renderApp(new FakeMain({ projects: [loom], sessions: reasons.map((reason) => session({ title: reason, waitingReason: reason })) }));
