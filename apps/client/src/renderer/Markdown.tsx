@@ -7,7 +7,7 @@ import type { Element, ElementContent } from 'hast';
 import { Check, Copy, ExternalLink, Link as LinkIcon, TriangleAlert } from 'lucide-react';
 import type { Html, Nodes, PhrasingContent, Root } from 'mdast';
 import { renderAsync } from 'pele/lazy';
-import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
@@ -102,16 +102,23 @@ function CodeBlock({ node, children }: { node?: Element; children?: ReactNode })
   return diagrams && language === 'mermaid' ? <Diagram source={text} code={figure} /> : figure;
 }
 
-/** The code of the code block `target` is in, if it is in one: what its Copy code button copies. */
-export function codeBlockAt(target: EventTarget | null): { element: HTMLElement; code: string } | undefined {
-  const element = target instanceof globalThis.Element ? target.closest<HTMLElement>('.code-block') : null;
-  const code = element?.querySelector('pre')?.textContent;
-  return element && code != null ? { element, code: code.replace(/\n$/, '') } : undefined;
+/** The code of the code block each right-click is on, by its native event: set as the event goes through the block. */
+const rightClickedCode = new WeakMap<Event, string>();
+
+/** The code of the code block this right-click is on, if it is on one: what its Copy code copies. */
+export function codeRightClicked(event: ReactMouseEvent): string | undefined {
+  return rightClickedCode.get(event.nativeEvent);
+}
+
+/** Offers Copy code on a right-click of a code block, its code kept for the menus of the elements around it. */
+function offerCopyCode(event: ReactMouseEvent, code: string) {
+  rightClickedCode.set(event.nativeEvent, code);
+  addToContextMenu(event, [{ label: 'Copy code', icon: Copy, run: () => copyText(code) }]);
 }
 
 function CodeFigure({ language, text, children }: { language: string | undefined; text: string; children?: ReactNode }) {
   return (
-    <figure className="code-block" onContextMenu={(event) => addToContextMenu(event, [{ label: 'Copy code', icon: Copy, run: () => copyText(text) }])}>
+    <figure className="code-block" onContextMenu={(event) => offerCopyCode(event, text)}>
       <figcaption>
         <span className="grow tech">{language}</span>
         <CopyButton text={text} label="Copy code" />
@@ -141,7 +148,7 @@ function Diagram({ source, code }: { source: string; code: ReactNode }) {
     };
   }, [source, idPrefix]);
   const mine = drawn?.source === source ? drawn : undefined;
-  if (mine?.svg) return <figure className="diagram" role="img" aria-label="Diagram" dangerouslySetInnerHTML={{ __html: mine.svg }} />;
+  if (mine?.svg) return <figure className="diagram" role="img" aria-label="Diagram" onContextMenu={(event) => offerCopyCode(event, source)} dangerouslySetInnerHTML={{ __html: mine.svg }} />;
   return (
     <>
       {code}

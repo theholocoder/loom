@@ -173,8 +173,13 @@ describe("the Session's Merge request", () => {
     expect(section.textContent).not.toContain('Say what this changes');
     const diagram = await within(section).findByRole('img', { name: 'Diagram' });
     expect(diagram.querySelector('svg')!.textContent).toContain('currencyFor');
-    // Drawn instead of shown as code.
+    // Drawn instead of shown as code: its code is copied from its right-click menu.
     expect(within(section).queryByRole('button', { name: 'Copy code' })).toBeNull();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+    fireEvent.contextMenu(diagram);
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Context menu' })).getByRole('menuitem', { name: 'Copy code' }));
+    await waitFor(() => expect(copied).toEqual(['flowchart LR\n  showInvoice --> currencyFor']));
     const reviews = within(shown).getByRole('region', { name: 'Reviews and comments' });
     expect(within(reviews).getByRole('listitem', { name: 'Comment by carol' }).querySelector('.rb')!.textContent).toBe('Coverage 91%');
   });

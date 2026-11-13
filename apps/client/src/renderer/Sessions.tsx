@@ -18,7 +18,7 @@ import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from 
 import { canRunTerminals, PanelArea, usePanels } from './Panels';
 import { TerminalView } from './TerminalView';
 import { Select } from './Popover';
-import { codeBlockAt, Markdown } from './Markdown';
+import { codeRightClicked, Markdown } from './Markdown';
 import { useArchive, useRemovedProject } from './Archive';
 import { useToast } from './Toast';
 import { useDelete } from './Delete';
@@ -679,16 +679,17 @@ export function SessionView({
   // Comments can go with the next message: not while the composer takes none, nor with an answer to a question.
   const composerDisabled = readOnly || (asked && !freeAnswer) || !!session.worktreeMissing;
   /**
-   * Comment…, on a right-click of text selected in the conversation, or of a
-   * code block (the selection in it, or its whole code): the passage and a
-   * note go to the composer as a chip.
+   * Comment…, on a right-click of the conversation with text selected in it,
+   * or of a code block with nothing selected, on its whole code: the passage
+   * and a note go to the composer as a chip.
    */
   const commentOnConversation = (event: ReactMouseEvent<HTMLElement>) => {
     const selection = window.getSelection();
-    const selected = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).commonAncestorContainer : null;
-    const block = codeBlockAt(event.target);
-    const onSelection = !!selected && (block ? block.element.contains(selected) : event.currentTarget.contains(selected)) && !!selectedText().trim();
-    const quote = onSelection ? selectedText().trim() : (block?.code ?? '');
+    const inside = selection && selection.rangeCount > 0 && event.currentTarget.contains(selection.getRangeAt(0).commonAncestorContainer);
+    const passage = inside ? selectedText() : '';
+    const code = codeRightClicked(event);
+    // On a code block, the selection keeps its first line's indentation; prose is quoted trimmed.
+    const quote = passage.trim() ? (code === undefined ? passage.trim() : passage.replace(/^\s*\n/, '').trimEnd()) : (code ?? '');
     if (!quote.trim()) return;
     addToContextMenu(event, [
       {

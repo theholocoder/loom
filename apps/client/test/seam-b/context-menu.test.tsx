@@ -353,15 +353,34 @@ describe("a link's and a code block's right-click menu in the conversation", () 
     );
   });
 
-  it('comments on the part of a code block selected', async () => {
-    await openConversation(code);
+  it('comments on the part of a code block selected, its indentation kept', async () => {
+    const { main, fix } = await openConversation('```ts\nif (retry) {\n  login(retries);\n}\n```');
     const block = await codeBlock();
-    const line = [...block.querySelectorAll('span')].find((span) => span.textContent === 'login')!;
-    select(line);
-    fireEvent.contextMenu(line);
+    // From the indentation to the end of the call.
+    const indent = [...block.childNodes].find((node) => node.textContent?.includes('\n  '))!;
+    const call = [...block.querySelectorAll('span')].find((span) => span.textContent === 'login')!;
+    const range = document.createRange();
+    range.setStart(indent, indent.textContent!.indexOf('\n  ') + 1);
+    range.setEnd(call.nextSibling!, '(retries);'.length);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.contextMenu(call);
     expect(items()).toEqual(['Copy code', '—', 'Comment…', '—', 'Copy']);
     pick('Comment…');
-    expect(within(screen.getByRole('dialog', { name: 'Comment on the conversation' })).getByText('login')).toBeTruthy();
+    const dialog = screen.getByRole('dialog', { name: 'Comment on the conversation' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: 'Why?' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(invoked(main, 'sessions.send')).toEqual([{ id: fix.id, prompt: '', comments: [{ quote: '  login(retries);', note: 'Why?' }] }]));
+  });
+
+  it('comments on the text selected rather than the code block, when the selection is elsewhere in the conversation', async () => {
+    await openConversation(`Retry once.\n\n${code}`);
+    select(await screen.findByText('Retry once.'));
+    fireEvent.contextMenu(await codeBlock());
+    pick('Comment…');
+    const dialog = screen.getByRole('dialog', { name: 'Comment on the conversation' });
+    expect(dialog.querySelector('blockquote')!.getAttribute('title')).toBe('Retry once.');
   });
 });
 
