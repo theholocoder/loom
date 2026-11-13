@@ -19,6 +19,7 @@ function renderApp(main: FakeMain) {
 const gitlab: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'gitlab', repository: 'acme/billing-api' },

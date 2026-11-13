@@ -5,7 +5,7 @@ A local desktop workspace for AI-assisted software development: coding agents do
 ## Language
 
 **Project**:
-A git checkout the user has added to Loom on their machine, either an existing folder or a fresh clone. It belongs to that machine only. **Forge** features (starting a **Session** from an issue, **Merge requests**, **Babysit**) are available only when its remote is on a Forge the user is signed in to with that Forge's CLI.
+A git checkout the user has added to Loom on their machine, either an existing folder or a fresh clone. It belongs to that machine only. The user can rename it, and pick its colour (the same wherever it shows), its avatar and its default model (what its new **Sessions** start on). **Forge** features (starting a **Session** from an issue, **Merge requests**, **Babysit**) are available only when its remote is on a Forge the user is signed in to with that Forge's CLI.
 _Avoid_: Repo, workspace, delete (a Project is **Removed**, never deleted)
 
 **Removed** (Project):

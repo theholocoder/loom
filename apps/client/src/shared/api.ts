@@ -4,6 +4,7 @@
 // (seam B), so everything the UI can see or do goes through here.
 import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
 import { DEFAULT_LAYOUT, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type SessionPanels } from './panels';
+import type { ProjectColor } from './projects';
 import { DEFAULT_INBOX, type InboxSettings } from './window';
 
 /** What the Environment's bridge reported in its handshake. */
@@ -212,17 +213,34 @@ export interface ForgeStatus {
 
 export interface Project {
   id: number;
+  /** What the user calls it: its checkout folder's name until they rename it. */
   name: string;
+  /** Its colour, the same wherever it shows. */
+  color: ProjectColor;
+  /** What its avatar shows, set by the user; its name's first two letters while absent. */
+  avatar?: string;
+  /** The model and Effort a new Session in it starts on, until another is picked; the agent's own while absent. */
+  defaultModel?: ModelPick;
   /** What Loom's branch names start with: `<prefix>/<slug>`. */
   branchPrefix: string;
   checkout: Checkout;
   forge: ForgeStatus;
 }
 
+/** What `projects.edit` changes about a Project: what is absent stays as it is. */
+export interface ProjectEdit {
+  id: number;
+  name?: string;
+  color?: ProjectColor;
+  avatar?: string | null;
+  defaultModel?: ModelPick | null;
+}
+
 /** A Project the user removed: hidden, its Sessions archived, its history kept. */
 export interface RemovedProject {
   id: number;
   name: string;
+  color: ProjectColor;
 }
 
 /** A removed Project a checkout being added could restore, with how many Sessions it would bring back. */
@@ -1329,7 +1347,7 @@ export interface TopSession {
   sessionId: number;
   title: string;
   projectId: number;
-  /** Its Project's name, as it was when its usage was last recorded. */
+  /** Its Project's name: the Project's own, or, without a Project row, as it was when its usage was last recorded. */
   project: string;
   /** Whether the user has removed its Project. */
   projectRemoved?: true;
@@ -1365,8 +1383,8 @@ export interface UsageDashboard {
   medianRunMs?: number;
   /** The median wait for the user (on a question or Approval request, or finished and unanswered, while Loom ran), in ms; absent with none. */
   medianWaitMs?: number;
-  /** By tokens, most first; `project` is its name as its usage was last recorded. */
-  perProject: Array<{ projectId: number; project: string; tokens: number; removed?: true }>;
+  /** By tokens, most first; `project` is its name as TopSession's is, `color` its colour (removed or not). */
+  perProject: Array<{ projectId: number; project: string; color: ProjectColor; tokens: number; removed?: true }>;
   /** By tokens, most first: `model` as `provider/model`, `name` as the agent last gave it (absent when it never did). */
   perModel: Array<{ model: string; name?: string; tokens: number }>;
   mix: TokenCounts;
@@ -1465,6 +1483,14 @@ export interface Commands {
    * would not accept at the start of a branch name.
    */
   'projects.setBranchPrefix': { params: { id: number; branchPrefix: string }; result: Project };
+  /**
+   * Changes what is given of the Project's name, colour, avatar and default
+   * model; `null` clears the avatar (back to the initials) or the default
+   * model (back to the agent's own). Rejects an empty or overlong name, an
+   * avatar of more than two characters or with a space, an unknown colour,
+   * and an Effort level without a model.
+   */
+  'projects.edit': { params: ProjectEdit; result: Project };
   /**
    * The open issues on the Project's Forge, any of them, not only the user's,
    * matching `search` if given, as many as the Forge's CLI lists by default.

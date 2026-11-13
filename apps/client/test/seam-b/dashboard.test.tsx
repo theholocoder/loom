@@ -10,6 +10,7 @@ afterEach(cleanup);
 const project: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/loom' },
   forge: { state: 'available', checking: false, kind: 'github', host: 'github.com', repository: 'theholocoder/loom' },
@@ -39,8 +40,8 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
     medianRunMs: 400_000,
     medianWaitMs: 22 * 60_000,
     perProject: [
-      { projectId: 1, project: 'loom', tokens: 900_000 },
-      { projectId: 2, project: 'docs', tokens: 300_000 },
+      { projectId: 1, project: 'loom', color: 'blue', tokens: 900_000 },
+      { projectId: 2, project: 'docs', color: 'orange', tokens: 300_000 },
     ],
     perModel: [
       { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1_000_000 },

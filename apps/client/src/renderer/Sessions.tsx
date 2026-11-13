@@ -29,7 +29,7 @@ import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed, wakeTime } from './Snooze';
 import { useNow } from './now';
-import { ContextGauge, effortsOf, listedModels, ModelMarker, ModelName, ModelPickers } from './ModelPicker';
+import { ContextGauge, effortsOf, effortTaken, listedModels, ModelMarker, ModelName, ModelPickers } from './ModelPicker';
 import { AttachmentList, CommentNoteForm, Composer } from './Composer';
 import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
@@ -193,10 +193,14 @@ export function NewSession({
   const branchError = branchProblem && `"${typedBranch}" can't be a branch name: ${branchProblem}`;
   const branchErrorId = useId();
   const suggested = !chosen ? '' : issue ? issueBranch(chosen.branchPrefix, issue) : draft.trim() ? suggestBranch(chosen.branchPrefix, draft) : '';
-  // The model and Effort picked; until then, the agent's own.
+  // The model and Effort picked; until then, the Project's default, or else the agent's own.
   const models = useCheckoutModels(chosen?.id);
-  const [model, setModel] = useState<string>();
-  const [effort, setEffort] = useState<string>();
+  const [pickedModel, setModel] = useState<string>();
+  const [pickedEffort, setEffort] = useState<string>();
+  const model = pickedModel ?? chosen?.defaultModel?.model;
+  // A model picked starts on its own default Effort, not the Project's default model's.
+  const defaultEffort = pickedModel === undefined ? chosen?.defaultModel?.effort : undefined;
+  const effort = pickedEffort ?? defaultEffort;
   const efforts = effortsOf(models.listed, model);
   const commands = useAgentCommands(chosen?.id);
   // The Approval mode picked; until then, the default from Settings.
@@ -224,7 +228,9 @@ export function NewSession({
     setError(undefined);
     const params = workingCopyParams(workingCopy, { existing, branch: editedBranch, base: pickedBase });
     try {
-      const pick = { ...(model !== undefined && { model }), ...(effort !== undefined && efforts.includes(effort) && { effort }) };
+      // The Project's default Effort goes as it is while the models aren't listed to check it against.
+      const taken = effortTaken(models.listed, model, effort);
+      const pick = { ...(model !== undefined && { model }), ...(taken !== undefined && { effort: taken }) };
       onStarted(await api.invoke('sessions.create', { projectId: chosen.id, ...params, ...(issue ? { issue } : {}), ...pick, approvalMode, prompt, ...(attachments.length ? { attachments } : {}) }));
       return true;
     } catch (e) {

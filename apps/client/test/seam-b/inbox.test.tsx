@@ -24,6 +24,7 @@ const inbox = () => screen.getByRole('complementary', { name: 'Inbox' });
 const loom: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/loom' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'theholocoder/loom' },
@@ -31,6 +32,7 @@ const loom: Project = {
 const billing: Project = {
   id: 2,
   name: 'billing-api',
+  color: 'orange',
   branchPrefix: 'billing',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'gitlab', repository: 'acme/billing-api' },

@@ -19,6 +19,7 @@ function renderApp(main: FakeMain) {
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'no-remote', checking: false },
@@ -162,6 +163,60 @@ describe('the model and Effort pickers before a Session exists', () => {
     const pane = startNewSession();
     fireEvent.click(within(pane).getByRole('button', { name: 'Model' }));
     expect((await screen.findByRole('alert')).textContent).toContain('could not ask OpenCode');
+  });
+});
+
+describe("a Project's default model", () => {
+  const withDefault: Project = { ...project, defaultModel: { model: 'anthropic/claude-sonnet-5-5', effort: 'max' } };
+
+  it('is what a new Session in it starts on, with its Effort', async () => {
+    const created: Array<Commands['sessions.create']['params']> = [];
+    renderApp(
+      new FakeMain(
+        { projects: [withDefault] },
+        {
+          'projects.models': () => probed,
+          'sessions.create': (params) => {
+            created.push(params);
+            return finished;
+          },
+        },
+      ),
+    );
+    const pane = startNewSession();
+
+    await waitFor(() => expect(within(pane).getByRole('button', { name: 'Model' }).textContent).toBe('Claude Sonnet 5.5'));
+    expect(within(pane).getByRole('button', { name: 'Effort' }).textContent).toBe('Effort: max');
+    fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Hi' } });
+    fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]).toMatchObject({ model: 'anthropic/claude-sonnet-5-5', effort: 'max' });
+  });
+
+  it('gives way to a model picked, which starts on its own default Effort', async () => {
+    const created: Array<Commands['sessions.create']['params']> = [];
+    renderApp(
+      new FakeMain(
+        { projects: [withDefault] },
+        {
+          'projects.models': () => probed,
+          'sessions.create': (params) => {
+            created.push(params);
+            return finished;
+          },
+        },
+      ),
+    );
+    const pane = startNewSession();
+    fireEvent.click(within(pane).getByRole('button', { name: 'Model' }));
+    await waitFor(() => screen.getByRole('option', { name: /pulse-free/ }));
+    fireEvent.click(screen.getByRole('option', { name: /pulse-free/ }));
+
+    fireEvent.change(within(pane).getByRole('textbox', { name: 'Prompt' }), { target: { value: 'Hi' } });
+    fireEvent.click(within(pane).getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.model).toBe('opencode/pulse-free');
+    expect(created[0]).not.toHaveProperty('effort');
   });
 });
 

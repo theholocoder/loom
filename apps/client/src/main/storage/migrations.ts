@@ -1,4 +1,4 @@
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 
 // Bundled, forward-only migrations. A migration's version is its position in
 // this list (the first is version 1), and the database's `PRAGMA user_version`
@@ -269,5 +269,14 @@ export const migrations: Migration[] = [
   async (db) => {
     // Each model's name as the agent gave it, so the dashboard names models as the rest of the Client does.
     for (const table of ['usage_buckets', 'highlight_usage']) await db.schema.alterTable(table).addColumn('model_name', 'text').execute();
+  },
+  async (db) => {
+    // A Project's colour, avatar and default model, chosen by the user. Every
+    // Project keeps the colour it had, picked by id among the first three.
+    await db.schema.alterTable('projects').addColumn('color', 'text', (c) => c.notNull().defaultTo('blue')).execute();
+    await db.schema.alterTable('projects').addColumn('avatar', 'text').execute();
+    await db.schema.alterTable('projects').addColumn('default_model', 'text').execute();
+    await db.schema.alterTable('projects').addColumn('default_effort', 'text').execute();
+    await sql`update projects set color = case id % 3 when 0 then 'blue' when 1 then 'orange' else 'aqua' end`.execute(db);
   },
 ];

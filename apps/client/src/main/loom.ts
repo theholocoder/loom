@@ -305,6 +305,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       return sessionService.removeProject(id, discard ?? false, () => projectService.remove(id));
     },
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
+    'projects.edit': (params) => projectService.edit(params),
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),

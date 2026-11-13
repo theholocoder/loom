@@ -61,7 +61,7 @@ describe('usage per turn', () => {
     expect(dashboard.mix).toEqual({ input: 1500, output: 300, reasoning: 50, cacheRead: 3000, cacheWrite: 400 });
     expect(dashboard.cacheHitRate).toBeCloseTo(3000 / 4900);
     expect(dashboard.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 5250 }]);
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 5250 }]);
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', color: project.color, tokens: 5250 }]);
     expect(dashboard.perDay).toHaveLength(7);
     expect(dashboard.perDay.at(-1)).toMatchObject({ tokens: 5250, byProject: { [project.id]: 5250 } });
     expect(dashboard.perDay.slice(0, -1).every((d) => d.tokens === 0)).toBe(true);
@@ -264,8 +264,8 @@ describe('usage per Project', () => {
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
     expect(dashboard.perProject).toEqual([
-      { projectId: second.id, project: 'loom', tokens: 200 },
-      { projectId: first.id, project: 'loom', tokens: 100 },
+      { projectId: second.id, project: 'loom', color: second.color, tokens: 200 },
+      { projectId: first.id, project: 'loom', color: first.color, tokens: 100 },
     ]);
     expect(dashboard.perDay.at(-1)!.byProject).toEqual({ [first.id]: 100, [second.id]: 200 });
   });
@@ -279,8 +279,21 @@ describe('usage per Project', () => {
 
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 100, removed: true }]);
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', color: project.color, tokens: 100, removed: true }]);
     expect(dashboard.topSessions).toMatchObject([{ sessionId: id, title: 'Fix the login bug', project: 'loom', projectRemoved: true }]);
+  });
+
+  it('names and colours a Project as it is now, renamed and recoloured since its usage', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'], tokens: { inputTokens: 100, outputTokens: 0 } }]);
+    const { main, project } = await start(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(main, id);
+
+    await main.api.invoke('projects.edit', { id: project.id, name: 'Loom app', color: 'magenta' });
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'Loom app', color: 'magenta', tokens: 100 }]);
+    expect(dashboard.topSessions).toMatchObject([{ sessionId: id, project: 'Loom app' }]);
   });
 });
 

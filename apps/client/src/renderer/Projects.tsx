@@ -1,10 +1,14 @@
-import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, MessageSquarePlus, TriangleAlert, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { FORGE_CLI, type ForgeKind, type ForgeStatus, type Project, type RestorableProject, type UnsavedSession } from '../shared/api';
+import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, MessageSquarePlus, Pencil, TriangleAlert, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { FORGE_CLI, OPENCODE_NAME, type ForgeKind, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { branchPrefixError, branchPrefixOf } from '../shared/branches';
+import { AVATAR_MAX, avatarError, avatarText, PROJECT_COLOR_NAMES, PROJECT_COLORS, projectNameError, type ProjectColor } from '../shared/projects';
 import { useApi, useTopic } from './api';
 import { unsavedWorkSummary } from './Archive';
+import { useCheckoutModels } from './checkout';
 import { copyable } from './ContextMenu';
+import { effortsOf, effortTaken, ModelPickers } from './ModelPicker';
+import { ProjectAvatar, projectColor } from './ProjectAvatar';
 import { SHORTCUTS } from './shortcuts';
 
 const FORGE_NAME: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
@@ -171,6 +175,7 @@ export function Projects({ adder, onStartSession }: { adder: ProjectAdder; onSta
                 <th>Environment</th>
                 <th>Forge</th>
                 <th>Branch prefix</th>
+                <th>Default model</th>
                 <th aria-label="Actions" />
               </tr>
             </thead>
@@ -206,9 +211,15 @@ function NextStep({ added: { project, restored }, onStartSession, onDismiss }: {
 
 function ProjectRow({ project, environmentLabel }: { project: Project; environmentLabel: string }) {
   const reason = forgeOffReason(project.forge, environmentLabel);
+  const [editing, setEditing] = useState(false);
   return (
     <tr>
-      <td>{project.name}</td>
+      <td>
+        <span className="row project-name">
+          <ProjectAvatar project={project} size={22} />
+          {project.name}
+        </span>
+      </td>
       <td>
         <span className="tech" {...copyable('path', project.checkout.path)}>
           {project.checkout.path}
@@ -226,10 +237,156 @@ function ProjectRow({ project, environmentLabel }: { project: Project; environme
       <td>
         <BranchPrefix project={project} />
       </td>
+      <td>{project.defaultModel?.model ? <DefaultModel pick={project.defaultModel} /> : <span className="muted">{OPENCODE_NAME}'s own</span>}</td>
       <td>
-        <RemoveProject project={project} />
+        <span className="row project-actions">
+          <button className="sm" type="button" title={`Edit ${project.name}`} aria-label={`Edit ${project.name}`} onClick={() => setEditing(true)}>
+            <Pencil className="sm" />
+            Edit
+          </button>
+          <RemoveProject project={project} />
+        </span>
+        {editing && <EditProject project={project} onClose={() => setEditing(false)} />}
       </td>
     </tr>
+  );
+}
+
+/** A Project's default model, as `provider/model`, and its Effort level when one is set. */
+function DefaultModel({ pick }: { pick: ModelPick }) {
+  return (
+    <span className="tech">
+      {pick.model}
+      {pick.effort !== undefined && <span className="muted"> · {pick.effort}</span>}
+    </span>
+  );
+}
+
+/** The Edit dialog: the Project's name, colour, avatar and default model, saved together. */
+function EditProject({ project, onClose }: { project: Project; onClose: () => void }) {
+  const api = useApi();
+  const [name, setName] = useState(project.name);
+  const [color, setColor] = useState<ProjectColor>(project.color);
+  const [avatar, setAvatar] = useState(project.avatar ?? '');
+  const [model, setModel] = useState(project.defaultModel?.model);
+  const [effort, setEffort] = useState(project.defaultModel?.effort);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const models = useCheckoutModels(project.id);
+  const efforts = effortsOf(models.listed, model);
+  const nameField = useRef<HTMLInputElement>(null);
+  useEffect(() => nameField.current?.select(), []);
+  const id = useId();
+  const nameError = projectNameError(name);
+  const avatarProblem = avatarError(avatar);
+
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    if (nameError || avatarProblem) return;
+    const edit: ProjectEdit = { id: project.id };
+    if (name.trim() !== project.name) edit.name = name;
+    if (color !== project.color) edit.color = color;
+    const typed = avatar.trim();
+    if (typed !== (project.avatar ?? '')) edit.avatar = typed || null;
+    const kept = effortTaken(models.listed, model, effort);
+    if (model !== project.defaultModel?.model || kept !== project.defaultModel?.effort) edit.defaultModel = model === undefined ? null : { model, ...(kept !== undefined && { effort: kept }) };
+    if (Object.keys(edit).length === 1) return onClose();
+    setError(undefined);
+    setBusy(true);
+    api
+      .invoke('projects.edit', edit)
+      .then(onClose)
+      .catch((e: unknown) => setError((e as Error).message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && !e.defaultPrevented && onClose()}>
+      <form className="card modal project-edit" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} onSubmit={save}>
+        <div className="card-head">
+          <ProjectAvatar project={{ name: name.trim() || project.name, color, avatar: avatar.trim() && !avatarProblem ? avatar.trim() : undefined }} size={26} />
+          <h3 id={`${id}-title`}>Edit {project.name}</h3>
+        </div>
+        <label className="project-field">
+          <span>Name</span>
+          <input ref={nameField} value={name} aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? `${id}-name-error` : undefined} onChange={(e) => setName(e.target.value)} />
+        </label>
+        {nameError && (
+          <div id={`${id}-name-error`} className="err" role="alert">
+            {nameError}
+          </div>
+        )}
+        <div className="project-field">
+          <span id={`${id}-color`}>Colour</span>
+          <div role="radiogroup" aria-labelledby={`${id}-color`} className="accent-picker">
+            {PROJECT_COLOR_NAMES.map((choice) => (
+              <label key={choice} className="accent-option">
+                <input type="radio" className="sr-only" name={`${id}-color`} checked={color === choice} onChange={() => setColor(choice)} />
+                <span className="accent-swatch" aria-hidden="true" style={{ background: projectColor({ color: choice }) }} />
+                {PROJECT_COLORS[choice].label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <label className="project-field">
+          <span>Avatar</span>
+          <input
+            className="project-avatar-input"
+            value={avatar}
+            placeholder={avatarText({ name: name.trim() || project.name })}
+            aria-invalid={avatarProblem ? true : undefined}
+            aria-describedby={`${id}-avatar-hint`}
+            onChange={(e) => setAvatar(e.target.value)}
+          />
+        </label>
+        <div id={`${id}-avatar-hint`} className={avatarProblem ? 'err' : 'muted project-hint'} role={avatarProblem ? 'alert' : undefined}>
+          {avatarProblem ?? `Up to ${AVATAR_MAX} characters, or an emoji. Empty, the name's first letters.`}
+        </div>
+        <div className="project-field">
+          <span>Default model</span>
+          <div className="row project-model">
+            <ModelPickers
+              agent={OPENCODE_NAME}
+              models={models.listed}
+              model={model}
+              efforts={efforts}
+              effort={effort}
+              onOpen={models.refresh}
+              onModel={(picked) => {
+                setModel(picked);
+                setEffort(undefined);
+              }}
+              onEffort={setEffort}
+            />
+            {model !== undefined && (
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setModel(undefined);
+                  setEffort(undefined);
+                }}
+              >
+                Use {OPENCODE_NAME}'s own
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="muted project-hint">New Sessions in {project.name} start on it, until another is picked.</div>
+        {error && (
+          <div className="err" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="row modal-actions">
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="primary" disabled={busy || !!nameError || !!avatarProblem}>
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

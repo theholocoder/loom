@@ -19,6 +19,7 @@ function renderApp(main = new FakeMain()) {
 const billing: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -26,6 +27,7 @@ const billing: Project = {
 const web: Project = {
   id: 2,
   name: 'web-app',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/web-app' },
   forge: { state: 'no-remote', checking: false },

@@ -22,6 +22,7 @@ function renderApp(main = new FakeMain()) {
 const loom: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/code/loom' },
   forge: { state: 'no-remote', checking: false },

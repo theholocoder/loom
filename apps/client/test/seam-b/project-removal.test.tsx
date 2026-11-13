@@ -22,6 +22,7 @@ function renderApp(main: FakeMain) {
 const loom: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/code/loom' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'theholocoder/loom' },
@@ -170,7 +171,7 @@ describe('adding a checkout of a removed Project', () => {
 
 describe('a removed Project', () => {
   it("marks its Sessions in the Archive as the removed Project's", () => {
-    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom' }], sessions: [session({ title: 'Done long ago', status: 'archived', waitingReason: undefined })] }));
+    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom', color: 'blue' as const }], sessions: [session({ title: 'Done long ago', status: 'archived', waitingReason: undefined })] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
 
@@ -178,7 +179,7 @@ describe('a removed Project', () => {
   });
 
   it("names it in an archived Session's header, marked removed", () => {
-    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom' }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
+    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom', color: 'blue' as const }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     fireEvent.click(screen.getByRole('button', { name: /Old work/ }));
@@ -189,7 +190,7 @@ describe('a removed Project', () => {
   });
 
   it("turns its archived Sessions' composer off entirely", () => {
-    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom' }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
+    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom', color: 'blue' as const }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     fireEvent.click(screen.getByRole('button', { name: /Old work/ }));
@@ -228,7 +229,7 @@ describe('a removed Project', () => {
     const dashboard = {
       ...emptyDashboard(7),
       tokens: 100,
-      perProject: [{ projectId: 1, project: 'loom', tokens: 100, removed: true as const }],
+      perProject: [{ projectId: 1, project: 'loom', color: 'blue' as const, tokens: 100, removed: true as const }],
       topSessions: [{ sessionId: 3, title: 'Fix the login bug', projectId: 1, project: 'loom', projectRemoved: true as const, model: 'anthropic/claude-sonnet-5-5', tokens: 100, workingMs: 0, outcome: 'archived' as const }],
     };
     renderApp(new FakeMain({}, { 'usage.dashboard': () => dashboard }));

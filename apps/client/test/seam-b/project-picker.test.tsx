@@ -10,6 +10,7 @@ afterEach(cleanup);
 const project = (id: number, name: string, path: string): Project => ({
   id,
   name,
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path },
   forge: { state: 'no-remote', checking: false },

@@ -10,6 +10,7 @@ afterEach(cleanup);
 const project: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/loom' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/loom' },

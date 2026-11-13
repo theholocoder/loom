@@ -184,6 +184,7 @@ describe('Projects', () => {
   const project = (name: string, forge: Partial<ForgeStatus> = {}, id = 1): Project => ({
     id,
     name,
+    color: 'blue',
     branchPrefix: 'loom',
     checkout: { environmentId: 'native', path: `/home/dev/code/${name}` },
     forge: { state: 'available', checking: false, kind: 'github', host: 'github.com', repository: `acme/${name}`, ...forge },
@@ -427,6 +428,96 @@ describe('Projects', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch('database is locked');
   });
 
+  describe('Edit', () => {
+    const editDialog = () => screen.getByRole('dialog', { name: 'Edit loom' });
+
+    function openEdit(main: FakeMain) {
+      openProjects(main);
+      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
+      return editDialog();
+    }
+
+    it('saves a new name, colour, avatar and default model together, then closes', async () => {
+      const main = new FakeMain({ projects: [project('loom')] }, { 'projects.models': () => [{ id: 'anthropic/claude-haiku-5-5', name: 'Claude Haiku 5.5', efforts: ['low', 'high', 'default'] }] });
+      const dialog = openEdit(main);
+
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'Loom app' } });
+      fireEvent.click(within(dialog).getByRole('radio', { name: 'Violet' }));
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: '🦊' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Model' }));
+      fireEvent.click(await screen.findByRole('option', { name: /claude-haiku-5-5/ }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Effort' }));
+      fireEvent.click(screen.getByRole('option', { name: 'Effort: high' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull());
+      expect(main.invoked).toContainEqual({
+        command: 'projects.edit',
+        params: { id: 1, name: 'Loom app', color: 'violet', avatar: '🦊', defaultModel: { model: 'anthropic/claude-haiku-5-5', effort: 'high' } },
+      });
+      const row = screen.getByRole('row', { name: /Loom app/ });
+      expect(within(row).getByText('anthropic/claude-haiku-5-5')).toBeTruthy();
+    });
+
+    it('sends only what changed, and nothing when nothing did', async () => {
+      const main = new FakeMain({ projects: [{ ...project('loom'), avatar: 'LM', defaultModel: { model: 'anthropic/claude-haiku-5-5' } }] });
+      let dialog = openEdit(main);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull();
+      expect(main.invoked.map((i) => i.command)).not.toContain('projects.edit');
+
+      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
+      dialog = editDialog();
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: '' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: "Use OpenCode's own" }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.edit', params: { id: 1, avatar: null, defaultModel: null } }));
+    });
+
+    it('says why a name or avatar is refused, and holds Save until it is fixed', () => {
+      const dialog = openEdit(new FakeMain({ projects: [project('loom')] }));
+
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: '  ' } });
+      expect(within(dialog).getByRole('alert').textContent).toMatch('needs a name');
+      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'loom' } });
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: 'ABC' } });
+      expect(within(dialog).getByRole('alert').textContent).toMatch('at most 2 characters');
+      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("shows main's error and stays open", async () => {
+      const dialog = openEdit(
+        new FakeMain(
+          { projects: [project('loom')] },
+          {
+            'projects.edit': () => {
+              throw new Error('database is locked');
+            },
+          },
+        ),
+      );
+      fireEvent.click(within(dialog).getByRole('radio', { name: 'Red' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+      expect((await within(dialog).findByRole('alert')).textContent).toMatch('database is locked');
+      expect(editDialog()).toBeTruthy();
+    });
+
+    it('closes on Escape without saving', () => {
+      const main = new FakeMain({ projects: [project('loom')] });
+      const dialog = openEdit(main);
+      fireEvent.click(within(dialog).getByRole('radio', { name: 'Red' }));
+
+      fireEvent.keyDown(within(dialog).getByRole('textbox', { name: 'Name' }), { key: 'Escape' });
+
+      expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull();
+      expect(main.invoked.map((i) => i.command)).not.toContain('projects.edit');
+    });
+  });
+
   it("doesn't list Projects in the Inbox when they have no Sessions", () => {
     renderApp(new FakeMain({ projects: [project('billing-api', {}, 1), project('loom', {}, 2)] }));
 
@@ -440,6 +531,7 @@ describe('the + menu', () => {
   const linked: Project = {
     id: 1,
     name: 'loom',
+    color: 'blue',
     branchPrefix: 'loom',
     checkout: { environmentId: 'native', path: '/home/dev/code/loom' },
     forge: { state: 'no-remote', checking: false },

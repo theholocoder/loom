@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { authState } from '../../src/main/projects/forge';
+import { openDatabase } from '../../src/main/storage/database';
+import { migrations } from '../../src/main/storage/migrations';
 import { startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus } from '../../src/shared/api';
 
@@ -20,7 +24,8 @@ describe('linking an existing checkout', () => {
 
     const project = await main.api.invoke('projects.link', { path });
 
-    expect(project).toMatchObject({ name: 'billing-api', branchPrefix: 'loom', checkout: { environmentId: 'native', path } });
+    expect(project).toMatchObject({ name: 'billing-api', color: 'blue',
+  branchPrefix: 'loom', checkout: { environmentId: 'native', path } });
     expect(await main.api.invoke('projects.list')).toEqual([project]);
   });
 
@@ -36,7 +41,8 @@ describe('linking an existing checkout', () => {
 
     const projects = await second.api.invoke('projects.list');
     expect(projects).toHaveLength(1);
-    expect(projects[0]).toMatchObject({ id, name: 'billing-api', branchPrefix: 'loom', checkout: { environmentId: 'native', path } });
+    expect(projects[0]).toMatchObject({ id, name: 'billing-api', color: 'blue',
+  branchPrefix: 'loom', checkout: { environmentId: 'native', path } });
   });
 
   it('links the whole checkout when given a folder inside it', async () => {
@@ -372,3 +378,136 @@ describe("a Project's Forge on GitLab, as glab reports it", () => {
     expect([github.forge.state, gitlab.forge.state]).toEqual(['available', 'available']);
   });
 });
+
+describe("a Project's name, colour, avatar and default model", () => {
+  it('can be changed together, and are kept when main starts again', async () => {
+    const machine = tempMachine();
+    const userDataDir = tempDir('loom-projects-');
+    const first = await started(machine, userDataDir);
+    const { id } = await first.api.invoke('projects.link', { path: machine.gitRepo('web-frontend') });
+
+    const edited = await first.api.invoke('projects.edit', { id, name: '  Web  ', color: 'violet', avatar: '🦊', defaultModel: { model: 'anthropic/claude-haiku-5-5', effort: 'high' } });
+
+    const expected = { id, name: 'Web', color: 'violet', avatar: '🦊', defaultModel: { model: 'anthropic/claude-haiku-5-5', effort: 'high' } };
+    expect(edited).toMatchObject(expected);
+    expect((await waitFor(first.api, 'projects', (p) => p[0]?.name === 'Web'))[0]).toMatchObject(expected);
+    await first.close();
+    const second = await started(machine, userDataDir);
+    expect((await second.api.invoke('projects.list'))[0]).toMatchObject(expected);
+  });
+
+  it('changes only what is given', async () => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const { id } = await main.api.invoke('projects.link', { path: machine.gitRepo('loom') });
+    await main.api.invoke('projects.edit', { id, avatar: 'LM', defaultModel: { model: 'anthropic/claude-haiku-5-5' } });
+
+    const edited = await main.api.invoke('projects.edit', { id, color: 'red' });
+
+    expect(edited).toMatchObject({ name: 'loom', color: 'red', avatar: 'LM', defaultModel: { model: 'anthropic/claude-haiku-5-5' } });
+  });
+
+  it('clears the avatar and the default model with null, or an empty avatar', async () => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const { id } = await main.api.invoke('projects.link', { path: machine.gitRepo('loom') });
+    await main.api.invoke('projects.edit', { id, avatar: 'LM', defaultModel: { model: 'anthropic/claude-haiku-5-5', effort: 'high' } });
+
+    const cleared = await main.api.invoke('projects.edit', { id, avatar: null, defaultModel: null });
+    expect(cleared.avatar).toBeUndefined();
+    expect(cleared.defaultModel).toBeUndefined();
+
+    await main.api.invoke('projects.edit', { id, avatar: 'LM' });
+    expect((await main.api.invoke('projects.edit', { id, avatar: '  ' })).avatar).toBeUndefined();
+  });
+
+  it.each([
+    [{ name: '   ' }, /needs a name/],
+    [{ name: 'x'.repeat(61) }, /at most 60 characters/],
+    [{ avatar: 'ABC' }, /at most 2 characters/],
+    [{ avatar: 'A B' }, /no spaces/],
+    [{ color: 'beige' as never }, /unknown Project colour/],
+    [{ defaultModel: { effort: 'high' } }, /pick the model too/],
+  ])('refuses %o, and changes nothing', async (edit, error) => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const project = await main.api.invoke('projects.link', { path: machine.gitRepo('loom') });
+
+    await expect(main.api.invoke('projects.edit', { id: project.id, ...edit })).rejects.toThrow(error);
+    expect((await main.api.invoke('projects.list'))[0]).toEqual(expect.objectContaining({ name: 'loom', color: project.color }));
+  });
+
+  it('takes an emoji with its modifiers as one character of an avatar', async () => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const { id } = await main.api.invoke('projects.link', { path: machine.gitRepo('loom') });
+
+    expect((await main.api.invoke('projects.edit', { id, avatar: '👩🏽‍💻X' })).avatar).toBe('👩🏽‍💻X');
+  });
+
+  it('rejects an unknown Project', async () => {
+    const main = await started();
+
+    await expect(main.api.invoke('projects.edit', { id: 42, name: 'x' })).rejects.toThrow(/unknown Project 42/);
+  });
+
+  it('gives each new Project a colour no Project in use has yet', async () => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const a = await main.api.invoke('projects.link', { path: machine.gitRepo('a') });
+    await main.api.invoke('projects.edit', { id: a.id, color: 'orange' });
+
+    const b = await main.api.invoke('projects.link', { path: machine.gitRepo('b') });
+    const c = await main.api.invoke('projects.link', { path: machine.gitRepo('c') });
+
+    expect([b.color, c.color]).toEqual(['blue', 'aqua']);
+  });
+
+  it("gives a new Project a removed Project's colour only once every other is taken", async () => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const a = await main.api.invoke('projects.link', { path: machine.gitRepo('a') });
+    await main.api.invoke('projects.remove', { id: a.id });
+
+    expect((await main.api.invoke('projects.link', { path: machine.gitRepo('b') })).color).toBe('orange');
+  });
+
+  it('keeps its name and colour while removed, and brings them back on restore', async () => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const path = machine.gitRepo('loom');
+    const { id } = await main.api.invoke('projects.link', { path });
+    await main.api.invoke('projects.edit', { id, name: 'Loom app', color: 'green', avatar: 'LA' });
+
+    await main.api.invoke('projects.remove', { id });
+
+    expect(await main.api.invoke('projects.restorable', { path })).toMatchObject({ id, name: 'Loom app' });
+    expect((await waitFor(main.api, 'removedProjects', (r) => r.length === 1))[0]).toEqual({ id, name: 'Loom app', color: 'green' });
+    const restored = await main.api.invoke('projects.link', { path, restore: id });
+    expect(restored).toMatchObject({ id, name: 'Loom app', color: 'green', avatar: 'LA' });
+  });
+});
+
+describe('Projects from before they had a colour', () => {
+  it('keep the colour each had, by id, among the first three', async () => {
+    const machine = tempMachine();
+    const userDataDir = tempDir('loom-projects-');
+    // The migration before colours, avatars and default models came in.
+    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, COLOR_MIGRATION - 1) })).destroy();
+    const db = new Database(join(userDataDir, 'loom.db'));
+    for (const [i, name] of ['a', 'b', 'c', 'd'].entries()) {
+      db.prepare('insert into projects (id, name, branch_prefix, created_at) values (?, ?, ?, 0)').run(i + 1, name, 'loom');
+      db.prepare("insert into checkouts (project_id, environment_id, path) values (?, 'native', ?)").run(i + 1, machine.gitRepo(name));
+    }
+    db.close();
+
+    const main = await started(machine, userDataDir);
+
+    const projects = await main.api.invoke('projects.list');
+    expect(projects.map((p) => [p.name, p.color])).toEqual([['a', 'orange'], ['b', 'aqua'], ['c', 'blue'], ['d', 'orange']]);
+    expect(projects.every((p) => p.avatar === undefined && p.defaultModel === undefined)).toBe(true);
+  });
+});
+
+/** The migration that brought in Projects' colours, avatars and default models. */
+const COLOR_MIGRATION = 22;
