@@ -218,7 +218,7 @@ describe('moving a Panel', () => {
     expect(within(dock()!).getByRole('tabpanel', { name: 'Dock' }).textContent).toBe('No Panels here. Add one with +, or drag a tab here.');
     // Its + menu still offers every Panel.
     fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Highlights', 'Terminal']);
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
     expect(calls(main, 'terminals.open')).toHaveLength(2);
 
@@ -231,7 +231,7 @@ describe('moving a Panel', () => {
     // A new one opens beside them.
     toggleTerminal();
     fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Add a Panel to the Side area' }));
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Highlights', 'Terminal']);
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Terminal' }));
     await waitFor(() => expect(tabNames(sideArea())).toEqual(['Changes', 'Terminal 1', 'Terminal 2', 'Terminal 3']));
     expect(shownIn(sideArea())).toBe('Terminal 3');
@@ -301,7 +301,7 @@ describe('splitting an area', () => {
 
     // A new Terminal opens in the stack Terminals sit in; each stack's + menu offers every Panel.
     fireEvent.click(within(sideArea()!).getAllByRole('button', { name: 'Add a Panel to the Side area' }).at(-1)!);
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Highlights', 'Terminal']);
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Terminal' }));
     await waitFor(() => expect(tabsOf(sideArea(), 'Side area Panels, bottom')).toEqual(['Terminal 1', 'Terminal 2']));
 

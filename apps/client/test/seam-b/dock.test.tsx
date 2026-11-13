@@ -292,7 +292,7 @@ describe('the dock', () => {
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
     expect(main.value('panels', { sessionId: 7 }).dock).toEqual({ panels: ['terminal:1'], shown: 'terminal:1', open: true });
     fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
-    expect(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
+    expect(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Highlights', 'Terminal']);
   });
 
   it('brings a Panel of the Side area into it from its + menu, its kind kept there', async () => {

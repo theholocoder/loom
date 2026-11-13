@@ -146,11 +146,12 @@ describe('the Highlights Panel', () => {
     expect(panel().getByText(/Turn Session highlights on in Settings/)).toBeTruthy();
   });
 
-  it("is offered by the + menu only while it means something for the Session", () => {
-    renderApp({ s: { ...session, highlights: undefined }, shown: 'changes' });
+  it('is offered by the + menu even with Session highlights off, saying so once open', () => {
+    renderApp({ s: { ...session, highlights: undefined }, h: { highlights: [], seenThrough: 0, checking: false }, settings: { on: false }, shown: 'changes' });
     fireEvent.click(screen.getByRole('button', { name: 'Close Highlights' }));
     fireEvent.click(screen.getByRole('button', { name: /Add a Panel/ }));
-    expect(screen.queryByRole('menuitem', { name: /Highlights/ })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: /Highlights/ }));
+    expect(panel().getByText(/Turn Session highlights on in Settings/)).toBeTruthy();
   });
 });
 

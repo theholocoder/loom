@@ -113,8 +113,7 @@ export const PANELS: Record<PanelKind, PanelKindView> = {
     ...PANEL_SPECS.highlights,
     label: 'Highlights',
     icon: Sparkles,
-    // Session highlights on, or Highlights kept from when it was.
-    offered: (session) => !!session.highlights,
+    // Always: with Session highlights off, it says so and how to turn it on.
     badge: ({ highlights }) => (highlights?.unseen ? { text: String(highlights.unseen), description: `${highlights.unseen} new ${highlights.unseen === 1 ? 'highlight' : 'highlights'}` } : undefined),
   },
   terminal: { ...PANEL_SPECS.terminal, label: 'Terminal', icon: SquareTerminal, offered: (session) => canRunTerminals(session) },
