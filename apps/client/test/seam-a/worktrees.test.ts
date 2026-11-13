@@ -685,8 +685,9 @@ describe('archiving a worktree Session', () => {
     expect(remoteRefs(origin)).toBe(before);
 
     await main.api.invoke('sessions.unarchive', { id });
-    expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('half done\n');
-    expect(readFileSync(join(path, 'notes.txt'), 'utf8')).toBe('untracked\n');
+    // Checked out again, git may give them Windows line endings.
+    expect(readFileSync(join(path, 'README.md'), 'utf8').replace(/\r\n/g, '\n')).toBe('half done\n');
+    expect(readFileSync(join(path, 'notes.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('untracked\n');
   });
 
   it("won't commit the work of a worktree on no branch, where the commit would be lost, and archives nothing", async () => {
