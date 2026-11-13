@@ -142,7 +142,7 @@ describe("the Side area's Panels", () => {
       fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Add a Panel to the Side area' }));
       return screen.getByRole('menu', { name: 'Add a Panel to the Side area' });
     };
-    expect(within(add()).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes']);
+    expect(within(add()).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Changes' }));
     expect(screen.queryByRole('menu')).toBeNull();
     expect(tabNames()).toEqual(['Changes']);

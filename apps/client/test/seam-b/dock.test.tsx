@@ -285,14 +285,27 @@ describe('the dock', () => {
     expect(dock()!.style.height).toBe('333px');
   });
 
-  it("keeps each Session's Terminal tabs while Loom runs, and offers only a Terminal in its + menu", async () => {
+  it("keeps each Session's Terminal tabs while Loom runs, and offers every Panel in its + menu", async () => {
     const main = renderApp(fakeMain());
     openSession('Fix login');
     toggleTerminal();
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
     expect(main.value('panels', { sessionId: 7 }).dock).toEqual({ panels: ['terminal:1'], shown: 'terminal:1', open: true });
     fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
-    expect(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Terminal']);
+    expect(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
+  });
+
+  it('brings a Panel of the Side area into it from its + menu, its kind kept there', async () => {
+    const main = renderApp(fakeMain());
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getByRole('menuitem', { name: 'Changes' }));
+    expect(within(dock()!).getAllByRole('tab').map((t) => t.getAttribute('aria-label'))).toEqual(['Terminal 1', 'Changes']);
+    expect(within(dock()!).getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'changes', area: 'dock', stack: 'first' }]);
+    await waitFor(() => expect(main.value('panels', { sessionId: 7 }).dock).toEqual({ panels: ['terminal:1', 'changes'], shown: 'changes', open: true }));
   });
 
   it('says why when a terminal fails to open', async () => {

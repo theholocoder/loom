@@ -216,7 +216,10 @@ describe('moving a Panel', () => {
     // The Dock has nothing left: the header's toggle shows it empty, rather than start a Terminal there.
     fireEvent.click(within(screen.getByRole('region', { name: 'Session header' })).getByRole('button', { name: 'Show the Dock' }));
     expect(within(dock()!).getByRole('tabpanel', { name: 'Dock' }).textContent).toBe('No Panels here. Add one with +, or drag a tab here.');
-    expect(within(dock()!).queryByRole('button', { name: 'Add a Panel to the Dock' })).toBeNull();
+    // Its + menu still offers every Panel.
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
     expect(calls(main, 'terminals.open')).toHaveLength(2);
 
     // Ctrl+` goes to the Terminal shown in the Side area, then hides the area from it.
@@ -296,9 +299,9 @@ describe('splitting an area', () => {
     // Each stack shows its own: Changes still, beside the Terminal.
     expect(within(sideArea()!).getAllByRole('tab', { selected: true }).map((t) => t.getAttribute('aria-label'))).toEqual(['Changes', 'Terminal 1']);
 
-    // A new Terminal opens in the stack Terminals sit in, which alone offers it.
+    // A new Terminal opens in the stack Terminals sit in; each stack's + menu offers every Panel.
     fireEvent.click(within(sideArea()!).getAllByRole('button', { name: 'Add a Panel to the Side area' }).at(-1)!);
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Terminal']);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Terminal']);
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Terminal' }));
     await waitFor(() => expect(tabsOf(sideArea(), 'Side area Panels, bottom')).toEqual(['Terminal 1', 'Terminal 2']));
 

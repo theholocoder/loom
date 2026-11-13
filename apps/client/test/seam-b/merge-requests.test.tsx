@@ -277,7 +277,7 @@ describe("the Session's Merge request", () => {
     expect(calls(main, 'sessions.mergeRequest')).toEqual([]);
     // The + menu offers it only with one linked.
     fireEvent.click(screen.getByRole('button', { name: 'Add a Panel to the Side area' }));
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Changes']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Changes', 'Terminal']);
     cleanup();
 
     const off = new FakeMain({ projects: [{ ...gitlab, forge: { state: 'no-remote', checking: false } }], sessions: [session()] });

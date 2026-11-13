@@ -200,8 +200,14 @@ export interface PanelsControl {
   toggleArea(area: PanelAreaName): void;
   /** `d`: shows `panel`, or hides its area when that is what it shows; leaves Review mode when it is in it. */
   toggle(panel: PanelId): void;
-  /** Starts a Terminal in the Session and shows it in the Dock, with the focus in it. */
+  /** Starts a Terminal in the Session and shows it in the area Terminals sit in, with the focus in it. */
   newTerminal(): void;
+  /**
+   * The + menu of `to`: shows a Panel of `kind` there, a new one for a kind a
+   * Session has several of. A kind sitting elsewhere moves there first, with
+   * every Panel of it, as `place` does.
+   */
+  add(kind: PanelKind, to: PanelPlace): void;
   /**
    * Ctrl+`: shows the area Terminals sit in on a Terminal with the focus in
    * it (starting one when it has none), and hides that area when its
@@ -289,21 +295,22 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     if (unkept) save(current);
   }, [unkept]);
 
-  const show = (panel: PanelId) => {
+  // `layoutNow`: the Layout as just changed, before this render has it.
+  const show = (panel: PanelId, layoutNow = layout.value) => {
     if (reviewing.current === panel) return;
     // Another of the Side area's Panels brings the area back.
-    if (reviewing.current && (areaOf(latest.current, panel) ?? panelArea(layout.value, kindOf(panel))) === 'side') setReview(undefined);
-    const next = update((state) => showing(state, panel, layout.value));
+    if (reviewing.current && (areaOf(latest.current, panel) ?? panelArea(layoutNow, kindOf(panel))) === 'side') setReview(undefined);
+    const next = update((state) => showing(inLayout(state, layoutNow), panel, layoutNow));
     if (narrow && next && panelsIn(next.side).includes(panel)) setDrawerOpen(true);
   };
   /** Whether the Side area shows in `state`: beside the conversation, or as the open drawer. */
   const sideShownIn = (state: SessionPanels) => state.side.open && (!narrow || drawerOpen);
-  const newTerminal = async () => {
+  const newTerminal = async (layoutNow = layout.value) => {
     if (opening.current) return;
     opening.current = true;
     setError(undefined);
     // Shown at once, the terminal coming in once started, or why it couldn't.
-    const area = panelArea(layout.value, 'terminal');
+    const area = panelArea(layoutNow, 'terminal');
     if (!latest.current[area].open) update((state) => ({ ...state, [area]: { ...state[area], open: true } }));
     if (area === 'side') {
       setReview(undefined);
@@ -312,7 +319,7 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     try {
       const terminal = await api.invoke('terminals.open', { sessionId, ...START_SIZE });
       starting.current.add(terminal.id);
-      show(terminalPanel(terminal.id));
+      show(terminalPanel(terminal.id), layoutNow);
       setFocus(terminalPanel(terminal.id));
     } catch (e) {
       setError((e as Error).message);
@@ -353,6 +360,19 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
     // In a narrow window, the drawer opens on the Panel brought in, and closes on one taken out to the Dock, which it would cover.
     if (narrow && from.area !== to.area) setDrawerOpen(to.area === 'side');
     setMoved(panel);
+  }
+
+  /** See PanelsControl's `add`. */
+  function add(kind: PanelKind, to: PanelPlace) {
+    if (!loaded.current) return;
+    const open = PANELS[kind].several ? undefined : placeOf(latest.current, kind as PanelId);
+    // One open elsewhere moves here as its tab would.
+    if (open && !samePlace(open, to)) return place(kind as PanelId, to);
+    const next = samePlace(panelPlace(layout.value, kind), to) ? layout.value : layout.setPlace(kind, to);
+    // Panels of a kind brought from elsewhere (Terminals) come along at once.
+    if (next !== layout.value) update((state) => inLayout(state, next));
+    if (PANELS[kind].several) return void newTerminal(next);
+    show(kind as PanelId, next);
   }
 
   const sideShown = !review && sideShownIn(current);
@@ -407,6 +427,7 @@ export function usePanels(sessionId: number, terminals: TerminalInfo[] | undefin
       else show(panel);
     },
     newTerminal: () => void newTerminal(),
+    add,
     toggleTerminal: () => {
       const area = panelArea(layout.value, 'terminal');
       const state = latest.current[area];
@@ -527,16 +548,18 @@ interface PanelChoice {
   run: () => void;
 }
 
-/** What the + menu of `area`'s stack `stack` adds for `session`: each kind that sits there and it offers (each the area has, unsplit), a new Terminal for those a Session has several of. */
+/**
+ * What the + menu of `area`'s stack `stack` (the area, unsplit) adds for
+ * `session`: each kind it offers, wherever the kind sits, a new Terminal for
+ * those a Session has several of. One sitting elsewhere is brought there.
+ */
 function choicesFor(area: PanelAreaName, stack: PanelStack | undefined, session: Session, control: PanelsControl): PanelChoice[] {
-  return PANEL_KINDS.filter((kind) => {
+  return PANEL_KINDS.filter((kind) => PANELS[kind].offered?.(session) ?? true).map((kind) => {
     const place = control.placeFor(kind);
-    return place.area === area && (!stack || place.stack === stack) && (PANELS[kind].offered?.(session) ?? true);
-  }).map((kind) => ({
-    label: PANELS[kind].label,
-    icon: PANELS[kind].icon,
-    run: PANELS[kind].several ? control.newTerminal : () => control.show(kind as PanelId),
-  }));
+    // An unsplit area is one stack: a kind already in it stays in the stack it has.
+    const to: PanelPlace = place.area === area && (!stack || place.stack === stack) ? place : { area, stack: stack ?? 'first' };
+    return { label: PANELS[kind].label, icon: PANELS[kind].icon, run: () => control.add(kind, to) };
+  });
 }
 
 /**
