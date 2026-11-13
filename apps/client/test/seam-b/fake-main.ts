@@ -3,7 +3,7 @@
 import { ownLocale } from '../../src/shared/dates';
 import { DEFAULT_KEYBINDINGS, remap } from '../../src/shared/shortcuts';
 import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
-import { clampPanelSize, DEFAULT_SESSION_PANELS, inLayout, withoutTerminals, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
+import { clampPanelSize, DEFAULT_SESSION_PANELS, servedPanels, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
 import { clampInboxWidth } from '../../src/shared/window';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
@@ -278,10 +278,7 @@ export class FakeMain implements LoomApi {
     const value = (this.values.has(k) ? this.values.get(k) : EMPTY[topic]) as Topics[T];
     if (topic !== 'panels') return value;
     const running = new Set(this.value('terminals', ...(params as TopicArgs<'terminals'>)).map((t) => t.id));
-    return inLayout(
-      withoutTerminals(value as SessionPanels, (id) => !running.has(id)),
-      this.value('settings').layout,
-    ) as Topics[T];
+    return servedPanels(value as SessionPanels, this.value('settings').layout, (id) => !running.has(id)) as Topics[T];
   }
 
   /** Publishes a new value on `topic`, as main does when its state changes; the Panels it changes with it too. */

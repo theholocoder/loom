@@ -4,7 +4,7 @@
 // is served, and kept, in the area and stack its kind sits in, and a
 // Terminal's Panel goes once it ends. Terminals don't come back after a
 // restart, as they end when Loom quits.
-import { checkSessionPanels, DEFAULT_SESSION_PANELS, inLayout, sameSessionPanels, withoutTerminals, type LayoutSettings, type SessionPanels } from '../../shared/panels';
+import { checkSessionPanels, DEFAULT_SESSION_PANELS, sameSessionPanels, servedPanels, withoutTerminals, type LayoutSettings, type SessionPanels } from '../../shared/panels';
 import type { LoomDatabase } from '../storage/database';
 
 export interface PanelsOptions {
@@ -84,13 +84,11 @@ export class Panels {
 
   /** The Session's Terminals changed: the Panel of one that ended goes. */
   terminalsChanged(sessionId: number): void {
-    const state = this.states.get(sessionId);
-    if (state) this.states.set(sessionId, withoutTerminals(state, (id) => this.options.ended(id)));
     this.publish(sessionId);
   }
 
   private applied(panels: SessionPanels): SessionPanels {
-    return inLayout(withoutTerminals(panels, (id) => this.options.ended(id)), this.options.layout());
+    return servedPanels(panels, this.options.layout(), (id) => this.options.ended(id));
   }
 
   /** Gives the Session's listeners its Panels, when they changed from what they were last given. */

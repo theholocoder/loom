@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/main/storage/database';
 import { migrations } from '../../src/main/storage/migrations';
-import { DEFAULT_SESSION_PANELS, PANEL_MAX_SIZE, sameSessionPanels, type SessionPanels } from '../../src/shared/panels';
+import { DEFAULT_SESSION_PANELS, PANEL_MAX_SIZE, sameLayout, sameSessionPanels, type LayoutSettings, type SessionPanels } from '../../src/shared/panels';
 import type { EnvironmentStatus, Session } from '../../src/shared/api';
 import { DEFAULT_INBOX, INBOX_WIDTH } from '../../src/shared/window';
 import { startMain, tempDir, tempMachine, waitFor } from './harness';
@@ -266,6 +266,16 @@ describe('sameSessionPanels', () => {
     const { second: _, ...unsplit } = panels.side;
     expect(sameSessionPanels(panels, { ...panels, side: unsplit })).toBe(false);
     expect(sameSessionPanels(panels, { ...panels, side: { ...panels.side, second: { panels: ['highlights'], shown: null } } })).toBe(false);
+  });
+});
+
+describe('sameLayout', () => {
+  it('holds two alike whatever order their keys were built in, and tells apart any kind placed or sized otherwise', () => {
+    const layout: LayoutSettings = { area: { changes: 'dock', terminal: 'side' }, stack: { terminal: 'second' }, width: { changes: 600 }, height: {} };
+    expect(sameLayout(layout, { height: {}, width: { changes: 600 }, stack: { terminal: 'second' }, area: { terminal: 'side', changes: 'dock' } })).toBe(true);
+    expect(sameLayout(layout, { ...layout, area: { changes: 'dock' } })).toBe(false);
+    expect(sameLayout(layout, { ...layout, stack: {} })).toBe(false);
+    expect(sameLayout(layout, { ...layout, height: { issue: 200 } })).toBe(false);
   });
 });
 

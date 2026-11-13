@@ -278,8 +278,9 @@ export function checkSessionPanels(value: unknown): SessionPanels {
 }
 
 /**
- * `panels` without the Terminals that `ended` says have, every one without
- * it, as all end when Loom quits: an area left with none is hidden.
+ * `panels` without the Terminals that have ended, as `ended` tells; without
+ * it, without every Terminal, as they all end when Loom quits. An area left
+ * with none is hidden.
  */
 export function withoutTerminals(panels: SessionPanels, ended: (terminal: number) => boolean = () => true): SessionPanels {
   let next = panels;
@@ -303,7 +304,11 @@ function sameStack(a: PanelStackState, b: PanelStackState): boolean {
 
 /** Whether `a` and `b` are the same Layout, however their objects were built. */
 export function sameLayout(a: LayoutSettings, b: LayoutSettings): boolean {
-  return (['area', 'stack', ...PANEL_DIMENSIONS] as const).every((part) => PANEL_KINDS.every((kind) => a[part][kind] === b[part][kind]));
+  const parts = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof LayoutSettings)[]);
+  return [...parts].every((part) => {
+    const kinds = new Set([...Object.keys(a[part] ?? {}), ...Object.keys(b[part] ?? {})] as PanelKind[]);
+    return [...kinds].every((kind) => a[part]?.[kind] === b[part]?.[kind]);
+  });
 }
 
 /** The place `panel` is open in, if it is. */
@@ -347,6 +352,15 @@ export function withPanelAt(panels: SessionPanels, panel: PanelId, place: PanelP
   const list = [...stack.panels];
   list.splice(index === undefined ? list.length : Math.max(0, Math.min(index, list.length)), 0, panel);
   return { ...next, [place.area]: { ...withStack(area, place.stack, { panels: list, shown: shown ? panel : (stack.shown ?? panel) }), open: area.open || shown } };
+}
+
+/**
+ * `panels` as main serves and keeps them (ADR 0009): each Panel where its
+ * kind sits in `layout`, without the Terminals that have ended, as `ended`
+ * tells.
+ */
+export function servedPanels(panels: SessionPanels, layout: LayoutSettings, ended: (terminal: number) => boolean): SessionPanels {
+  return inLayout(withoutTerminals(panels, ended), layout);
 }
 
 /**
