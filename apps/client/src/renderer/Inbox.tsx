@@ -5,6 +5,7 @@
 import { AlarmClock, AlarmClockOff, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
+import { PROJECT_COLOR_NAMES } from '../shared/projects';
 import { useApi, useTopic } from './api';
 import { useNow } from './now';
 import { ProjectRemoved, useArchive, useRemovedProjectIds, WorktreeMissing } from './Archive';
@@ -29,7 +30,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
   const removed = useTopic('removedProjects');
   const removedIds = useRemovedProjectIds();
   // Projects by id, the removed ones too: their archived Sessions' cards still show their name.
-  const named = [...projects, ...(removed ?? []).map((p) => ({ ...unknownProject(p.id), name: p.name }))];
+  const named = [...projects, ...(removed ?? []).map((p) => ({ ...unknownProject(p.id), name: p.name, color: p.color }))];
   const waiting = sessions.filter(inInbox);
   const groups = groupByProject(waiting, named);
   const snoozed = [...sessions.filter(isSnoozed)].sort((a, b) => a.snoozedUntil! - b.snoozedUntil!);
@@ -138,7 +139,7 @@ function projectOf(id: number, projects: Project[]): Project {
 
 /** Stands in for a Project the projects topic hasn't reported yet. */
 function unknownProject(id: number): Project {
-  return { id, name: `Project ${id}`, branchPrefix: '', checkout: { environmentId: '', path: '' }, forge: { state: 'unknown', checking: false } };
+  return { id, name: `Project ${id}`, color: PROJECT_COLOR_NAMES[id % PROJECT_COLOR_NAMES.length]!, branchPrefix: '', checkout: { environmentId: '', path: '' }, forge: { state: 'unknown', checking: false } };
 }
 
 interface SessionCardProps {
@@ -214,7 +215,8 @@ function SessionCard({ session, project, showProject = false, projectRemoved = f
         {(showProject || issue || mergeRequest || branch) && (
           <div className="l2">
             {showProject && (
-              <span className="proj ellipsis" title="Project" style={{ color: projectColor(project) }}>
+              <span className="proj ellipsis" title="Project">
+                <span className="proj-dot" aria-hidden style={{ background: projectColor(project) }} />
                 {project.name}
               </span>
             )}

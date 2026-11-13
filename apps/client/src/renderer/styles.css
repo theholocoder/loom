@@ -363,7 +363,7 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 /* A card's second line: the Project (outside the Inbox), the issue and the
    Merge request keep their room; the branch gives way, with an ellipsis. */
 .B-item .l2 { min-width: 0; align-items: center; }
-.B-item .l2 .proj { font-weight: 600; font-size: 12px; white-space: nowrap; flex: 0 1 auto; max-width: 40%; }
+.B-item .l2 .proj { font-weight: 600; font-size: 12px; white-space: nowrap; flex: 0 1 auto; max-width: 40%; color: var(--text); }
 .B-item .l2 .ref, .B-item .l2 .chip { flex: none; }
 /* A Waiting Session the agent can't go on without (an Approval request, a question)
    stands out from a Finished one. */
@@ -860,3 +860,31 @@ input.toggle:disabled { cursor: not-allowed; }
 [data-density="compact"] .card-head { margin-bottom: 6px; }
 [data-density="compact"] .settings-sections { gap: 12px; }
 [data-density="compact"] .setting { padding: 8px 0; }
+
+/* The Projects page: a Project's avatar beside its name, and its Edit dialog. */
+.project-name { gap: 8px; font-weight: 600; }
+.project-actions { gap: 6px; flex-wrap: nowrap; }
+.project-edit { display: flex; flex-direction: column; gap: 6px; width: min(520px, calc(100vw - 32px)); }
+.project-field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12.5px; }
+.project-field > span { color: var(--muted); font-weight: 600; }
+.project-field input { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; color: var(--text); }
+.project-field input.project-avatar-input { width: 8ch; }
+.project-model { gap: 6px; flex-wrap: wrap; }
+.project-hint { font-size: 12px; }
+.project-model .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px; }
+
+/* Loom: each Project's colour (shared/projects.ts), the validated categorical
+   palette's eight slots in order, its dark or light step (the first three are
+   --p1 to --p3), and its -ink: white or near-black, whichever reads better on it. */
+[data-theme="midnight"], [data-theme="nord"], [data-theme="mocha"] {
+  --proj-blue:#3987e5; --proj-blue-ink:#0b0b0b; --proj-orange:#d95926; --proj-orange-ink:#0b0b0b;
+  --proj-aqua:#199e70; --proj-aqua-ink:#0b0b0b; --proj-yellow:#c98500; --proj-yellow-ink:#0b0b0b;
+  --proj-magenta:#d55181; --proj-magenta-ink:#0b0b0b; --proj-green:#008300; --proj-green-ink:#ffffff;
+  --proj-violet:#9085e9; --proj-violet-ink:#0b0b0b; --proj-red:#e66767; --proj-red-ink:#0b0b0b; }
+[data-theme="paper"], [data-theme="daylight"] {
+  --proj-blue:#2a78d6; --proj-blue-ink:#0b0b0b; --proj-orange:#eb6834; --proj-orange-ink:#0b0b0b;
+  --proj-aqua:#1baf7a; --proj-aqua-ink:#0b0b0b; --proj-yellow:#eda100; --proj-yellow-ink:#0b0b0b;
+  --proj-magenta:#e87ba4; --proj-magenta-ink:#0b0b0b; --proj-green:#008300; --proj-green-ink:#ffffff;
+  --proj-violet:#6250d6; --proj-violet-ink:#ffffff; --proj-red:#e34948; --proj-red-ink:#0b0b0b; }
+/* Loom: a dot beside a Project's name, in its colour. */
+.proj-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; flex: none; }

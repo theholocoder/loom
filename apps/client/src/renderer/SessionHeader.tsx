@@ -122,7 +122,8 @@ export function SessionHeader({
     ],
     ...menu.sections(),
   ];
-  const projectName = project?.name ?? removedProject?.name;
+  // A removed Project keeps its name and colour in the header.
+  const shownProject = project ?? removedProject;
 
   return (
     <>
@@ -141,9 +142,10 @@ export function SessionHeader({
               {session.title}
             </button>
           </h1>
-          {projectName && (
-            <span className="proj-tag" title="Project" style={project ? { color: projectColor(project), background: `color-mix(in srgb, ${projectColor(project)} 16%, transparent)` } : undefined}>
-              {projectName}
+          {shownProject && (
+            <span className="proj-tag" title="Project" style={{ background: `color-mix(in srgb, ${projectColor(shownProject)} 16%, transparent)` }}>
+              <span className="proj-dot" aria-hidden style={{ background: projectColor(shownProject) }} />
+              {shownProject.name}
             </span>
           )}
           {removedProject && <ProjectRemoved />}

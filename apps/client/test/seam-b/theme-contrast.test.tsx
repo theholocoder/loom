@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ACCENTS, accentColours, THEMES, type Accent, type Theme } from '../../src/shared/appearance';
+import { PROJECT_COLOR_NAMES } from '../../src/shared/projects';
 
 // Every theme's text stays readable: WCAG AA asks for 4.5:1 between normal
 // text and what it sits on. The tokens are read from styles.css itself.
@@ -61,5 +62,29 @@ describe.each((Object.keys(ACCENTS) as Accent[]).filter((accent) => accent !== '
     const low = SURFACES.filter((bg) => contrast(colours.accent, colour(bg)) < 4.5).map((bg) => `on ${bg}: ${contrast(colours.accent, colour(bg)).toFixed(2)}`);
     expect(low).toEqual([]);
     expect(contrast(colours.accentText, colours.accent)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+/** A theme's colour tokens from every rule naming it, alone or among others, as the cascade merges them. */
+function allTokens(theme: string): Map<string, string> {
+  const colours = new Map<string, string>();
+  for (const [, selectors, body] of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+    if (!selectors!.split(',').some((s) => s.trim() === `[data-theme="${theme}"]`)) continue;
+    for (const m of body!.matchAll(/--([\w-]+):\s*(#[0-9a-f]{3,8})/gi)) colours.set(m[1]!, m[2]!);
+  }
+  return colours;
+}
+
+describe.each(Object.keys(THEMES))("Projects' colours in the %s theme", (theme) => {
+  const colours = allTokens(theme);
+
+  it.each(PROJECT_COLOR_NAMES)('labels %s in whichever of white or near-black reads better on it', (color) => {
+    const fill = colours.get(`proj-${color}`);
+    const ink = colours.get(`proj-${color}-ink`);
+    expect(fill).toBeDefined();
+    expect(ink).toBeDefined();
+    const other = ink === '#ffffff' ? '#0b0b0b' : '#ffffff';
+    expect(contrast(ink!, fill!)).toBeGreaterThanOrEqual(contrast(other, fill!));
+    expect(contrast(ink!, fill!)).toBeGreaterThanOrEqual(3.9);
   });
 });

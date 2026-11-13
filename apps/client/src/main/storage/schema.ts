@@ -12,6 +12,14 @@ export interface ProjectsTable {
   id: Generated<number>;
   name: string;
   branch_prefix: string;
+  /** Its colour, a key of PROJECT_COLORS. */
+  color: Generated<string>;
+  /** What its avatar shows, set by the user; null for its initials. */
+  avatar: string | null;
+  /** The model a new Session in it starts on, `provider/model`; null for the agent's own. */
+  default_model: string | null;
+  /** The Effort level a new Session starts on with `default_model`; null for the model's own. */
+  default_effort: string | null;
   /** Whether the agent may trust the checkout's local files, as the user said once: 1 or 0, null until asked. */
   trusted: number | null;
   /** Clock time the Project was added. */

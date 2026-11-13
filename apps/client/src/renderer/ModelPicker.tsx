@@ -101,6 +101,11 @@ export function effortsOf(listed: Loaded<ModelChoice[]>, model: string | undefin
   return listedModels(listed)?.find((m) => m.id === model)?.efforts ?? [];
 }
 
+/** `effort` if the model takes it, or while the models aren't listed to say; else none, for the model's own default. */
+export function effortTaken(listed: Loaded<ModelChoice[]>, model: string | undefined, effort: string | undefined): string | undefined {
+  return effort !== undefined && (!listedModels(listed) || effortsOf(listed, model).includes(effort)) ? effort : undefined;
+}
+
 const tokens = new Intl.NumberFormat('en');
 
 /** How much of its context window the agent has used, as a whole percentage. */

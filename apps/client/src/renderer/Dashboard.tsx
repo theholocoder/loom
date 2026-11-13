@@ -6,9 +6,7 @@ import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type Session
 import { useApi, useTopic } from './api';
 import { RemovedTag } from './Archive';
 import { ModelName } from './ModelPicker';
-
-/** Series colours, the prototype's categorical slots, in order. */
-const SERIES = ['var(--p1)', 'var(--p2)', 'var(--p3)', 'var(--accent)', 'var(--wait)', 'var(--work)'];
+import { projectColor } from './ProjectAvatar';
 
 const OUTCOME_LABEL: Record<SessionOutcome, string> = { merged: 'Merged', closed: 'Closed', archived: 'Archived', open: 'Open' };
 
@@ -34,10 +32,10 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
     };
   }, [api, days, changed]);
 
-  // Projects coloured by their place in the per-Project chart, the same in every chart.
+  // Each Project in its own colour, as everywhere else: a removed one in the colour it had.
   const colorOf = (projectId: number) => {
-    const at = data?.perProject.findIndex((p) => p.projectId === projectId) ?? -1;
-    return SERIES[(at < 0 ? 0 : at) % SERIES.length]!;
+    const color = data?.perProject.find((p) => p.projectId === projectId)?.color ?? projects.find((p) => p.id === projectId)?.color;
+    return color ? projectColor({ color }) : 'var(--muted)';
   };
   const shown = data?.days === days ? data : undefined;
 

@@ -3,6 +3,7 @@
 // Sessions' facts. Usage is kept indefinitely; nothing here deletes any.
 import type { Kysely, Transaction } from 'kysely';
 import { TOP_SESSIONS, totalTokens, USAGE_RANGES, type MergeRequestState, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
+import { projectColorOf } from '../../shared/projects';
 import type { Schema, SessionSpansTable } from '../storage/schema';
 
 /** One turn's usage, as the Session service records it. */
@@ -90,15 +91,20 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   const from = dayList[0]!;
   const to = dayList.at(-1)!;
 
-  const [sessionBuckets, highlightBuckets, sessions, spans, removedRows] = await Promise.all([
+  const [sessionBuckets, highlightBuckets, sessions, spans, projectRows] = await Promise.all([
     db.selectFrom('usage_buckets').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('highlight_usage').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('sessions').selectAll().execute(),
     db.selectFrom('session_spans').selectAll().where('ended_at', '>=', since).where('ended_at', '<=', now).execute(),
-    db.selectFrom('projects').select('id').where('removed_at', 'is not', null).execute(),
+    db.selectFrom('projects').select(['id', 'name', 'color', 'removed_at']).execute(),
   ]);
-  const removed = new Set(removedRows.map((r) => r.id));
-  const removedFlag = (projectId: number) => (removed.has(projectId) ? (true as const) : undefined);
+  // Every Project by id, removed ones too: removing a Project keeps its row.
+  const projectsById = new Map(projectRows.map((r) => [r.id, r]));
+  const removedFlag = (projectId: number) => (projectsById.get(projectId)?.removed_at != null ? (true as const) : undefined);
+  /** A Project's name: its own, renamed or not, or else as its usage last recorded it. */
+  const projectName = (projectId: number) => projectsById.get(projectId)?.name ?? projectNames.get(projectId)!.name;
+  /** A Project's colour; one with no row takes the first. */
+  const projectColor = (projectId: number) => projectColorOf(projectsById.get(projectId)?.color);
 
   const mix: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   let reportedCost = 0;
@@ -161,7 +167,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
         // Only a deleted Session has no row: its usage still counts.
         title: row?.title ?? 'Deleted Session',
         projectId: usage.projectId,
-        project: projectNames.get(usage.projectId)!.name,
+        project: projectName(usage.projectId),
         projectRemoved: removedFlag(usage.projectId),
         issue: row ? linkOf(row.issue_number, row.issue_url) : undefined,
         mergeRequest: row ? linkOf(row.merge_request_number, row.merge_request_url) : undefined,
@@ -183,7 +189,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     mergeRequestsMerged: sessions.filter((s) => s.merge_request_state === 'merged' && s.archived_at !== null && s.archived_at >= since && s.archived_at <= now).length,
     medianRunMs: median(runs.map((s) => s.ended_at - s.started_at)),
     medianWaitMs: median(waits.map((s) => s.ended_at - s.started_at)),
-    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => withoutUndefined({ projectId, project: projectNames.get(projectId)!.name, tokens, removed: removedFlag(projectId) })),
+    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => withoutUndefined({ projectId, project: projectName(projectId), color: projectColor(projectId), tokens, removed: removedFlag(projectId) })),
     perModel: byTokens(perModel).map(({ key: model, tokens }) => withoutUndefined({ model, name: modelNames.get(model)?.name, tokens })),
     mix,
     cacheHitRate: prompt > 0 ? mix.cacheRead / prompt : undefined,
