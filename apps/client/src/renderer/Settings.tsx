@@ -36,9 +36,10 @@ interface SettingsSection {
   Body?: ComponentType;
 }
 
-// The prototype has no Settings page; it uses the layout of its other full
-// page, the Dashboard, a .dash page of cards, with a list of the sections
-// beside them to go to one, and a search over every setting.
+// The prototype has no Settings page. Its sections are pages: a list of them
+// beside, under a search over every setting, goes to one. Only the page
+// scrolls, so the list and the search stay in sight; the search shows what it
+// finds in every section, on one page.
 /** Checks each Environment's agent again on mount, so what a page shows of them is current. */
 export function useAgentCheck() {
   const api = useApi();
@@ -52,40 +53,28 @@ export function Settings() {
   useAgentCheck();
   const [query, setQuery] = useState('');
   const shown = useMemo(() => matching(SECTIONS, query), [query]);
+  const searching = query.trim() !== '';
   const page = useRef<HTMLDivElement>(null);
   const [current, setCurrent] = useState(SECTIONS[0]!.id);
-  const active = shown.some(({ section }) => section.id === current) ? current : shown[0]?.section.id;
+  const [goneTo, setGoneTo] = useState<string>();
+  const onPage = searching ? shown : shown.filter(({ section }) => section.id === current);
 
-  // A section gone to stays current while it is in sight, though near the bottom the page can't bring it to the top.
-  const goneTo = useRef<string>(undefined);
+  // A page gone to takes the focus.
+  useEffect(() => {
+    if (!goneTo) return;
+    document.getElementById(anchorOf(goneTo))?.focus({ preventScroll: true });
+    setGoneTo(undefined);
+  }, [goneTo]);
   const go = (event: MouseEvent, id: string) => {
     event.preventDefault();
-    const section = document.getElementById(anchorOf(id));
-    goneTo.current = id;
-    section?.scrollIntoView?.({ block: 'start' });
-    section?.focus({ preventScroll: true });
+    setQuery('');
     setCurrent(id);
+    setGoneTo(id);
   };
-  // Otherwise the section current in the list is the last whose top has scrolled up to the page's, or the last one once at the bottom.
-  const followScroll = () => {
-    const element = page.current;
-    if (!element || shown.length === 0) return;
-    const { top, bottom } = element.getBoundingClientRect();
-    const sought = goneTo.current && document.getElementById(anchorOf(goneTo.current))?.getBoundingClientRect();
-    if (sought && sought.top >= top - SECTION_TOP_SLACK && sought.top < bottom) return;
-    goneTo.current = undefined;
-    let at = shown[0]!.section.id;
-    for (const { section } of shown) {
-      const head = document.getElementById(anchorOf(section.id));
-      if (head && head.getBoundingClientRect().top - top <= SECTION_TOP_SLACK) at = section.id;
-    }
-    if (element.scrollTop + element.clientHeight >= element.scrollHeight - 2) at = shown[shown.length - 1]!.section.id;
-    setCurrent(at);
-  };
-  // What the search finds starts at the top of the page.
+  // A page, or what the search finds, starts at its top.
   useEffect(() => {
     if (page.current) page.current.scrollTop = 0;
-  }, [query]);
+  }, [query, current]);
   const clearOnEscape = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || !query) return;
     event.stopPropagation();
@@ -93,31 +82,31 @@ export function Settings() {
   };
 
   return (
-    <div className="dash settings" ref={page} onScroll={followScroll}>
+    <div className="settings">
       <div className="settings-layout">
-        <div className="settings-head">
+        <aside className="settings-side">
           <h1>Settings</h1>
           <label className="settings-search">
             <Search className="sm" />
             <input type="search" aria-label="Search settings" placeholder="Search settings" value={query} spellCheck={false} onChange={(event) => setQuery(event.target.value)} onKeyDown={clearOnEscape} />
           </label>
-        </div>
-        <nav className="settings-nav" aria-label="Settings sections">
-          {shown.map(({ section: { id, title, icon: Icon } }) => (
-            <a key={id} href={`#${anchorOf(id)}`} aria-current={id === active ? 'true' : undefined} onClick={(event) => go(event, id)}>
-              <Icon className="sm" />
-              {title}
-            </a>
-          ))}
-        </nav>
-        <div className="settings-sections">
-          {shown.length === 0 ? (
+          <nav className="settings-nav" aria-label="Settings sections">
+            {shown.map(({ section: { id, title, icon: Icon } }) => (
+              <a key={id} href={`#${anchorOf(id)}`} aria-current={!searching && id === current ? 'page' : undefined} onClick={(event) => go(event, id)}>
+                <Icon className="sm" />
+                {title}
+              </a>
+            ))}
+          </nav>
+        </aside>
+        <div className="settings-sections" ref={page}>
+          {onPage.length === 0 ? (
             <div className="empty">
               <SearchX className="sm" />
               No setting matches “{query.trim()}”.
             </div>
           ) : (
-            shown.map(({ section, settings }) => <Section key={section.id} section={section} settings={settings} />)
+            onPage.map(({ section, settings }) => <Section key={section.id} section={section} settings={settings} />)
           )}
         </div>
       </div>
@@ -126,9 +115,6 @@ export function Settings() {
 }
 
 const anchorOf = (id: string) => `settings-${id}`;
-
-/** How far below the page's top, in pixels, a section's top may be and still count as at the top. */
-const SECTION_TOP_SLACK = 40;
 
 function Section({ section: { id, title, icon: Icon, description, Body }, settings }: { section: SettingsSection; settings: SettingEntry[] }) {
   return (

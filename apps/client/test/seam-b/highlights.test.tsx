@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type DiffSummary, type Highlight, type HighlightsSettings, type Project, type Session, type SessionHighlights, type TranscriptItem } from '../../src/shared/api';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 type Handlers = NonNullable<ConstructorParameters<typeof FakeMain>[1]>;
@@ -164,6 +165,7 @@ describe('the Session highlights setting', () => {
       </ApiProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Sessions');
     const box = screen.getByRole('checkbox', { name: 'Note highlights after each turn' }) as HTMLInputElement;
     expect(box.disabled).toBe(true);
 

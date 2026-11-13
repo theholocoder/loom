@@ -7,6 +7,7 @@ import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session } from '../../src/shared/api';
 import type { KeybindingSettings } from '../../src/shared/shortcuts';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -49,7 +50,10 @@ const press = (key: string, more: { ctrlKey?: boolean; shiftKey?: boolean; altKe
   fireEvent.keyDown(target, { key, ...more });
 const calls = (main: FakeMain, command: string) => main.invoked.filter((i) => i.command === command).map((i) => i.params);
 const openSessionTitle = () => within(screen.getByRole('region', { name: 'Session header' })).getByRole('heading').textContent;
-const openSettings = () => fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+const openSettings = () => {
+  fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+  settingsPage('Keybindings');
+};
 const closeSettings = () => fireEvent.click(screen.getByRole('button', { name: 'Close Settings' }));
 const keybindings = () => screen.getByRole('region', { name: 'Keybindings' });
 /** The keys a setting's row shows for its action, or None. */

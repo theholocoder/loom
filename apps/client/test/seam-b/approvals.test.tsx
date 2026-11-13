@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session, type TranscriptItem } from '../../src/shared/api';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -134,6 +135,7 @@ describe('Approval requests', () => {
       </ApiProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Approvals');
     const toggle = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
     expect(toggle('sudo and global installs').textContent).toContain('Ask');
     expect(toggle('MCP and extension tools').textContent).toContain('Allow');
@@ -153,6 +155,7 @@ describe('Approval requests', () => {
       </ApiProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Approvals');
     const picker = () => screen.getByRole('button', { name: 'Default Approval mode' });
     expect(picker().textContent).toContain('Supervised');
     await act(async () => fireEvent.click(picker()));

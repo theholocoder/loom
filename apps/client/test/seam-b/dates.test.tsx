@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session, type Settings } from '../../src/shared/api';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 // Wednesday 2026-11-11, 10:42 local time.
@@ -127,6 +128,7 @@ describe('the date settings', () => {
   };
   const openSettings = (main: FakeMain) => {
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Dates and times');
     return main;
   };
 

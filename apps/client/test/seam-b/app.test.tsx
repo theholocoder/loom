@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { AgentStatus, EnvironmentStatus, ForgeStatus, Project } from '../../src/shared/api';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -55,6 +56,7 @@ describe('Settings', () => {
     renderApp(new FakeMain({ environments: [connectedNative] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Environments');
 
     const row = screen.getByRole('row', { name: /Native/ });
     expect(within(row).getByText('connected')).toBeTruthy();
@@ -64,6 +66,7 @@ describe('Settings', () => {
   it('follows the Environment as main reports changes', () => {
     const main = renderApp(new FakeMain({ environments: [{ id: 'native', label: 'Native', state: 'starting' }] }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Environments');
     const row = () => screen.getByRole('row', { name: /Native/ });
     expect(within(row()).getByText('starting')).toBeTruthy();
 
@@ -80,6 +83,7 @@ describe('Settings: worktrees', () => {
   const openSettings = (main: FakeMain) => {
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Worktrees');
     return screen.getByRole('textbox', { name: 'Worktree root' }) as HTMLInputElement;
   };
 
@@ -122,6 +126,7 @@ describe('Settings: the agent in each Environment', () => {
   function openSettings(environment: EnvironmentStatus) {
     const main = renderApp(new FakeMain({ environments: [environment] }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Environments');
     return { main, row: screen.getByRole('row', { name: /Native/ }) };
   }
 
@@ -595,6 +600,7 @@ describe('Settings: editor and terminal', () => {
   const field = (main: FakeMain, name: string) => {
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Editor and terminal');
     return screen.getByRole('textbox', { name }) as HTMLInputElement;
   };
 
@@ -632,6 +638,7 @@ describe('Settings: stuck Sessions', () => {
   const field = (main: FakeMain) => {
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Sessions');
     return screen.getByRole('textbox', { name: 'Stuck after (minutes)' }) as HTMLInputElement;
   };
 
@@ -676,23 +683,39 @@ describe('Settings: sections, search and feedback', () => {
   /** The setting row holding the named control. */
   const rowOf = (control: HTMLElement) => control.closest('.setting') as HTMLElement;
 
-  it('groups the settings in sections, listed beside them, the first one current', () => {
+  const currentPage = () => sections().filter((link) => link.getAttribute('aria-current') === 'page').map((link) => link.textContent);
+  const pageHeadings = () => within(screen.getByRole('dialog', { name: 'Settings' })).getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+
+  it('gives each section a page of its own, listed beside it, the first one shown', () => {
     openSettings();
 
     expect(sectionNames()).toEqual(['Appearance', 'Dates and times', 'Sessions', 'Notifications', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Keybindings', 'Environments']);
-    expect(within(screen.getByRole('dialog', { name: 'Settings' })).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(sectionNames());
-    expect(sections().filter((link) => link.getAttribute('aria-current') === 'true').map((link) => link.textContent)).toEqual(['Appearance']);
-    const worktrees = screen.getByRole('region', { name: 'Worktrees' });
-    expect(within(worktrees).getByRole('textbox', { name: 'Worktree root' })).toBeTruthy();
+    expect(pageHeadings()).toEqual(['Appearance']);
+    expect(currentPage()).toEqual(['Appearance']);
+    expect(screen.queryByRole('textbox', { name: 'Worktree root' })).toBeNull();
   });
 
-  it('goes to the section picked in the list', () => {
+  it('goes to the page picked in the list', () => {
     openSettings();
 
     fireEvent.click(sections().find((link) => link.textContent === 'Editor and terminal')!);
 
     expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Editor and terminal' }));
-    expect(sections().filter((link) => link.getAttribute('aria-current') === 'true').map((link) => link.textContent)).toEqual(['Editor and terminal']);
+    expect(pageHeadings()).toEqual(['Editor and terminal']);
+    expect(currentPage()).toEqual(['Editor and terminal']);
+  });
+
+  it('shows what the search finds in every section on one page, and a section picked then shows all of it', () => {
+    openSettings();
+
+    search('terminal');
+    expect(pageHeadings()).toEqual(['Appearance', 'Editor and terminal', 'Keybindings']);
+    expect(currentPage()).toEqual([]);
+
+    fireEvent.click(sections().find((link) => link.textContent === 'Appearance')!);
+    expect((screen.getByRole('searchbox', { name: 'Search settings' }) as HTMLInputElement).value).toBe('');
+    expect(pageHeadings()).toEqual(['Appearance']);
+    expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeTruthy();
   });
 
   it('finds a setting by its name or what it does, keeping only its section, and clears on Escape', () => {
@@ -728,6 +751,7 @@ describe('Settings: sections, search and feedback', () => {
 
   it('says Saved once main kept a change', async () => {
     openSettings();
+    settingsPage('Editor and terminal');
     const input = screen.getByRole('textbox', { name: 'Editor command' }) as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: 'zed' } });
@@ -741,10 +765,11 @@ describe('Settings: sections, search and feedback', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'UI font' }));
     fireEvent.click(within(screen.getByRole('listbox', { name: 'UI font' })).getByRole('option', { name: 'Figtree' }));
+    await waitFor(() => expect(within(rowOf(screen.getByRole('button', { name: 'UI font' }))).getByRole('status').textContent).toBe('Saved'));
+
+    settingsPage('Sessions');
     const box = screen.getByRole('checkbox', { name: 'Auto-prompt new Sessions' });
     fireEvent.click(box);
-
-    await waitFor(() => expect(within(rowOf(screen.getByRole('button', { name: 'UI font' }))).getByRole('status').textContent).toBe('Saved'));
     await waitFor(() => expect(within(rowOf(box)).getByRole('status').textContent).toBe('Saved'));
   });
 
@@ -757,6 +782,7 @@ describe('Settings: sections, search and feedback', () => {
         },
       }),
     );
+    settingsPage('Sessions');
     const input = screen.getByRole('textbox', { name: 'Stuck after (minutes)' }) as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: '0' } });
@@ -779,6 +805,7 @@ describe('Settings: sections, search and feedback', () => {
 
   it('shows the patterns collapsed in the diff one a line, all of them, and saves them', async () => {
     const main = openSettings();
+    settingsPage('Changes');
     const field = screen.getByRole('textbox', { name: 'Collapsed in the diff' }) as HTMLTextAreaElement;
     expect(field.tagName).toBe('TEXTAREA');
     expect(field.value.split('\n')).toEqual(main.value('settings').diffCollapsedPatterns);
@@ -791,6 +818,7 @@ describe('Settings: sections, search and feedback', () => {
 
   it("gives the terminal command an example for the Environment's system", () => {
     openSettings(new FakeMain({ environments: [{ ...connectedNative, bridge: { ...connectedNative.bridge!, os: 'windows' } }] }));
+    settingsPage('Editor and terminal');
 
     expect(screen.getByRole('textbox', { name: 'Terminal command' }).getAttribute('placeholder')).toBe('For example: wt -d {path}');
   });

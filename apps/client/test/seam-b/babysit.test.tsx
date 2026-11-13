@@ -4,6 +4,7 @@ import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { DiffSummary, Project, Session, TranscriptItem } from '../../src/shared/api';
 import { Dates, ownLocale } from '../../src/shared/dates';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -304,6 +305,7 @@ describe('the auto-prompt default in Settings', () => {
       </ApiProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Sessions');
     const box = screen.getByRole('checkbox', { name: 'Auto-prompt new Sessions' }) as HTMLInputElement;
     expect(box.checked).toBe(false);
 

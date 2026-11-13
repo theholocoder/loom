@@ -757,20 +757,25 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 ::-webkit-scrollbar-thumb:active { background-color: var(--muted); }
 ::-webkit-scrollbar-button { display: none; }
 
-/* Settings: its sections as cards, the list of them beside to go to one, and
-   a search over every setting at the top. Each setting is one row: its name
-   and what it does, then its control, or under them for a wide one. */
-.settings { container-type: inline-size; }
-.settings-layout { display: grid; grid-template-columns: 180px minmax(0, 780px); column-gap: 24px; align-items: start; }
-.settings-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
-.settings-search { display: flex; align-items: center; gap: 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; width: min(340px, 100%); color: var(--muted); }
+/* Settings: a page per section, as a card, the list of them beside under the
+   title and a search over every setting. Only the page scrolls, its card's
+   head staying at its top. Each setting is one row: its name and what it does,
+   then its control, or under them for a wide one. */
+.settings { container-type: size; min-height: 0; height: 100%; }
+.settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); height: 100%; }
+.settings-side { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; padding: 20px 12px 20px 20px; border-right: 1px solid var(--line); }
+.settings-side h1 { font-size: 20px; margin: 0 0 2px 6px; }
+.settings-search { display: flex; align-items: center; gap: 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; color: var(--muted); }
 .settings-search:focus-within { border-color: var(--accent); }
 .settings-search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; color: var(--text); }
-.settings-nav { position: sticky; top: 0; display: flex; flex-direction: column; gap: 2px; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; }
 .settings-nav a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; }
 .settings-nav a:hover { background: var(--hover); color: var(--text); }
-.settings-nav a[aria-current="true"] { background: var(--panel2); color: var(--text); }
-.settings-sections { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.settings-nav a[aria-current="page"] { background: var(--panel2); color: var(--text); }
+/* The page leaves the close button its corner. */
+.settings-sections { display: flex; flex-direction: column; gap: 18px; min-width: 0; min-height: 0; overflow: auto; padding: 20px 64px 90px 28px; }
+.settings-sections > * { width: 100%; max-width: 780px; }
+.settings-section .card-head { position: sticky; top: -20px; z-index: 1; background: var(--panel); margin: -14px 0 10px; padding: 14px 0 6px; border-radius: 12px 12px 0 0; }
 .settings-section { padding-bottom: 4px; }
 .settings-section:focus { outline: none; }
 .settings-section .card-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
@@ -802,8 +807,10 @@ input.toggle:disabled { cursor: not-allowed; }
 .table-scroll { overflow-x: auto; }
 /* In a narrow page the list of sections goes above them, wrapped. */
 @container (max-width: 640px) {
-  .settings-layout { grid-template-columns: minmax(0, 1fr); }
-  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; margin-bottom: 14px; }
+  .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-side { border-right: 0; border-bottom: 1px solid var(--line); padding: 16px 56px 12px 20px; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; }
+  .settings-sections { padding: 16px 20px 90px; }
   .setting { grid-template-columns: minmax(0, 1fr); }
   .setting-control, .setting-form { align-items: flex-start; }
   .setting-control .err { text-align: left; }
@@ -820,7 +827,8 @@ input.toggle:disabled { cursor: not-allowed; }
 .page-window > .dash { flex: 1; min-height: 0; }
 .page-window-close { position: absolute; top: 16px; right: 18px; z-index: 2; }
 /* Each page's first row leaves the close button its corner. */
-.page-window > .dash > .row:first-child, .page-window .settings-head { padding-right: 40px; }
+.page-window > .dash > .row:first-child { padding-right: 40px; }
+.page-window > .settings { flex: 1; min-height: 0; }
 /* The main pane's wrapper, inert under a Page, leaves its panes in the window's grid. */
 .main-pane { display: contents; }
 

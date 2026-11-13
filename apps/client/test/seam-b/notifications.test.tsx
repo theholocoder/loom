@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { Project, Session } from '../../src/shared/api';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -38,6 +39,7 @@ describe('notifications in Settings', () => {
     const main = new FakeMain({ projects: [project] });
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Notifications');
 
     const names = ['When a Session finishes', 'When the agent asks a question', 'When the agent asks for approval', 'When a Merge request has new feedback', 'When a Session is stuck'];
     const boxes = names.map((name) => screen.getByRole('checkbox', { name }) as HTMLInputElement);
