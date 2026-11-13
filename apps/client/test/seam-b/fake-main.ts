@@ -1,5 +1,6 @@
 // Seam B: a fake main implementing the same typed API the real one does, so
 // renderer tests control exactly what main reports.
+import { ownLocale } from '../../src/shared/dates';
 import { DEFAULT_KEYBINDINGS, remap } from '../../src/shared/shortcuts';
 import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
 import { clampPanelSize, DEFAULT_SESSION_PANELS, type SessionPanels } from '../../src/shared/panels';
@@ -137,6 +138,13 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setDateFormat': (dates) => {
+        const settings = { ...this.value('settings'), ...dates };
+        this.publish('settings', settings);
+        return settings;
+      },
+      // The runner's own regional format, as the renderer takes it before main says.
+      'settings.systemLocale': ownLocale,
       'settings.setHighlights': (highlights) => {
         if (highlights.on && !highlights.model) throw new Error('Pick the model that checks Sessions for highlights before turning it on.');
         const settings = { ...this.value('settings'), highlights };

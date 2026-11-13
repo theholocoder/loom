@@ -3,6 +3,7 @@
 // also the seam tests drive main through (seam A) and fake for the renderer
 // (seam B), so everything the UI can see or do goes through here.
 import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
+import { DEFAULT_DATE_SETTINGS, type DateSettings } from './dates';
 import { DEFAULT_LAYOUT, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type SessionPanels } from './panels';
 import type { ProjectColor } from './projects';
 import { DEFAULT_KEYBINDINGS, type KeybindingSettings, type Shortcut, type ShortcutName } from './shortcuts';
@@ -972,7 +973,7 @@ export interface FileDiff {
 }
 
 /** Loom's own settings, the same for every Project. */
-export interface Settings extends Appearance {
+export interface Settings extends Appearance, DateSettings {
   /**
    * Where new worktrees go, as `<root>/<project>/<session>`, the Session's
    * folder named after its branch without the prefix. A leading `~` is the
@@ -1122,6 +1123,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifications: DEFAULT_NOTIFICATIONS,
   keybindings: DEFAULT_KEYBINDINGS,
   ...DEFAULT_APPEARANCE,
+  ...DEFAULT_DATE_SETTINGS,
 };
 
 export type ToolStatus = 'running' | 'completed' | 'failed';
@@ -1579,6 +1581,10 @@ export interface Commands {
   'settings.resetKeybindings': { params: void; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
+  /** Sets the regional format dates and times follow, or their clock, or both. Rejects one not in Loom's lists, setting neither. */
+  'settings.setDateFormat': { params: Partial<DateSettings>; result: Settings };
+  /** The system's regional format, as a locale such as `fr-FR`: the one dates and times follow until Settings picks another. */
+  'settings.systemLocale': { params: void; result: string };
   /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */
   'settings.setPanelSize': { params: { kind: PanelKind; dimension: PanelDimension; size: number }; result: Settings };
   /** Sets the area a Panel kind sits in, in the Layout. Rejects a kind or an area Loom has not. */

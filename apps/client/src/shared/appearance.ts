@@ -139,7 +139,8 @@ export function windowLook(appearance: ThemeSetting & Pick<Appearance, 'fontSize
   return { background: THEMES[resolveTheme(appearance, systemDark)].background, zoom: FONT_SIZES[appearance.fontSize].zoom };
 }
 
-const isIn =
+/** A check that a value is one of `table`'s keys: one of the choices a setting offers. */
+export const isIn =
   <T extends object>(table: T) =>
   (value: unknown): value is keyof T =>
     typeof value === 'string' && Object.hasOwn(table, value);

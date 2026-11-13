@@ -1,9 +1,11 @@
-import { Bell, Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, Keyboard, LoaderCircle, MessagesSquare, Palette, Pencil, RotateCcw, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { Bell, CalendarClock, Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, Keyboard, LoaderCircle, MessagesSquare, Palette, Pencil, RotateCcw, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi, type NotificationKind } from '../shared/api';
 import { assignedBindings, checkShortcut, DEFAULT_KEYBINDINGS, isDefaultKeybindings, MODIFIER_KEYS, REMAPPABLE_SHORTCUTS, sameShortcut, SHORTCUTS, shortcutLabel, takenBy, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { ACCENTS, accentColours, DENSITIES, FONT_SIZES, isDarkTheme, isLightTheme, MATCH_SYSTEM_LABEL, MONO_FONTS, THEMES, UI_FONTS, type Accent, type Appearance, type Theme, type ThemeChoice } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { useSystemLocale } from './dates';
+import { DATE_FORMATS, dateSettingsOf, Dates, HOUR_CYCLES, type DateSettings } from '../shared/dates';
 import { useTheme } from './appearance';
 import { useCheckoutModels } from './checkout';
 import { effortsOf, ModelPickers } from './ModelPicker';
@@ -273,6 +275,31 @@ function AppearanceSelect<K extends keyof Appearance>({ label, field, options, c
   if (!settings) return null;
   return <SelectSetting label={label} className={className} value={settings[field]} options={options} change={(api, value) => api.invoke('settings.setAppearance', { [field]: value })} />;
 }
+
+/** The moment each date format option is shown writing: a Monday afternoon. */
+const SAMPLE_TIME = new Date(2026, 10, 9, 14, 5).getTime();
+
+/**
+ * How dates are written, or their clock, each option saying how it would
+ * write the same moment, so the user picks by what they see.
+ */
+function DateSelect<K extends keyof DateSettings>({ label, field }: { label: string; field: K }) {
+  const settings = useTopic('settings');
+  const systemLocale = useSystemLocale();
+  if (!settings) return null;
+  const { choices, sample } = DATE_FIELDS[field];
+  const options = (Object.keys(choices) as DateSettings[K][]).map((value) => {
+    const dates = new Dates(systemLocale, { ...dateSettingsOf(settings), [field]: value });
+    return { value, label: `${(choices as Record<DateSettings[K], { label: string }>)[value].label} (${sample(dates)})` };
+  });
+  return <SelectSetting label={label} value={settings[field]} options={options} change={(api, value) => api.invoke('settings.setDateFormat', { [field]: value })} />;
+}
+
+/** Each date setting's choices, and what its options show of the sample moment: a clock only the time, a format all of it. */
+const DATE_FIELDS: { [K in keyof DateSettings]: { choices: Record<DateSettings[K], { label: string }>; sample: (dates: Dates) => string } } = {
+  dateFormat: { choices: DATE_FORMATS, sample: (dates) => dates.full(SAMPLE_TIME) },
+  hourCycle: { choices: HOUR_CYCLES, sample: (dates) => dates.time(SAMPLE_TIME) },
+};
 
 /** A small window drawn in `theme`'s colours, and in `accent`'s shade for it: what the theme looks like. */
 function ThemePreview({ theme, accent }: { theme: Theme; accent: Accent }) {
@@ -798,6 +825,26 @@ const SECTIONS: SettingsSection[] = [
         description: 'How much room the Inbox, the conversation, Panels and pages leave around what they show.',
         keywords: 'compact comfortable spacing padding',
         Control: ({ label }) => <AppearanceSelect label={label} field="density" options={DENSITY_OPTIONS} />,
+      },
+    ],
+  },
+  {
+    id: 'dates',
+    title: 'Dates and times',
+    icon: CalendarClock,
+    keywords: 'locale region language time clock',
+    settings: [
+      {
+        title: 'Regional format',
+        description: 'The order of the day, month and year, and how times are written. Match system follows your system’s regional format. The words stay in English.',
+        keywords: 'locale country date',
+        Control: ({ label }) => <DateSelect label={label} field="dateFormat" />,
+      },
+      {
+        title: 'Clock',
+        description: 'Times on a 12-hour or a 24-hour clock, or as the regional format writes them.',
+        keywords: '12-hour 24-hour am pm hour',
+        Control: ({ label }) => <DateSelect label={label} field="hourCycle" />,
       },
     ],
   },

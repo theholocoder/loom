@@ -4,6 +4,7 @@ import { Coins, DatabaseZap, GitMerge, MessagesSquare, Receipt, Timer, type Luci
 import { useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
 import { useApi, useTopic } from './api';
+import { useDates } from './dates';
 import { RemovedTag } from './Archive';
 import { ModelName } from './ModelPicker';
 import { projectColor } from './ProjectAvatar';
@@ -283,6 +284,7 @@ function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: stri
 
 /** Tokens per day as bars stacked by Project, with a tooltip per day. */
 function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId: number) => string }) {
+  const dates = useDates();
   const W = 820;
   const H = 230;
   const L = 46;
@@ -328,11 +330,11 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId
               {segments}
               {labelled && (
                 <text x={x + barW / 2} y={H - 8} textAnchor="middle">
-                  {shortDay(day.day)}
+                  {dates.calendarDay(day.day)}
                 </text>
               )}
               <rect className="hit" x={L + i * bw} y={T} width={bw} height={base - T}>
-                <title>{`${shortDay(day.day)}: ${formatTokens(day.tokens)} tokens${order
+                <title>{`${dates.calendarDay(day.day)}: ${formatTokens(day.tokens)} tokens${order
                   .filter(({ projectId }) => day.byProject[projectId])
                   .map(({ projectId, project }) => `\n${project}: ${formatTokens(day.byProject[projectId]!)}`)
                   .join('')}`}</title>
@@ -382,10 +384,4 @@ export function formatDuration(ms: number | undefined): string {
 
 function percent(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
-}
-
-/** `2026-11-05` as `Nov 5`. */
-function shortDay(day: string): string {
-  const [y, m, d] = day.split('-').map(Number);
-  return new Date(y!, m! - 1, d!).toLocaleDateString('en', { month: 'short', day: 'numeric' });
 }

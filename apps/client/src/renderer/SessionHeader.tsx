@@ -27,6 +27,7 @@ import {
 import { useRef, type ReactNode, type RefObject } from 'react';
 import { mergeRequestRef, type BabysitCi, type DiffStat, type ForgeLink, type Project, type RemovedProject, type Session } from '../shared/api';
 import { useApi } from './api';
+import { useDates } from './dates';
 import { ProjectRemoved, WorktreeMissing } from './Archive';
 import { copyable, copyText, MenuButtonMenu, type ContextMenuSection } from './ContextMenu';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
@@ -392,6 +393,7 @@ function MergeRequestChip({
 /** The Merge request's checks, as Babysit last saw them. */
 function ChecksPopover({ session, anchor, onClose, onError }: { session: Session; anchor: RefObject<HTMLElement | null>; onClose: () => void; onError: (message: string | undefined) => void }) {
   const api = useApi();
+  const dates = useDates();
   const { ci, checks = [], lastPollAt } = session.babysit ?? {};
   const heading = ci ? CI_HEADINGS[ci] : 'No CI checks';
   const empty = session.babysitOff ? "Loom isn't watching this Merge request, so it can't say how its CI is going." : "Loom hasn't seen any checks on this Merge request.";
@@ -418,7 +420,7 @@ function ChecksPopover({ session, anchor, onClose, onError }: { session: Session
           ))}
         </ul>
       )}
-      {lastPollAt !== undefined && <p className="muted checked">{`Checked ${new Date(lastPollAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</p>}
+      {lastPollAt !== undefined && <p className="muted checked">{`Checked ${dates.time(lastPollAt)}`}</p>}
     </Popover>
   );
 }

@@ -7,11 +7,12 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { PROJECT_COLOR_NAMES } from '../shared/projects';
 import { useApi, useTopic } from './api';
+import { useDates } from './dates';
 import { useNow } from './now';
 import { ProjectRemoved, useArchive, useRemovedProjectIds, WorktreeMissing } from './Archive';
 import { ProjectAvatar, projectColor } from './ProjectAvatar';
 import { StatusIcon } from './Sessions';
-import { isSnoozed, SnoozeButton, wakeTime } from './Snooze';
+import { isSnoozed, SnoozeButton } from './Snooze';
 import { useSessionMenu } from './SessionMenu';
 import { copyable } from './ContextMenu';
 
@@ -244,16 +245,17 @@ function SessionCard({ session, project, showProject = false, projectRemoved = f
  * when it was archived (Archived), or how long it has been Waiting.
  */
 function CardTime({ session, now }: { session: Session; now: number }) {
+  const dates = useDates();
   const snoozed = isSnoozed(session);
   const at = snoozed ? session.snoozedUntil! : session.updatedAt;
-  const full = new Date(at).toLocaleString();
+  const full = dates.full(at);
   const { text, title, className } = snoozed
-    ? { text: `until ${wakeTime(at, now)}`, title: `Comes back ${full}`, className: 'time' }
+    ? { text: `until ${dates.upcoming(at, now)}`, title: `Comes back ${full}`, className: 'time' }
     : session.status === 'working'
       ? { text: elapsed(now - at), title: `Working since ${full}`, className: 'time elapsed' }
       : session.status === 'archived'
-        ? { text: dateOf(at, now), title: `Archived ${full}`, className: 'time' }
-        : { text: ago(at, now), title: `Waiting since ${full}`, className: 'time' };
+        ? { text: dates.day(at, now), title: `Archived ${full}`, className: 'time' }
+        : { text: dates.agoShort(at, now), title: `Waiting since ${full}`, className: 'time' };
   return (
     <time className={className} dateTime={new Date(at).toISOString()} title={title}>
       {text}
@@ -281,18 +283,6 @@ function Action({ label, icon: Icon, onClick }: { label: string; icon: LucideIco
 }
 
 const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-/** How long ago `at` was, shortest first: "now" within the minute, then "4m", "3h", "2d", and the date after a week. */
-function ago(at: number, now: number): string {
-  const since = now - at;
-  if (since < MINUTE) return 'now';
-  if (since < HOUR) return `${Math.floor(since / MINUTE)}m`;
-  if (since < DAY) return `${Math.floor(since / HOUR)}h`;
-  if (since < 7 * DAY) return `${Math.floor(since / DAY)}d`;
-  return dateOf(at, now);
-}
 
 /** How long a Working Session has run: "<1m", "4m", "1h 12m". */
 function elapsed(ms: number): string {
@@ -300,12 +290,6 @@ function elapsed(ms: number): string {
   const minutes = Math.floor(ms / MINUTE);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
-/** The day of `at`: "Oct 26", with the year when it isn't this one. */
-function dateOf(at: number, now: number): string {
-  const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
-  return new Date(at).toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 const FORGE_MARK: Record<ForgeKind, { name: string; path: string }> = {

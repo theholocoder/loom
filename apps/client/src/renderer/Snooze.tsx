@@ -5,6 +5,7 @@ import { useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { Session } from '../shared/api';
 import { useApi } from './api';
+import { useDates } from './dates';
 import { Popover } from './Popover';
 
 const HOUR = 3_600_000;
@@ -39,18 +40,6 @@ export function snoozePresets(now: number): Array<{ label: string; until: number
   ];
 }
 
-/** When a snooze ends: the time today, "Tomorrow" and the time, the weekday and time within the week, else the date and time. */
-export function wakeTime(until: number, now: number): string {
-  const at = new Date(until);
-  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const day = (t: number) => new Date(t).setHours(0, 0, 0, 0);
-  const days = Math.round((day(until) - day(now)) / 86_400_000);
-  if (days <= 0) return time;
-  if (days === 1) return `Tomorrow ${time}`;
-  if (days < 7) return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`;
-  return `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
-}
-
 /**
  * A Waiting Session's Snooze button and its menu. `onOpenChange` says while
  * the menu is open, so the row keeps its actions showing; `onError` says why
@@ -80,6 +69,7 @@ export function SnoozeButton({ session, onOpenChange, onError }: { session: Sess
  */
 export function SnoozeMenu({ anchor, session, onClose, onError }: { anchor: RefObject<HTMLElement | null>; session: Session; onClose: () => void; onError: (message: string) => void }) {
   const api = useApi();
+  const dates = useDates();
   const [custom, setCustom] = useState(false);
   const snooze = (until: number) => {
     onClose();
@@ -95,7 +85,7 @@ export function SnoozeMenu({ anchor, session, onClose, onError }: { anchor: RefO
       {snoozePresets(now).map(({ label, until }) => (
         <button key={label} type="button" role="menuitem" aria-label={label} onClick={() => snooze(until)}>
           <span className="grow">{label}</span>
-          <span className="muted">{wakeTime(until, now)}</span>
+          <span className="muted">{dates.upcoming(until, now)}</span>
         </button>
       ))}
       <button type="button" role="menuitem" aria-label="Custom…" onClick={() => setCustom(true)}>
@@ -110,6 +100,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
 /** A snooze until a date and time, or for a duration; it must end in the future. */
 function CustomSnooze({ now, onSnooze }: { now: number; onSnooze: (until: number) => void }) {
+  const dates = useDates();
   const inAnHour = new Date(now + HOUR);
   const [mode, setMode] = useState<'until' | 'for'>('until');
   const [date, setDate] = useState(`${inAnHour.getFullYear()}-${pad(inAnHour.getMonth() + 1)}-${pad(inAnHour.getDate())}`);
@@ -146,6 +137,12 @@ function CustomSnooze({ now, onSnooze }: { now: number; onSnooze: (until: number
           <input type="number" aria-label="Minutes" min={0} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
           <span className="muted">min</span>
         </div>
+      )}
+      {/* The date and time inputs are the system's own, in its language: this says it as Loom writes dates. */}
+      {valid && (
+        <p className="muted" role="status">
+          Comes back {dates.upcoming(until, Date.now())}
+        </p>
       )}
       <button type="submit" className="primary" disabled={!valid}>
         Snooze

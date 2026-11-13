@@ -7,6 +7,7 @@ import { goingOn } from '../shared/going-on';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
 import { kindOf, terminalOf, type PanelId } from '../shared/panels';
 import { useApi, useTopic } from './api';
+import { useDates } from './dates';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
 import { ChangesView, type ChangesFocus, type DiffComments } from './Changes';
@@ -27,7 +28,7 @@ import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
-import { isSnoozed, wakeTime } from './Snooze';
+import { isSnoozed } from './Snooze';
 import { useNow } from './now';
 import { ContextGauge, effortsOf, effortTaken, listedModels, ModelMarker, ModelName, ModelPickers } from './ModelPicker';
 import { AttachmentList, CommentNoteForm, Composer } from './Composer';
@@ -1177,13 +1178,14 @@ function ErrorCard({ message, onRetry, onContinue }: { message: string; onRetry?
 /** A Snoozed Session's mark in its header: until when, and Wake, to bring it back now. */
 function Snoozed({ session, onError }: { session: Session; onError: (message: string | undefined) => void }) {
   const api = useApi();
+  const dates = useDates();
   const now = useNow();
   const until = session.snoozedUntil!;
   return (
     <>
-      <span className="chip" role="status" aria-label="Snoozed" title={new Date(until).toLocaleString()}>
+      <span className="chip" role="status" aria-label="Snoozed" title={dates.full(until)}>
         <AlarmClock className="sm" />
-        Snoozed until {wakeTime(until, now)}
+        Snoozed until {dates.upcoming(until, now)}
       </span>
       <button
         className="icon-btn sm"

@@ -24,6 +24,7 @@ import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
 import { Topic } from './topic';
 import { dashboard } from './usage/usage';
 import { isWebLink } from '../shared/links';
+import { ownLocale } from '../shared/dates';
 
 export interface LoomOptions {
   userDataDir: string;
@@ -43,6 +44,8 @@ export interface LoomOptions {
   notify?: (notification: DesktopNotification) => void;
   /** Whether Loom's window has the focus; taken as not without it. */
   windowFocused?: () => boolean;
+  /** The system's regional format, such as `fr-FR`; Intl's own locale without it. */
+  systemLocale?: string;
 }
 
 export interface Loom {
@@ -334,6 +337,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setKeybinding': ({ name, shortcut }) => settingsService.setKeybinding(name, shortcut),
     'settings.setSingleKeyShortcuts': ({ on }) => settingsService.setSingleKeyShortcuts(on),
     'settings.resetKeybindings': () => settingsService.resetKeybindings(),
+    'settings.setDateFormat': (dates) => settingsService.setDateFormat(dates),
+    'settings.systemLocale': () => options.systemLocale || ownLocale(),
     'window.showing': ({ sessionId }) => {
       if (sessionId !== null && typeof sessionId !== 'number') throw new Error('The Session shown is a Session id, or null for none.');
       showing = sessionId;

@@ -679,7 +679,7 @@ describe('Settings: sections, search and feedback', () => {
   it('groups the settings in sections, listed beside them, the first one current', () => {
     openSettings();
 
-    expect(sectionNames()).toEqual(['Appearance', 'Sessions', 'Notifications', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Keybindings', 'Environments']);
+    expect(sectionNames()).toEqual(['Appearance', 'Dates and times', 'Sessions', 'Notifications', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Keybindings', 'Environments']);
     expect(within(screen.getByRole('dialog', { name: 'Settings' })).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(sectionNames());
     expect(sections().filter((link) => link.getAttribute('aria-current') === 'true').map((link) => link.textContent)).toEqual(['Appearance']);
     const worktrees = screen.getByRole('region', { name: 'Worktrees' });
@@ -723,7 +723,7 @@ describe('Settings: sections, search and feedback', () => {
     expect(screen.getByText(/No setting matches “nothing like this”/)).toBeTruthy();
 
     fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Search settings' }), { key: 'Escape' });
-    expect(sections()).toHaveLength(9);
+    expect(sections()).toHaveLength(10);
   });
 
   it('says Saved once main kept a change', async () => {

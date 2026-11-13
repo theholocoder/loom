@@ -130,6 +130,8 @@ export async function startMain(
     adapter?: AgentAdapter;
     /** The clock time main starts at. */
     now?: number;
+    /** The system's regional format, as Electron reports it. */
+    systemLocale?: string;
   } = {},
 ): Promise<MainHarness> {
   const ownDir = !options.userDataDir;
@@ -148,6 +150,7 @@ export async function startMain(
     clock,
     maxUntrackedCounted: options.maxUntrackedCounted,
     adapter: options.adapter,
+    systemLocale: options.systemLocale,
     bridgePath: options.bridgePath ?? realBridgePath,
     spawnBridge: (command, args) => {
       bridgeStarts++;

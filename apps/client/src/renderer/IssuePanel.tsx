@@ -7,9 +7,10 @@ import { CircleCheck, CircleDot, ExternalLink, Link2Off, MessageSquare, RotateCw
 import { useState } from 'react';
 import { FORGE_NAMES, type Project, type Session } from '../shared/api';
 import { useApi } from './api';
+import { useDates } from './dates';
 import { useForgeRead } from './forge-read';
 import { Markdown } from './Markdown';
-import { ago, countText } from './MergeRequestLooks';
+import { countText } from './MergeRequestLooks';
 import { useNow } from './now';
 import { attempt } from './SessionDetails';
 
@@ -20,6 +21,7 @@ import { attempt } from './SessionDetails';
 export function IssuePanel({ session, project, onUnlinked, onError }: { session: Session; project: Project | undefined; onUnlinked: () => void; onError: (message: string | undefined) => void }) {
   const api = useApi();
   const now = useNow();
+  const dates = useDates();
   const { issue } = session;
   /** Moves on each refresh: the issue is read again. */
   const [generation, setGeneration] = useState(0);
@@ -82,7 +84,7 @@ export function IssuePanel({ session, project, onUnlinked, onError }: { session:
             <div className="mr-meta">
               <span className="row">
                 <User className="sm" />
-                {details.at === undefined ? `Opened by ${details.author}` : `Opened by ${details.author} · ${ago(details.at, now)}`}
+                {details.at === undefined ? `Opened by ${details.author}` : `Opened by ${details.author} · ${dates.ago(details.at, now)}`}
               </span>
               <span className="row">
                 <MessageSquare className="sm" />

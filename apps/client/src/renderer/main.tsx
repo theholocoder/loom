@@ -37,20 +37,20 @@ declare global {
 }
 
 let rendered = false;
-const render = () => {
+const render = (systemLocale?: string) => {
   if (rendered) return;
   rendered = true;
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <ApiProvider api={window.loom}>
-        <App />
+        <App systemLocale={systemLocale} />
       </ApiProvider>
     </StrictMode>,
   );
 };
 
-// The first paint already has the saved theme and fonts: wait for the
-// settings before rendering. The App keeps them in step after that. A damaged
+// The first paint already has the saved theme and fonts, and the system's
+// regional format for dates: wait for both before rendering. The App keeps them in step after that. A damaged
 // database serves no settings, so its blocking screen renders straight away,
 // with the default look.
 let waitingForSettings = false;
@@ -58,9 +58,11 @@ window.loom.subscribe('database', (database) => {
   if (database.state === 'damaged') return render();
   if (waitingForSettings || rendered) return;
   waitingForSettings = true;
+  // Without it, the App asks again, and writes dates in the renderer's own format meanwhile.
+  const systemLocale = window.loom.invoke('settings.systemLocale').catch(() => undefined);
   const unsubscribe = window.loom.subscribe('settings', (settings) => {
     applyAppearance(settings);
     queueMicrotask(() => unsubscribe());
-    render();
+    void systemLocale.then(render);
   });
 });

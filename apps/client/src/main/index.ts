@@ -125,6 +125,8 @@ if (!app.requestSingleInstanceLock()) {
         openExternal: (url) => shell.openExternal(url),
         notify,
         windowFocused: () => !!window && window.isFocused(),
+        // The regional format, which on Windows and macOS may differ from the UI language the renderer's Intl takes.
+        systemLocale: app.getSystemLocale(),
       });
     } catch (error) {
       console.error('Loom could not start:', error);

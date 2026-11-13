@@ -48,13 +48,3 @@ export function Avatar({ name }: { name: string }) {
     </span>
   );
 }
-
-/** "just now", "12 min ago", "3 h ago", "Yesterday", then the date. */
-export function ago(at: number, now: number): string {
-  const minutes = Math.floor((now - at) / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`;
-  if (minutes < 48 * 60) return 'Yesterday';
-  return new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
