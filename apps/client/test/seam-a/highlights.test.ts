@@ -131,7 +131,7 @@ describe('Session highlights', () => {
     await expect(main.api.invoke('sessions.resolveHighlight', { id, highlightId: 12345, resolved: true })).rejects.toThrow(/no Highlight/);
   });
 
-  it('keeps when the model resolved a Highlight, the same across restarts', async () => {
+  it('keeps the time the model resolved a Highlight, across restarts', async () => {
     const { machine, checkout } = machineWith(
       [{ chunks: ['Skipped the e2e tests for now.'] }, { chunks: ['Added the e2e tests.'] }],
       [answer({ add: [{ kind: 'not-done', text: 'The e2e tests were skipped.' }], resolve: [] }), answer({ add: [], resolve: [{ id: 1, reason: 'The e2e tests were added.' }] })],

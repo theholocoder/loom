@@ -6,7 +6,7 @@
 // after it. Checks never hold up the Session; one that fails leaves its turns
 // for the next. The checks' usage counts on the dashboard, but isn't the
 // Session's own.
-import { DEFAULT_APPROVALS, modelNameIn, type Highlight, type HighlightCounts, type HighlightsSettings, type Session, type SessionHighlights, type TokenCounts, type TranscriptItem } from '../../shared/api';
+import { DEFAULT_APPROVALS, modelNameIn, type Highlight, type HighlightCounts, type HighlightResolution, type HighlightsSettings, type Session, type SessionHighlights, type TokenCounts, type TranscriptItem } from '../../shared/api';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import type { BridgeCall } from '../environments/exec';
@@ -223,7 +223,7 @@ export class Highlights {
     const now = this.options.clock.now();
     // Applied once written: a check whose write fails leaves the Highlights as they were.
     const added: Highlight[] = [];
-    const resolutions = new Map<number, NonNullable<Highlight['resolved']>>();
+    const resolutions = new Map<number, HighlightResolution>();
     await this.options.db.transaction().execute(async (trx) => {
       for (const { kind, text, turn } of answer.add) {
         const row = { session_id: session.id, kind, text, item_id: turn, created_at: now, resolved_by: null, resolved_reason: null, resolved_item_id: null, resolved_at: null };
@@ -234,11 +234,23 @@ export class Highlights {
         const highlight = state.highlights.find((h) => h.id === id);
         // The user may have resolved it meanwhile: theirs stands.
         if (!highlight || highlight.resolved) continue;
-        await trx.updateTable('highlights').set({ resolved_by: 'model', resolved_reason: reason || null, resolved_item_id: turn, resolved_at: now }).where('id', '=', id).execute();
-        resolutions.set(id, { by: 'model', ...(reason ? { reason } : {}), itemId: turn, at: now });
+        const { numUpdatedRows } = await trx
+          .updateTable('highlights')
+          .set({ resolved_by: 'model', resolved_reason: reason || null, resolved_item_id: turn, resolved_at: now })
+          .where('id', '=', id)
+          .where('resolved_at', 'is', null)
+          .executeTakeFirstOrThrow();
+        if (numUpdatedRows > 0n) resolutions.set(id, { by: 'model', ...(reason ? { reason } : {}), itemId: turn, at: now });
       }
     });
-    state.highlights = [...state.highlights.map((h) => (resolutions.has(h.id) ? { ...h, resolved: resolutions.get(h.id)! } : h)), ...added];
+    state.highlights = [
+      ...state.highlights.map((h) => {
+        const resolution = resolutions.get(h.id);
+        // Again, theirs stands: the user's resolution is written after the check's.
+        return resolution && !h.resolved ? { ...h, resolved: resolution } : h;
+      }),
+      ...added,
+    ];
   }
 
   /**
