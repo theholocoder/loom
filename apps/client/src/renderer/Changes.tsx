@@ -198,9 +198,9 @@ function DiffBase({ session, base, onChanged }: { session: Session; base: string
         onChange={(chosen) => void choose(chosen)}
       />
       {error && (
-        <span className="err" role="alert">
+        <div className="err" role="alert">
           <ErrorText text={error} />
-        </span>
+        </div>
       )}
     </span>
   );

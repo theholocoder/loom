@@ -5,17 +5,24 @@
 import { withDetails } from '../../shared/errors';
 import type { ExecResult } from './exec';
 
-type Explainer = (output: string, command: string) => string | undefined;
+/** What describeFailure says of a folder that isn't in a git repository. */
+export const NOT_A_REPOSITORY = "it isn't in a git repository";
 
-/** A sentence for each common failure, first match wins; each gets the whole output and the command run. */
+type Explainer = (output: string, cli: string) => string | undefined;
+
+/** A sentence for each common failure, first match wins; each gets the whole output and the command run (`git`, `gh`, `glab`). */
 const EXPLAINERS: Explainer[] = [
   // git: the repository and its refs.
-  (out) => (/not a git repository/i.test(out) && !/does not appear to be a git repository/i.test(out) ? "it isn't in a git repository" : undefined),
+  (out) => (/not a git repository/i.test(out) ? NOT_A_REPOSITORY : undefined),
   (out) => quoted(/detected dubious ownership in repository at '([^']+)'/.exec(out), (at) => `git won't work in ${at}, which another user owns, until you add it to its safe.directory`),
   (out) => quoted(/a branch named '([^']+)' already exists/.exec(out), (name) => `there's already a branch named "${name}"`),
   (out) => quoted(/'([^']+)' is already (?:checked out|used by worktree) at '([^']+)'/.exec(out), (name, at) => `"${name}" is already checked out in ${at}`),
   (out) => quoted(/'([^']+)' is not a valid branch name/.exec(out), (name) => `"${name}" isn't a valid branch name`),
-  (out) => quoted(/(?:invalid reference|not a valid object name|unknown revision or path not in the working tree|bad revision)[:\s]*'?([^'\n]*)'?/.exec(out), (name) => (name ? `there's no branch or commit "${name}"` : "there's no such branch or commit")),
+  (out) =>
+    quoted(
+      /ambiguous argument '([^']+)': unknown revision/.exec(out) ?? /invalid reference: (\S+)/.exec(out) ?? /not a valid object name:? '?([^'\s]+)/i.exec(out) ?? /bad revision '([^']+)'/.exec(out),
+      (name) => `there's no branch or commit "${name}"`,
+    ),
   (out) => quoted(/fatal: '([^']+)' already exists/.exec(out), (path) => `there's already a folder at ${path}`),
   (out) => quoted(/Unable to create '([^']+\.lock)': File exists/.exec(out), (lock) => `another git command is running there, or one stopped and left ${lock} behind; wait for it, or delete that file`),
   (out) => (/contains modified or untracked files, use --force/.test(out) ? 'it has changes that would be lost' : undefined),

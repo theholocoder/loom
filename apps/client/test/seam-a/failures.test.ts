@@ -12,6 +12,8 @@ describe('why git or a Forge CLI failed, in a sentence', () => {
     ['git', "fatal: 'main' is already used by worktree at '/home/dev/billing-api'", '"main" is already checked out in /home/dev/billing-api'],
     ['git', "fatal: '/home/dev/worktrees/fix-it' already exists", "there's already a folder at /home/dev/worktrees/fix-it"],
     ['git', 'fatal: invalid reference: origin/nope', 'there\'s no branch or commit "origin/nope"'],
+    ['git', "fatal: ambiguous argument 'nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions", 'there\'s no branch or commit "nope"'],
+    ['git', "fatal: Not a valid object name: 'nope'.", 'there\'s no branch or commit "nope"'],
     ['git', "fatal: Unable to create '/home/dev/billing-api/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository", 'another git command is running there, or one stopped and left /home/dev/billing-api/.git/index.lock behind; wait for it, or delete that file'],
     ['git', "fatal: '/srv/gone.git' does not appear to be a git repository\nfatal: Could not read from remote repository.", "the repository wasn't found, or you don't have access to it"],
     ['git', "fatal: unable to access 'https://github.com/a/b.git/': Could not resolve host: github.com", "couldn't reach github.com: check your network connection"],

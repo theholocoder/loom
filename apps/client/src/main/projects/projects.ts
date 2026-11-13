@@ -3,9 +3,10 @@
 import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type ModelPick, type Project, type ProjectEdit, type RemovedProject, type RestorableProject } from '../../shared/api';
 import { branchPrefixError, branchPrefixOf } from '../../shared/branches';
 import { avatarError, isProjectColor, nextProjectColor, projectColorOf, projectNameError } from '../../shared/projects';
-import { withDetails } from '../../shared/errors';
+import { splitDetails, withDetails } from '../../shared/errors';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
+import { describeFailure, NOT_A_REPOSITORY } from '../environments/failures';
 import type { LoomDatabase } from '../storage/database';
 import { detectForge, GIT_TIMEOUT_MS, parseRemote } from './forge';
 import { listIssues } from './issues';
@@ -335,6 +336,10 @@ async function topLevelOf(environment: ProjectEnvironment, path: string): Promis
     }
     throw error;
   }
-  if (result.exitCode !== 0) throw new Error(withDetails(`${path} isn't in a git repository`, result.stderr || result.stdout));
+  if (result.exitCode !== 0) {
+    const why = describeFailure('git', result);
+    const { message, details } = splitDetails(why);
+    throw new Error(message === NOT_A_REPOSITORY ? withDetails(`${path} isn't in a git repository`, details) : `git can't open ${path}: ${why}`);
+  }
   return result.stdout.trim();
 }

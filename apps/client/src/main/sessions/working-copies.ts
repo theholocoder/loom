@@ -250,7 +250,7 @@ type Fetched = { state: 'fetched' } | { state: 'failed'; error: string } | { sta
 async function tryFetchOrigin(environment: GitRunner, checkout: string): Promise<Fetched> {
   if ((await git(environment, ['-C', checkout, 'remote', 'get-url', 'origin'])).exitCode !== 0) return { state: 'none' };
   const result = await git(environment, ['-C', checkout, 'fetch', '--quiet', 'origin'], FETCH_TIMEOUT_MS);
-  return result.exitCode === 0 ? { state: 'fetched' } : { state: 'failed', error: message(result) };
+  return result.exitCode === 0 ? { state: 'fetched' } : { state: 'failed', error: describeFailure('git', result) };
 }
 
 /** The ref an `origin` or a local branch has in the checkout. */
@@ -407,12 +407,8 @@ async function git(environment: GitRunner, args: string[], timeoutMs = GIT_TIMEO
 /** Runs git, rejecting with `what` and git's message if it fails. */
 async function gitOrThrow(environment: GitRunner, args: string[], what: string, timeoutMs?: number): Promise<ExecResult> {
   const result = await git(environment, args, timeoutMs);
-  if (result.exitCode !== 0) throw new Error(`${what}: ${message(result)}`);
+  if (result.exitCode !== 0) throw new Error(`${what}: ${describeFailure('git', result)}`);
   return result;
-}
-
-function message(result: ExecResult): string {
-  return describeFailure('git', result);
 }
 
 /** What the bridge keeps of a command's stdout (`maxOutput` in bridge/protocol/exec.go), past which the listing is cut short. */

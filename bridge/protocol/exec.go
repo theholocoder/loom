@@ -56,7 +56,8 @@ func runCommand(ctx context.Context, env shellenv.Env, params execParams) (*exec
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, params.Args...)
 	cmd.Dir = params.Cwd
-	// The last LC_ALL wins; it overrides LANG and LC_*, and gettext then ignores LANGUAGE.
+	// The last LC_ALL wins; it overrides LANG and LC_*, and gettext then
+	// ignores LANGUAGE.
 	cmd.Env = append(env.ForTools(), "LC_ALL=C")
 	proc.Isolate(cmd)
 	cmd.WaitDelay = time.Second
