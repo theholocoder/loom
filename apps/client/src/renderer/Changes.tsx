@@ -7,9 +7,10 @@
 // copy as it changes, whoever changes it.
 import { ArrowRightToLine, ChevronDown, ChevronRight, CircleHelp, Columns2, Folder, GitBranch, ListTree, MessageSquare, MessageSquareCode, RefreshCw, Rows2, SquarePen, WrapText, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { DEFAULT_DIFF_VIEW, DEFAULT_SETTINGS, DIFF_SCOPES, diffCommentRange, type DiffBaseSource, type DiffComment, type DiffCounts, type DiffFile, type DiffScope, type DiffSummary, type DiffViewSettings, type FileDiff, type ReviewThread, type Session } from '../shared/api';
+import { DEFAULT_DIFF_VIEW, DIFF_SCOPES, diffCommentRange, type DiffBaseSource, type DiffComment, type DiffCounts, type DiffFile, type DiffScope, type DiffSummary, type DiffViewSettings, type FileDiff, type ReviewThread, type Session } from '../shared/api';
 import type { Theme } from '../shared/appearance';
 import { useApi, useTopic } from './api';
+import { useTheme } from './appearance';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
 import { FileDiffView, useFocusOnceShown, type Commenting, type LineNote } from './FileDiffView';
 import { askHead, askNote, ReviewNote, type ReviewNotes } from './ReviewNotes';
@@ -60,6 +61,7 @@ type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { sta
 function SessionDiff({ session, comments, reviews, focus }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes; focus?: ChangesFocus }) {
   const api = useApi();
   const settings = useTopic('settings');
+  const theme = useTheme();
   const [view, changeView] = useDiffView(settings?.diffView);
   const live = session.status !== 'archived';
   const [scope, setScope] = useState<DiffScope>('all');
@@ -132,7 +134,7 @@ function SessionDiff({ session, comments, reviews, focus }: { session: Session; 
           reviews={reviews}
           wide={wide}
           patterns={settings?.diffCollapsedPatterns ?? []}
-          theme={settings?.theme ?? DEFAULT_SETTINGS.theme}
+          theme={theme}
           view={view}
           onViewChange={changeView}
           version={`${scope}:${refreshes}:${turnEnded}:${changed}`}

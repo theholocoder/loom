@@ -82,6 +82,7 @@ describe('palette actions', () => {
       'New Session',
       'Add a Project…',
       'Toggle the Inbox',
+      'Theme: Match system',
       'Theme: Midnight',
       'Theme: Paper',
       'Theme: Nord',
@@ -126,6 +127,7 @@ describe('palette actions', () => {
       'Rename this Session…',
       'Archive this Session',
       'Delete this Session…',
+      'Theme: Match system',
       'Theme: Midnight',
       'Theme: Paper',
       'Theme: Nord',
@@ -155,7 +157,8 @@ describe('palette actions', () => {
     ctrlK();
     type('theme');
     const highlighted = () => within(palette()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
-    expect(highlighted()).toBe('Theme: Midnight');
+    expect(highlighted()).toBe('Theme: Match system');
+    press('ArrowDown', search());
     press('ArrowDown', search());
     press('ArrowDown', search());
     expect(highlighted()).toBe('Theme: Nord');

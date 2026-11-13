@@ -3,7 +3,7 @@ import { DEFAULT_APPROVALS, DEFAULT_NOTIFICATIONS, DEFAULT_SETTINGS, isApprovalC
 import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, readLayout, type PanelArea, type PanelDimension, type PanelKind } from '../shared/panels';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
-import { isMonoFont, isTheme, isUiFont, type Appearance } from '../shared/appearance';
+import { isAccent, isDarkTheme, isDensity, isFontSize, isLightTheme, isMonoFont, isThemeChoice, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
 
 export interface SettingsOptions {
@@ -64,9 +64,7 @@ export class Settings {
       // Never set, or not as Loom takes it: off.
     }
     // A value Loom no longer offers falls back to the default.
-    if (isTheme(stored.theme)) current.theme = stored.theme;
-    if (isUiFont(stored.uiFont)) current.uiFont = stored.uiFont;
-    if (isMonoFont(stored.monoFont)) current.monoFont = stored.monoFont;
+    for (const [key, { valid }] of APPEARANCE_FIELDS) if (valid(stored[key])) Object.assign(current, { [key]: stored[key] });
     return new Settings(db, current, onChange, options);
   }
 
@@ -124,16 +122,12 @@ export class Settings {
     return this.set('notifications', { ...this.current.notifications, [kind]: on });
   }
 
-  /** Sets the theme or fonts given; rejects any not in Loom's lists. */
+  /** Sets the parts of the look given; rejects them all if any is not one Loom offers. */
   async setAppearance(appearance: Partial<Appearance>): Promise<SettingsValues> {
-    const { theme, uiFont, monoFont } = appearance;
-    if (theme !== undefined && !isTheme(theme)) throw new Error(`"${String(theme)}" is not a theme`);
-    if (uiFont !== undefined && !isUiFont(uiFont)) throw new Error(`"${String(uiFont)}" is not a UI font Loom offers`);
-    if (monoFont !== undefined && !isMonoFont(monoFont)) throw new Error(`"${String(monoFont)}" is not a monospace font Loom offers`);
-    if (theme !== undefined) await this.set('theme', theme);
-    if (uiFont !== undefined) await this.set('uiFont', uiFont);
-    if (monoFont !== undefined) await this.set('monoFont', monoFont);
-    return this.current;
+    if (typeof appearance !== 'object' || appearance === null) throw new Error('The look must be an object.');
+    const given = APPEARANCE_FIELDS.filter(([key]) => appearance[key] !== undefined);
+    for (const [key, { valid, what }] of given) if (!valid(appearance[key])) throw new Error(`"${String(appearance[key])}" is not ${what}`);
+    return this.setAll(Object.fromEntries(given.map(([key]) => [key, appearance[key]])));
   }
 
   /** Sets a Panel kind's width or height in the Layout, kept within its minimum and maximum. */
@@ -176,17 +170,41 @@ export class Settings {
   }
 
   private async set<K extends keyof SettingsValues>(key: K, value: SettingsValues[K]): Promise<SettingsValues> {
-    const json = JSON.stringify(value);
+    return this.setAll({ [key]: value });
+  }
+
+  /** Keeps every setting given, then tells of the change once, so no one sees only some of them. */
+  private async setAll(values: Partial<SettingsValues>): Promise<SettingsValues> {
+    const rows = Object.entries(values).map(([key, value]) => ({ key, value: JSON.stringify(value) }));
+    if (rows.length === 0) return this.current;
     await this.db
       .insertInto('settings')
-      .values({ key, value: json })
-      .onConflict((c) => c.column('key').doUpdateSet({ value: json }))
+      .values(rows)
+      .onConflict((c) => c.column('key').doUpdateSet((eb) => ({ value: eb.ref('excluded.value') })))
       .execute();
-    this.current = { ...this.current, [key]: value };
+    this.current = { ...this.current, ...values };
     this.onChange(this.current);
     return this.current;
   }
 }
+
+/** A part of the look: whether a value is one Loom offers, and what it should have been when it isn't. */
+interface AppearanceField {
+  valid: (value: unknown) => boolean;
+  what: string;
+}
+
+/** Each part of the look, and how to check it. */
+const APPEARANCE_FIELDS = Object.entries({
+  theme: { valid: isThemeChoice, what: 'a theme' },
+  lightTheme: { valid: isLightTheme, what: 'a light theme' },
+  darkTheme: { valid: isDarkTheme, what: 'a dark theme' },
+  uiFont: { valid: isUiFont, what: 'a UI font Loom offers' },
+  monoFont: { valid: isMonoFont, what: 'a monospace font Loom offers' },
+  fontSize: { valid: isFontSize, what: 'a font size' },
+  density: { valid: isDensity, what: 'a density' },
+  accent: { valid: isAccent, what: 'an accent colour' },
+} satisfies Record<keyof Appearance, AppearanceField>) as [keyof Appearance, AppearanceField][];
 
 /** Whether `value` is a whole number of minutes, at least 1. */
 function isStuckAfterMinutes(value: unknown): value is number {

@@ -42,7 +42,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FORGE_NAMES, mergeRequestRef, type Project, type Session } from '../shared/api';
-import { THEMES, type Theme } from '../shared/appearance';
+import { MATCH_SYSTEM_LABEL, THEMES, type Theme, type ThemeChoice } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
@@ -474,7 +474,7 @@ function paletteActions(app: {
   addProject: () => void;
   select: (session: Session) => void;
   command: (command: SessionCommand) => void;
-  setTheme: (theme: Theme) => void;
+  setTheme: (theme: ThemeChoice) => void;
   openPage: (page: Page) => void;
   showHelp: (returnFocus: HTMLElement | null) => void;
   toggleInbox: () => void;
@@ -532,6 +532,7 @@ function paletteActions(app: {
     // A removed Project's archived Sessions are read-only.
     session?.status === 'archived' && project && { label: 'Reopen this Session', icon: ArchiveRestore, run: () => app.command('reopen') },
     session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },
+    { label: `Theme: ${MATCH_SYSTEM_LABEL}`, icon: Palette, run: () => app.setTheme('system') },
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.openPage('projects') },
     { label: 'Open Dashboard', icon: ChartColumn, run: () => app.openPage('dashboard') },

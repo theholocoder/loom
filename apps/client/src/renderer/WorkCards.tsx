@@ -2,8 +2,8 @@
 // calls, each folded away behind a header the user can open, and its plan.
 import { Brain, ChevronRight, Circle, CircleCheck, CircleCheckBig, CircleDot, CircleSlash, ListTodo, LoaderCircle, OctagonX } from 'lucide-react';
 import { useId, useState, type ReactNode } from 'react';
-import { DEFAULT_SETTINGS, toolLine, type PlanStatus, type ToolDiff, type TranscriptItem } from '../shared/api';
-import { useTopic } from './api';
+import { toolLine, type PlanStatus, type ToolDiff, type TranscriptItem } from '../shared/api';
+import { useTheme } from './appearance';
 import { TextDiffView } from './FileDiffView';
 
 type Thinking = Extract<TranscriptItem, { kind: 'thinking' }>;
@@ -108,7 +108,7 @@ export function ToolCard({ item }: { item: Tool }) {
 
 /** Each file an edit changed: its path, then its diff, or why it isn't shown. */
 function ToolDiffs({ diffs }: { diffs: ToolDiff[] }) {
-  const theme = useTopic('settings')?.theme ?? DEFAULT_SETTINGS.theme;
+  const theme = useTheme();
   return diffs.map((diff, at) => (
     <div className="tool-diff" key={at}>
       <div className="tool-diff-path">

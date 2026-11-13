@@ -609,7 +609,7 @@ describe('Settings: sections, search and feedback', () => {
     search('terminal');
     expect(sectionNames()).toEqual(['Appearance', 'Editor and terminal']);
     expect(screen.getByRole('button', { name: 'Monospace font' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Theme' })).toBeNull();
+    expect(screen.queryByRole('radiogroup', { name: 'Theme' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: 'Worktree root' })).toBeNull();
 
     search('stuck');
@@ -623,7 +623,8 @@ describe('Settings: sections, search and feedback', () => {
 
     // A section's own name finds all of it.
     search('appearance');
-    expect(['Theme', 'UI font', 'Monospace font'].map((name) => !!screen.queryByRole('button', { name }))).toEqual([true, true, true]);
+    expect(['UI font', 'Monospace font', 'Font size', 'Density'].map((name) => !!screen.queryByRole('button', { name }))).toEqual([true, true, true, true]);
+    expect(['Theme', 'Accent colour'].map((name) => !!screen.queryByRole('radiogroup', { name }))).toEqual([true, true]);
 
     search('nothing like this');
     expect(sections()).toEqual([]);
@@ -646,12 +647,12 @@ describe('Settings: sections, search and feedback', () => {
   it('says Saved for a picked option or a ticked box', async () => {
     openSettings();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Theme' }));
-    fireEvent.click(within(screen.getByRole('listbox', { name: 'Theme' })).getByRole('option', { name: 'Nord' }));
+    fireEvent.click(screen.getByRole('button', { name: 'UI font' }));
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'UI font' })).getByRole('option', { name: 'Figtree' }));
     const box = screen.getByRole('checkbox', { name: 'Auto-prompt new Sessions' });
     fireEvent.click(box);
 
-    await waitFor(() => expect(within(rowOf(screen.getByRole('button', { name: 'Theme' }))).getByRole('status').textContent).toBe('Saved'));
+    await waitFor(() => expect(within(rowOf(screen.getByRole('button', { name: 'UI font' }))).getByRole('status').textContent).toBe('Saved'));
     await waitFor(() => expect(within(rowOf(box)).getByRole('status').textContent).toBe('Saved'));
   });
 

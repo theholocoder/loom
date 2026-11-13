@@ -173,7 +173,8 @@ function luminance(color: string): number {
 test('the Settings dropdowns take on the theme', async () => {
   const window = await launch();
   await window.getByRole('button', { name: 'Settings' }).click();
-  const theme = window.getByRole('button', { name: 'Theme' });
+  const themes = window.getByRole('radiogroup', { name: 'Theme' });
+  const dropdown = window.getByRole('button', { name: 'UI font' });
 
   const dir = process.env.LOOM_SMOKE_SCREENSHOT_DIR;
   if (dir) mkdirSync(dir, { recursive: true });
@@ -184,13 +185,13 @@ test('the Settings dropdowns take on the theme', async () => {
     ['Mocha', 'dark'],
     ['Daylight', 'light'],
   ] as const) {
-    await theme.click();
-    await window.getByRole('listbox', { name: 'Theme' }).getByRole('option', { name: label }).click();
+    // Each theme is picked from its preview.
+    await themes.getByText(label, { exact: true }).click();
     await expect(window.locator('html')).toHaveAttribute('data-theme', label.toLowerCase());
-    await expect(theme).toHaveText(label);
+    await expect(themes.getByRole('radio', { name: label })).toBeChecked();
 
-    // The trigger reads as a field: a themed border or background, a pointer.
-    const field = await theme.evaluate((element) => {
+    // A dropdown's trigger reads as a field: a themed border or background, a pointer.
+    const field = await dropdown.evaluate((element) => {
       const style = getComputedStyle(element);
       return { border: style.borderTopWidth, borderColor: style.borderTopColor, background: style.backgroundColor, cursor: style.cursor, chevron: !!element.querySelector('svg.chev') };
     });
@@ -199,8 +200,8 @@ test('the Settings dropdowns take on the theme', async () => {
     expect(field.border !== '0px' && field.borderColor !== 'rgba(0, 0, 0, 0)' || field.background !== 'rgba(0, 0, 0, 0)').toBe(true);
     if (dir) await window.screenshot({ path: join(dir, `settings-${label.toLowerCase()}.png`) });
 
-    await theme.click();
-    const listbox = window.getByRole('listbox', { name: 'Theme' });
+    await dropdown.click();
+    const listbox = window.getByRole('listbox', { name: 'UI font' });
     await expect(listbox).toBeVisible();
     await expect(listbox).toBeInViewport({ ratio: 1 });
     const look = await listbox.evaluate((element) => {
