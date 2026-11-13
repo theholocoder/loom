@@ -1308,6 +1308,8 @@ export type TranscriptItem =
   | { kind: 'merge-request'; id: number; number: number; url: string }
   /** The agent's Link merge request tool named a Merge request Loom couldn't link, as `mergeRequest` gave it, and why. */
   | { kind: 'merge-request-refused'; id: number; mergeRequest: string; reason: string }
+  /** The agent's Link issue tool named an issue Loom couldn't link, as `issue` gave it, and why. */
+  | { kind: 'issue-refused'; id: number; issue: string; reason: string }
   /**
    * Babysit found feedback on the Merge request; `state` is `sent` once Send
    * to agent or auto-prompt has passed it on. `paused` when auto-prompt would
@@ -1500,7 +1502,10 @@ export interface Commands {
   /**
    * The open issues on the Project's Forge, any of them, not only the user's,
    * matching `search` if given, as many as the Forge's CLI lists by default.
-   * Rejects when the Project's Forge is off.
+   * A `search` naming an issue by its number (`12`, `#12`) puts that issue
+   * first, whatever its state; one that is an issue's URL gives only that
+   * issue. Rejects when the Project's Forge is off, or a URL that isn't one
+   * of the repository's issues.
    */
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
   /**

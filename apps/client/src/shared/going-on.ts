@@ -27,6 +27,7 @@ const PARTWAY: Record<TranscriptItem['kind'], boolean> = {
   model: false,
   'merge-request': false,
   'merge-request-refused': false,
+  'issue-refused': false,
   'merge-request-ended': false,
   feedback: false,
   'feedback-info': false,

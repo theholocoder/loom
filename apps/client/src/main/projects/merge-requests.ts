@@ -158,18 +158,38 @@ function mergeRequestOf(kind: ForgeKind, value: unknown): FoundMergeRequest | un
   return { number, url, state, branch: String(raw.branch ?? '') };
 }
 
-/** A Merge request as the user or the agent names it: `12`, `#12`, `!12`, or its URL (`…/pull/12`, `…/merge_requests/12`). */
-export function mergeRequestNamed(text: unknown): { number: number; url?: string } | undefined {
+/** A Merge request or issue as the user or the agent names it: its number, and the URL given for it, if it was named by one. */
+export interface ForgeItemName {
+  number: number;
+  url?: string;
+}
+
+/**
+ * What `text` names on the Forge: a number after one of `marks` or none
+ * (`12`, `#12`), or a URL whose path has the number after one of `pages`
+ * (`…/pull/12`).
+ */
+export function forgeItemNamed(text: unknown, marks: string, pages: string[]): ForgeItemName | undefined {
   if (typeof text !== 'string' && typeof text !== 'number') return undefined;
   const trimmed = String(text).trim();
-  const plain = /^[#!]?(\d+)$/.exec(trimmed);
+  const plain = new RegExp(`^[${marks}]?(\\d+)$`).exec(trimmed);
   if (plain) return Number(plain[1]) > 0 ? { number: Number(plain[1]) } : undefined;
-  if (!/^https?:\/\//i.test(trimmed)) return undefined;
-  const inUrl = /\/(?:pull|pulls|merge_requests)\/(\d+)(?:[/?#]|$)/.exec(trimmed);
+  if (!isWebLink(trimmed)) return undefined;
+  const inUrl = new RegExp(`/(?:${pages.join('|')})/(\\d+)(?:[/?#]|$)`).exec(trimmed);
   return inUrl && Number(inUrl[1]) > 0 ? { number: Number(inUrl[1]), url: trimmed } : undefined;
 }
 
-/** Whether the URL the user gave is of the Merge request the Forge found: its page, or one under it. */
+/** Whether `text` is an http(s) link. */
+export function isWebLink(text: string): boolean {
+  return /^https?:\/\//i.test(text);
+}
+
+/** A Merge request as the user or the agent names it: `12`, `#12`, `!12`, or its URL (`…/pull/12`, `…/merge_requests/12`). */
+export function mergeRequestNamed(text: unknown): ForgeItemName | undefined {
+  return forgeItemNamed(text, '#!', ['pull', 'pulls', 'merge_requests']);
+}
+
+/** Whether the URL the user gave is of the Merge request or issue the Forge found: its page, or one under it. */
 export function isPageOf(given: string, found: string): boolean {
   const normal = (url: string) => url.toLowerCase().replace(/[?#].*$/, '').replace(/\/+$/, '');
   const a = normal(given);
