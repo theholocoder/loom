@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { DiffSummary, Project, Session, TranscriptItem } from '../../src/shared/api';
+import { Dates, ownLocale } from '../../src/shared/dates';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -149,7 +150,8 @@ describe("the Glance strip's Merge request", () => {
     open(new FakeMain({ projects: [project], sessions: [session({ babysit: { ci: 'pending', lastPollAt: at, stale: false } })] }));
 
     expect(ciButton('CI running').textContent).toBe('CI running');
-    const checked = `Checked ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    // In the runner's regional format, which the fake main reports.
+    const checked = `Checked ${new Dates(ownLocale()).time(at)}`;
     expect(glance().textContent).not.toContain('Checked');
     fireEvent.click(ciButton('CI running'));
     expect(screen.getByRole('dialog', { name: 'CI checks' }).textContent).toContain(checked);

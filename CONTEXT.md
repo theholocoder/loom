@@ -125,6 +125,10 @@ _Avoid_: Console, shell (for the Panel's tab)
 The user's keyboard shortcuts, set in Settings: Loom's own until remapped, each action's shortcut changed or taken off, and the single-key ones (`j k r d u e`, and any shortcut without Ctrl) turned off at once. A shortcut given to one action is taken from any other that had it. The palette and the Ctrl+? list show the user's. The composer's Enter and Shift+Enter, and Ctrl+1…9, are fixed.
 _Avoid_: Hotkeys, key map
 
+**Regional format**:
+How Loom writes dates and times: the order of the day, month and year and the clock (12-hour or 24-hour), the system's until picked in Settings, where the clock can be picked apart from it. The words ("Tomorrow", "3 h ago", month and weekday names) stay in the UI's language, English, whatever the format.
+_Avoid_: Locale (for the setting), date language
+
 ## Relationships
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**

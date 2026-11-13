@@ -45,6 +45,7 @@ import { FORGE_NAMES, mergeRequestRef, type Project, type Session } from '../sha
 import { MATCH_SYSTEM_LABEL, THEMES, type Theme, type ThemeChoice } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
+import { DatesProvider } from './dates';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { DatabaseProblem } from './DatabaseProblem';
 import { inboxOrder, InboxList } from './Inbox';
@@ -70,18 +71,21 @@ import { INBOX_WIDTH, windowLayout } from '../shared/window';
 /** What the main pane shows; a Page opens over it. */
 type View = 'session' | 'new-session';
 
-export function App() {
+/** `systemLocale` is the system's regional format, when main has said already. */
+export function App({ systemLocale }: { systemLocale?: string } = {}) {
   const database = useTopic('database');
   // Nothing else can be served until main knows its database is usable.
   if (!database) return null;
   if (database.state === 'damaged') return <DatabaseProblem status={database} />;
   return (
     <BindingsProvider>
-      <ToastHost>
-        <DraftsProvider>
-          <Workspace />
-        </DraftsProvider>
-      </ToastHost>
+      <DatesProvider systemLocale={systemLocale}>
+        <ToastHost>
+          <DraftsProvider>
+            <Workspace />
+          </DraftsProvider>
+        </ToastHost>
+      </DatesProvider>
     </BindingsProvider>
   );
 }

@@ -4,6 +4,7 @@ import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, readLayout,
 import { DEFAULT_KEYBINDINGS, readKeybindings, remap, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
+import { isDateFormat, isHourCycle, type DateSettings } from '../shared/dates';
 import { isAccent, isDarkTheme, isDensity, isFontSize, isLightTheme, isMonoFont, isThemeChoice, isUiFont, type Appearance } from '../shared/appearance';
 import type { LoomDatabase } from './storage/database';
 
@@ -67,7 +68,7 @@ export class Settings {
       // Never set, or not as Loom takes it: off.
     }
     // A value Loom no longer offers falls back to the default.
-    for (const [key, { valid }] of APPEARANCE_FIELDS) if (valid(stored[key])) Object.assign(current, { [key]: stored[key] });
+    for (const [key, { valid }] of [...APPEARANCE_FIELDS, ...DATE_FIELDS]) if (valid(stored[key])) Object.assign(current, { [key]: stored[key] });
     return new Settings(db, current, onChange, options);
   }
 
@@ -144,9 +145,20 @@ export class Settings {
   /** Sets the parts of the look given; rejects them all if any is not one Loom offers. */
   async setAppearance(appearance: Partial<Appearance>): Promise<SettingsValues> {
     if (typeof appearance !== 'object' || appearance === null) throw new Error('The look must be an object.');
-    const given = APPEARANCE_FIELDS.filter(([key]) => appearance[key] !== undefined);
-    for (const [key, { valid, what }] of given) if (!valid(appearance[key])) throw new Error(`"${String(appearance[key])}" is not ${what}`);
-    return this.setAll(Object.fromEntries(given.map(([key]) => [key, appearance[key]])));
+    return this.setFields(APPEARANCE_FIELDS, appearance);
+  }
+
+  /** Sets the regional format dates and times follow, or their clock; rejects both if either is not one Loom offers. */
+  async setDateFormat(dates: Partial<DateSettings>): Promise<SettingsValues> {
+    if (typeof dates !== 'object' || dates === null) throw new Error('How dates are written must be an object.');
+    return this.setFields(DATE_FIELDS, dates);
+  }
+
+  /** Sets the fields of `values` given, once each is checked against `fields`; sets none if one is wrong. */
+  private async setFields<K extends string>(fields: [K, CheckedField][], values: Partial<Record<K, unknown>>): Promise<SettingsValues> {
+    const given = fields.filter(([key]) => values[key] !== undefined);
+    for (const [key, { valid, what }] of given) if (!valid(values[key])) throw new Error(`"${String(values[key])}" is not ${what}`);
+    return this.setAll(Object.fromEntries(given.map(([key]) => [key, values[key]])));
   }
 
   /** Sets a Panel kind's width or height in the Layout, kept within its minimum and maximum. */
@@ -207,8 +219,8 @@ export class Settings {
   }
 }
 
-/** A part of the look: whether a value is one Loom offers, and what it should have been when it isn't. */
-interface AppearanceField {
+/** A setting picked from Loom's list: whether a value is one Loom offers, and what it should have been when it isn't. */
+interface CheckedField {
   valid: (value: unknown) => boolean;
   what: string;
 }
@@ -223,7 +235,13 @@ const APPEARANCE_FIELDS = Object.entries({
   fontSize: { valid: isFontSize, what: 'a font size' },
   density: { valid: isDensity, what: 'a density' },
   accent: { valid: isAccent, what: 'an accent colour' },
-} satisfies Record<keyof Appearance, AppearanceField>) as [keyof Appearance, AppearanceField][];
+} satisfies Record<keyof Appearance, CheckedField>) as [keyof Appearance, CheckedField][];
+
+/** How dates and times are written, and how to check it. */
+const DATE_FIELDS = Object.entries({
+  dateFormat: { valid: isDateFormat, what: 'a regional format Loom offers' },
+  hourCycle: { valid: isHourCycle, what: 'a clock: 12-hour, 24-hour or the format’s own' },
+} satisfies Record<keyof DateSettings, CheckedField>) as [keyof DateSettings, CheckedField][];
 
 /** Whether `value` is a whole number of minutes, at least 1. */
 function isStuckAfterMinutes(value: unknown): value is number {

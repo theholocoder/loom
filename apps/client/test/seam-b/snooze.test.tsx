@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { Project, Session } from '../../src/shared/api';
+import { Dates, ownLocale } from '../../src/shared/dates';
 import { FakeMain } from './fake-main';
 
 // Wednesday 2026-11-11, 10:42 local time.
 const NOW = new Date(2026, 10, 11, 10, 42).getTime();
 const HOUR = 3_600_000;
-/** A time of day as the runner's locale writes it: 09:00, or 09:00 AM. */
-const clock = (hours: number, minutes: number) => new Date(2026, 0, 1, hours, minutes).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/** A time of day as Loom writes it in the runner's regional format, which the fake main reports: 09:00, or 9:00 AM. */
+const clock = (hours: number, minutes: number) => new Dates(ownLocale()).time(new Date(2026, 0, 1, hours, minutes).getTime());
 
 beforeEach(() => vi.useFakeTimers({ toFake: ['Date'], now: NOW }));
 afterEach(() => {

@@ -10,6 +10,7 @@ import { Bot, ExternalLink, Eye, GitBranch, GitCommitHorizontal, GitMerge, GitPu
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type MergeRequestDetails, type MergeRequestReview, type Project, type ReviewVerdict, type Session } from '../shared/api';
 import { useApi } from './api';
+import { useDates } from './dates';
 import type { DiffComments } from './Changes';
 import { MergeRequestDiffView } from './MergeRequestDiff';
 import type { ReviewNotes } from './ReviewNotes';
@@ -18,7 +19,7 @@ import { Markdown } from './Markdown';
 import { useNow } from './now';
 import { attempt } from './SessionDetails';
 import { SquashAndMergeDialog } from './SquashAndMerge';
-import { ago, Avatar, canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
+import { Avatar, canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
 
 /** Where the Panel is asked to take the user: the link form, or the reviews and comments. `n` tells one ask from the next. */
 export interface MergeRequestFocus {
@@ -129,6 +130,7 @@ export function MergeRequestPanel({
   const checks = live ?? details?.checks;
   const ci = live ? session.babysit?.ci : details?.ci;
   const checkedAt = live ? session.babysit?.lastPollAt : read.at;
+  const dates = useDates();
   // Babysit looks after an open one only.
   const watchable = session.status !== 'archived' && project?.forge.state === 'available' && state === 'open';
   const watching = !session.babysitOff;
@@ -323,7 +325,7 @@ export function MergeRequestPanel({
           ) : (
             checks && <p className="muted">{ci ? 'No checks listed.' : 'No CI checks.'}</p>
           )}
-          {checks && checkedAt !== undefined && <p className="muted checked">{`Checked ${new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</p>}
+          {checks && checkedAt !== undefined && <p className="muted checked">{`Checked ${dates.time(checkedAt)}`}</p>}
         </section>
         <section className="mr-sec" aria-labelledby={`${ids}-reviews`}>
           <h3 id={`${ids}-reviews`} ref={reviews} tabIndex={-1}>
@@ -387,6 +389,7 @@ type Entry = { kind: 'review'; review: MergeRequestReview } | { kind: 'comment';
 /** The Merge request's reviews and comments, oldest first, each opening on the Forge. */
 function Discussion({ details, onOpen }: { details: MergeRequestDetails; onOpen: (url: string) => void }) {
   const now = useNow();
+  const dates = useDates();
   const entries: Entry[] = [...details.reviews.map((review) => ({ kind: 'review' as const, review })), ...details.comments.map((comment) => ({ kind: 'comment' as const, comment }))];
   // Those the Forge gives no time for keep their place at the end.
   const at = (entry: Entry) => (entry.kind === 'review' ? entry.review.at : entry.comment.at) ?? Infinity;
@@ -406,8 +409,8 @@ function Discussion({ details, onOpen }: { details: MergeRequestDetails; onOpen:
               {verdict ? <span className={verdict.className}>{verdict.label}</span> : <MessageSquare className="sm muted" aria-hidden="true" />}
               <span className="grow" />
               {item.at !== undefined && (
-                <time className="muted" dateTime={new Date(item.at).toISOString()} title={new Date(item.at).toLocaleString()}>
-                  {ago(item.at, now)}
+                <time className="muted" dateTime={new Date(item.at).toISOString()} title={dates.full(item.at)}>
+                  {dates.ago(item.at, now)}
                 </time>
               )}
               <button type="button" className="icon-btn xs" title="Open on the Forge" aria-label={`Open the ${verdict ? 'review' : 'comment'} by ${item.author}`} onClick={() => onOpen(item.url)}>

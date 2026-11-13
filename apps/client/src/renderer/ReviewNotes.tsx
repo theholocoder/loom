@@ -8,8 +8,9 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 import { FORGE_NAMES, type ForgeKind, type ReviewThread } from '../shared/api';
 import { Markdown } from './Markdown';
 import { useFocusOnceShown } from './FileDiffView';
-import { ago, Avatar } from './MergeRequestLooks';
+import { Avatar } from './MergeRequestLooks';
 import { useNow } from './now';
+import { useDates } from './dates';
 
 /** The review threads to show on a diff, and what can be done with them. */
 export interface ReviewNotes {
@@ -47,6 +48,7 @@ export function askHead(thread: ReviewThread): string {
  */
 export function ReviewNote({ thread, reviews, where, onAsk }: { thread: ReviewThread; reviews: ReviewNotes; where?: string; onAsk?: () => void }) {
   const now = useNow();
+  const dates = useDates();
   const [replying, setReplying] = useState(false);
   const [busy, setBusy] = useState<'reply' | 'resolve'>();
   const [error, setError] = useState<string>();
@@ -74,7 +76,7 @@ export function ReviewNote({ thread, reviews, where, onAsk }: { thread: ReviewTh
         <b>{first.author}</b>
         <span className="muted ellipsis grow">
           {where ?? 'on the Merge request'}
-          {first.at !== undefined && ` · ${ago(first.at, now)}`}
+          {first.at !== undefined && ` · ${dates.ago(first.at, now)}`}
         </span>
         {thread.changesRequested && <span className="chip verdict changes">Changes requested</span>}
         <button type="button" className="icon-btn xs" title={`Open on ${forge}`} aria-label={`Open the comment by ${first.author} on ${forge}`} onClick={() => reviews.onOpen(first.url)}>
@@ -89,7 +91,7 @@ export function ReviewNote({ thread, reviews, where, onAsk }: { thread: ReviewTh
           <div className="note-h">
             <Avatar name={comment.author} />
             <b>{comment.author}</b>
-            {comment.at !== undefined && <span className="muted">{ago(comment.at, now)}</span>}
+            {comment.at !== undefined && <span className="muted">{dates.ago(comment.at, now)}</span>}
           </div>
           <div className="note-b">
             <Markdown text={comment.body} flavour="forge" />
