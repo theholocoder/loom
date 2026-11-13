@@ -52,6 +52,12 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
   const agentDefault = session.model === undefined ? (session.agentConfig?.model ?? defaultModelOf(models)?.id) : undefined;
   const effort = session.effort ?? session.agentConfig?.effort;
   const { workingCopy } = session;
+  // Archiving leaves a worktree to the Sessions still working in it.
+  const sessions = useTopic('sessions');
+  const worktreeRemoved =
+    workingCopy.kind === 'worktree' &&
+    session.status === 'archived' &&
+    !sessions?.some((s) => s.id !== session.id && s.status !== 'archived' && s.workingCopy.kind === 'worktree' && s.workingCopy.path === workingCopy.path);
 
   return (
     <Popover anchor={anchor} role="dialog" label="Session details" className="details" maxHeight={DETAILS_MAX_HEIGHT} onClose={onClose}>
@@ -83,6 +89,9 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
           <span className="tech path" {...copyable(workingCopy.kind === 'worktree' ? 'worktree path' : 'path', workingCopy.path)}>
             {workingCopy.kind === 'worktree' ? <span {...copyable('worktree name', baseName(workingCopy.path))}>{breakable(workingCopy.path)}</span> : breakable(workingCopy.path)}
           </span>
+          {worktreeRemoved && (
+            <span className="muted">{removedProject ? 'Removed on archiving.' : 'Removed on archiving; made again here when the Session reopens.'}</span>
+          )}
         </Fact>
         <Fact label="Branch" actions={session.branch && <CopyAction text={session.branch} label="Copy branch name" />}>
           {session.branch ? (

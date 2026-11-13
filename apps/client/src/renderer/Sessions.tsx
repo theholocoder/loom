@@ -445,6 +445,7 @@ const AT_FOOT_PX = 8;
 /** An action asked of the open Session from outside it: by the palette or a shortcut. */
 export type SessionCommand =
   | 'archive'
+  | 'reopen'
   | 'delete'
   | 'openMergeRequest'
   | 'requestMergeRequest'
@@ -576,6 +577,7 @@ export function SessionView({
     const { id } = session;
     const runs: Record<SessionCommand, () => Promise<void>> = {
       archive: () => archiver.archive(session),
+      reopen: () => api.invoke('sessions.unarchive', { id }),
       delete: async () => deleter.delete(session),
       openMergeRequest: () => api.invoke('links.open', { url: session.mergeRequest!.url }),
       requestMergeRequest: () => api.invoke('sessions.requestMergeRequest', { id }),
@@ -896,7 +898,7 @@ export function SessionView({
           </div>
           <Composer
             agent={session.agent}
-            placeholder={situation ?? `Reply to ${session.agent}…`}
+            placeholder={situation ?? (session.status === 'archived' ? 'Reply to reopen this Session…' : `Reply to ${session.agent}…`)}
             tips={situation === undefined}
             disabled={composerDisabled}
             dock={panel}

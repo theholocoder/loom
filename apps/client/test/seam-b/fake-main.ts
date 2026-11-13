@@ -173,6 +173,7 @@ export class FakeMain implements LoomApi {
       'sessions.archive': () => ({ archived: true }),
       'sessions.unarchive': () => {},
       'sessions.delete': () => ({ deleted: true }),
+      'sessions.unsavedWork': () => null,
       'sessions.requestMergeRequest': () => {},
       'sessions.linkMergeRequest': () => {},
       'sessions.mergeRequest': () => {

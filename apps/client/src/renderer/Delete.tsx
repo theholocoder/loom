@@ -1,11 +1,11 @@
 // The delete command, shared by the Session menus and the palette: deletes a
-// Session for good, asking first, then warning (Discard and delete / Cancel)
-// when its worktree has uncommitted changes or unpushed commits.
-import { Trash2, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+// Session for good, asking first in one dialog, which also says what unsaved
+// work its worktree has and offers to keep it as a commit, or discard it.
+import { Trash2 } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Session, UnsavedWork } from '../shared/api';
 import { useApi } from './api';
-import { unsavedWorkText } from './Archive';
+import { CloseSessionDialog } from './Archive';
 
 export interface Deleter {
   /** Opens the dialog asking whether to delete the Session. */
@@ -18,14 +18,35 @@ export function useDelete(): Deleter {
   const api = useApi();
   const [asked, setAsked] = useState<{ session: Session; unsavedWork?: UnsavedWork }>();
   const close = () => setAsked(undefined);
+  const session = asked?.session;
+  // Asked once, up front; Delete pressed before the answer is safe, as the deletion looks again and says what it found.
+  useEffect(() => {
+    if (!session) return;
+    let current = true;
+    api
+      .invoke('sessions.unsavedWork', { id: session.id })
+      // Not known, the deletion itself asks.
+      .catch(() => null)
+      .then((work) => {
+        if (current && work) setAsked((was) => (was?.session.id === session.id ? { ...was, unsavedWork: was.unsavedWork ?? work } : was));
+      });
+    return () => {
+      current = false;
+    };
+  }, [api, session]);
   const dialog = asked && (
-    <DeleteDialog
-      key={`${asked.session.id}:${asked.unsavedWork ? 'unsaved' : 'confirm'}`}
-      session={asked.session}
+    <CloseSessionDialog
+      key={asked.session.id}
+      id="delete-session"
+      title={`Delete “${asked.session.title}”?`}
+      icon={<Trash2 className="sm warn-icon" />}
+      text={`Its conversation and attachments are deleted, which can't be undone.${workingCopyText(asked.session)} Its usage still counts on the Dashboard.`}
+      verb="delete"
+      plain="Delete"
+      branch={asked.session.branch}
       unsavedWork={asked.unsavedWork}
-      onDelete={async () => {
-        const discard = !!asked.unsavedWork;
-        const result = await api.invoke('sessions.delete', discard ? { id: asked.session.id, discard } : { id: asked.session.id });
+      onClose={async (choice) => {
+        const result = await api.invoke('sessions.delete', { id: asked.session.id, ...choice });
         if (result.deleted) close();
         else setAsked({ session: asked.session, unsavedWork: result.unsavedWork });
       }}
@@ -46,46 +67,4 @@ function workingCopyText(session: Session): string {
 
 function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function DeleteDialog({ session, unsavedWork, onDelete, onCancel }: { session: Session; unsavedWork?: UnsavedWork; onDelete: () => Promise<void>; onCancel: () => void }) {
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
-  const confirm = () => {
-    setError(undefined);
-    setBusy(true);
-    onDelete()
-      .catch((e: unknown) => setError((e as Error).message))
-      .finally(() => setBusy(false));
-  };
-  const title = unsavedWork ? 'Delete with unsaved work?' : `Delete “${session.title}”?`;
-  const text = unsavedWork
-    ? unsavedWorkText(unsavedWork, 'Deleting')
-    : `Its conversation and attachments are deleted, which can't be undone.${workingCopyText(session)} Its usage still counts on the Dashboard.`;
-  return (
-    <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && onCancel()}>
-      <div className="card modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-session-title" aria-describedby="delete-session-text">
-        <div className="card-head">
-          {unsavedWork ? <TriangleAlert className="sm warn-icon" /> : <Trash2 className="sm warn-icon" />}
-          <h3 id="delete-session-title">{title}</h3>
-        </div>
-        <p id="delete-session-text">{text}</p>
-        {error && (
-          <div className="err" role="alert">
-            {error}
-          </div>
-        )}
-        <div className="row modal-actions">
-          <button ref={cancel} type="button" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="button" className="danger" disabled={busy} onClick={confirm}>
-            {unsavedWork ? 'Discard and delete' : 'Delete'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }

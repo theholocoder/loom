@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -19,7 +19,7 @@ import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { WorkingCopyDiff } from './diff';
-import { createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
+import { commitWork, createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
 import { capToolDiffs, capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
 import { goingOn } from '../../shared/going-on';
@@ -112,6 +112,9 @@ type OpenSpan = { kind: 'run' | 'wait'; since: number; carried?: number };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
 /** What the user sends the agent: text, and the files attached to it, stored already. */
 type Message = { text: string; attachments?: Attachment[] };
+/** What archiving does with a worktree's unsaved work: hold back (neither flag), discard it, or commit it to keep it. */
+type UnsavedHandling = Required<Pick<CloseSessionParams, 'discard' | 'commitWork'>>;
+const NO_BRANCH_TO_COMMIT_TO = "This Session's worktree is on no branch, so its work can't be committed to one.";
 /** A transcript item before it has its place in the transcript. */
 type NewItem = TranscriptItem extends infer I ? (I extends TranscriptItem ? Omit<I, 'id'> : never) : never;
 
@@ -1166,14 +1169,14 @@ export class Sessions {
    * Session counts as archived only once its worktree is gone, so a removal
    * that fails can be tried again.
    */
-  async archive({ id, discard = false }: CloseSessionParams): Promise<ArchiveResult> {
+  async archive({ id, discard = false, commitWork = false }: CloseSessionParams): Promise<ArchiveResult> {
     if (this.deleting.has(id)) throw new Error('This Session is being deleted.');
-    return this.archiveTracked(id, discard);
+    return this.archiveTracked(id, { discard, commitWork });
   }
 
-  private async archiveTracked(id: number, discard: boolean): Promise<ArchiveResult> {
+  private async archiveTracked(id: number, unsaved: UnsavedHandling): Promise<ArchiveResult> {
     // An agent still starting up for this Session waits for this, and is closed if the Session is archived.
-    const archiving = this.archiveSession(id, discard);
+    const archiving = this.archiveSession(id, unsaved);
     this.archiving.set(id, archiving);
     try {
       return await archiving;
@@ -1188,14 +1191,14 @@ export class Sessions {
    * holding it back unless `discard`), then forgets it: its record, its
    * conversation, its queue and its attachments. Its usage stays.
    */
-  async delete({ id, discard = false }: CloseSessionParams): Promise<DeleteResult> {
+  async delete({ id, discard = false, commitWork = false }: CloseSessionParams): Promise<DeleteResult> {
     const session = this.get(id);
     if (this.deleting.has(id)) throw new Error('This Session is already being deleted.');
     if (this.archiving.has(id)) throw new Error('This Session is being archived.');
     if (this.reopening.has(id)) throw new Error('This Session is being reopened.');
     const project = this.options.project(session.projectId);
     if (project && this.removing.has(project.id)) throw beingRemoved(project);
-    const deleting = this.deleteSession(id, discard);
+    const deleting = this.deleteSession(id, { discard, commitWork });
     this.deleting.set(id, deleting);
     try {
       return await deleting;
@@ -1204,13 +1207,22 @@ export class Sessions {
     }
   }
 
-  private async deleteSession(id: number, discard: boolean): Promise<DeleteResult> {
+  /** What archiving or deleting the Session would ask about: its own worktree's unsaved work, if it has any. */
+  async unsavedWork({ id }: { id: number }): Promise<UnsavedWork | null> {
+    const session = this.get(id);
+    if (session.workingCopy.kind !== 'worktree' || this.worktreeShared(id) || !this.options.project(session.projectId)) return null;
+    const environment = this.environmentOf(session);
+    if (!(await pathExists(environment, session.workingCopy.path))) return null;
+    return (await unsavedWork(environment, session.workingCopy.path)) ?? null;
+  }
+
+  private async deleteSession(id: number, unsaved: UnsavedHandling): Promise<DeleteResult> {
     const session = this.get(id);
     // An archived worktree Session's worktree may be left over: its Environment must say, or the worktree would outlive the Session.
     if (session.status === 'archived' && session.workingCopy.kind === 'worktree' && this.options.project(session.projectId)) {
       await pathExists(this.environmentOf(session), session.workingCopy.path);
     }
-    const result = await this.archiveTracked(id, discard);
+    const result = await this.archiveTracked(id, unsaved);
     if (!result.archived) return { deleted: false, unsavedWork: result.unsavedWork };
     // What was being looked up after its last turn ends before it is forgotten.
     await this.afterTurns.get(id)?.catch(() => {});
@@ -1295,7 +1307,7 @@ export class Sessions {
     }
   }
 
-  private async archiveSession(id: number, discard: boolean): Promise<ArchiveResult> {
+  private async archiveSession(id: number, { discard, commitWork: keep }: UnsavedHandling): Promise<ArchiveResult> {
     // Ending the agent's text needs the transcript, so it is read first.
     this.get(id);
     await this.loadTranscript(id);
@@ -1315,16 +1327,29 @@ export class Sessions {
     // The check runs with the agent alive, so Cancel on the warning leaves the Session as it was.
     if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
-      if (work) return { archived: false, unsavedWork: work };
+      if (work?.detached && keep) throw new Error(NO_BRANCH_TO_COMMIT_TO);
+      if (work && !keep) return { archived: false, unsavedWork: work };
     }
     // Confirmed: stop the agent, then look again in case it wrote in its last moment.
     // A run waiting on the user's answer ends here too, so it fails like a Working one.
     const evenIfWaiting = this.inRun(id);
     this.denyApprovals(id);
     await this.stopAgent(id);
+    if (keep && (await pathExists(environment, worktree))) {
+      try {
+        // On no branch since the check, its commit would be lost with the worktree.
+        if ((await unsavedWork(environment, worktree))?.detached) throw new Error(NO_BRANCH_TO_COMMIT_TO);
+        await commitWork(environment, worktree, `WIP: ${session.title}`);
+      } catch (error) {
+        this.fail(id, `Loom stopped the agent to archive this Session, but couldn't commit its work, so the Session was not archived. ${(error as Error).message}`, { evenIfWaiting });
+        throw error;
+      }
+    }
     if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
-      if (work) {
+      // Kept, its unpushed commits are on its local branch, which archiving keeps.
+      const keptOnBranch = keep && work && !work.uncommitted && !work.detached;
+      if (work && !keptOnBranch) {
         this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.', { evenIfWaiting });
         return { archived: false, unsavedWork: work };
       }
@@ -1358,10 +1383,7 @@ export class Sessions {
     this.archivedFrom.set(id, inRunOrAsking(was) ? 'stopped' : (was.waitingReason ?? 'finished'));
     this.endRun(id);
     this.denyMessages.delete(id);
-    if (this.get(id).queue) {
-      this.update(id, { queue: undefined });
-      this.write((trx) => trx.deleteFrom('queued_messages').where('session_id', '=', id).execute());
-    }
+    // Its queue is kept for when it reopens: then a reply goes first, and the queue after it, as after a Stop.
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
     if (!this.deleting.has(id)) void this.lookUpMergeRequestState(id);

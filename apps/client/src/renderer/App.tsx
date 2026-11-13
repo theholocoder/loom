@@ -4,6 +4,7 @@
 // the keyboard shortcuts, which run the same actions.
 import {
   Archive,
+  ArchiveRestore,
   ArrowLeftToLine,
   ArrowRightToLine,
   ChartColumn,
@@ -496,6 +497,8 @@ function paletteActions(app: {
     session && shortcutAction('sessionDetails', Info, () => app.command('sessionDetails')),
     active && !active.unread && shortcutAction('markUnread', Mail, () => app.command('markUnread')),
     open && shortcutAction('archive', Archive, () => app.command('archive')),
+    // A removed Project's archived Sessions are read-only.
+    session?.status === 'archived' && project && { label: 'Reopen this Session', icon: ArchiveRestore, run: () => app.command('reopen') },
     session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },
     ...(Object.keys(THEMES) as Theme[]).map((theme) => ({ label: `Theme: ${THEMES[theme].label}`, icon: Palette, run: () => app.setTheme(theme) })),
     { label: 'Open Projects', icon: FolderGit2, run: () => app.openPage('projects') },

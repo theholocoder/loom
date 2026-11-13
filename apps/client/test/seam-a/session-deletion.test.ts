@@ -70,6 +70,23 @@ describe('deleting a Session', () => {
     expect((await main.api.invoke('sessions.list')).map((s) => s.id)).not.toContain(created.id);
   });
 
+  it("says what unsaved work a worktree has before it is deleted, touching nothing, and none for a clean one or a checkout's", async () => {
+    const { checkout, machine } = machineWithClone();
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    expect(await main.api.invoke('sessions.unsavedWork', { id: created.id })).toBeNull();
+
+    writeFileSync(join(created.workingCopy.path, 'notes.txt'), 'half done\n');
+    expect(await main.api.invoke('sessions.unsavedWork', { id: created.id })).toEqual({ uncommitted: true, unpushedCommits: 0, detached: false });
+    expect(existsSync(join(created.workingCopy.path, 'notes.txt'))).toBe(true);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)).toMatchObject({ status: 'waiting' });
+
+    writeFileSync(join(checkout, 'README.md'), 'dirty\n');
+    const inCheckout = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look around' });
+    expect(await main.api.invoke('sessions.unsavedWork', { id: inCheckout.id })).toBeNull();
+  });
+
   it('deletes an archived Session, which then has nothing to reopen', async () => {
     const { machine, checkout } = machineWithClone();
     const { main, project } = await withProject(machine, checkout);

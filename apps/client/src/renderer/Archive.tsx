@@ -1,9 +1,11 @@
 // The archive command, shared by the Session header, the Inbox rows, the
-// palette and the `e` shortcut: archives a Session, warning first (Discard / Cancel) when its
-// worktree has uncommitted changes or unpushed commits, then says so in a toast with Undo.
+// palette and the `e` shortcut: archives a Session, warning first when its
+// worktree has uncommitted changes or unpushed commits (keep them as a commit,
+// or discard them), then says so in a toast with Undo. Also the dialog that
+// Delete shares, and the flags of archived and removed Sessions.
 import { FolderX, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { RemovedProject, Session, UnsavedWork } from '../shared/api';
+import type { CloseSessionParams, RemovedProject, Session, UnsavedWork } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { useToast } from './Toast';
 
@@ -21,16 +23,30 @@ export function useArchive(): Archiver {
   const archive = async (session: Session) => {
     const result = await api.invoke('sessions.archive', { id: session.id });
     if (!result.archived) return setHeld({ session, unsavedWork: result.unsavedWork });
-    // Not after Discard, confirmed on the warning: what it discarded wouldn't come back.
-    toast.show({ message: `Archived “${session.title}”`, undo: () => api.invoke('sessions.unarchive', { id: session.id }) });
+    archived(session);
+  };
+  /** Says the Session was archived, in a toast whose Undo reopens it. */
+  const archived = (session: Session) => {
+    const queued = session.queue?.length ?? 0;
+    const kept = queued === 0 ? '' : queued === 1 ? '; its queued message is kept for when it reopens' : `; its ${queued} queued messages are kept for when it reopens`;
+    toast.show({ message: `Archived “${session.title}”${kept}`, undo: () => api.invoke('sessions.unarchive', { id: session.id }) });
   };
   const dialog = held && (
-    <DiscardWarning
+    <CloseSessionDialog
       key={held.session.id}
+      id="archive-warning"
+      title="Archive with unsaved work?"
+      icon={<TriangleAlert className="sm warn-icon" />}
+      verb="archive"
+      branch={held.session.branch}
       unsavedWork={held.unsavedWork}
-      onDiscard={async () => {
-        await api.invoke('sessions.archive', { id: held.session.id, discard: true });
+      onClose={async (choice) => {
+        const result = await api.invoke('sessions.archive', { id: held.session.id, ...choice });
+        // More came meanwhile, to ask about again.
+        if (!result.archived) return setHeld({ session: held.session, unsavedWork: result.unsavedWork });
         setHeld(undefined);
+        // Kept, the work comes back with Undo; discarded, it wouldn't.
+        if (choice.commitWork) archived(held.session);
       }}
       onCancel={() => setHeld(undefined)}
     />
@@ -79,34 +95,85 @@ export function unsavedWorkSummary({ uncommitted, unpushedCommits }: UnsavedWork
   return uncommitted && unpushedCommits ? `uncommitted changes and ${commits}` : uncommitted ? 'uncommitted changes' : commits;
 }
 
-/** What archiving (or deleting, as `doing` says) would lose, in words. */
-export function unsavedWorkText(work: UnsavedWork, doing: 'Archiving' | 'Deleting' = 'Archiving'): string {
+/** How the user closes a Session whose worktree has unsaved work: keeping it as a commit on its branch, or discarding it. */
+export type CloseChoice = Pick<CloseSessionParams, 'discard' | 'commitWork'>;
+
+/** Which way the dialog closes the Session: for now, or for good. */
+type CloseVerb = 'archive' | 'delete';
+
+/** What the worktree's unsaved work is, and what happens to it either way, in words; `reopens`, whether the Session can come back to it. */
+export function unsavedWorkText(work: UnsavedWork, branch: string | undefined, reopens: boolean): string {
   const { uncommitted, unpushedCommits, detached } = work;
-  const what = unsavedWorkSummary(work);
-  const kept = !unpushedCommits ? '' : detached ? ' Its HEAD is on no branch, so those commits will be lost.' : ' Commits stay on its local branch.';
-  return `This Session's worktree has ${what}. ${doing} removes the worktree${uncommitted ? ' and discards the changes' : ''}.${kept}`;
+  const has = `This Session's worktree has ${unsavedWorkSummary(work)}.`;
+  if (detached) return `${has} Its HEAD is on no branch, so nothing can keep it: removing the worktree loses it all.`;
+  const on = branch ? `its branch ${branch}` : 'its branch';
+  if (!uncommitted) return `${has} ${unpushedCommits === 1 ? 'It stays' : 'They stay'} on ${on} when the worktree is removed.`;
+  return `${has} Commit them to keep them on ${on} as a WIP commit${reopens ? ', there when the Session reopens,' : ','} or discard them with the worktree.${unpushedCommits ? ` Its commits stay on ${on}.` : ''}`;
 }
 
-function DiscardWarning({ unsavedWork, onDiscard, onCancel }: { unsavedWork: UnsavedWork; onDiscard: () => Promise<void>; onCancel: () => void }) {
+/** The buttons closing a Session with unsaved work offers, for `verb` ("archive", "delete"): keep it if it can be, else discard it. */
+function unsavedChoices(work: UnsavedWork, verb: CloseVerb): Array<{ label: string; className: string; choice: CloseChoice }> {
+  const Verb = verb.charAt(0).toUpperCase() + verb.slice(1);
+  // On no branch, nothing can keep it; with only commits, on a branch, nothing is lost. Committing whatever came meanwhile loses nothing either.
+  if (work.detached) return [{ label: `Discard and ${verb}`, className: 'danger', choice: { discard: true } }];
+  if (!work.uncommitted) return [{ label: Verb, className: 'primary', choice: { commitWork: true } }];
+  return [
+    { label: `Commit and ${verb}`, className: 'primary', choice: { commitWork: true } },
+    { label: `Discard and ${verb}`, className: 'danger', choice: { discard: true } },
+  ];
+}
+
+/**
+ * A dialog closing a Session for good or for now: `text` says what happens,
+ * and with `unsavedWork`, what the worktree has and the ways to deal with it;
+ * without, `plain` is the one button.
+ */
+export function CloseSessionDialog({
+  id,
+  title,
+  icon,
+  text,
+  verb,
+  plain,
+  branch,
+  unsavedWork,
+  onClose,
+  onCancel,
+}: {
+  id: string;
+  title: string;
+  icon: ReactNode;
+  text?: string;
+  verb: CloseVerb;
+  plain?: string;
+  branch: string | undefined;
+  unsavedWork?: UnsavedWork;
+  onClose: (choice: CloseChoice) => Promise<void>;
+  onCancel: () => void;
+}) {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
-  const discard = () => {
+  const close = (choice: CloseChoice) => {
     setError(undefined);
     setBusy(true);
-    onDiscard()
+    onClose(choice)
       .catch((e: unknown) => setError((e as Error).message))
       .finally(() => setBusy(false));
   };
+  const choices = unsavedWork ? unsavedChoices(unsavedWork, verb) : plain ? [{ label: plain, className: 'danger', choice: {} }] : [];
   return (
     <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && onCancel()}>
-      <div className="card modal" role="alertdialog" aria-modal="true" aria-labelledby="archive-warning-title" aria-describedby="archive-warning-text">
+      <div className="card modal" role="alertdialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-text`}>
         <div className="card-head">
-          <TriangleAlert className="sm warn-icon" />
-          <h3 id="archive-warning-title">Archive with unsaved work?</h3>
+          {unsavedWork ? <TriangleAlert className="sm warn-icon" /> : icon}
+          <h3 id={`${id}-title`}>{title}</h3>
         </div>
-        <p id="archive-warning-text">{unsavedWorkText(unsavedWork)}</p>
+        <div id={`${id}-text`}>
+          {text && <p>{text}</p>}
+          {unsavedWork && <p>{unsavedWorkText(unsavedWork, branch, verb === 'archive')}</p>}
+        </div>
         {error && (
           <div className="err" role="alert">
             {error}
@@ -116,9 +183,11 @@ function DiscardWarning({ unsavedWork, onDiscard, onCancel }: { unsavedWork: Uns
           <button ref={cancel} type="button" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="danger" disabled={busy} onClick={discard}>
-            Discard
-          </button>
+          {choices.map(({ label, className, choice }) => (
+            <button key={label} type="button" className={className} disabled={busy} onClick={() => close(choice)}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
     </div>

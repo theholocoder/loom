@@ -327,6 +327,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.archive': (params) => sessionService.archive(params),
     'sessions.unarchive': (params) => sessionService.unarchive(params),
     'sessions.delete': (params) => sessionService.delete(params),
+    'sessions.unsavedWork': (params) => sessionService.unsavedWork(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
     'sessions.mergeRequest': (params) => sessionService.mergeRequest(params),

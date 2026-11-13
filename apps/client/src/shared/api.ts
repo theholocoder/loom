@@ -545,12 +545,15 @@ export interface UnsavedWork {
 }
 
 /**
- * Which Session to archive or delete, and whether to discard the unsaved
- * work of its worktree, which otherwise holds it back.
+ * Which Session to archive or delete, and what to do with the unsaved work
+ * of its worktree, which otherwise holds it back: `discard` it, or keep it,
+ * `commitWork`, as a WIP commit on its local branch (its unpushed commits
+ * stay there too), which reopening brings back.
  */
 export interface CloseSessionParams {
   id: number;
   discard?: boolean;
+  commitWork?: boolean;
 }
 
 /** What `sessions.archive` did: archived, or held back by unsaved work. */
@@ -1608,10 +1611,14 @@ export interface Commands {
    * Session's checkout is left as it is. A worktree Session's worktree is
    * removed, keeping its local branch and never touching the remote; if the
    * worktree has uncommitted changes or commits on no remote branch, it
-   * resolves with that unsaved work and archives nothing, unless `discard`.
+   * resolves with that unsaved work and archives nothing, unless `discard`
+   * or `commitWork`: the latter commits its uncommitted changes, untracked
+   * files included, as "WIP: <title>" on its branch first, skipping hooks,
+   * and rejects, archiving nothing, when its HEAD is on no branch.
    * A worktree another Session that isn't archived works in is left to it,
    * as a checkout is.
-   * A Session whose worktree is missing archives as it is.
+   * A Session whose worktree is missing archives as it is. Its queue is kept
+   * for when it reopens.
    */
   'sessions.archive': { params: CloseSessionParams; result: ArchiveResult };
   /**
@@ -1625,11 +1632,19 @@ export interface Commands {
   /**
    * Deletes a Session for good, whatever its status: its agent is stopped
    * and its worktree removed as `sessions.archive` would (its local branch
-   * kept, held back by unsaved work unless `discard`), then its record, its
-   * conversation and its attachments are gone. Its usage still counts on the
-   * dashboard. Rejects while the Session is being archived or reopened.
+   * kept, held back by unsaved work unless `discard` or `commitWork`), then
+   * its record, its conversation and its attachments are gone. Its usage
+   * still counts on the dashboard. Rejects while the Session is being
+   * archived or reopened.
    */
   'sessions.delete': { params: CloseSessionParams; result: DeleteResult };
+  /**
+   * What archiving or deleting the Session would ask about: its worktree's
+   * unsaved work, or null with none, as for a checkout Session, one whose
+   * worktree another Session works in, or one whose worktree is gone.
+   * Touches nothing; the archive or deletion looks again.
+   */
+  'sessions.unsavedWork': { params: { id: number }; result: UnsavedWork | null };
   /**
    * Asks a Waiting Session's agent to open its branch's Merge request, or
    * update it, with a canned prompt; Loom never creates one itself. Rejects
