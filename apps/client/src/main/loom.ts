@@ -331,6 +331,9 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setHighlights': (value) => settingsService.setHighlights(value),
     'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
     'settings.setNotification': ({ kind, on }) => settingsService.setNotification(kind, on),
+    'settings.setKeybinding': ({ name, shortcut }) => settingsService.setKeybinding(name, shortcut),
+    'settings.setSingleKeyShortcuts': ({ on }) => settingsService.setSingleKeyShortcuts(on),
+    'settings.resetKeybindings': () => settingsService.resetKeybindings(),
     'window.showing': ({ sessionId }) => {
       if (sessionId !== null && typeof sessionId !== 'number') throw new Error('The Session shown is a Session id, or null for none.');
       showing = sessionId;

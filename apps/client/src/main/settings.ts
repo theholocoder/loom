@@ -1,6 +1,7 @@
 // Loom's own settings, kept as JSON values in the database's settings table.
 import { DEFAULT_APPROVALS, DEFAULT_NOTIFICATIONS, DEFAULT_SETTINGS, isApprovalCategory, isApprovalMode, isNotificationKind, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type DiffViewSettings, type HighlightsSettings, type NotificationKind, type Settings as SettingsValues } from '../shared/api';
 import { clampPanelSize, isPanelArea, isPanelDimension, isPanelKind, readLayout, type PanelArea, type PanelDimension, type PanelKind } from '../shared/panels';
+import { DEFAULT_KEYBINDINGS, readKeybindings, remap, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { clampInboxWidth, readInbox, type InboxSettings } from '../shared/window';
 import { splitCommandLine } from './command-line';
 import { isAccent, isDarkTheme, isDensity, isFontSize, isLightTheme, isMonoFont, isThemeChoice, isUiFont, type Appearance } from '../shared/appearance';
@@ -48,6 +49,8 @@ export class Settings {
     // Each Panel kind's area and size stand alone: one Loom no longer has is dropped, one never set takes its kind's own.
     current.layout = readLayout(stored.layout);
     current.inbox = readInbox(stored.inbox);
+    // Each remapped shortcut stands alone: one Loom no longer takes goes back to its own.
+    current.keybindings = readKeybindings(stored.keybindings);
     // Each part of the Changes view's layout stands alone: one Loom no longer takes falls back to its default.
     if (typeof stored.diffView === 'object' && stored.diffView !== null) {
       const { fileList, wrap, sideBySide } = stored.diffView as Record<string, unknown>;
@@ -120,6 +123,22 @@ export class Settings {
     if (!isNotificationKind(kind)) throw new Error(`"${String(kind)}" is not a kind of notification`);
     if (typeof on !== 'boolean') throw new Error('Whether a notification is on must be true or false.');
     return this.set('notifications', { ...this.current.notifications, [kind]: on });
+  }
+
+  /** Sets an action's shortcut, taking it from any other that had it; rejects one Loom can't run. */
+  async setKeybinding(name: ShortcutName, shortcut: Shortcut | null | 'default'): Promise<SettingsValues> {
+    return this.set('keybindings', remap(this.current.keybindings, name, shortcut));
+  }
+
+  /** Turns the shortcuts without Ctrl on or off. */
+  async setSingleKeyShortcuts(on: boolean): Promise<SettingsValues> {
+    if (typeof on !== 'boolean') throw new Error('Whether the single-key shortcuts run must be true or false.');
+    return this.set('keybindings', { ...this.current.keybindings, singleKeys: on });
+  }
+
+  /** Puts every shortcut back to Loom's own. */
+  async resetKeybindings(): Promise<SettingsValues> {
+    return this.set('keybindings', DEFAULT_KEYBINDINGS);
   }
 
   /** Sets the parts of the look given; rejects them all if any is not one Loom offers. */

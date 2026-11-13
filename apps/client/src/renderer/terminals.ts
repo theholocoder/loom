@@ -2,6 +2,8 @@
 // run: the dock shows one at a time, and a Session not shown keeps its
 // terminals going, still taking in what they print.
 import type { LoomApi, TerminalInfo, TerminalSize } from '../shared/api';
+import { bindingsOf, DEFAULT_KEYBINDINGS, type Bindings } from '../shared/shortcuts';
+import { isTerminalShortcut } from './shortcuts';
 import { createTerminalScreen, type TerminalScreen } from './terminal-screen';
 
 interface KeptScreen {
@@ -17,6 +19,19 @@ const keptScreens = new WeakMap<LoomApi, Map<number, KeptScreen>>();
 /** Each main's subscriptions to a Session's terminals, while it has screens. */
 const watchedSessions = new WeakMap<LoomApi, Map<number, () => void>>();
 
+/** Each main's shortcuts, as the user last set them, which the terminals let through to the window. */
+const keptBindings = new WeakMap<LoomApi, { bindings: Bindings }>();
+
+/** The user's shortcuts, kept current from the settings from the first terminal on, for as long as `api` lasts. */
+function bindingsFor(api: LoomApi): { bindings: Bindings } {
+  const existing = keptBindings.get(api);
+  if (existing) return existing;
+  const kept = { bindings: bindingsOf(DEFAULT_KEYBINDINGS) };
+  keptBindings.set(api, kept);
+  api.subscribe('settings', (settings) => (kept.bindings = bindingsOf(settings.keybindings)));
+  return kept;
+}
+
 /** The screen of `terminal`, made the first time it is asked for. */
 export function terminalScreen(api: LoomApi, terminal: TerminalInfo): TerminalScreen {
   let screens = keptScreens.get(api);
@@ -25,7 +40,9 @@ export function terminalScreen(api: LoomApi, terminal: TerminalInfo): TerminalSc
   if (existing) return existing.screen;
 
   const { id, sessionId } = terminal;
+  const kept = bindingsFor(api);
   const screen = createTerminalScreen({
+    isShortcut: (event) => isTerminalShortcut(event, kept.bindings),
     openLink: (url) => void api.invoke('links.open', { url }).catch((error: unknown) => console.error('could not open the link:', error)),
   });
   screen.onInput((data) => void api.invoke('terminals.write', { id, data }).catch(() => {}));

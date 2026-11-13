@@ -60,7 +60,7 @@ import { ContextMenuHost } from './ContextMenu';
 import { Settings } from './Settings';
 import { canSnooze, isSnoozed } from './Snooze';
 import { ShortcutHelp } from './ShortcutHelp';
-import { isTerminalShortcut, matchesShortcut, SHORTCUTS, typingGuard, type ShortcutName } from './shortcuts';
+import { BindingsProvider, isTerminalShortcut, matchesShortcut, shortcutLabel, SHORTCUTS, typingGuard, useBindings, type Bindings, type ShortcutName } from './shortcuts';
 import { ToastHost, useToast } from './Toast';
 import { Welcome } from './Welcome';
 import { ResizeEdge } from './ResizeEdge';
@@ -76,11 +76,13 @@ export function App() {
   if (!database) return null;
   if (database.state === 'damaged') return <DatabaseProblem status={database} />;
   return (
-    <ToastHost>
-      <DraftsProvider>
-        <Workspace />
-      </DraftsProvider>
-    </ToastHost>
+    <BindingsProvider>
+      <ToastHost>
+        <DraftsProvider>
+          <Workspace />
+        </DraftsProvider>
+      </ToastHost>
+    </BindingsProvider>
   );
 }
 
@@ -179,7 +181,9 @@ function Workspace() {
   const layout = { ...windowLayout(windowSize.width, inbox.value), height: windowSize.height };
 
   const waiting = inboxOrder(sessions, projects);
+  const bindings = useBindings();
   const actions = paletteActions({
+    bindings,
     projects,
     forgeProjects,
     session: shown,
@@ -209,8 +213,8 @@ function Workspace() {
     help?.returnFocus?.focus();
     setHelp(undefined);
   };
-  const latest = useRef({ palette, openPalette, closePalette, help, closeHelp, actions, waiting, select });
-  latest.current = { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select };
+  const latest = useRef({ palette, openPalette, closePalette, help, closeHelp, actions, waiting, select, bindings });
+  latest.current = { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select, bindings };
   // Main keeps quiet about the Session shown while the window has the focus.
   const shownId = shown?.id ?? null;
   useEffect(() => {
@@ -239,28 +243,29 @@ function Workspace() {
     const typing = typingGuard();
     const onPointerDown = () => typing.reset();
     const onKeyDown = (event: KeyboardEvent) => {
-      const { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select } = latest.current;
+      const { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select, bindings } = latest.current;
       // A terminal takes every key but the few shortcuts xterm lets through to here.
-      if (event.target instanceof Element && event.target.closest('.terminal-screen') && !isTerminalShortcut(event)) return;
+      if (event.target instanceof Element && event.target.closest('.terminal-screen') && !isTerminalShortcut(event, bindings)) return;
       if (isTyping(event.target)) typing.typed(event);
+      const ctrl = event.ctrlKey || event.metaKey;
       // Not over a dialog, nor a menu or picker, which have keys of their own.
       const covered = () => !!document.querySelector('[aria-modal="true"], .popover');
-      // The palette and the shortcuts list close on their own key too.
-      if (matchesShortcut(SHORTCUTS.palette.shortcut, event)) {
+      // The palette and the shortcuts list close on their own key too; one without Ctrl, only away from typing, as any.
+      const anywhere = () => ctrl || (!isTyping(event.target) && !typing.holds());
+      if (matchesShortcut(bindings.palette, event) && anywhere()) {
         event.preventDefault();
         if (palette) closePalette();
         else if (!covered()) openPalette();
         return;
       }
-      if (help && matchesShortcut(SHORTCUTS.help.shortcut, event)) {
+      if (help && matchesShortcut(bindings.help, event) && anywhere()) {
         event.preventDefault();
         closeHelp();
         return;
       }
-      const ctrl = event.ctrlKey || event.metaKey;
       if (event.altKey || event.defaultPrevented || (!ctrl && isTyping(event.target)) || covered()) return;
       // The toast's Undo; in a text field, the field's own.
-      if (matchesShortcut(SHORTCUTS.undo.shortcut, event)) {
+      if (matchesShortcut(bindings.undo, event)) {
         if (!isTyping(event.target) && toast.undo()) event.preventDefault();
         return;
       }
@@ -315,7 +320,7 @@ function Workspace() {
               <button className="search" type="button" title="Search Sessions and actions" aria-label="Search Sessions and actions" aria-haspopup="dialog" onClick={openPalette}>
                 <Search />
                 <span>Search…</span>
-                <kbd>Ctrl K</kbd>
+                {bindings.palette && <kbd>{shortcutLabel(bindings.palette)}</kbd>}
               </button>
             </div>
             <InboxList sessions={sessions} projects={projects} selectedId={behind?.id} onSelect={select} onReply={reply} />
@@ -461,6 +466,8 @@ function stepWaiting(waiting: Session[], shown: Session | undefined, step: 1 | -
  * them, in this order, and their shortcuts run them (see Shortcut).
  */
 function paletteActions(app: {
+  /** Each action's shortcut, as the user has them. */
+  bindings: Bindings;
   projects: Project[];
   forgeProjects: Project[];
   session: Session | undefined;
@@ -480,6 +487,8 @@ function paletteActions(app: {
   toggleInbox: () => void;
 }): PaletteAction[] {
   const { session, nextWaiting, previousWaiting } = app;
+  /** An action named and keyed as the shortcuts catalog has it, with the user's shortcut. */
+  const shortcutAction = (name: ShortcutName, icon: LucideIcon, run: PaletteAction['run']): PaletteAction => ({ label: SHORTCUTS[name].label, icon, shortcut: app.bindings[name], run });
   const project = session && app.projects.find((p) => p.id === session.projectId);
   // A Session whose worktree is missing can only be archived.
   const active = session && session.status !== 'archived' && !session.worktreeMissing ? session : undefined;
@@ -540,12 +549,6 @@ function paletteActions(app: {
     shortcutAction('help', Keyboard, app.showHelp),
   ];
   return actions.filter((action): action is PaletteAction => !!action);
-}
-
-/** An action named and keyed as the shortcuts catalog has it. */
-function shortcutAction(name: ShortcutName, icon: LucideIcon, run: PaletteAction['run']): PaletteAction {
-  const { label, shortcut } = SHORTCUTS[name];
-  return { label, icon, shortcut, run };
 }
 
 /** The Project a new Session most likely goes in: the open Session's, else that of the Session most recently active. */

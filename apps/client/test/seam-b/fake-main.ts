@@ -1,5 +1,6 @@
 // Seam B: a fake main implementing the same typed API the real one does, so
 // renderer tests control exactly what main reports.
+import { DEFAULT_KEYBINDINGS, remap } from '../../src/shared/shortcuts';
 import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
 import { clampPanelSize, DEFAULT_SESSION_PANELS, type SessionPanels } from '../../src/shared/panels';
 import { clampInboxWidth } from '../../src/shared/window';
@@ -175,6 +176,23 @@ export class FakeMain implements LoomApi {
       'settings.setNotification': ({ kind, on }) => {
         const current = this.value('settings');
         const settings = { ...current, notifications: { ...current.notifications, [kind]: on } };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setKeybinding': ({ name, shortcut }) => {
+        const current = this.value('settings');
+        const settings = { ...current, keybindings: remap(current.keybindings, name, shortcut) };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setSingleKeyShortcuts': ({ on }) => {
+        const current = this.value('settings');
+        const settings = { ...current, keybindings: { ...current.keybindings, singleKeys: on } };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.resetKeybindings': () => {
+        const settings = { ...this.value('settings'), keybindings: DEFAULT_KEYBINDINGS };
         this.publish('settings', settings);
         return settings;
       },

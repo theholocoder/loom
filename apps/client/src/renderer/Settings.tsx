@@ -1,6 +1,7 @@
-import { Bell, Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, LoaderCircle, MessagesSquare, Palette, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Bell, Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, Keyboard, LoaderCircle, MessagesSquare, Palette, Pencil, RotateCcw, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi, type NotificationKind } from '../shared/api';
+import { assignedBindings, checkShortcut, DEFAULT_KEYBINDINGS, isDefaultKeybindings, MODIFIER_KEYS, REMAPPABLE_SHORTCUTS, sameShortcut, SHORTCUTS, shortcutLabel, takenBy, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { ACCENTS, accentColours, DENSITIES, FONT_SIZES, isDarkTheme, isLightTheme, MATCH_SYSTEM_LABEL, MONO_FONTS, THEMES, UI_FONTS, type Accent, type Appearance, type Theme, type ThemeChoice } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useTheme } from './appearance';
@@ -435,6 +436,131 @@ const NOTIFICATION_SETTINGS: { kind: NotificationKind; title: string; descriptio
   { kind: 'stuck', title: 'When a Session is stuck', description: 'Its agent has said nothing for the minutes set in Stuck after.', keywords: 'timeout idle' },
 ];
 
+/** Whether the shortcuts without Ctrl run. */
+function SingleKeyShortcuts({ label }: { label: string }) {
+  const on = useTopic('settings')?.keybindings.singleKeys ?? DEFAULT_KEYBINDINGS.singleKeys;
+  return <Toggle label={label} on={on} change={(api, next) => api.invoke('settings.setSingleKeyShortcuts', { on: next })} />;
+}
+
+/**
+ * One action's shortcut: its keys, Change to press new ones, Remove, and
+ * Reset to Loom's own once remapped. Says which action a shortcut was taken
+ * from.
+ */
+function KeybindingSetting({ label, name }: { label: string; name: ShortcutName }) {
+  const api = useApi();
+  const keybindings = useTopic('settings')?.keybindings;
+  const { save, saved, error } = useSaving();
+  const [recording, setRecording] = useState(false);
+  /** Which actions the last shortcut set was taken from, said under it. */
+  const [takenNote, setTakenNote] = useState<string>();
+  const change = useRef<HTMLButtonElement>(null);
+  const errorId = useId();
+  if (!keybindings) return null;
+  const shortcut = assignedBindings(keybindings)[name];
+  const own = SHORTCUTS[name].shortcut;
+  const off = !!shortcut && !shortcut.ctrl && !keybindings.singleKeys;
+  const setShortcut = (next: Shortcut | null | 'default') => {
+    const from = next ? takenBy(keybindings, name, next === 'default' ? own : next) : [];
+    setTakenNote(undefined);
+    change.current?.focus();
+    void save(api.invoke('settings.setKeybinding', { name, shortcut: next })).then((kept) => {
+      if (kept && from.length) setTakenNote(`Taken from “${from.map((other) => SHORTCUTS[other].label).join('”, “')}”, now with none.`);
+    });
+  };
+  const refuse = (why: string) => {
+    setTakenNote(undefined);
+    void save(Promise.reject(new Error(why)));
+  };
+  const stop = () => {
+    setRecording(false);
+    change.current?.focus();
+  };
+  const record = (event: KeyboardEvent) => {
+    const key = event.key.toLowerCase();
+    const ctrl = event.ctrlKey || event.metaKey;
+    // Tab still moves on, leaving the shortcut as it was.
+    if (key === 'tab' && !ctrl && !event.altKey) return setRecording(false);
+    // Nothing else reaches the window's shortcuts or the page, Escape included.
+    event.preventDefault();
+    event.stopPropagation();
+    if (MODIFIER_KEYS.has(key)) return;
+    if (key === 'escape' && !ctrl && !event.shiftKey && !event.altKey) return stop();
+    if (event.altKey) return refuse("Loom's shortcuts don't take Alt: try Ctrl, or Ctrl Shift.");
+    // By where the key sits, as Ctrl 1…9 are: AZERTY's 1 types &.
+    if (ctrl && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) return refuse('Ctrl 1…9 open the Waiting Sessions in the Inbox.');
+    let next: Shortcut;
+    try {
+      next = checkShortcut(name, { key, ...(ctrl ? { ctrl } : {}), ...(event.shiftKey ? { shift: true } : {}) });
+    } catch (refusal) {
+      return refuse((refusal as Error).message);
+    }
+    stop();
+    if (!shortcut || !sameShortcut(next, shortcut)) setShortcut(next);
+  };
+  return (
+    <>
+      <div className="keybinding">
+        {recording ? (
+          <button
+            type="button"
+            className="keybinding-record"
+            autoFocus
+            aria-label={`New shortcut for ${label}: press it`}
+            aria-describedby={error ? errorId : undefined}
+            onKeyDown={record}
+            onBlur={() => setRecording(false)}
+          >
+            Press the keys…
+          </button>
+        ) : shortcut ? (
+          <kbd className={off ? 'off' : undefined} title={off ? 'Off, as the single-key shortcuts are' : undefined} aria-label={off ? `${shortcutLabel(shortcut)}, off` : undefined}>
+            {shortcutLabel(shortcut)}
+          </kbd>
+        ) : (
+          <span className="muted">None</span>
+        )}
+        <button ref={change} className="icon-btn sm" type="button" title="Change" aria-label={`Change the shortcut for ${label}`} onClick={() => setRecording(true)}>
+          <Pencil />
+        </button>
+        {shortcut && (
+          <button className="icon-btn sm" type="button" title="Remove" aria-label={`Remove the shortcut for ${label}`} onClick={() => setShortcut(null)}>
+            <X />
+          </button>
+        )}
+        {name in keybindings.remapped && (
+          <button className="icon-btn sm" type="button" title={`Reset to ${shortcutLabel(own)}`} aria-label={`Reset the shortcut for ${label} to ${shortcutLabel(own)}`} onClick={() => setShortcut('default')}>
+            <RotateCcw />
+          </button>
+        )}
+      </div>
+      <SaveFeedback saved={saved} error={error} errorId={errorId} />
+      {takenNote && <div className="muted keybinding-taken">{takenNote}</div>}
+    </>
+  );
+}
+
+/** Puts every shortcut back to Loom's own. */
+function ResetKeybindings({ label }: { label: string }) {
+  const api = useApi();
+  const keybindings = useTopic('settings')?.keybindings;
+  const { save, saved, error } = useSaving();
+  return (
+    <>
+      <button type="button" disabled={!keybindings || isDefaultKeybindings(keybindings)} onClick={() => void save(api.invoke('settings.resetKeybindings'))}>
+        <RotateCcw className="sm" />
+        {label}
+      </button>
+      <SaveFeedback saved={saved} error={error} />
+    </>
+  );
+}
+
+/** Loom's own shortcuts without Ctrl, as the single-key setting names them. */
+const SINGLE_KEYS = REMAPPABLE_SHORTCUTS.map((name) => SHORTCUTS[name].shortcut as Shortcut)
+  .filter((shortcut) => !shortcut.ctrl)
+  .map(shortcutLabel);
+
 /** Whether a model checks each turn for Session highlights; only once one is picked. */
 function HighlightsOn({ label }: { label: string }) {
   const highlights = useTopic('settings')?.highlights;
@@ -807,6 +933,30 @@ const SECTIONS: SettingsSection[] = [
         wide: true,
         Control: DiffCollapsedPatterns,
       },
+    ],
+  },
+  {
+    id: 'keybindings',
+    title: 'Keybindings',
+    icon: Keyboard,
+    description:
+      'Change an action’s shortcut, then press its new keys; Escape leaves it as it was. One with Ctrl runs even while you type, one without only outside text fields. A shortcut given to one action is taken from any other that had it. The keyboard shortcuts list, and the palette, show them as you have them.',
+    keywords: 'keyboard shortcuts keys hotkeys remap',
+    settings: [
+      {
+        title: 'Single-key shortcuts',
+        description: `Loom’s own ${SINGLE_KEYS.join(', ')}, and any shortcut you give a key without Ctrl. Off, those keys run nothing.`,
+        keywords: 'letters bare',
+        Control: SingleKeyShortcuts,
+      },
+      ...REMAPPABLE_SHORTCUTS.map(
+        (name): SettingEntry => ({
+          title: SHORTCUTS[name].label,
+          keywords: `shortcut ${shortcutLabel(SHORTCUTS[name].shortcut)}`,
+          Control: ({ label }) => <KeybindingSetting label={label} name={name} />,
+        }),
+      ),
+      { title: 'Reset all shortcuts', description: 'Back to Loom’s own shortcuts, the single-key ones on.', keywords: 'default', Control: ResetKeybindings },
     ],
   },
   {
