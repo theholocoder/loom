@@ -824,6 +824,8 @@ input.toggle:disabled { cursor: not-allowed; }
 .page-window { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px var(--shadow); overflow: hidden; }
 .page-window-scrim.narrow .page-window { border: 0; border-radius: 0; box-shadow: none; }
 .page-window:focus { outline: none; }
+/* Settings and Projects: no wider than their content, in the middle of the room. */
+.page-window-scrim:not(.narrow) .page-window.compact { max-width: 1080px; margin: 0 auto; }
 .page-window > .dash { flex: 1; min-height: 0; }
 .page-window-close { position: absolute; top: 16px; right: 18px; z-index: 2; }
 /* Each page's first row leaves the close button its corner. */

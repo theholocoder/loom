@@ -13,6 +13,8 @@ import { useWindowLayout } from './WindowLayout';
 export type Page = 'projects' | 'dashboard' | 'settings';
 
 const PAGE_TITLES: Record<Page, string> = { projects: 'Projects', dashboard: 'Dashboard', settings: 'Settings' };
+/** The pages whose content has a width of its own: their window takes no more, so it isn't left empty beside it. The Dashboard's cards take all the room. */
+const COMPACT: ReadonlySet<Page> = new Set(['projects', 'settings']);
 
 /** The page window's class, by which views beneath it know it covers them. */
 export const PAGE_WINDOW_CLASS = 'page-window';
@@ -49,7 +51,7 @@ export function PageWindow({ page, onClose, children }: { page: Page; onClose: (
   const title = PAGE_TITLES[page];
   return (
     <div className={narrow ? 'page-window-scrim narrow' : 'page-window-scrim'} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={element} className={PAGE_WINDOW_CLASS} role="dialog" aria-label={title} tabIndex={-1}>
+      <div ref={element} className={COMPACT.has(page) ? `${PAGE_WINDOW_CLASS} compact` : PAGE_WINDOW_CLASS} role="dialog" aria-label={title} tabIndex={-1}>
         <button className="icon-btn page-window-close" type="button" title="Close (Esc)" aria-label={`Close ${title}`} onClick={onClose}>
           <X />
         </button>
