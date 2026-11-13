@@ -47,6 +47,9 @@ button.select-field:focus-visible { border-color: var(--accent); }
 .palette [role="option"][aria-selected="true"] { color: var(--text); background: var(--sel); }
 .palette [role="option"] kbd { margin-left: auto; }
 .palette-project { max-width: 30%; font-size: 12px; }
+/* A Session's title, and under it what was said that the search found. */
+.palette-session { display: flex; flex-direction: column; min-width: 0; }
+.palette-excerpt { font-size: 12px; }
 .palette-empty { padding: 16px; text-align: center; }
 .palette-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 /* The Ctrl+? list of shortcuts. */

@@ -10,7 +10,7 @@ import { addToContextMenu, type ContextMenuItem, type ContextMenuSection } from 
 import { useDelete } from './Delete';
 import { Popover } from './Popover';
 import type { NewSessionWorkingCopy } from './Sessions';
-import { isSnoozed, SnoozeMenu } from './Snooze';
+import { canSnooze, isSnoozed, SnoozeMenu } from './Snooze';
 
 /** Opens New Session on a Project and working copy; given by the window, which shows it. */
 export const NewSessionContext = createContext<(projectId: number, workingCopy: NewSessionWorkingCopy) => void>(() => {});
@@ -52,13 +52,12 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
   const fail = (e: unknown) => onError((e as Error).message);
   const sections = (): ContextMenuSection[] => {
     const same = project ? sameWorkingCopy(session, sessions) : undefined;
-    const waiting = session.status === 'waiting' && !session.worktreeMissing;
     const snooze: ContextMenuItem = isSnoozed(session)
       ? { label: 'Wake', icon: AlarmClockOff, run: () => void api.invoke('sessions.snooze', { id: session.id, until: null }).catch(fail) }
       : {
           label: 'Snooze…',
           icon: AlarmClock,
-          disabled: !waiting,
+          disabled: !canSnooze(session),
           open: (anchor, close) => <SnoozeMenu anchor={anchor} session={session} onClose={close} onError={onError} />,
         };
     const archived = session.status === 'archived';
@@ -97,7 +96,7 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
 }
 
 /** The Session's title to edit, beside `anchor`: Enter renames it, Escape leaves it be. */
-function RenameSession({ anchor, session, onClose, onError }: { anchor: RefObject<HTMLElement | null>; session: Session; onClose: () => void; onError: (message: string) => void }) {
+export function RenameSession({ anchor, session, onClose, onError }: { anchor: RefObject<HTMLElement | null>; session: Session; onClose: () => void; onError: (message: string) => void }) {
   const api = useApi();
   const [title, setTitle] = useState(session.title);
   const valid = title.trim() !== '';
