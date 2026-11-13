@@ -5,6 +5,7 @@
 import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
 import { DEFAULT_LAYOUT, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type SessionPanels } from './panels';
 import type { ProjectColor } from './projects';
+import { DEFAULT_KEYBINDINGS, type KeybindingSettings, type Shortcut, type ShortcutName } from './shortcuts';
 import { DEFAULT_INBOX, type InboxSettings } from './window';
 
 /** What the Environment's bridge reported in its handshake. */
@@ -1021,6 +1022,8 @@ export interface Settings extends Appearance {
    * until the user turns them on.
    */
   notifications: NotificationSettings;
+  /** The shortcuts the user remapped, and whether the single-key ones run: Loom's own, all on, until changed. */
+  keybindings: KeybindingSettings;
 }
 
 /** The Changes view's layout, kept in settings. */
@@ -1117,6 +1120,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diffView: DEFAULT_DIFF_VIEW,
   highlights: DEFAULT_HIGHLIGHTS,
   notifications: DEFAULT_NOTIFICATIONS,
+  keybindings: DEFAULT_KEYBINDINGS,
   ...DEFAULT_APPEARANCE,
 };
 
@@ -1561,6 +1565,18 @@ export interface Commands {
   'settings.setApproval': { params: { category: ApprovalCategory; setting: ApprovalSetting }; result: Settings };
   /** Turns desktop notifications of one kind of news on or off. Rejects an unknown kind. */
   'settings.setNotification': { params: { kind: NotificationKind; on: boolean }; result: Settings };
+  /**
+   * Sets an action's shortcut: to `shortcut`, to none for null, or back to
+   * Loom's own for 'default'. Any other action that had that shortcut is left
+   * with none. Rejects an action Settings can't remap, and a shortcut Loom
+   * can't run (Escape, Tab, a key without Ctrl that types more than a
+   * character, Ctrl 1…9, the Ctrl keys of text fields).
+   */
+  'settings.setKeybinding': { params: { name: ShortcutName; shortcut: Shortcut | null | 'default' }; result: Settings };
+  /** Turns the shortcuts without Ctrl on or off: off, `j k r d u e`, and any shortcut remapped to a key without Ctrl, run nothing. */
+  'settings.setSingleKeyShortcuts': { params: { on: boolean }; result: Settings };
+  /** Puts every shortcut back to Loom's own, the single-key ones on. */
+  'settings.resetKeybindings': { params: void; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
   /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */

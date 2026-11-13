@@ -40,7 +40,7 @@ import { addToContextMenu, MenuButtonMenu, type ContextMenuSection } from './Con
 import { countText } from './MergeRequestLooks';
 import { Popover } from './Popover';
 import { ResizeEdge } from './ResizeEdge';
-import { SHORTCUTS, shortcutLabel } from './shortcuts';
+import { shortcutLabel, useBindings } from './shortcuts';
 import { useWindowLayout } from './WindowLayout';
 import { isFreeEscape } from './escape';
 
@@ -576,7 +576,8 @@ export function PanelArea({
   const Element = area === 'side' ? 'aside' : 'section';
   // Review mode takes the Side area's place: a Panel in the Dock stays there.
   const reviewable = area === 'side' && !reviewing && state.shown && PANELS[kindOf(state.shown)].reviewable && canReview(state.shown) ? state.shown : undefined;
-  const reviewShortcut = shortcutLabel(SHORTCUTS.reviewChanges.shortcut);
+  const reviewBinding = useBindings().reviewChanges;
+  const reviewShortcut = reviewBinding && shortcutLabel(reviewBinding);
   return (
     <>
     {drawer && <div className="drawer-scrim" aria-hidden="true" />}
@@ -652,9 +653,9 @@ export function PanelArea({
             className="icon-btn sm"
             type="button"
             data-review-toggle
-            title={`Review mode: give ${tab(reviewable).label} the main area (${reviewShortcut}, Esc to come back)`}
+            title={`Review mode: give ${tab(reviewable).label} the main area (${reviewShortcut ? `${reviewShortcut}, ` : ''}Esc to come back)`}
             aria-label={`Review ${tab(reviewable).label}`}
-            aria-keyshortcuts={reviewShortcut.replaceAll(' ', '+')}
+            aria-keyshortcuts={reviewShortcut?.replaceAll(' ', '+')}
             onClick={() => control.toggleReview(reviewable)}
           >
             <Maximize2 />

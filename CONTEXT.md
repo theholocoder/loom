@@ -121,6 +121,10 @@ The setting that has a model of the user's picking, usually a cheap one, check e
 A shell in a **Panel**, run by the **Session**'s **Environment** in its working copy. A Session can have several. They keep running when another Session is shown, and end when closed, when their shell exits, when the Session is archived or when Loom quits. None outlives Loom. "Open in terminal" is different: it opens the working copy in the user's own terminal app.
 _Avoid_: Console, shell (for the Panel's tab)
 
+**Keybindings**:
+The user's keyboard shortcuts, set in Settings: Loom's own until remapped, each action's shortcut changed or taken off, and the single-key ones (`j k r d u e`, and any shortcut without Ctrl) turned off at once. A shortcut given to one action is taken from any other that had it. The palette and the Ctrl+? list show the user's. The composer's Enter and Shift+Enter, and Ctrl+1…9, are fixed.
+_Avoid_: Hotkeys, key map
+
 ## Relationships
 
 - A **Project** has many **Sessions**; a **Session** belongs to exactly one **Project**

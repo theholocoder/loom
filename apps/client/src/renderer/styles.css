@@ -755,6 +755,11 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .setting.wide { grid-template-columns: minmax(0, 1fr); }
 .setting.wide .setting-control, .setting.wide .setting-form { align-items: stretch; }
 .setting.wide .setting-control .err { max-width: none; text-align: left; }
+.keybinding { display: flex; align-items: center; gap: 4px; }
+.keybinding kbd { font-size: 12px; padding: 1px 6px; }
+.keybinding kbd.off { text-decoration: line-through; opacity: 0.6; }
+.keybinding-record { font-size: 12px; padding: 1px 8px; border-color: var(--accent); }
+.keybinding-taken { font-size: 12px; margin-top: 4px; max-width: 36ch; text-align: right; }
 .saved { display: inline-flex; align-items: center; gap: 4px; color: var(--ok); font-size: 12px; }
 .saved:not(:empty) { margin-top: 4px; }
 .setting.wide .saved { align-self: flex-start; }

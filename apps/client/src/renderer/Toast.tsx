@@ -1,10 +1,11 @@
 // The toast at the foot of the window: a word on what an action just did,
 // with Undo for the ones that can be taken back (Archive, Mark unread), which
-// Ctrl+Z runs too outside text fields, or why an action failed, in view
-// wherever the action was. One at a time: a new one takes the place of the
-// last.
+// its shortcut (Ctrl+Z, unless remapped) runs too outside text fields, or why
+// an action failed, in view wherever the action was. One at a time: a new
+// one takes the place of the last.
 import { OctagonX, Undo2, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { shortcutLabel, useBindings } from './shortcuts';
 
 /** How long a toast stays, unless it says why an action failed. */
 export const TOAST_MS = 8000;
@@ -63,6 +64,8 @@ export function ToastHost({ children }: { children: ReactNode }) {
     return { show, undo, close };
   }, []);
   const holding = held.pointer || held.focus;
+  const undoBinding = useBindings().undo;
+  const undoKeys = undoBinding && shortcutLabel(undoBinding);
   useEffect(() => {
     if (!toast || holding || toast.failed) return;
     const timer = setTimeout(toaster.close, TOAST_MS);
@@ -89,7 +92,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
               {toast.message}
             </span>
             {toast.undo && (
-              <button type="button" className="link" title="Undo (Ctrl Z)" onClick={toaster.undo}>
+              <button type="button" className="link" title={undoKeys ? `Undo (${undoKeys})` : 'Undo'} onClick={toaster.undo}>
                 <Undo2 className="sm" />
                 Undo
               </button>
