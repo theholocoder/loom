@@ -87,6 +87,17 @@ describe('Babysit on GitHub', () => {
     const session = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === 'feedback');
     expect(sessionOf(session, id)).toMatchObject({ status: 'waiting', unread: true });
   });
+
+  it('notifies the new feedback, once desktop notifications of it are on', async () => {
+    const { main, id, forge } = await babysat('gh');
+    await main.api.invoke('settings.setNotification', { kind: 'feedback', on: true });
+    forge({ comments: [{ id: 2, author: 'bob', body: 'Please add a test', url: `${URLS.gh}#c2` }] });
+    await pollAfter(main, id, 3 * MINUTE);
+    await main.elapse(QUIET_WINDOW);
+    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).waitingReason === 'feedback');
+
+    expect(main.notifications.map(({ title, body }) => ({ title, body }))).toEqual([{ title: 'Fix the login bug', body: 'loom: New feedback on its Merge request' }]);
+  });
 });
 
 /** Asks for a poll now, as the window gaining focus does, and waits for it to land. */

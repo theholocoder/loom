@@ -71,6 +71,10 @@ export interface MainHarness {
   machine: Machine;
   /** Every URL main has opened in the user's browser, in order. */
   opened: string[];
+  /** Every desktop notification main has shown, in order; `click` clicks it. */
+  notifications: ShownNotification[];
+  /** Gives Loom's window the focus, or takes it away: it starts without. */
+  setWindowFocused(focused: boolean): void;
   /** The native Environment's bridge process: the one started last. */
   bridge(): ChildProcess;
   /** How many times main has started a bridge. */
@@ -108,6 +112,13 @@ export function tempMachine(): Machine {
   return machine;
 }
 
+/** A desktop notification main showed. */
+export interface ShownNotification {
+  title: string;
+  body: string;
+  click(): void;
+}
+
 export async function startMain(
   options: {
     userDataDir?: string;
@@ -129,6 +140,8 @@ export async function startMain(
   let bridgeStarts = 0;
   let bridgePath: string | undefined;
   const opened: string[] = [];
+  const notifications: ShownNotification[] = [];
+  let windowFocused = false;
   const loom: Loom = await createLoom({
     userDataDir,
     appVersion: options.appVersion ?? appVersion,
@@ -143,6 +156,8 @@ export async function startMain(
     openExternal: async (url) => {
       opened.push(url);
     },
+    notify: ({ title, body, onClick }) => notifications.push({ title, body, click: onClick }),
+    windowFocused: () => windowFocused,
   });
   let closed = false;
   const close = async () => {
@@ -159,6 +174,8 @@ export async function startMain(
     userDataDir,
     machine,
     opened,
+    notifications,
+    setWindowFocused: (focused) => (windowFocused = focused),
     bridge: () => {
       if (!bridge) throw new Error('the bridge has not been spawned');
       return bridge;

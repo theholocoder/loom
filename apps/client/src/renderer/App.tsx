@@ -211,6 +211,30 @@ function Workspace() {
   };
   const latest = useRef({ palette, openPalette, closePalette, help, closeHelp, actions, waiting, select });
   latest.current = { palette, openPalette, closePalette, help, closeHelp, actions, waiting, select };
+  // Main keeps quiet about the Session shown while the window has the focus.
+  const shownId = shown?.id ?? null;
+  useEffect(() => {
+    api.invoke('window.showing', { sessionId: shownId }).catch((error: unknown) => console.error('telling main the Session shown failed:', error));
+  }, [api, shownId]);
+  // A click on a desktop notification opens its Session, over the palette or the shortcuts list; one
+  // made before this window loaded is left, as is one already handled when subscribing again.
+  const sessionsNow = useRef(sessions);
+  sessionsNow.current = sessions;
+  const lastClick = useRef<number>(undefined);
+  useEffect(
+    () =>
+      api.subscribe('openSession', (request) => {
+        const seen = lastClick.current;
+        lastClick.current = request?.click ?? 0;
+        if (seen === undefined || !request || request.click === seen) return;
+        const session = sessionsNow.current.find((s) => s.id === request.sessionId);
+        if (!session) return;
+        setPalette(undefined);
+        setHelp(undefined);
+        latest.current.select(session);
+      }),
+    [api],
+  );
   useEffect(() => {
     const typing = typingGuard();
     const onPointerDown = () => typing.reset();

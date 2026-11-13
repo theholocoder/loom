@@ -31,7 +31,7 @@ export const HIDDEN_PANELS: SessionPanels = { side: { panels: ['changes'], shown
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
-type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database'>;
+type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database' | 'openSession'>;
 
 const EMPTY: { [T in TopicName]: Topics[T] } = {
   environments: [],
@@ -45,6 +45,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   terminals: [],
   terminalOutput: { data: new Uint8Array() },
   database: { state: 'ok' },
+  openSession: null,
 };
 
 export class FakeMain implements LoomApi {
@@ -159,6 +160,13 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setNotification': ({ kind, on }) => {
+        const current = this.value('settings');
+        const settings = { ...current, notifications: { ...current.notifications, [kind]: on } };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'window.showing': () => {},
       'sessions.list': () => this.value('sessions'),
       'sessions.create': () => {
         throw new Error('sessions.create is not scripted');

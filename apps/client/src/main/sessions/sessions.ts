@@ -60,6 +60,12 @@ export interface SessionsOptions {
   attachments: Attachments;
   /** A turn has ended, however it did: its transcript runs through item `throughItem`. For Session highlights. */
   onTurnEnded?: (id: number, throughItem: number) => void;
+  /**
+   * The Session has news for the user: it went Waiting for `reason`, or new
+   * feedback came while it waits on an error or an interrupted run. Not
+   * called when the user reopens it. For desktop notifications.
+   */
+  onNews?: (id: number, reason: WaitingReason) => void;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -1496,6 +1502,7 @@ export class Sessions {
       this.endSnooze(id);
       this.update(id, { unread: true });
       this.save(id, { unread: 1 });
+      this.options.onNews?.(id, 'feedback');
     } else {
       this.setStatus(id, { status: 'waiting', waitingReason: 'feedback' });
     }
@@ -2436,6 +2443,10 @@ export class Sessions {
     this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt, snoozed_until: null });
     this.watchIdle(id);
     this.watchStuck(id);
+    // Reopening is the user's doing, not news; nor is another ask while one is pending. New feedback always is.
+    const reason = waitingReason ?? 'finished';
+    const again = was.status === 'waiting' && was.waitingReason === reason && reason !== 'feedback';
+    if (status === 'waiting' && was.status !== 'archived' && !again) this.options.onNews?.(id, reason);
   }
 
   /**

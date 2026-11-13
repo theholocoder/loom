@@ -2,7 +2,7 @@
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
@@ -12,6 +12,7 @@ import { Projects } from './projects/projects';
 import { Attachments } from './sessions/attachments';
 import { Babysit } from './sessions/babysit';
 import { Highlights } from './sessions/highlights';
+import { Notifications, type DesktopNotification } from './notifications';
 import { openIn, type Opener } from './sessions/open-in';
 import { Panels } from './sessions/panels';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
@@ -38,6 +39,10 @@ export interface LoomOptions {
   openExternal: (url: string) => Promise<void>;
   /** The agent Sessions run on; OpenCode over ACP unless a test gives another. */
   adapter?: AgentAdapter;
+  /** Shows a desktop notification; `onClick` asks the window to open its Session. None are shown without it. */
+  notify?: (notification: DesktopNotification) => void;
+  /** Whether Loom's window has the focus; taken as not without it. */
+  windowFocused?: () => boolean;
 }
 
 export interface Loom {
@@ -179,6 +184,18 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   /** The commands and skills the agent offers in the Project's checkout, once its Environment is up. */
   const listCommands = async (projectId: number) => native.listCommands(await readyCheckout(projectId));
   const sessions = new Topic<Session[]>([]);
+  const openSession = new Topic<OpenSessionRequest | null>(null);
+  /** The Session the window shows, as the renderer last said. */
+  let showing: number | null = null;
+  const projectName = (id: number) => projectService.list().find((p) => p.id === id)?.name ?? `Project ${id}`;
+  const notifications = new Notifications({
+    settings: () => settingsService.value.notifications,
+    session: (id) => sessionService.list().find((s) => s.id === id),
+    projectName,
+    inView: (id) => showing === id && (options.windowFocused?.() ?? false),
+    show: (notification) => options.notify?.(notification),
+    open: (sessionId) => openSession.set({ sessionId, click: (openSession.value?.click ?? 0) + 1 }),
+  });
   /** The id of the Environment the Project's checkout is in. */
   const environmentIdOf = (projectId: number) => projectService.list().find((p) => p.id === projectId)?.checkout.environmentId;
   /** The Environment a Session runs in, if Loom has it. */
@@ -191,7 +208,6 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     },
   });
   const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
-  const projectName = (id: number) => projectService.list().find((p) => p.id === id)?.name ?? `Project ${id}`;
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
@@ -206,6 +222,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       highlights?.sessionsChanged(list);
     },
     onTurnEnded: (id, through) => highlights?.turnEnded(id, through),
+    onNews: (id, reason) => notifications.news(id, reason),
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
@@ -258,7 +275,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     });
   };
 
-  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database, openSession };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
     panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
@@ -312,6 +329,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setDiffView': (diffView) => settingsService.setDiffView(diffView),
     'settings.setHighlights': (value) => settingsService.setHighlights(value),
     'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
+    'settings.setNotification': ({ kind, on }) => settingsService.setNotification(kind, on),
+    'window.showing': ({ sessionId }) => {
+      if (sessionId !== null && typeof sessionId !== 'number') throw new Error('The Session shown is a Session id, or null for none.');
+      showing = sessionId;
+    },
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
     'sessions.diffBases': ({ id }) => sessionService.diffBases(id),
