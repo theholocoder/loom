@@ -1,9 +1,9 @@
-// The open Session's Panels (ADR 0009): each kind of Panel registers once, and
-// sits as a labelled tab in one of two Panel areas, the Side area right of
-// the conversation and the Dock under it. Which Panels a Session has open,
-// the one shown and whether each area is shown are the Session's own, kept
-// in the database; each kind's size is the Layout's, the same for every
-// Session, and so is the area each kind sits in: a Panel moved to the other
+// The open Session's Panels (ADR 0009): each kind of Panel registers once (see
+// panel-kinds.tsx), and sits as a labelled tab in one of two Panel areas, the
+// Side area right of the conversation and the Dock under it. Which Panels a
+// Session has open, the one shown and whether each area is shown are the
+// Session's own, kept in the database; each kind's size is the Layout's, the
+// same for every Session, and so is the area each kind sits in: a Panel moved to the other
 // area takes every Panel of its kind there, in every Session. Either area can
 // be split into two Panel stacks, the Side area's one above the other, the
 // Dock's side by side: which kinds sit in the second is the Layout's too. Tabs
@@ -12,9 +12,9 @@
 // split area's second stack takes the Panel it shows' size along it. A Panel
 // with a large work surface can take the Session's main area instead, in
 // Review mode.
-import { ChevronDown, CircleDot, Columns2, Ellipsis, FileDiff, GitPullRequest, Maximize2, Minimize2, PanelBottom, PanelRight, Plus, Rows2, Sparkles, SquareTerminal, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { Session, TerminalInfo } from '../shared/api';
+import { ChevronDown, Columns2, Ellipsis, Maximize2, Minimize2, PanelBottom, PanelRight, Plus, Rows2, X, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
+import type { Project, Session, TerminalInfo } from '../shared/api';
 import {
   areaOf,
   DEFAULT_LAYOUT,
@@ -49,7 +49,6 @@ import {
   type PanelDimension,
   type PanelId,
   type PanelKind,
-  type PanelKindSpec,
   type PanelPlace,
   type PanelStack,
   type SessionPanels,
@@ -57,74 +56,13 @@ import {
 import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { addToContextMenu, MenuButtonMenu, type ContextMenuSection } from './ContextMenu';
-import { countText } from './MergeRequestLooks';
+import { PANELS, type PanelBadge } from './panel-kinds';
+import { useSessionPanels } from './panel-context';
 import { Popover } from './Popover';
 import { ResizeEdge } from './ResizeEdge';
 import { shortcutLabel, useBindings } from './shortcuts';
 import { useWindowLayout } from './WindowLayout';
 import { isFreeEscape } from './escape';
-
-/** What a tab shows beside its label: a count, with what it counts for a screen reader and the tooltip. */
-export interface PanelBadge {
-  text: string;
-  description: string;
-}
-
-/** A Panel kind as the renderer shows it: main's spec, with its label, icon and badge. */
-export interface PanelKindView extends PanelKindSpec {
-  label: string;
-  icon: LucideIcon;
-  badge?: (session: Session) => PanelBadge | undefined;
-  /** Whether it can take the Session's main area, in Review mode: a large work surface. */
-  reviewable?: boolean;
-  /** Whether the + menu offers it for `session`; always, without. */
-  offered?: (session: Session) => boolean;
-}
-
-/** The Panel registry: every kind of Panel, once. */
-export const PANELS: Record<PanelKind, PanelKindView> = {
-  changes: {
-    ...PANEL_SPECS.changes,
-    label: 'Changes',
-    icon: FileDiff,
-    reviewable: true,
-    badge: ({ diffStat }) => (diffStat?.files ? { text: String(diffStat.files), description: `${diffStat.files} ${diffStat.files === 1 ? 'file' : 'files'} changed` } : undefined),
-  },
-  'merge-request': {
-    ...PANEL_SPECS['merge-request'],
-    label: 'Merge request',
-    icon: GitPullRequest,
-    // On its Diff tab: see PanelArea's `canReview`.
-    reviewable: true,
-    // It means nothing on a Session without one (ADR 0009); one open when it goes says so.
-    offered: (session) => !!session.mergeRequest,
-    badge: ({ babysit }) => {
-      const reviews = babysit?.reviews?.reviews;
-      if (!reviews) return undefined;
-      return { text: String(reviews), description: `${countText(reviews, 'review')}${babysit.reviews!.changesRequested ? ', changes requested' : ''}` };
-    },
-  },
-  issue: {
-    ...PANEL_SPECS.issue,
-    label: 'Issue',
-    icon: CircleDot,
-    // Like the Merge request's, it means nothing on a Session without one.
-    offered: (session) => !!session.issue,
-  },
-  highlights: {
-    ...PANEL_SPECS.highlights,
-    label: 'Highlights',
-    icon: Sparkles,
-    // Always: with Session highlights off, it says so and how to turn it on.
-    badge: ({ highlights }) => (highlights?.unseen ? { text: String(highlights.unseen), description: `${highlights.unseen} new ${highlights.unseen === 1 ? 'highlight' : 'highlights'}` } : undefined),
-  },
-  terminal: { ...PANEL_SPECS.terminal, label: 'Terminal', icon: SquareTerminal, offered: (session) => canRunTerminals(session) },
-};
-
-/** Whether `session` can have Terminals: it can still work, so it is not archived, and its worktree is there. */
-export function canRunTerminals(session: Session): boolean {
-  return session.status !== 'archived' && !session.worktreeMissing;
-}
 
 /** The Panel areas' names, as the user reads them. */
 export const AREA_LABELS: Record<PanelAreaName, string> = { side: 'Side area', dock: 'Dock' };
@@ -548,19 +486,19 @@ function choicesFor(area: PanelAreaName, stack: PanelStack | undefined, session:
 export function PanelArea({
   area,
   session,
+  project,
   terminals,
   control,
-  canReview = () => true,
-  render,
+  onError,
 }: {
   area: PanelAreaName;
   session: Session;
-  /** The Session's Terminals, for their tabs' titles. */
+  project: Project | undefined;
+  /** The Session's Terminals, for their tabs' titles and their Panels. */
   terminals: TerminalInfo[] | undefined;
   control: PanelsControl;
-  /** Whether a reviewable Panel can take Review mode as it is now: the Merge request Panel only on its Diff tab. */
-  canReview?: (panel: PanelId) => boolean;
-  render: (panel: PanelId) => ReactNode;
+  /** Shows why an action in a Panel failed. */
+  onError: (message: string | undefined) => void;
 }) {
   const state = control.state[area];
   const label = AREA_LABELS[area];
@@ -641,10 +579,10 @@ export function PanelArea({
           stack={stack}
           twoStacks={twoStacks}
           session={session}
+          project={project}
           terminals={terminals}
           control={control}
-          canReview={canReview}
-          render={render}
+          onError={onError}
           reviewing={reviewing}
           // The area's own buttons go in the bar at its top right corner.
           corner={area === 'side' ? i === 0 : i === stacks.length - 1}
@@ -676,10 +614,10 @@ function PanelStackView({
   stack,
   twoStacks,
   session,
+  project,
   terminals,
   control,
-  canReview,
-  render,
+  onError,
   reviewing,
   corner,
   edge,
@@ -689,10 +627,10 @@ function PanelStackView({
   /** Whether the area shows both its stacks. */
   twoStacks: boolean;
   session: Session;
+  project: Project | undefined;
   terminals: TerminalInfo[] | undefined;
   control: PanelsControl;
-  canReview: (panel: PanelId) => boolean;
-  render: (panel: PanelId) => ReactNode;
+  onError: (message: string | undefined) => void;
   /** The Panel in Review mode, which this stack holds, if any. */
   reviewing: PanelId | undefined;
   /** Whether its bar holds the area's own buttons: the one that hides it. */
@@ -703,6 +641,13 @@ function PanelStackView({
   const areaState = control.state[area];
   const state = stackOf(areaState, stack);
   const tab = (panel: PanelId) => tabOf(panel, session, terminals);
+  const { stateOf } = useSessionPanels();
+  /** Whether `panel` can take Review mode, as it is now. */
+  const canReview = (panel: PanelId) => {
+    const kind = PANELS[kindOf(panel)];
+    return !!kind.reviewable && (kind.canReview?.(stateOf(panel)) ?? true);
+  };
+  const render = (panel: PanelId) => PANELS[kindOf(panel)].render({ panel, session, project, terminals, control, onError });
   const areaLabel = AREA_LABELS[area];
   const sides = STACK_SIDES[area];
   const label = twoStacks ? `${areaLabel} Panels, ${sides[stack].where}` : `${areaLabel} Panels`;
@@ -737,7 +682,7 @@ function PanelStackView({
         : splits(panel)
           ? [{ label: `Split ${sides[otherStack].way}`, icon: SplitIcon, run: () => control.place(panel, { area, stack: otherStack }) }]
           : []),
-      ...(area === 'side' && PANELS[kindOf(panel)].reviewable && canReview(panel)
+      ...(area === 'side' && canReview(panel)
         ? [
             {
               label: 'Review mode',
@@ -753,7 +698,7 @@ function PanelStackView({
     [{ label: 'Close', icon: X, run: () => control.close(panel) }],
   ];
   // Review mode takes the Side area's place: a Panel in the Dock stays there.
-  const reviewable = area === 'side' && !reviewing && state.shown && PANELS[kindOf(state.shown)].reviewable && canReview(state.shown) ? state.shown : undefined;
+  const reviewable = area === 'side' && !reviewing && state.shown && canReview(state.shown) ? state.shown : undefined;
   const reviewBinding = useBindings().reviewChanges;
   const reviewShortcut = reviewBinding && shortcutLabel(reviewBinding);
 

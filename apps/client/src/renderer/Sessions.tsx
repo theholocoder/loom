@@ -6,20 +6,19 @@ import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type
 import { goingOn } from '../shared/going-on';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
 import { splitDetails, withDetails } from '../shared/errors';
-import { kindOf, panelsIn, terminalOf, type PanelId } from '../shared/panels';
+import { panelsIn } from '../shared/panels';
 import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useDates } from './dates';
 import { SearchPicker, type Loaded, type PickerOption } from './SearchPicker';
 import { IssuePicker } from './IssuePicker';
-import { ChangesView, type ChangesFocus, type DiffComments } from './Changes';
-import { highlightLine, HighlightsPanel } from './HighlightsPanel';
-import { IssuePanel } from './IssuePanel';
+import type { DiffComments } from './Changes';
+import { highlightLine } from './HighlightsPanel';
 import type { ReviewNotes } from './ReviewNotes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
-import { MergeRequestPanel, type MergeRequestFocus, type MergeRequestTab } from './MergeRequestPanel';
-import { canRunTerminals, PanelArea, PanelDropStrips, usePanels } from './Panels';
-import { TerminalView } from './TerminalView';
+import { PanelArea, PanelDropStrips, usePanels } from './Panels';
+import { canRunTerminals } from './panel-kinds';
+import { SessionPanelProvider, useSessionPanelStore, type PanelRequests } from './panel-context';
 import { Select } from './Popover';
 import { codeRightClicked, Markdown } from './Markdown';
 import { useArchive, useRemovedProject } from './Archive';
@@ -506,27 +505,9 @@ export function SessionView({
   const [error, setError] = useState<string>();
   /** The header's popover open, if any: Session details, the Merge request's checks, Link issue or the ⋯ menu. */
   const [popover, setPopover] = useState<HeaderPopover>();
-  /** Where the Merge request Panel was last asked to take the user. */
-  const [mergeRequestFocus, setMergeRequestFocus] = useState<MergeRequestFocus>();
-  /** The Merge request Panel's tab: its overview, or its diff, which alone can take Review mode. */
-  const [mergeRequestTab, setMergeRequestTab] = useState<MergeRequestTab>('overview');
   const runsTerminals = canRunTerminals(session);
   const terminals = useTopic('terminals', { sessionId: session.id });
   const panels = usePanels(session.id);
-  /** Shows the Merge request Panel, at its link form or its reviews when asked. */
-  const showMergeRequest = (to?: MergeRequestFocus['to']) => {
-    panels.show('merge-request');
-    // The reviews are on the Overview, which leaves Review mode.
-    if (to === 'reviews') showMergeRequestTab('overview');
-    if (to) setMergeRequestFocus((was) => ({ to, n: (was?.n ?? 0) + 1 }));
-  };
-  /** Switches the Merge request Panel's tab: off its diff, it leaves Review mode. */
-  const showMergeRequestTab = (tab: MergeRequestTab) => {
-    setMergeRequestTab(tab);
-    if (tab !== 'diff' && panels.review === 'merge-request') panels.leaveReview();
-  };
-  /** Whether `panel` can take Review mode now: the Merge request Panel only on its Diff tab. */
-  const canReview = (panel: PanelId) => kindOf(panel) !== 'merge-request' || mergeRequestTab === 'diff';
   const { side, dock } = panels.state;
   const sideShown = panels.sideShown;
   // The Dock holds Terminals, and whatever Panels were moved there, which any Session can show.
@@ -758,8 +739,6 @@ export function SessionView({
       }
     : undefined;
 
-  /** Where Changes was last asked to take the user: a file a Highlight or a review comment names. */
-  const [changesFocus, setChangesFocus] = useState<ChangesFocus>();
   /**
    * Scrolls the conversation to the turn `itemId` is in: to the user's
    * message it starts with, the last at or before it (the first, for an item
@@ -771,56 +750,19 @@ export function SessionView({
     const target = messages.filter((m) => Number(m.dataset.itemId) <= itemId).at(-1) ?? messages[0];
     target?.scrollIntoView?.({ block: 'start' });
   };
-  /** Shows Changes, at `path`. */
-  const showFile = (path: string) => {
-    setChangesFocus((was) => ({ path, n: (was?.n ?? 0) + 1 }));
-    panels.show('changes');
-  };
   /** Ask the agent, on a Highlight: it goes to the composer as a comment quoting it, its note to edit. */
   const askAboutHighlight = (highlight: Highlight) =>
     setPending((list) => [...list, { comment: { quote: highlightLine(highlight), note: 'Can you look into this?' } }]);
-
-  /** A Panel's content, in whichever area it sits. */
-  const renderPanel = (panel: PanelId) => {
-    switch (kindOf(panel)) {
-      case 'changes':
-        return <ChangesView session={session} comments={diffComments} reviews={reviewNotes} focus={changesFocus} />;
-      case 'merge-request':
-        return (
-          <MergeRequestPanel
-            session={session}
-            project={project}
-            focus={mergeRequestFocus}
-            tab={mergeRequestTab}
-            onTab={showMergeRequestTab}
-            // As on Changes: comments go with the next message, which an archived Session's diff doesn't take.
-            comments={session.status === 'archived' || session.worktreeMissing ? undefined : diffComments}
-            reviewNotes={reviewNotes}
-            onError={actionFailed}
-          />
-        );
-      case 'issue':
-        return <IssuePanel session={session} project={project} onUnlinked={() => panels.close('issue')} onError={actionFailed} />;
-      case 'highlights':
-        return (
-          <HighlightsPanel
-            session={session}
-            onShowTurn={showTurn}
-            onShowFile={showFile}
-            onAsk={composerDisabled || freeAnswer ? undefined : askAboutHighlight}
-            onError={actionFailed}
-          />
-        );
-      case 'terminal': {
-        const terminal = terminals?.find((t) => t.id === terminalOf(panel));
-        return terminal && <TerminalView key={terminal.id} terminal={terminal} focusPending={panels.focus === panel} onFocused={panels.onFocused} />;
-      }
-    }
-  };
+  const panelContext = useSessionPanelStore({ diffComments, reviewNotes, showTurn, askAboutHighlight: composerDisabled || freeAnswer ? undefined : askAboutHighlight }, panels.show);
+  /** Shows Changes, at `path`. */
+  const showFile = (path: string) => panelContext.show('changes', path);
+  /** Shows the Merge request Panel, at its link form or its reviews when asked. */
+  const showMergeRequest = (to?: PanelRequests['merge-request']) => panelContext.show('merge-request', to);
 
   const StatusGlyph = status.icon;
   const statusIcon = <StatusGlyph className="sm" />;
   return (
+    <SessionPanelProvider value={panelContext}>
     <main className="main" aria-label="Session">
       <SessionHeader
         session={session}
@@ -980,15 +922,16 @@ export function SessionView({
           />
         </div>
         {panels.ready && (sideShown || panels.review) && (
-          <PanelArea area="side" session={session} terminals={terminals} control={panels} canReview={canReview} render={renderPanel} />
+          <PanelArea area="side" session={session} project={project} terminals={terminals} control={panels} onError={actionFailed} />
         )}
         {/* In Review mode the reviewed Panel holds the Side area's place: no strip over it. */}
         {panels.ready && <PanelDropStrips control={panels} shown={{ side: sideShown || !!panels.review, dock: hasDock && dock.open }} />}
       </div>
       {panels.ready && hasDock && dock.open && (
-        <PanelArea area="dock" session={session} terminals={terminals} control={panels} render={renderPanel} />
+        <PanelArea area="dock" session={session} project={project} terminals={terminals} control={panels} onError={actionFailed} />
       )}
     </main>
+    </SessionPanelProvider>
   );
 }
 
