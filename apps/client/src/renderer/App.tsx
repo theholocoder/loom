@@ -541,7 +541,8 @@ function paletteActions(app: {
     session && isSnoozed(session) && { label: 'Wake this Session', icon: AlarmClockOff, run: () => app.command('wake') },
     // A removed Project's Sessions are read-only.
     session && project && { label: 'Rename this Session…', icon: Pencil, run: () => app.command('rename') },
-    open && shortcutAction('archive', Archive, () => app.command('archive')),
+    // Not from a single key while it waits on an answer: archiving would deny the request, or drop the question. From the palette, deliberately, it still can.
+    open && { ...shortcutAction('archive', Archive, () => app.command('archive')), shortcut: awaitsAnswer(open) ? undefined : app.bindings.archive },
     // A removed Project's archived Sessions are read-only.
     session?.status === 'archived' && project && { label: 'Reopen this Session', icon: ArchiveRestore, run: () => app.command('reopen') },
     session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },
@@ -553,6 +554,11 @@ function paletteActions(app: {
     shortcutAction('help', Keyboard, app.showHelp),
   ];
   return actions.filter((action): action is PaletteAction => !!action);
+}
+
+/** Whether the Session waits on the user's answer: an Approval request, or a question. */
+function awaitsAnswer(session: Session): boolean {
+  return session.status === 'waiting' && (session.waitingReason === 'approval' || session.waitingReason === 'question');
 }
 
 /** The Project a new Session most likely goes in: the open Session's, else that of the Session most recently active. */

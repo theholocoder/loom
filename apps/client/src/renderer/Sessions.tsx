@@ -581,7 +581,8 @@ export function SessionView({
       openInTerminal: () => api.invoke('sessions.openInTerminal', { id }),
       retry: () => (retryable ? api.invoke('sessions.retry', { id }) : Promise.resolve()),
       markUnread: async () => {
-        await api.invoke('sessions.setUnread', { id, unread: true });
+        // Archived meanwhile, it stays as it is.
+        if (!(await api.invoke('sessions.setUnread', { id, unread: true }))) return;
         toast.show({ message: `Marked “${session.title}” unread`, undo: () => api.invoke('sessions.setUnread', { id, unread: false }) });
       },
       snooze: async () => setPopover({ kind: 'snooze' }),

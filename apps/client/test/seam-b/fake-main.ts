@@ -237,7 +237,7 @@ export class FakeMain implements LoomApi {
       'sessions.sendFeedback': () => {},
       'sessions.setAutoPrompt': () => {},
       'sessions.setBabysitting': () => {},
-      'sessions.setUnread': () => {},
+      'sessions.setUnread': () => true,
       'sessions.snooze': () => {},
       'sessions.rename': () => {},
       'sessions.searchConversations': () => [],

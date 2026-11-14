@@ -179,7 +179,7 @@ function SessionCard({ session, project, showProject = false, projectRemoved = f
   const menu = useSessionMenu(session, setError);
   const [snoozing, setSnoozing] = useState(false);
   /** A click handler running a card action, saying on the card why it failed. */
-  const withRowError = (action: () => Promise<void>) => () => {
+  const withRowError = (action: () => Promise<unknown>) => () => {
     setError(undefined);
     action().catch((e: unknown) => setError((e as Error).message));
   };
