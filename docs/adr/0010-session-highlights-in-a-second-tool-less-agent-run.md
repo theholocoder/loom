@@ -10,5 +10,6 @@ Each check sends the open Highlights and the turns since the last check: the use
 
 The costs:
 - A process starts for each turn checked: about 400 MB for a few seconds. Checks run in the background and never hold up the Session. A turn that ends during a check is covered by the next one, so no turn is checked twice.
+- At most `MAX_CHECKS` (2) check processes run at a time, across Sessions. Sessions whose turns end meanwhile wait in one queue, first in first checked, and the Panel says so; a Session already waiting isn't queued twice, as its check covers its later turns. A Session deleted or archived while waiting, or every Session waiting when the setting is turned off, leaves the queue.
 - A check that fails, because the model is unavailable or its answer isn't JSON, leaves its turns for the next check, and the Panel says why.
 - The checks' usage goes into a table of its own (`highlight_usage`). The dashboard counts it in its totals, per day, per Project and per model, but not in a Session's own usage, its context or the top Sessions: it is a different model with a different context.
