@@ -4,7 +4,7 @@
 // turn it came from, and can be resolved by hand, reopened, copied, or put to
 // the agent as a comment in the composer. Showing the Panel marks what it
 // holds seen, which clears its tab's badge.
-import { Bot, Check, ChevronDown, ChevronRight, Copy, LoaderCircle, RotateCcw, TriangleAlert } from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronRight, Copy, Hourglass, LoaderCircle, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { HIGHLIGHT_KINDS, HIGHLIGHT_LABELS, type Highlight, type Session } from '../shared/api';
 import { useApi, useTopic } from './api';
@@ -55,7 +55,7 @@ export function HighlightsPanel({
 
   return (
     <div className="highlights" aria-label="Highlights">
-      <HighlightsStatus checking={value.checking} error={value.error} on={settings?.on ?? false} model={checkModel || undefined} />
+      <HighlightsStatus pending={value.pending} checking={value.checking} error={value.error} on={settings?.on ?? false} model={checkModel || undefined} />
       <div className="scroll">
         {open.length === 0 ? (
           <div className="empty">
@@ -93,8 +93,16 @@ export function HighlightsPanel({
   );
 }
 
-/** How checking goes: running, or why the last check failed; and whether the setting is off. */
-function HighlightsStatus({ checking, error, on, model }: { checking: boolean; error?: string; on: boolean; model?: string }) {
+/** How checking goes: pending, running, or why the last check failed; and whether the setting is off. */
+function HighlightsStatus({ pending, checking, error, on, model }: { pending: boolean; checking: boolean; error?: string; on: boolean; model?: string }) {
+  if (pending) {
+    return (
+      <div className="hl-status" role="status">
+        <Hourglass className="sm" />
+        Waiting for other checks to end before checking the last turn…
+      </div>
+    );
+  }
   if (checking) {
     return (
       <div className="hl-status" role="status">

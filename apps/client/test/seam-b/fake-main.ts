@@ -43,7 +43,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   sessions: [],
   transcript: [],
   panels: DEFAULT_SESSION_PANELS,
-  highlights: { highlights: [], seenThrough: 0, checking: false },
+  highlights: { highlights: [], seenThrough: 0, pending: false, checking: false },
   reviewThreads: [],
   terminals: [],
   terminalOutput: { data: new Uint8Array() },

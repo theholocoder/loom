@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { startMain, tempDir, tempMachine, waitFor, type AcpMessage, type AcpTurn, type MainHarness, type Machine } from './harness';
+import { processEnded, startMain, tempDir, tempMachine, until, waitFor, type AcpMessage, type AcpTurn, type MainHarness, type Machine } from './harness';
+import { MAX_CHECKS } from '../../src/main/sessions/highlights';
 import type { EnvironmentStatus, Session, SessionHighlights } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -53,6 +54,31 @@ function checkPrompts(machine: Machine): string[] {
 function checkMessages(machine: Machine): AcpMessage[] {
   return machine.acpMessages().filter((m) => m.config && JSON.parse(m.config).permission?.['*'] === 'deny');
 }
+
+/** The check processes started so far. */
+const checkPids = (machine: Machine) => [...new Set(checkMessages(machine).map((m) => m.pid))];
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Watches how many check processes are open at once, until stopped: the most it saw. */
+function watchOpenChecks(machine: Machine): () => number {
+  let most = 0;
+  const timer = setInterval(() => (most = Math.max(most, checkPids(machine).filter(alive).length)), 10);
+  return () => {
+    clearInterval(timer);
+    return most;
+  };
+}
+
+/** A check's answer that holds until `machine.release(name)`. */
+const held = (name: string) => answer({ add: [{ kind: 'decision', text: `Noted by ${name}.` }], resolve: [] }, { hold: name });
 
 describe('Session highlights', () => {
   it('is off until the user turns it on with a model, and then checks nothing', async () => {
@@ -224,6 +250,80 @@ describe('Session highlights', () => {
     expect(prompts[0]).not.toContain('Prompt two');
     expect(prompts[1]).toContain('User: Prompt two');
     expect(prompts[1]).not.toContain('Prompt one');
+  });
+
+  it(`runs at most ${MAX_CHECKS} checks at a time across Sessions, the others pending, and checks them all`, async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }], [held('check-1'), held('check-2'), held('check-3'), held('check-4')]);
+    const { main, project } = await start(machine, checkout);
+    await main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    const openAtMost = watchOpenChecks(machine);
+    const ids: number[] = [];
+    for (const prompt of ['Prompt A', 'Prompt B', 'Prompt C', 'Prompt D']) ids.push((await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt })).id);
+    for (const id of ids) await waitFor(main.api, 'highlights', (h) => h.checking || h.pending, { sessionId: id });
+    await until(() => checkPrompts(machine).length === MAX_CHECKS);
+
+    const views = await Promise.all(ids.map((id) => waitFor(main.api, 'highlights', () => true, { sessionId: id })));
+    expect(views.filter((h) => h.checking)).toHaveLength(MAX_CHECKS);
+    expect(views.filter((h) => h.pending)).toHaveLength(ids.length - MAX_CHECKS);
+    expect(views.every((h) => !(h.checking && h.pending))).toBe(true);
+    expect(checkPids(machine)).toHaveLength(MAX_CHECKS);
+
+    // A slot freeing starts the next check, and only then.
+    machine.release('check-1');
+    await until(() => checkPrompts(machine).length === MAX_CHECKS + 1);
+    expect(checkPids(machine)).toHaveLength(MAX_CHECKS + 1);
+    machine.release('check-2');
+    machine.release('check-3');
+    machine.release('check-4');
+
+    for (const id of ids) await highlightsWhere(main, id, (h) => h.highlights.length === 1 && !h.pending);
+    await Promise.all(checkPids(machine).map(processEnded));
+    expect(openAtMost()).toBe(MAX_CHECKS);
+    const prompts = checkPrompts(machine);
+    expect(prompts).toHaveLength(4);
+    for (const prompt of ['Prompt A', 'Prompt B', 'Prompt C', 'Prompt D']) expect(prompts.filter((p) => p.includes(`User: ${prompt}`))).toHaveLength(1);
+  });
+
+  it('never checks a Session deleted while it waits for a check', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }], [held('check-1'), held('check-2'), answer({ add: [], resolve: [] })]);
+    const { main, project } = await start(machine, checkout);
+    await main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    const create = async (prompt: string) => (await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt })).id;
+    const first = await create('Prompt A');
+    const second = await create('Prompt B');
+    await waitFor(main.api, 'highlights', (h) => h.checking, { sessionId: first });
+    await waitFor(main.api, 'highlights', (h) => h.checking, { sessionId: second });
+    const deleted = await create('Prompt C');
+    await waitFor(main.api, 'highlights', (h) => h.pending, { sessionId: deleted });
+    await main.api.invoke('sessions.delete', { id: deleted });
+    // Queued after the deleted one: once it is checked, the deleted one's turn would have been.
+    const last = await create('Prompt D');
+    await waitFor(main.api, 'highlights', (h) => h.pending, { sessionId: last });
+
+    machine.release('check-1');
+    machine.release('check-2');
+    await until(() => checkPrompts(machine).length === 3);
+    await highlightsWhere(main, last, (h) => !h.pending);
+    const prompts = checkPrompts(machine);
+    expect(prompts).toHaveLength(3);
+    expect(prompts.some((p) => p.includes('Prompt C'))).toBe(false);
+    expect(prompts[2]).toContain('User: Prompt D');
+  });
+
+  it('checks an archived Session no more, even with a turn that ended during its check', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['One.'] }, { chunks: ['Two.'] }], [held('first-check')]);
+    const { main, project } = await start(machine, checkout);
+    await main.api.invoke('settings.setHighlights', { on: true, model: CHEAP });
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Prompt one' });
+    await waitFor(main.api, 'highlights', (h) => h.checking, { sessionId: id });
+    await main.api.invoke('sessions.send', { id, prompt: 'Prompt two' });
+    await waiting(main, id);
+    await main.api.invoke('sessions.archive', { id });
+    await waitFor(main.api, 'sessions', sessionWhere(id, (s) => s.status === 'archived'));
+    machine.release('first-check');
+
+    await highlightsWhere(main, id, (h) => h.highlights.length === 1 && !h.pending);
+    expect(checkPrompts(machine)).toHaveLength(1);
   });
 
   it('passes over the turns that end while it is off, even during a check', async () => {

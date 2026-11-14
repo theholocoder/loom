@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { git, startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine, type PermissionToolCall } from './harness';
+import { git, startMain, tempDir, tempMachine, until, waitFor, type AcpTurn, type Machine, type PermissionToolCall } from './harness';
 import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -58,14 +58,6 @@ const permissionAnswers = (machine: Machine) => {
     .filter(({ message }) => message.id !== undefined && asked.has(message.id) && message.method === undefined && !seen.has(message.id) && seen.add(message.id))
     .map(({ message }) => (message.result as { outcome?: { optionId?: string } } | undefined)?.outcome?.optionId);
 };
-
-/** Resolves once `check` holds, looking every 20 ms for up to 5 s. */
-async function until(check: () => boolean): Promise<void> {
-  for (const deadline = Date.now() + 5000; !check(); ) {
-    if (Date.now() > deadline) throw new Error('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
 
 /** The OPENCODE_CONFIG_CONTENT each agent process started with. */
 const configs = (machine: Machine) => [...new Set(machine.acpMessages().map((m) => m.config))].map((c) => (c === undefined ? undefined : (JSON.parse(c) as Record<string, unknown>)));

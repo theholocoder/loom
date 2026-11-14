@@ -738,6 +738,8 @@ export interface SessionHighlights {
   highlights: Highlight[];
   /** The Highlights with a greater id came since the user last looked at the Panel. */
   seenThrough: number;
+  /** While the Session's check waits for others to end: only so many run at a time, across Sessions. */
+  pending: boolean;
   /** While a check of the turns since the last one runs. */
   checking: boolean;
   /** Why the last check failed; gone once one succeeds. Its turns are checked again with the next. */
