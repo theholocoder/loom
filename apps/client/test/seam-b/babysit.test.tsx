@@ -68,8 +68,18 @@ describe('the feedback card', () => {
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url: 'https://ci/1' }]));
     fireEvent.click(within(card).getByRole('button', { name: 'Send to agent' }));
     await waitFor(() => expect(calls(main, 'sessions.sendFeedback')).toEqual([{ id: 1, itemId: 0 }]));
-    fireEvent.click(within(card).getByRole('button', { name: 'Open on Forge' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Open on GitHub' }));
     await waitFor(() => expect(calls(main, 'links.open')).toEqual([{ url: 'https://ci/1' }, { url }]));
+  });
+
+  it('names the Forge it opens on: GitLab for a GitLab Project', () => {
+    const gitlab: Project = { ...project, forge: { state: 'available', checking: false, kind: 'gitlab', repository: 'acme/loom' } };
+    const main = new FakeMain({ projects: [gitlab], sessions: [session()] });
+    main.publish('transcript', [feedback], { sessionId: 1 });
+    const card = within(open(main)).getByRole('group', { name: 'Feedback on Merge request !12' });
+
+    expect(within(card).getByRole('button', { name: 'Open on GitLab' })).toBeTruthy();
+    expect(within(card).queryByRole('button', { name: /Forge/ })).toBeNull();
   });
 
   it('takes a comment on the code to its file in Changes', async () => {
@@ -121,7 +131,7 @@ describe('the feedback card', () => {
     act(() => main.publish('sessions', [session({ status: 'archived', waitingReason: undefined })]));
     const archived = within(screen.getByRole('log', { name: 'Conversation' })).getByRole('group', { name: 'Feedback on Merge request #12' });
     expect(within(archived).queryByRole('button', { name: 'Send to agent' })).toBeNull();
-    expect(within(archived).getByRole('button', { name: 'Open on Forge' })).toBeTruthy();
+    expect(within(archived).getByRole('button', { name: 'Open on GitHub' })).toBeTruthy();
   });
 });
 

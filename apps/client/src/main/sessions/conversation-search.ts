@@ -38,8 +38,40 @@ export async function searchConversations(db: LoomDatabase, sessionIds: Readonly
   `.execute(db);
   return rows.filter((row) => sessionIds.has(row.session_id)).map((row) => {
     const held = wanted.filter((_, i) => row[`a${i}`] === 1);
-    return { id: row.session_id, words: held, excerpt: excerpt(row.text, held) };
+    return { id: row.session_id, words: held, excerpt: excerpt(plainText(row.text), held) };
   });
+}
+
+/**
+ * What Markdown `text` says, as plain text: the agent writes Markdown, and an
+ * excerpt shows no heading marks, table pipes, emphasis, code ticks or link
+ * targets. Stars and underscores inside words, as in snake_case, are kept.
+ */
+function plainText(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !/^\s*(`{3,}|~{3,})/.test(line) && !/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line) && !/^\s*([-*_])(\s*\1){2,}\s*$/.test(line))
+    .map((line) => {
+      let plain = line
+        .replace(/^\s{0,3}#{1,6}\s+(.*?)(\s+#+)?\s*$/, '$1')
+        .replace(/^\s*(>\s?)+/, '')
+        .replace(/^\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, '');
+      if (plain.trim().startsWith('|')) plain = plain.replace(/^\s*\|/, '').replace(/\|\s*$/, '').replace(/\s*\|\s*/g, ' ');
+      return inlinePlain(plain);
+    })
+    .join('\n');
+}
+
+/** A line's inline Markdown, as plain text. */
+function inlinePlain(line: string): string {
+  return line
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<((?:https?|mailto):[^>\s]+)>/g, '$1')
+    .replace(/(`+)(.+?)\1/g, (_, _ticks: string, code: string) => code.trim())
+    .replace(/(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    .replace(/(^|[^\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])/g, '$1$2')
+    .replace(/(^|[^\w])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, '$1$2');
 }
 
 /** `text` on one line, cut down around the first of `words` it holds, with an ellipsis where cut. */

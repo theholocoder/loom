@@ -218,7 +218,9 @@ function ProjectRow({ project, environmentLabel }: { project: Project; environme
       <td>
         <span className="row project-name">
           <ProjectAvatar project={project} size={22} />
-          {project.name}
+          <span className="ellipsis" title={project.name}>
+            {project.name}
+          </span>
         </span>
       </td>
       <td>
@@ -481,6 +483,8 @@ function forgeLook(forge: ForgeStatus): { look: string; label: string; reason?: 
       return { look: 'unknown', label: 'not checked' };
     case 'no-remote':
       return { look: 'local', label: 'Local only', reason: 'This checkout has no origin remote, so Forge features (issues, Merge requests, Babysit) are off.' };
+    case 'unsupported':
+      return { look: 'local', label: 'No Forge', reason: `origin (${forge.remote ?? forge.host ?? 'its remote'}) isn't on GitHub or GitLab, so Forge features (issues, Merge requests, Babysit) are off.` };
     default:
       return { look: 'off', label: 'off' };
   }
@@ -517,8 +521,8 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
       return <CircleCheckBig className="sm" />;
     case 'unknown':
     case 'no-remote':
-      return null;
     case 'unsupported':
+      return null;
     case 'cli-missing':
     case 'signed-out':
       return <TriangleAlert className="sm" />;
@@ -529,20 +533,15 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
 
 /**
  * Why the Project's Forge features are off, and what to do about it, if they
- * are and the user can do something. A checkout with no origin remote is a
- * normal, local-only setup: its cell says so, and why on hover.
+ * are and the user can do something. A checkout with no origin remote, or
+ * with one that isn't on GitHub or GitLab, is a normal setup: its cell says
+ * so, and why on hover.
  */
 function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode {
   const command = forge.kind && FORGE_CLI[forge.kind];
   const cli = <span className="tech">{command}</span>;
   const recheck = 'Loom checks again whenever Projects opens.';
   switch (forge.state) {
-    case 'unsupported':
-      return (
-        <>
-          Forge features are off: origin (<span className="tech">{forge.remote}</span>) isn't on GitHub or GitLab.
-        </>
-      );
     case 'cli-missing':
       return (
         <>

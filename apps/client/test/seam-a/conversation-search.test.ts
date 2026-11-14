@@ -67,3 +67,31 @@ describe('searching conversations', () => {
     expect(match!.excerpt.endsWith('…')).toBe(true);
   });
 });
+
+describe('the excerpt of an agent message in Markdown', () => {
+  it('is plain text: no heading marks, table pipes, emphasis, code ticks or link targets', async () => {
+    const markdown = [
+      '## Fixed the export',
+      '',
+      'It uses **new** `renderPdf`, see [docs](https://example.com/docs).',
+      '',
+      '| File | Change |',
+      '|---|:---:|',
+      '| export.ts | *streams* rows |',
+      '',
+      '- one item',
+      '> quoted note',
+    ].join('\n');
+    const { main, ids } = await twoSessions(['Fix it', 'Other'], [{ chunks: [markdown] }]);
+
+    const [match] = await main.api.invoke('sessions.searchConversations', { words: ['export'] });
+    expect(match!.id).toBe(ids[0]);
+    expect(match!.excerpt).toBe('Fixed the export It uses new renderPdf, see docs. File Change export.ts streams rows one item quoted note');
+  });
+
+  it('keeps the underscores and stars that are part of what was said', async () => {
+    const { main } = await twoSessions(['Rename snake_case keys to 2*3 values', 'Other']);
+    const [match] = await main.api.invoke('sessions.searchConversations', { words: ['snake_case'] });
+    expect(match!.excerpt).toBe('Rename snake_case keys to 2*3 values');
+  });
+});

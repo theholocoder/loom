@@ -220,7 +220,6 @@ describe('Projects', () => {
   });
 
   it.each([
-    [{ state: 'unsupported', kind: undefined, host: 'bitbucket.org', remote: 'https://bitbucket.org/acme/x.git' }, /https:\/\/bitbucket\.org\/acme\/x\.git.*isn't on GitHub or GitLab/],
     [{ state: 'cli-missing', kind: 'gitlab', host: 'gitlab.com' }, /glab isn't installed in Native/],
     [{ state: 'signed-out', kind: 'github', host: 'github.com' }, /gh isn't signed in to github\.com.*gh auth login --hostname github\.com/],
     [{ state: 'error', error: 'bridge did not answer' }, /couldn't check.*bridge did not answer/],
@@ -241,6 +240,26 @@ describe('Projects', () => {
     expect(local.getAttribute('title')).toMatch(/no origin remote/);
     expect(within(row).queryByRole('alert')).toBeNull();
     expect(within(row).queryByText('off')).toBeNull();
+  });
+
+  it("shows an origin that isn't on GitHub or GitLab as no Forge, muted, with why on hover", () => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('notes', { state: 'unsupported', kind: undefined, host: 'bitbucket.org', remote: 'https://bitbucket.org/acme/x.git' })] }));
+
+    const row = screen.getByRole('row', { name: /notes/ });
+    const none = within(row).getByText('No Forge').parentElement!;
+    expect(none.className).toMatch('fg-local');
+    expect(none.getAttribute('title')).toMatch(/https:\/\/bitbucket\.org\/acme\/x\.git.*isn't on GitHub or GitLab/);
+    expect(within(row).queryByRole('alert')).toBeNull();
+    expect(within(row).queryByText('off')).toBeNull();
+  });
+
+  it('cuts a long Project name to one line, with the full name on hover', () => {
+    const name = 'customer-billing-and-invoicing-platform-api-gateway';
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project(name)] }));
+
+    const shown = within(screen.getByRole('row', { name: new RegExp(name) })).getByText(name);
+    expect(shown.className).toMatch('ellipsis');
+    expect(shown.getAttribute('title')).toBe(name);
   });
 
   it('checks the Forges again when Projects opens', () => {
