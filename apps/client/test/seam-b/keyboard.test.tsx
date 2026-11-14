@@ -150,7 +150,10 @@ describe('single-key shortcuts on a Session waiting on an answer', () => {
     press('j', document.body);
     later(2000);
 
-    press('e', document.activeElement ?? document.body);
+    // On the card that asks, as the user found it, and away from it.
+    const card = screen.getByRole('group', { name: asked.kind === 'approval' ? 'Approval request' : 'Question' });
+    card.focus();
+    press('e', card);
     press('e', document.body);
 
     expect(commands(main)).not.toContain('sessions.archive');

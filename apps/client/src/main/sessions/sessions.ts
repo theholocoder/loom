@@ -1432,8 +1432,7 @@ export class Sessions {
     this.addItem(id, { kind: 'feedback', ...feedback, state: 'new', ...(paused ? { paused } : {}) });
     if (session.waitingReason === 'error' || session.waitingReason === 'interrupted') {
       this.endSnooze(id);
-      this.update(id, { unread: true });
-      this.save(id, { unread: 1 });
+      this.writeUnread(id, true);
       this.options.onNews?.(id, 'feedback');
     } else {
       this.setStatus(id, { status: 'waiting', waitingReason: 'feedback' });

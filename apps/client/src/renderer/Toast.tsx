@@ -4,7 +4,7 @@
 // an action failed, in view wherever the action was. One at a time: a new
 // one takes the place of the last, but an Undo it hides is kept: undoing the
 // one showing brings back the one before, to undo in turn, until the toast
-// closes.
+// closes or one without Undo comes between.
 import { OctagonX, Undo2, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ErrorText } from './ErrorText';
@@ -55,7 +55,9 @@ export function ToastHost({ children }: { children: ReactNode }) {
       setToast(toast);
     };
     const show = (content: ToastContent) => {
+      // One without Undo says something else happened since: what came before can't be reached from it.
       if (content.undo) undoable.current.push(content);
+      else undoable.current = [];
       display(content);
     };
     const hide = () => {
@@ -77,11 +79,8 @@ export function ToastHost({ children }: { children: ReactNode }) {
       const before = undoable.current.at(-1);
       if (before) display(before);
       else hide();
-      taken.undo().catch((error: unknown) => {
-        // What came before may hang on what couldn't be undone: it goes too.
-        undoable.current = [];
-        display({ message: `Couldn’t undo: ${(error as Error).message}` });
-      });
+      // What came before may hang on what couldn't be undone: it goes too.
+      taken.undo().catch((error: unknown) => show({ message: `Couldn’t undo: ${(error as Error).message}` }));
       return true;
     };
     return { show, undo, close };

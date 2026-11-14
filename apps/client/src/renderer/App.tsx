@@ -542,7 +542,7 @@ function paletteActions(app: {
     // A removed Project's Sessions are read-only.
     session && project && { label: 'Rename this Session…', icon: Pencil, run: () => app.command('rename') },
     // Not from a single key while it waits on an answer: archiving would deny the request, or drop the question. From the palette, deliberately, it still can.
-    open && { ...shortcutAction('archive', Archive, () => app.command('archive')), ...(awaitsAnswer(open) && { shortcut: undefined }) },
+    open && { ...shortcutAction('archive', Archive, () => app.command('archive')), shortcut: awaitsAnswer(open) ? undefined : app.bindings.archive },
     // A removed Project's archived Sessions are read-only.
     session?.status === 'archived' && project && { label: 'Reopen this Session', icon: ArchiveRestore, run: () => app.command('reopen') },
     session && { label: 'Delete this Session…', icon: Trash2, run: () => app.command('delete') },
