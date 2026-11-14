@@ -10,7 +10,11 @@
 // branch knows stays), and it backs the file up first. Added columns take their
 // default: a migration's data backfill isn't replayed.
 //
-// Usage: node scripts/db-repair.mjs [path/to/loom.db] [--dry-run]
+// --set-version <n> first sets the schema version to n, for a database whose
+// migrations were since replaced by fewer that give the same schema (as when a
+// branch squashes its own before merging), then checks it against version n.
+//
+// Usage: node scripts/db-repair.mjs [path/to/loom.db] [--dry-run] [--set-version <n>]
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -25,7 +29,13 @@ const { migrations } = await import(join(root, 'apps/client/src/main/storage/mig
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
-const path = args.find((a) => !a.startsWith('--')) ?? defaultPath();
+const at = args.indexOf('--set-version');
+const setVersion = at === -1 ? undefined : args[at + 1];
+if (at !== -1 && (!/^\d+$/.test(setVersion ?? '') || Number(setVersion) > migrations.length)) {
+  console.error(`--set-version takes a schema version from 0 to ${migrations.length}, the ones this checkout knows.`);
+  process.exit(1);
+}
+const path = args.find((a, i) => !a.startsWith('--') && !(at !== -1 && i === at + 1)) ?? defaultPath();
 
 function defaultPath() {
   if (process.env.LOOM_USER_DATA_DIR) return join(process.env.LOOM_USER_DATA_DIR, 'loom.db');
@@ -45,7 +55,31 @@ if (problems.length) {
   console.error(`${path} is damaged (${problems.join('; ')}); not touching it.`);
   process.exit(1);
 }
-const version = target.pragma('user_version', { simple: true });
+let version = target.pragma('user_version', { simple: true });
+
+let backup;
+async function backUp() {
+  if (backup) return;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  backup = `${path}.bak-${stamp}`;
+  await target.backup(backup);
+  console.log(`  Backed up to ${backup}`);
+}
+
+if (at !== -1) {
+  const wanted = Number(setVersion);
+  if (wanted === version) {
+    console.log(`${path}: schema version is already ${version}.`);
+  } else if (dryRun) {
+    console.log(`${path}: would set schema version ${version} to ${wanted}; checking as if it were ${wanted}.`);
+    version = wanted;
+  } else {
+    await backUp();
+    target.pragma(`user_version = ${wanted}`);
+    console.log(`${path}: schema version set from ${version} to ${wanted}.`);
+    version = wanted;
+  }
+}
 const upto = Math.min(version, migrations.length);
 console.log(`${path}: schema version ${version}; this checkout knows ${migrations.length}.`);
 if (version > migrations.length) {
@@ -107,10 +141,7 @@ if (dryRun) {
   process.exit(0);
 }
 
-const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const backup = `${path}.bak-${stamp}`;
-await target.backup(backup);
-console.log(`  Backed up to ${backup}`);
+await backUp();
 target.pragma('foreign_keys = OFF');
 target.transaction(() => {
   for (const s of statements) target.exec(s);
