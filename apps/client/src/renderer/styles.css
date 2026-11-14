@@ -406,8 +406,7 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 .database-problem .error { color: var(--err); }
 .popover.search-popover { width: max-content; min-width: 360px; gap: 4px; }
 .diff-base { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 12px; }
-.diff-base .pick { min-width: 0; }
-.diff-base .pick b { min-width: 0; }
+.diff-base .pick, .diff-base .pick b { min-width: 0; }
 .diff-base .err { font-size: 12px; }
 
 /* what the New Session's controls have to say, above the composer */
@@ -419,7 +418,8 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 .queue { list-style: none; margin: 0 8px 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .queue li { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); }
 /* A queued message takes what the row has left, over two lines before it is cut. */
-.queue li .grow { color: var(--text); min-width: 0; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.queue li .grow { color: var(--text); min-width: 0; }
+.queue li:not(.editing) .grow { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .queue li > :not(.grow) { flex: none; }
 .queue li button:not(.icon-btn) { border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
 .queue li.editing { align-items: flex-start; border-style: solid; }

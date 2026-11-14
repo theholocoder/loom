@@ -215,32 +215,37 @@ export function SessionHeader({
           </button>
         </span>
         <MergeRequestChip session={session} project={project} popover={popover} onPopover={onPopover} onShow={onShowMergeRequest} onError={onError} />
-        <span className={session.diffStat?.files === 0 ? 'g-chip quiet' : 'g-chip'}>
-          <button type="button" title="Show Changes" aria-label={session.diffStat ? `Show changes: ${diffStatLabel(session.diffStat)}` : 'Show changes'} onClick={onShowChanges}>
-            {session.diffStat?.files === 0 ? (
-              <>
-                <FileDiff className="sm" />
-                No changes
-              </>
-            ) : session.diffStat ? (
-              <span className="diff-stat">
-                <FileDiff className="sm" />
-                <span className="files">{filesText(session.diffStat)}</span>
-                <span className="add">+{session.diffStat.added}</span>
-                <span className="del">−{session.diffStat.removed}</span>
-              </span>
-            ) : (
-              <>
-                <FileDiff className="sm" />
-                Changes
-              </>
-            )}
-          </button>
-        </span>
+        <ChangesChip stat={session.diffStat} onClick={onShowChanges} />
         <ContextChip session={session} anchor={anchors.context} expanded={details === 'context'} onClick={() => toggleDetails('context')} />
         <IssueChip session={session} project={project} open={popover?.kind === 'issue'} onPopover={onPopover} onShow={onShowIssue} onError={onError} />
       </div>
     </>
+  );
+}
+
+/** The diff stat, showing Changes; "Changes" before there is one, and a quiet "No changes" while it is empty. */
+function ChangesChip({ stat, onClick }: { stat: DiffStat | undefined; onClick: () => void }) {
+  if (!stat || stat.files === 0) {
+    return (
+      <span className={stat ? 'g-chip quiet' : 'g-chip'}>
+        <button type="button" title="Show Changes" aria-label={stat ? 'Show changes: no changes' : 'Show changes'} onClick={onClick}>
+          <FileDiff className="sm" />
+          {stat ? 'No changes' : 'Changes'}
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="g-chip">
+      <button type="button" title="Show Changes" aria-label={`Show changes: ${diffStatLabel(stat)}`} onClick={onClick}>
+        <span className="diff-stat">
+          <FileDiff className="sm" />
+          <span className="files">{filesText(stat)}</span>
+          <span className="add">+{stat.added}</span>
+          <span className="del">−{stat.removed}</span>
+        </span>
+      </button>
+    </span>
   );
 }
 
@@ -249,9 +254,8 @@ function filesText(stat: DiffStat): string {
   return `${stat.files} ${stat.files === 1 ? 'file' : 'files'}`;
 }
 
-/** The spoken form of a diff stat, e.g. "4 files, 1210 added, 3 removed", or "no changes". */
+/** The spoken form of a diff stat, e.g. "4 files, 1210 added, 3 removed". */
 function diffStatLabel(stat: DiffStat): string {
-  if (stat.files === 0) return 'no changes';
   return `${filesText(stat)}, ${stat.added} added, ${stat.removed} removed`;
 }
 
