@@ -210,6 +210,22 @@ describe("the Merge request Panel's Diff tab", () => {
     expect(within(sideArea()!).getByRole('tabpanel', { name: 'Overview' })).toBeTruthy();
   });
 
+  it('stays on its Diff tab while another Panel shows, or the Side area is hidden', async () => {
+    renderApp();
+    await showDiff();
+    fireEvent.click(within(sideArea()!).getByRole('tab', { name: 'Changes' }));
+    expect(screen.queryByRole('tablist', { name: 'Merge request' })).toBeNull();
+    fireEvent.click(within(sideArea()!).getByRole('tab', { name: 'Merge request' }));
+    expect(within(mrTabs()).getByRole('tab', { name: 'Diff' }).getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.click(within(sideArea()!).getByRole('button', { name: 'Hide the Side area' }));
+    expect(sideArea()).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'b', ctrlKey: true });
+    expect(within(mrTabs()).getByRole('tab', { name: 'Diff' }).getAttribute('aria-selected')).toBe('true');
+    // Review mode is still offered, from the tab it is on.
+    expect(within(sideArea()!).getByRole('button', { name: 'Review Merge request' })).toBeTruthy();
+  });
+
   it('switches tabs with the arrow keys', async () => {
     renderApp();
     const overview = within(await screen.findByRole('tablist', { name: 'Merge request' })).getByRole('tab', { name: 'Overview' });

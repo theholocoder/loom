@@ -14,6 +14,7 @@ import { useApi } from './api';
 import { useDates } from './dates';
 import type { DiffComments } from './Changes';
 import { MergeRequestDiffView } from './MergeRequestDiff';
+import { usePanelRequest, usePanelState, type PanelState } from './panel-context';
 import type { ReviewNotes } from './ReviewNotes';
 import { useMergeRequestRead } from './forge-read';
 import { Markdown } from './Markdown';
@@ -22,15 +23,14 @@ import { attempt } from './SessionDetails';
 import { SquashAndMergeDialog } from './SquashAndMerge';
 import { Avatar, canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
 
-/** Where the Panel is asked to take the user: the link form, or the reviews and comments. `n` tells one ask from the next. */
-export interface MergeRequestFocus {
-  to: 'link' | 'reviews';
-  n: number;
-}
-
 /** The Panel's tabs: its checks, reviews and description, or its diff. */
 export type MergeRequestTab = 'overview' | 'diff';
 const TABS: MergeRequestTab[] = ['overview', 'diff'];
+
+/** Whether the Panel, as it keeps itself (see `usePanelState`), can take Review mode: on its Diff tab only. */
+export function mergeRequestCanReview(state: PanelState): boolean {
+  return state.tab === 'diff';
+}
 
 const VERDICTS: Record<ReviewVerdict, { label: string; className: string }> = {
   approved: { label: 'Approved', className: 'chip verdict approved' },
@@ -40,29 +40,26 @@ const VERDICTS: Record<ReviewVerdict, { label: string; className: string }> = {
 };
 
 /**
- * The Merge request Panel of `session`, showing `tab`; `onTab` switches it.
- * What goes wrong running an action goes to `onError`; a new `focus` opens
- * the link form or scrolls to the reviews and comments. The Diff tab's lines
- * can be commented on while `comments` is given, and show the review threads
- * in `reviewNotes` as notes.
+ * The Merge request Panel of `session`, on the tab it was last left on: its
+ * Overview at first. Leaving the Diff tab calls `onLeftDiff`. What goes wrong
+ * running an action goes to `onError`; a request (see `usePanelRequest`)
+ * opens the link form or scrolls to the reviews and comments, on the
+ * Overview. The Diff tab's lines can be commented on while `comments` is
+ * given, and show the review threads in `reviewNotes` as notes.
  */
 export function MergeRequestPanel({
   session,
   project,
-  focus,
-  tab,
-  onTab,
   comments,
   reviewNotes,
+  onLeftDiff,
   onError,
 }: {
   session: Session;
   project: Project | undefined;
-  focus?: MergeRequestFocus;
-  tab: MergeRequestTab;
-  onTab: (tab: MergeRequestTab) => void;
   comments?: DiffComments;
   reviewNotes?: ReviewNotes;
+  onLeftDiff: () => void;
   onError: (message: string | undefined) => void;
 }) {
   const api = useApi();
@@ -81,17 +78,26 @@ export function MergeRequestPanel({
   const ids = useId();
   /** Set while the reviews are to be scrolled to: again once read, as what comes above them pushes them down. */
   const toReviews = useRef(false);
-  useEffect(() => {
-    if (!focus) return;
-    if (focus.to === 'link') setLinking(true);
-    else toReviews.current = true;
-  }, [focus?.n]);
+  const [tab, setTab] = usePanelState<MergeRequestTab>('merge-request', 'tab', 'overview');
+  const onTab = (next: MergeRequestTab) => {
+    setTab(next);
+    if (next !== 'diff') onLeftDiff();
+  };
+  /** Counts the asks for the reviews, which are scrolled to on each. */
+  const [reviewsAsked, setReviewsAsked] = useState(0);
+  usePanelRequest('merge-request', (to) => {
+    if (to === 'link') return setLinking(true);
+    // The reviews are on the Overview.
+    onTab('overview');
+    toReviews.current = true;
+    setReviewsAsked((n) => n + 1);
+  });
   useEffect(() => {
     if (!toReviews.current) return;
     reviews.current?.focus({ preventScroll: true });
     reviews.current?.scrollIntoView?.({ block: 'start' });
     if (read.value) toReviews.current = false;
-  }, [focus?.n, read.value, tab]);
+  }, [reviewsAsked, read.value, tab]);
   const ask = () => attempt(onError, () => api.invoke('sessions.requestMergeRequest', { id: session.id }));
   const linkForm = canAct && linking && <LinkMergeRequestForm session={session} onLinked={() => setLinking(false)} onCancel={() => setLinking(false)} />;
   const linkButton = canAct && (

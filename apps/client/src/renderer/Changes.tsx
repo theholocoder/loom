@@ -13,6 +13,7 @@ import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useTheme } from './appearance';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
+import { usePanelRequest } from './panel-context';
 import { FileDiffView, useFocusOnceShown, type Commenting, type LineNote } from './FileDiffView';
 import { askHead, askNote, ReviewNote, type ReviewNotes } from './ReviewNotes';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
@@ -48,12 +49,15 @@ export interface DiffComments {
  * changes while shown, and on Refresh.
  */
 /** A file Changes was asked to show; `n` counts the asks, so that the same file can be asked for again. */
-export interface ChangesFocus {
+interface ChangesFocus {
   path: string;
   n: number;
 }
 
-export function ChangesView({ session, comments, reviews, focus }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes; focus?: ChangesFocus }) {
+export function ChangesView({ session, comments, reviews }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes }) {
+  // A file asked for (see `usePanelRequest`), shown once it is listed.
+  const [focus, setFocus] = useState<ChangesFocus>();
+  usePanelRequest('changes', (path) => setFocus((was) => ({ path, n: (was?.n ?? 0) + 1 })));
   return <SessionDiff key={session.id} session={session} comments={comments} reviews={reviews} focus={focus} />;
 }
 
