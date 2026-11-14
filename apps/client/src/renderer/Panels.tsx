@@ -1,9 +1,9 @@
 // The open Session's Panels (ADR 0009): each kind of Panel registers once (see
 // panel-kinds.tsx), and sits as a labelled tab in one of two Panel areas, the
-// Side area right of the conversation and the Dock under it. Which Panels a Session has open,
-// the one shown and whether each area is shown are the Session's own, kept
-// in the database; each kind's size is the Layout's, the same for every
-// Session, and so is the area each kind sits in: a Panel moved to the other
+// Side area right of the conversation and the Dock under it. Which Panels a
+// Session has open, the one shown and whether each area is shown are the
+// Session's own, kept in the database; each kind's size is the Layout's, the
+// same for every Session, and so is the area each kind sits in: a Panel moved to the other
 // area takes every Panel of its kind there, in every Session. Either area can
 // be split into two Panel stacks, the Side area's one above the other, the
 // Dock's side by side: which kinds sit in the second is the Layout's too. Tabs

@@ -130,16 +130,13 @@ function MergeRequest({ session, project, control, onError }: PanelProps) {
   );
 }
 
-function Highlights({ session, control, onError }: PanelProps) {
-  const { showTurn, askAboutHighlight, request } = useSessionPanels();
+function Highlights({ session, onError }: PanelProps) {
+  const { showTurn, askAboutHighlight, show } = useSessionPanels();
   return (
     <HighlightsPanel
       session={session}
       onShowTurn={showTurn}
-      onShowFile={(path) => {
-        request('changes', path);
-        control.show('changes');
-      }}
+      onShowFile={(path) => show('changes', path)}
       onAsk={askAboutHighlight}
       onError={onError}
     />

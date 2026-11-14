@@ -18,7 +18,7 @@ import type { ReviewNotes } from './ReviewNotes';
 import { SessionHeader, type HeaderPopover } from './SessionHeader';
 import { PanelArea, PanelDropStrips, usePanels } from './Panels';
 import { canRunTerminals } from './panel-kinds';
-import { SessionPanelProvider, useSessionPanelContext, type PanelRequests } from './panel-context';
+import { SessionPanelProvider, useSessionPanelStore, type PanelRequests } from './panel-context';
 import { Select } from './Popover';
 import { codeRightClicked, Markdown } from './Markdown';
 import { useArchive, useRemovedProject } from './Archive';
@@ -753,17 +753,11 @@ export function SessionView({
   /** Ask the agent, on a Highlight: it goes to the composer as a comment quoting it, its note to edit. */
   const askAboutHighlight = (highlight: Highlight) =>
     setPending((list) => [...list, { comment: { quote: highlightLine(highlight), note: 'Can you look into this?' } }]);
-  const panelContext = useSessionPanelContext({ diffComments, reviewNotes, showTurn, askAboutHighlight: composerDisabled || freeAnswer ? undefined : askAboutHighlight });
+  const panelContext = useSessionPanelStore({ diffComments, reviewNotes, showTurn, askAboutHighlight: composerDisabled || freeAnswer ? undefined : askAboutHighlight }, panels.show);
   /** Shows Changes, at `path`. */
-  const showFile = (path: string) => {
-    panelContext.request('changes', path);
-    panels.show('changes');
-  };
+  const showFile = (path: string) => panelContext.show('changes', path);
   /** Shows the Merge request Panel, at its link form or its reviews when asked. */
-  const showMergeRequest = (to?: PanelRequests['merge-request']) => {
-    panels.show('merge-request');
-    if (to) panelContext.request('merge-request', to);
-  };
+  const showMergeRequest = (to?: PanelRequests['merge-request']) => panelContext.show('merge-request', to);
 
   const StatusGlyph = status.icon;
   const statusIcon = <StatusGlyph className="sm" />;

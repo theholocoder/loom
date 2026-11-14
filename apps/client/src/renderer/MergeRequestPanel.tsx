@@ -27,9 +27,12 @@ import { Avatar, canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LO
 export type MergeRequestTab = 'overview' | 'diff';
 const TABS: MergeRequestTab[] = ['overview', 'diff'];
 
-/** Whether the Panel, as it keeps itself (see `usePanelState`), can take Review mode: on its Diff tab only. */
+/** What the Panel keeps its tab under (see `usePanelState`). */
+const TAB = 'tab';
+
+/** Whether the Panel, as it keeps itself, can take Review mode: on its Diff tab only. */
 export function mergeRequestCanReview(state: PanelState): boolean {
-  return state.tab === 'diff';
+  return state[TAB] === 'diff';
 }
 
 const VERDICTS: Record<ReviewVerdict, { label: string; className: string }> = {
@@ -78,7 +81,7 @@ export function MergeRequestPanel({
   const ids = useId();
   /** Set while the reviews are to be scrolled to: again once read, as what comes above them pushes them down. */
   const toReviews = useRef(false);
-  const [tab, setTab] = usePanelState<MergeRequestTab>('merge-request', 'tab', 'overview');
+  const [tab, setTab] = usePanelState<MergeRequestTab>('merge-request', TAB, 'overview');
   const onTab = (next: MergeRequestTab) => {
     setTab(next);
     if (next !== 'diff') onLeftDiff();

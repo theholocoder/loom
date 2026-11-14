@@ -13,7 +13,7 @@ import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useTheme } from './appearance';
 import { quoteRange, type LineRange, type Quote } from './diff-comments';
-import { usePanelRequest } from './panel-context';
+import { usePanelRequest, usePanelState } from './panel-context';
 import { FileDiffView, useFocusOnceShown, type Commenting, type LineNote } from './FileDiffView';
 import { askHead, askNote, ReviewNote, type ReviewNotes } from './ReviewNotes';
 import { SearchPicker, type Loaded as LoadedList, type PickerOption } from './SearchPicker';
@@ -55,9 +55,9 @@ interface ChangesFocus {
 }
 
 export function ChangesView({ session, comments, reviews }: { session: Session; comments?: DiffComments; reviews?: ReviewNotes }) {
-  // A file asked for (see `usePanelRequest`), shown once it is listed.
-  const [focus, setFocus] = useState<ChangesFocus>();
-  usePanelRequest('changes', (path) => setFocus((was) => ({ path, n: (was?.n ?? 0) + 1 })));
+  // The last file asked for (see `usePanelRequest`), shown once it is listed, and again as Changes shows anew.
+  const [focus, setFocus] = usePanelState<ChangesFocus | undefined>('changes', 'focus', undefined);
+  usePanelRequest('changes', (path) => setFocus({ path, n: (focus?.n ?? 0) + 1 }));
   return <SessionDiff key={session.id} session={session} comments={comments} reviews={reviews} focus={focus} />;
 }
 
