@@ -311,8 +311,6 @@ export interface BabysitStatus {
   stale: boolean;
   /** The reviews and comments others left on it, as last seen; absent before the first poll that worked. */
   reviews?: ReviewCount;
-  /** Its review threads on the code still open that others wrote in, as last seen: notes on their lines in the diffs. */
-  threads?: ReviewThread[];
 }
 
 /** One comment of a review thread. */
@@ -1990,6 +1988,13 @@ export interface Topics {
   panels: SessionPanels;
   /** One Session's Highlights, and how checking them goes. */
   highlights: SessionHighlights;
+  /**
+   * One Session's review threads on the code still open that others wrote
+   * in, as Babysit last saw them: notes on their lines in the diffs. None
+   * while Babysit isn't watching its Merge request. Kept off `sessions`, which
+   * every view gets again on any change to any Session.
+   */
+  reviewThreads: ReviewThread[];
   /** One Session's open terminals, in the order they were opened. */
   terminals: TerminalInfo[];
   /**
@@ -2019,6 +2024,7 @@ export interface TopicParams {
   transcript: { sessionId: number };
   panels: { sessionId: number };
   highlights: { sessionId: number };
+  reviewThreads: { sessionId: number };
   terminals: { sessionId: number };
   terminalOutput: { id: number };
 }

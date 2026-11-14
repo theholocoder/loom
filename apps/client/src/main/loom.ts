@@ -300,6 +300,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
     panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
     highlights: ({ sessionId }, listener) => highlighter.subscribe(sessionId, listener),
+    reviewThreads: ({ sessionId }, listener) => babysitter.subscribeThreads(sessionId, listener),
     terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
     terminalOutput: ({ id }, listener) => terminals.subscribeOutput(id, listener),
   };

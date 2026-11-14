@@ -68,7 +68,7 @@ const session: Session = {
   updatedAt: 1,
   mergeRequest: { number: 40, url },
   mergeRequestState: 'open',
-  babysit: { stale: false, lastPollAt: 1, threads: [thread] },
+  babysit: { stale: false, lastPollAt: 1 },
 };
 
 const patch = `diff --git a/${currency} b/${currency}\n--- a/${currency}\n+++ b/${currency}\n@@ -1,2 +1,2 @@\n import { x } from './x';\n-export const FALLBACK = 'USD';\n+export const FALLBACK = 'EUR';\n`;
@@ -95,7 +95,7 @@ const details: MergeRequestDetails = {
 };
 const mrDiff: MergeRequestDiff = { files: [{ ...files[0]!, text: patch, truncated: false }] };
 
-function renderApp({ s = session, p = project, shown = 'changes' as 'changes' | 'merge-request', diffText = patch, handlers = {} as Handlers } = {}) {
+function renderApp({ s = session, p = project, shown = 'changes' as 'changes' | 'merge-request', diffText = patch, threads = [thread], handlers = {} as Handlers } = {}) {
   const main = new FakeMain(
     { projects: [p], sessions: [s] },
     {
@@ -107,6 +107,7 @@ function renderApp({ s = session, p = project, shown = 'changes' as 'changes' | 
     },
   );
   main.publish('panels', { side: { panels: ['changes', 'merge-request'], shown, open: true }, dock: { panels: [], shown: null, open: false } }, { sessionId: s.id });
+  main.publish('reviewThreads', threads, { sessionId: s.id });
   render(
     <ApiProvider api={main}>
       <App />
@@ -219,7 +220,10 @@ describe("the Merge request's review comments, as notes on the diff", () => {
     expect(calls(main, 'sessions.resolveReviewThread')).toEqual([{ id: 7, thread: 'PRRT_1' }]);
 
     // Unresolved on the Forge since: the next read has it again.
-    act(() => main.publish('sessions', [{ ...session, babysit: { stale: false, lastPollAt: 2, threads: [thread] } }]));
+    act(() => {
+      main.publish('sessions', [{ ...session, babysit: { stale: false, lastPollAt: 2 } }]);
+      main.publish('reviewThreads', [thread], { sessionId: session.id });
+    });
     expect(await within(changes()).findByRole('note', { name: noteName })).toBeTruthy();
   });
 
@@ -235,7 +239,7 @@ describe("the Merge request's review comments, as notes on the diff", () => {
   });
 
   it('shows no Resolve where the Forge says the user may not, and only Open with the Forge off', async () => {
-    renderApp({ s: { ...session, babysit: { stale: false, threads: [{ ...thread, canResolve: false }] } } });
+    renderApp({ s: { ...session, babysit: { stale: false } }, threads: [{ ...thread, canResolve: false }] });
     const note = await noteInChanges();
     expect(within(note).queryByRole('button', { name: 'Resolve' })).toBeNull();
     expect(within(note).getByRole('button', { name: 'Reply' })).toBeTruthy();

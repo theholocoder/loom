@@ -719,7 +719,7 @@ export function SessionView({
   /** The review threads resolved here, by when Babysit last read them then: left out until it reads them again. */
   const [resolved, setResolved] = useState<ReadonlyMap<string, number | undefined>>(new Map());
   const lastPollAt = session.babysit?.lastPollAt;
-  const threads = session.babysit?.threads?.filter((thread) => !resolved.has(thread.id) || resolved.get(thread.id) !== lastPollAt);
+  const threads = useTopic('reviewThreads', { sessionId: session.id })?.filter((thread) => !resolved.has(thread.id) || resolved.get(thread.id) !== lastPollAt);
   // Replying and resolving work on the Forge from the Project's checkout: the worktree needn't be there.
   const actOnThreads = session.status !== 'archived' && project?.forge.state === 'available';
   const reviewNotes: ReviewNotes | undefined = threads?.length

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { git, startMain, tempDir, tempMachine, waitFor, type AcpTurn, type ForgeCli, type ForgeCliScript, type Machine, type MainHarness } from './harness';
-import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
+import type { EnvironmentStatus, ReviewThread, Session, TranscriptItem } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
 const signedIn = [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }];
@@ -59,6 +59,8 @@ async function babysat(
 }
 
 const sessionOf = (list: Session[], id: number) => list.find((s) => s.id === id)!;
+/** The Session's open review threads, once they satisfy `predicate`. */
+const threadsWhere = (main: MainHarness, id: number, predicate: (threads: ReviewThread[]) => boolean = () => true) => waitFor(main.api, 'reviewThreads', predicate, { sessionId: id });
 
 /** Moves the clock `ms` on and waits for the poll that falls due there to land. */
 async function pollAfter(main: MainHarness, id: number, ms: number) {
@@ -933,7 +935,7 @@ describe('the CI checks of a Merge request', () => {
 describe('review threads, as notes on the diff', () => {
   const others = { author: 'alice', body: 'Off by one', url: `${URLS.gh}#t1`, createdAt: '2026-11-01T10:00:00Z' };
 
-  it("carries each open thread others wrote in, with its file, line and comments, to the Session's Babysit status", async () => {
+  it("publishes each open thread others wrote in, with its file, line and comments, on the Session's own topic", async () => {
     const { main, id } = await babysat('gh', {
       threads: [
         { id: 'PRRT_1', path: 'src/a.ts', line: 10, code: 'const a = 1;', changesRequested: true, comments: [others, { author: 'octocat', body: 'Fixed?', url: `${URLS.gh}#t1r` }] },
@@ -944,7 +946,7 @@ describe('review threads, as notes on the diff', () => {
       ],
     });
 
-    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.threads).toEqual([
+    expect(await threadsWhere(main, id)).toEqual([
       {
         id: 'PRRT_1',
         path: 'src/a.ts',
@@ -964,6 +966,44 @@ describe('review threads, as notes on the diff', () => {
     ]);
   });
 
+  it('keeps the comments off the sessions topic, which every view gets on any change to any Session', async () => {
+    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    expect((await threadsWhere(main, id)).map((t) => t.id)).toEqual(['PRRT_1']);
+    const session = sessionOf(await waitFor(main.api, 'sessions', () => true), id);
+    expect(session.babysit).not.toHaveProperty('threads');
+    expect(JSON.stringify(session)).not.toContain('Off by one');
+  });
+
+  it('publishes no threads while the Session is not watched, and again once it is', async () => {
+    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    await threadsWhere(main, id, (threads) => threads.length === 1);
+
+    await main.api.invoke('sessions.setBabysitting', { id, on: false });
+    await threadsWhere(main, id, (threads) => threads.length === 0);
+    await main.api.invoke('sessions.setBabysitting', { id, on: true });
+    await threadsWhere(main, id, (threads) => threads.length === 1);
+
+    await main.api.invoke('sessions.archive', { id });
+    await threadsWhere(main, id, (threads) => threads.length === 0);
+  });
+
+  it('serves the threads kept from the last poll after a restart', async () => {
+    const userDataDir = tempDir('loom-babysit-');
+    const first = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] }, { userDataDir });
+    await first.main.close();
+    const main = await startMain({ machine: first.machine, userDataDir });
+    expect((await threadsWhere(main, first.id)).map((t) => t.id)).toEqual(['PRRT_1']);
+  });
+
+  it("drops a deleted Session's threads, telling those listening there are none", async () => {
+    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    const seen: ReviewThread[][] = [];
+    main.api.subscribe('reviewThreads', (threads) => seen.push(threads), { sessionId: id });
+    expect(await main.api.invoke('sessions.delete', { id, discard: true })).toEqual({ deleted: true });
+    expect(seen.at(-1)).toEqual([]);
+    expect(() => main.api.subscribe('reviewThreads', () => {}, { sessionId: id })).toThrow(/unknown Session/);
+  });
+
   it('replies to and resolves a thread on GitHub, then reads the Merge request again', async () => {
     const { machine, main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
 
@@ -972,12 +1012,12 @@ describe('review threads, as notes on the diff', () => {
     expect(mutation).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'thread=PRRT_1', '-F', expect.stringMatching(/^body=@.*loom-replies\/[\w-]+\.md$/)]));
     // The reply goes in a file: an argument with a newline or an & wouldn't pass through cmd.exe whole.
     expect(mutation.filter((arg) => /[\n&]/.test(arg))).toEqual([]);
-    const replied = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.[0]?.comments.length === 2);
-    expect(sessionOf(replied, id).babysit!.threads![0]!.comments[1]).toMatchObject({ author: 'octocat', body: 'Good catch:\nfixed in a & b' });
+    const replied = await threadsWhere(main, id, (threads) => threads[0]?.comments.length === 2);
+    expect(replied[0]!.comments[1]).toMatchObject({ author: 'octocat', body: 'Good catch:\nfixed in a & b' });
 
     await main.api.invoke('sessions.resolveReviewThread', { id, thread: 'PRRT_1' });
     expect(graphql(machine).some((args) => args.some((a) => a.includes('resolveReviewThread')) && args.includes('thread=PRRT_1'))).toBe(true);
-    await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.length === 0);
+    await threadsWhere(main, id, (threads) => threads.length === 0);
     // The user's own reply wakes nobody.
     await main.elapse(QUIET_WINDOW);
     expect(await cardsOf(main, id)).toEqual([]);
@@ -992,7 +1032,7 @@ describe('review threads, as notes on the diff', () => {
         { id: 'fed789', path: 'lib/c.rb', line: 1, resolved: true, comments: [{ id: 9, author: 'dave', body: 'Done' }] },
       ],
     });
-    expect(sessionOf(await main.api.invoke('sessions.list'), id).babysit!.threads).toEqual([
+    expect(await threadsWhere(main, id)).toEqual([
       { id: 'abc123', path: 'lib/a.rb', line: 3, side: 'new', comments: [{ author: 'carol', body: 'Rename it', at: Date.parse('2026-11-01T10:00:00Z'), url: `${URLS.glab}#note_7` }], canResolve: true },
       { id: 'def456', path: 'lib/b.rb', line: 8, side: 'old', comments: [{ author: 'dave', body: 'Keep this', url: `${URLS.glab}#note_8` }], canResolve: true },
     ]);
@@ -1005,8 +1045,8 @@ describe('review threads, as notes on the diff', () => {
     expect(invocations[reply]).toEqual(['api', `${discussion}/abc123/notes`, '--method', 'POST', '-F', expect.stringMatching(/^body=@.*loom-replies\/[\w-]+\.md$/)]);
     expect(invocations).toContainEqual(['api', `${discussion}/def456`, '--method', 'PUT', '-F', 'resolved=true']);
     expect(machine.forgeCliCwds('glab')[reply]).toBe(checkout);
-    const after = await waitFor(main.api, 'sessions', (list) => sessionOf(list, id).babysit?.threads?.length === 1 && sessionOf(list, id).babysit!.threads![0]!.comments.length === 2);
-    expect(sessionOf(after, id).babysit!.threads![0]!.comments[1]).toMatchObject({ author: 'octocat', body: 'Renamed' });
+    const after = await threadsWhere(main, id, (threads) => threads.length === 1 && threads[0]!.comments.length === 2);
+    expect(after[0]!.comments[1]).toMatchObject({ author: 'octocat', body: 'Renamed' });
   });
 
   it('refuses an empty reply, a thread the Forge lacks or that names no thread, and an archived Session', async () => {

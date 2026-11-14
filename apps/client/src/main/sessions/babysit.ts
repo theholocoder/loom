@@ -7,6 +7,7 @@ import type { Clock, TimerHandle } from '../clock';
 import type { BridgeCall } from '../environments/exec';
 import { readMergeRequestActivity, type MergeRequestActivity } from '../projects/merge-request-activity';
 import type { LoomDatabase } from '../storage/database';
+import { Topic } from '../topic';
 
 export const POLL_WHILE_CI_PENDING_MS = 60_000;
 export const POLL_MS = 3 * 60_000;
@@ -67,6 +68,8 @@ export class Babysit {
   private readonly records = new Map<number, BabysitRecord>();
   private readonly nextPolls = new Map<number, TimerHandle>();
   private readonly quietEnds = new Map<number, TimerHandle>();
+  /** Each Session's open review threads, for those listening: off the Session, as they carry every comment's body. */
+  private readonly threadTopics = new Map<number, Topic<ReviewThread[]>>();
   /** The polls under way, by Session and Merge request: a new link doesn't wait for the old one's. */
   private readonly polling = new Set<string>();
   private readonly flushing = new Set<number>();
@@ -104,9 +107,24 @@ export class Babysit {
     return babysit;
   }
 
-  /** Takes in a change to the Sessions: a Merge request linked starts being watched at once. */
+  /** The Session's open review threads now, then as Babysit reads them again; none while it isn't watching. */
+  subscribeThreads(id: number, listener: (threads: ReviewThread[]) => void): () => void {
+    if (!this.options.sessions.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
+    let topic = this.threadTopics.get(id);
+    if (!topic) this.threadTopics.set(id, (topic = new Topic(this.threadsOf(id))));
+    return topic.subscribe(listener);
+  }
+
+  /** Takes in a change to the Sessions: a Merge request linked starts being watched at once, and a deleted Session's is forgotten. */
   sessionsChanged(list: Session[]): void {
     if (this.stopped) return;
+    const ids = new Set(list.map((s) => s.id));
+    for (const id of new Set([...this.records.keys(), ...this.threadTopics.keys()])) {
+      if (ids.has(id)) continue;
+      if (this.records.has(id)) this.forget(id);
+      this.threadTopics.get(id)?.set([]);
+      this.threadTopics.delete(id);
+    }
     for (const session of list) {
       const link = session.status === 'archived' ? undefined : session.mergeRequest;
       const record = this.records.get(session.id);
@@ -133,10 +151,12 @@ export class Babysit {
       this.off.add(id);
       this.clearTimers(id);
       this.options.sessions.setBabysit(id, undefined);
+      this.publishThreads(id);
       return;
     }
     this.off.delete(id);
     this.options.sessions.setBabysit(id, statusOf(record));
+    this.publishThreads(id);
     if (record.pending.length) this.armQuietEnd(id, record);
     void this.poll(id);
   }
@@ -191,6 +211,7 @@ export class Babysit {
     if (activity) this.takeIn(id, record, activity);
     else record.stale = true;
     this.options.sessions.setBabysit(id, statusOf(record));
+    if (activity) this.publishThreads(id);
     this.save(id, record);
     if (activity && activity.state !== 'open') {
       this.clearTimers(id);
@@ -333,12 +354,28 @@ export class Babysit {
     }
   }
 
+  /** Stops watching the Session's Merge request, as it is unlinked, another linked, or the Session archived. */
   private drop(id: number): void {
+    this.forget(id);
+    this.options.sessions.setBabysit(id, undefined);
+    this.publishThreads(id);
+  }
+
+  /** Forgets what was seen of the Session's Merge request. */
+  private forget(id: number): void {
     this.records.delete(id);
     this.off.delete(id);
     this.clearTimers(id);
-    this.options.sessions.setBabysit(id, undefined);
     this.write(() => this.options.db.deleteFrom('babysit').where('session_id', '=', id).execute());
+  }
+
+  /** The Session's open review threads, as last read; none while it isn't watched. */
+  private threadsOf(id: number): ReviewThread[] {
+    return (!this.off.has(id) && this.records.get(id)?.threads) || [];
+  }
+
+  private publishThreads(id: number): void {
+    this.threadTopics.get(id)?.set(this.threadsOf(id));
   }
 
   private save(id: number, record: BabysitRecord): void {
@@ -362,6 +399,6 @@ function newRecord({ number, url }: { number: number; url: string }): BabysitRec
   return { number, url, baselined: false, seen: [], conflictsReported: false, pending: [], info: [], stale: false };
 }
 
-function statusOf({ ci, checks, reviews, threads, lastPollAt, stale }: BabysitRecord): BabysitStatus {
-  return { stale, ...(ci ? { ci } : {}), ...(checks ? { checks } : {}), ...(reviews ? { reviews } : {}), ...(threads ? { threads } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
+function statusOf({ ci, checks, reviews, lastPollAt, stale }: BabysitRecord): BabysitStatus {
+  return { stale, ...(ci ? { ci } : {}), ...(checks ? { checks } : {}), ...(reviews ? { reviews } : {}), ...(lastPollAt !== undefined ? { lastPollAt } : {}) };
 }
