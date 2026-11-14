@@ -103,7 +103,7 @@ _Avoid_: Bottom bar, bottom area
 Which kind of **Panel** sits in which **Panel area** and **Panel stack**, and each kind's size. One for the whole app, kept when Loom quits. Which Panels are open, which one is shown and whether each Panel area is shown belong to each **Session**.
 
 **Glance strip**:
-The row under an open **Session**'s header showing what is changing right now (its **Merge request** and checks, its changes, the context used, its issue), each opening its detail.
+The chips under an open **Session**'s header showing what is changing right now (its **Merge request** and checks, its changes, the context used, its issue), each opening its detail. They wrap onto a second row when the header is narrow.
 _Avoid_: Status bar, Session info
 
 **Session details**:
