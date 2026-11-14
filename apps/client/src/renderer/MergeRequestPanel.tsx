@@ -8,7 +8,7 @@
 // another. With none linked, it offers to create or link one.
 import { Bot, ExternalLink, Eye, GitBranch, GitCommitHorizontal, GitMerge, GitPullRequest, GitPullRequestCreate, GitPullRequestDraft, Link, MessageSquare, RotateCw, User } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { codePlace, FORGE_NAMES, mergeRequestRef, type MergeRequestComment, type MergeRequestDetails, type MergeRequestReview, type Project, type ReviewVerdict, type Session } from '../shared/api';
+import { codePlace, forgeName as forgeNameOf, mergeRequestRef, type MergeRequestComment, type MergeRequestDetails, type MergeRequestReview, type Project, type ReviewVerdict, type Session } from '../shared/api';
 import { ErrorText } from './ErrorText';
 import { useApi } from './api';
 import { useDates } from './dates';
@@ -144,7 +144,7 @@ export function MergeRequestPanel({
   // Babysit looks after an open one only.
   const watchable = session.status !== 'archived' && project?.forge.state === 'available' && state === 'open';
   const watching = !session.babysitOff;
-  const forgeName = project?.forge.kind ? FORGE_NAMES[project.forge.kind] : 'the Forge';
+  const forgeName = forgeNameOf(project?.forge.kind);
   // Offered on an open one; held back until it is read, and while it is a draft, which the Forge won't merge.
   const mergeable = canAct && state === 'open';
   const mergeBlockedBy = !details ? `Reading it from ${forgeName}…` : details.draft ? `${ref} is a draft: mark it ready on ${forgeName} first.` : !details.head ? `${forgeName} didn't say which commit ${ref} is at.` : undefined;

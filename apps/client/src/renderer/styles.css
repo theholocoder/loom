@@ -918,7 +918,8 @@ input.toggle:disabled { cursor: not-allowed; }
 [data-density="compact"] .setting { padding: 8px 0; }
 
 /* The Projects page: a Project's avatar beside its name, and its Edit dialog. */
-.project-name { gap: 8px; font-weight: 600; }
+.project-name { gap: 8px; font-weight: 600; max-width: 180px; }
+.project-name > .ellipsis { min-width: 0; }
 .project-actions { gap: 6px; flex-wrap: nowrap; }
 .project-edit { display: flex; flex-direction: column; gap: 6px; width: min(520px, calc(100vw - 32px)); }
 .project-field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12.5px; }

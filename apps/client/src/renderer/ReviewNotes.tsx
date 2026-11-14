@@ -5,7 +5,7 @@
 // Resolve, both on the Forge.
 import { Bot, Check, ExternalLink, MessageSquareReply } from 'lucide-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
-import { FORGE_NAMES, type ForgeKind, type ReviewThread } from '../shared/api';
+import { forgeName, type ForgeKind, type ReviewThread } from '../shared/api';
 import { ErrorText } from './ErrorText';
 import { Markdown } from './Markdown';
 import { useFocusOnceShown } from './FileDiffView';
@@ -55,7 +55,7 @@ export function ReviewNote({ thread, reviews, where, onAsk }: { thread: ReviewTh
   const [error, setError] = useState<string>();
   const [first, ...replies] = thread.comments;
   if (!first) return null;
-  const forge = reviews.forge ? FORGE_NAMES[reviews.forge] : 'the Forge';
+  const forge = forgeName(reviews.forge);
   const run = async (what: 'reply' | 'resolve', action: () => Promise<void>): Promise<boolean> => {
     setBusy(what);
     setError(undefined);

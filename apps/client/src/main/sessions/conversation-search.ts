@@ -1,8 +1,13 @@
 // Searching what was said in Sessions' conversations, for the Ctrl+K
 // palette: the user's messages and the agent's, as stored in `events`.
 import { sql } from 'kysely';
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { gfmFromMarkdown } from 'mdast-util-gfm';
+import { gfm } from 'micromark-extension-gfm';
 import type { ConversationMatch } from '../../shared/api';
 import { FOLD_CASE, type LoomDatabase } from '../storage/database';
+
+type MarkdownNode = ReturnType<typeof fromMarkdown> | ReturnType<typeof fromMarkdown>['children'][number];
 
 /** How long an excerpt is at most, ellipses aside. */
 const EXCERPT_LENGTH = 120;
@@ -38,8 +43,39 @@ export async function searchConversations(db: LoomDatabase, sessionIds: Readonly
   `.execute(db);
   return rows.filter((row) => sessionIds.has(row.session_id)).map((row) => {
     const held = wanted.filter((_, i) => row[`a${i}`] === 1);
-    return { id: row.session_id, words: held, excerpt: excerpt(row.text, held) };
+    return { id: row.session_id, words: held, excerpt: excerpt(plainText(row.text), held) };
   });
+}
+
+/**
+ * What Markdown `text` says, as plain text, read as the conversation renders
+ * it: no heading marks, table pipes, emphasis, code ticks or link targets, and
+ * code as it is. Blocks and table cells are kept apart by a line break.
+ */
+function plainText(text: string): string {
+  return said(fromMarkdown(text, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }));
+}
+
+/** What a Markdown node says: its text, or its children's, a block's on a line of its own. */
+function said(node: MarkdownNode): string {
+  switch (node.type) {
+    case 'text':
+    case 'inlineCode':
+    case 'code':
+      return node.value;
+    case 'image':
+      return node.alt ?? '';
+    case 'html':
+    case 'definition':
+    case 'footnoteDefinition':
+    case 'thematicBreak':
+      return '';
+    case 'break':
+      return '\n';
+  }
+  if (!('children' in node)) return '';
+  const inline = node.type === 'paragraph' || node.type === 'heading' || node.type === 'tableCell' || node.type === 'link' || node.type === 'linkReference' || node.type === 'emphasis' || node.type === 'strong' || node.type === 'delete';
+  return (node.children as MarkdownNode[]).map(said).join(inline ? '' : '\n');
 }
 
 /** `text` on one line, cut down around the first of `words` it holds, with an ellipsis where cut. */
@@ -48,7 +84,7 @@ function excerpt(text: string, words: string[]): string {
   if (line.length <= EXCERPT_LENGTH) return line;
   const lower = line.toLowerCase();
   const found = words.map((w) => lower.indexOf(w.toLowerCase())).filter((i) => i >= 0);
-  // The best message holds a word, but perhaps only across the spaces that were folded.
+  // The best message holds a word, but perhaps only across the spaces that were folded, or in Markdown that isn't shown, such as a link's target.
   const at = found.length ? Math.min(...found) : 0;
   let start = Math.max(0, Math.min(at - EXCERPT_LEAD, line.length - EXCERPT_LENGTH));
   // From the start of a word.

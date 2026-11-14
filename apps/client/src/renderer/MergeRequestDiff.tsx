@@ -4,7 +4,7 @@
 // notes), read when the tab shows, again after each Babysit poll and on the
 // Panel's refresh.
 import { useRef } from 'react';
-import { FORGE_NAMES, type DiffFile, type ForgeKind, type Session } from '../shared/api';
+import { forgeName as forgeNameOf, type DiffFile, type ForgeKind, type Session } from '../shared/api';
 import { ErrorText } from './ErrorText';
 import { useTopic } from './api';
 import { useTheme } from './appearance';
@@ -38,7 +38,7 @@ export function MergeRequestDiffView({
   const root = useRef<HTMLDivElement>(null);
   const wide = useWide(root, WIDE_CHANGES_PX);
   const read = useMergeRequestRead('sessions.mergeRequestDiff', session, generation);
-  const forgeName = forge ? FORGE_NAMES[forge] : 'the Forge';
+  const forgeName = forgeNameOf(forge);
   const diff = read.value;
   const byPath = new Map(diff?.files.map((file) => [file.path, file]));
   return (

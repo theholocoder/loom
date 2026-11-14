@@ -1,7 +1,7 @@
 // What Babysit found on the Session's Merge request, in its transcript: a card
 // of feedback the agent may need to act on, and quiet notes of progress.
 import { CircleCheckBig, CircleX, Eye, GitMerge, GitPullRequestClosed, MessageSquare, type LucideIcon } from 'lucide-react';
-import { codePlace, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type EndedMergeRequestState, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
+import { codePlace, forgeName, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type EndedMergeRequestState, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
 import { ErrorAlert, useAction } from './Questions';
 import { unsavedWorkSummary } from './Archive';
 
@@ -16,7 +16,7 @@ export const ENDED: Record<EndedMergeRequestState, { icon: LucideIcon; label: st
 /**
  * The feedback, in the style of the agent's tool calls: each item on one line,
  * its places in the code taking Changes to their notes; its CI status, Send to
- * agent while it can be sent, and Open on Forge.
+ * agent while it can be sent, and Open on GitHub or GitLab.
  */
 export function FeedbackCard({
   item,
@@ -65,7 +65,7 @@ export function FeedbackCard({
               </button>
             )}
             <button type="button" onClick={() => onOpen(item.url)}>
-              Open on Forge
+              Open on {forgeName(forge)}
             </button>
           </div>
         </div>

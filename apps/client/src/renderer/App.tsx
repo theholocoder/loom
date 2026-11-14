@@ -40,7 +40,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { FORGE_NAMES, mergeRequestRef, type Project, type Session } from '../shared/api';
+import { forgeName, mergeRequestRef, type Project, type Session } from '../shared/api';
 import { MATCH_SYSTEM_LABEL, THEMES, type Theme, type ThemeChoice } from '../shared/appearance';
 import { useApi, useTopic } from './api';
 import { useAppearance } from './appearance';
@@ -512,7 +512,7 @@ function paletteActions(app: {
       label: `Show Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} for this Session`,
     },
     mergeRequest && {
-      label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} on ${project?.forge.kind ? FORGE_NAMES[project.forge.kind] : 'the Forge'}`,
+      label: `Open Merge request ${mergeRequestRef(project?.forge.kind, mergeRequest.number)} on ${forgeName(project?.forge.kind)}`,
       icon: ExternalLink,
       run: () => app.command('openMergeRequest'),
     },

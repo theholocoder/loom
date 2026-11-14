@@ -1,6 +1,6 @@
 import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, MessageSquarePlus, Pencil, TriangleAlert, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { FORGE_CLI, OPENCODE_NAME, type ForgeKind, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
+import { FORGE_CLI, FORGE_NAMES, OPENCODE_NAME, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { branchPrefixError, branchPrefixOf } from '../shared/branches';
 import { AVATAR_MAX, avatarError, avatarText, PROJECT_COLOR_NAMES, PROJECT_COLORS, projectNameError, type ProjectColor } from '../shared/projects';
 import { ErrorText } from './ErrorText';
@@ -12,7 +12,6 @@ import { effortsOf, effortTaken, ModelPickers } from './ModelPicker';
 import { ProjectAvatar, projectColor } from './ProjectAvatar';
 import { SHORTCUTS } from './shortcuts';
 
-const FORGE_NAME: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
 
 /** A Project the user just added, or restored, which a Session can start in next. */
 export interface AddedProject {
@@ -218,7 +217,9 @@ function ProjectRow({ project, environmentLabel }: { project: Project; environme
       <td>
         <span className="row project-name">
           <ProjectAvatar project={project} size={22} />
-          {project.name}
+          <span className="ellipsis" title={project.name}>
+            {project.name}
+          </span>
         </span>
       </td>
       <td>
@@ -481,6 +482,8 @@ function forgeLook(forge: ForgeStatus): { look: string; label: string; reason?: 
       return { look: 'unknown', label: 'not checked' };
     case 'no-remote':
       return { look: 'local', label: 'Local only', reason: 'This checkout has no origin remote, so Forge features (issues, Merge requests, Babysit) are off.' };
+    case 'unsupported':
+      return { look: 'local', label: 'No Forge', reason: `origin${forge.remote ? ` (${forge.remote})` : ''} isn't on GitHub or GitLab, so Forge features (issues, Merge requests, Babysit) are off.` };
     default:
       return { look: 'off', label: 'off' };
   }
@@ -492,7 +495,7 @@ function ForgeCell({ forge }: { forge: ForgeStatus }) {
     <>
       {forge.kind && (
         <div>
-          {FORGE_NAME[forge.kind]} {forge.repository && <span className="tech">{forge.repository}</span>}
+          {FORGE_NAMES[forge.kind]} {forge.repository && <span className="tech">{forge.repository}</span>}
         </div>
       )}
       {/* Focusable when it has a reason, so the keyboard can reach its tooltip too. */}
@@ -517,8 +520,8 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
       return <CircleCheckBig className="sm" />;
     case 'unknown':
     case 'no-remote':
-      return null;
     case 'unsupported':
+      return null;
     case 'cli-missing':
     case 'signed-out':
       return <TriangleAlert className="sm" />;
@@ -529,20 +532,15 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
 
 /**
  * Why the Project's Forge features are off, and what to do about it, if they
- * are and the user can do something. A checkout with no origin remote is a
- * normal, local-only setup: its cell says so, and why on hover.
+ * are and the user can do something. A checkout with no origin remote, or
+ * with one that isn't on GitHub or GitLab, is a normal setup: its cell says
+ * so, and why on hover.
  */
 function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode {
   const command = forge.kind && FORGE_CLI[forge.kind];
   const cli = <span className="tech">{command}</span>;
   const recheck = 'Loom checks again whenever Projects opens.';
   switch (forge.state) {
-    case 'unsupported':
-      return (
-        <>
-          Forge features are off: origin (<span className="tech">{forge.remote}</span>) isn't on GitHub or GitLab.
-        </>
-      );
     case 'cli-missing':
       return (
         <>

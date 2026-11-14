@@ -182,6 +182,11 @@ export function mergeRequestRef(kind: ForgeKind | undefined, number: number): st
 /** Each Forge by its name. */
 export const FORGE_NAMES: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
 
+/** A Forge by its name, as in "Open on GitHub": "the Forge" while which one is unknown. */
+export function forgeName(kind: ForgeKind | undefined): string {
+  return kind ? FORGE_NAMES[kind] : 'the Forge';
+}
+
 /** The CLI Loom reaches each Forge through, with the user's own login. */
 export const FORGE_CLI: Record<ForgeKind, 'gh' | 'glab'> = { github: 'gh', gitlab: 'glab' };
 

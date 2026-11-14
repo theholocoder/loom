@@ -5,7 +5,7 @@
 // unlinking it.
 import { CircleCheck, CircleDot, ExternalLink, Link2Off, MessageSquare, RotateCw, User } from 'lucide-react';
 import { useState } from 'react';
-import { FORGE_NAMES, type Project, type Session } from '../shared/api';
+import { forgeName as forgeNameOf, type Project, type Session } from '../shared/api';
 import { ErrorText } from './ErrorText';
 import { useApi } from './api';
 import { useDates } from './dates';
@@ -39,7 +39,7 @@ export function IssuePanel({ session, project, onUnlinked, onError }: { session:
     );
   }
 
-  const forgeName = project?.forge.kind ? FORGE_NAMES[project.forge.kind] : 'the Forge';
+  const forgeName = forgeNameOf(project?.forge.kind);
   // Issues are #12 on both Forges.
   const ref = `${project?.forge.repository ?? ''}#${issue.number}`;
   const details = read.value;
