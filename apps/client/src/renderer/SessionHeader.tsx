@@ -215,9 +215,14 @@ export function SessionHeader({
           </button>
         </span>
         <MergeRequestChip session={session} project={project} popover={popover} onPopover={onPopover} onShow={onShowMergeRequest} onError={onError} />
-        <span className="g-chip">
+        <span className={session.diffStat?.files === 0 ? 'g-chip quiet' : 'g-chip'}>
           <button type="button" title="Show Changes" aria-label={session.diffStat ? `Show changes: ${diffStatLabel(session.diffStat)}` : 'Show changes'} onClick={onShowChanges}>
-            {session.diffStat ? (
+            {session.diffStat?.files === 0 ? (
+              <>
+                <FileDiff className="sm" />
+                No changes
+              </>
+            ) : session.diffStat ? (
               <span className="diff-stat">
                 <FileDiff className="sm" />
                 <span className="files">{filesText(session.diffStat)}</span>
@@ -244,8 +249,9 @@ function filesText(stat: DiffStat): string {
   return `${stat.files} ${stat.files === 1 ? 'file' : 'files'}`;
 }
 
-/** The spoken form of a diff stat, e.g. "4 files, 1210 added, 3 removed". */
+/** The spoken form of a diff stat, e.g. "4 files, 1210 added, 3 removed", or "no changes". */
 function diffStatLabel(stat: DiffStat): string {
+  if (stat.files === 0) return 'no changes';
   return `${filesText(stat)}, ${stat.added} added, ${stat.removed} removed`;
 }
 

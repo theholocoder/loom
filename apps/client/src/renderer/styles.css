@@ -405,7 +405,9 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 .database-problem code { word-break: break-all; }
 .database-problem .error { color: var(--err); }
 .popover.search-popover { width: max-content; min-width: 360px; gap: 4px; }
-.diff-base { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; }
+.diff-base { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 12px; }
+.diff-base .pick { min-width: 0; }
+.diff-base .pick b { min-width: 0; }
 .diff-base .err { font-size: 12px; }
 
 /* what the New Session's controls have to say, above the composer */
@@ -416,7 +418,9 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 /* the queue, above the composer, and where the user interrupted a run */
 .queue { list-style: none; margin: 0 8px 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .queue li { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); }
-.queue li .grow { color: var(--text); min-width: 0; }
+/* A queued message takes what the row has left, over two lines before it is cut. */
+.queue li .grow { color: var(--text); min-width: 0; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.queue li > :not(.grow) { flex: none; }
 .queue li button:not(.icon-btn) { border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
 .queue li.editing { align-items: flex-start; border-style: solid; }
 .queue li.editing:focus-within { border-color: var(--accent); }
@@ -558,9 +562,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 body.resizing-rows { cursor: row-resize; user-select: none; }
 .state-toggle .on-hover, .state-toggle:hover .at-rest, .state-toggle:focus-visible .at-rest { display: none; }
 .state-toggle:hover .on-hover, .state-toggle:focus-visible .on-hover { display: block; }
-/* The Changes Panel: one toolbar row, then the file tree above the diffs, or beside them once the Panel is wide. */
+/* The Changes Panel: its toolbar, wrapping to a second row when the Panel is narrow, then the file tree above the diffs, or beside them once the Panel is wide. */
 .changes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.changes-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
+.changes-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
 .changes-bar .icon-btn { flex: none; }
 .changes-bar .icon-btn[aria-pressed='true'] { color: var(--accent); }
 .changes-bar .seg { flex: none; }
@@ -588,14 +592,15 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .title-btn:hover, .title-btn[aria-expanded="true"] { background: var(--hover); }
 /* The title gives way first; then, on a narrow header, the Project's badge goes. */
 @container (max-width: 520px) { .head-line .proj-tag { display: none; } }
-.glance { display: flex; align-items: center; gap: 6px; padding: 0 16px 8px 20px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; flex: none; }
-.g-chip { display: inline-flex; align-items: stretch; height: 26px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 12.5px; overflow: hidden; flex: none; }
-.g-chip > button { display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; padding: 0 9px; gap: 5px; color: var(--text); white-space: nowrap; cursor: pointer; font: inherit; }
+/* The strip wraps rather than scroll, so every chip stays in sight at any width. */
+.glance { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 8px 20px; border-bottom: 1px solid var(--line); flex: none; }
+.g-chip { display: inline-flex; align-items: stretch; height: 26px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 12.5px; overflow: hidden; flex: none; max-width: 100%; }
+.g-chip > button { display: inline-flex; align-items: center; min-width: 0; border: 0; border-radius: 0; background: none; padding: 0 9px; gap: 5px; color: var(--text); white-space: nowrap; cursor: pointer; font: inherit; }
 .g-chip > button:hover, .g-chip > button[aria-expanded="true"] { background: var(--hover); }
 .g-chip > button + button { border-left: 1px solid var(--line); }
 .g-chip > button:first-child { padding-left: 10px; } .g-chip > button:last-child { padding-right: 10px; }
 .g-chip.quiet > button { color: var(--muted); }
-.g-chip .branch { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; }
+.g-chip .branch { min-width: 0; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; }
 .g-chip .diff-stat { align-items: center; }
 .meter { display: inline-block; width: 44px; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
 .meter > span { display: block; height: 100%; background: var(--accent); }

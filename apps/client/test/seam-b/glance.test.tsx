@@ -131,6 +131,15 @@ describe('the Glance strip', () => {
     expect(within(screen.getByRole('complementary', { name: 'Side area' })).getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
   });
 
+  it('says No changes, not 0 files +0 −0, for a Session that has changed nothing, and still opens Changes', () => {
+    renderApp({ ...full, diffStat: { files: 0, added: 0, removed: 0 } });
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Side area' })).getByRole('button', { name: 'Close Changes' }));
+    const chip = within(glance()).getByRole('button', { name: 'Show changes: no changes' });
+    expect(chip.textContent).toBe('No changes');
+    fireEvent.click(chip);
+    expect(within(screen.getByRole('complementary', { name: 'Side area' })).getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
+  });
+
   it('says Changes before there is a diff stat, and has no branch yet before the agent starts', () => {
     renderApp({ ...session, branch: undefined, mergeRequest: undefined });
     expect(within(glance()).getByRole('button', { name: 'Show changes' }).textContent).toBe('Changes');
