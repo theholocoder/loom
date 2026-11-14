@@ -11,10 +11,12 @@ import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
 import { Attachments } from './sessions/attachments';
 import { Babysit } from './sessions/babysit';
+import { searchConversations } from './sessions/conversation-search';
 import { Highlights } from './sessions/highlights';
 import { Notifications, type DesktopNotification } from './notifications';
 import { openIn, type Opener } from './sessions/open-in';
 import { Panels } from './sessions/panels';
+import { SessionForge } from './sessions/session-forge';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Terminals } from './sessions/terminals';
 import { checkWorktreeRootFolder } from './sessions/working-copies';
@@ -214,6 +216,13 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     },
     onChange: (sessionId) => panels.terminalsChanged(sessionId),
   });
+  // What Loom reads from, and does on, each Session's Merge request and issue.
+  const sessionForge = new SessionForge({
+    session: (id) => sessionService.list().find((s) => s.id === id),
+    project: (id) => projectService.list().find((p) => p.id === id),
+    environment: (session) => (environmentIdOf(session.projectId) === native.status.id ? nativeForSessions : undefined),
+    linkIssue: (id, issue) => sessionService.linkIssue({ id, issue }),
+  });
   const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
   const sessionService = await Sessions.load({
     db,
@@ -229,6 +238,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       highlights?.sessionsChanged(list);
     },
     onTurnEnded: (id, through) => highlights?.turnEnded(id, through),
+    linkNamedIssue: (id, issue) => sessionForge.linkNamedIssue(id, issue),
     onNews: (id, reason) => notifications.news(id, reason),
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
@@ -364,21 +374,21 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.unsavedWork': (params) => sessionService.unsavedWork(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
-    'sessions.mergeRequest': (params) => sessionService.mergeRequest(params),
-    'sessions.mergeRequestDiff': (params) => sessionService.mergeRequestDiff(params),
+    'sessions.mergeRequest': (params) => sessionForge.mergeRequest(params),
+    'sessions.mergeRequestDiff': (params) => sessionForge.mergeRequestDiff(params),
     'sessions.squashAndMerge': async (params) => {
-      const result = await sessionService.squashAndMerge(params);
+      const result = await sessionForge.squashAndMerge(params);
       // Babysit archives the Session once it sees it merged, so it looks now; without Babysit, the merge is just recorded.
       if (!babysitter.pollNow(params.id) && result.state && result.state !== 'open') sessionService.setMergeRequestState(params.id, result.state);
       return result;
     },
     // Babysit reads the Merge request again, so that its notes show the reply, or go once resolved.
     'sessions.replyToReviewThread': async (params) => {
-      await sessionService.replyToReviewThread(params);
+      await sessionForge.replyToReviewThread(params);
       babysitter.pollNow(params.id);
     },
     'sessions.resolveReviewThread': async (params) => {
-      await sessionService.resolveReviewThread(params);
+      await sessionForge.resolveReviewThread(params);
       babysitter.pollNow(params.id);
     },
     'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
@@ -387,10 +397,15 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.snooze': (params) => sessionService.snooze(params),
     'sessions.rename': (params) => sessionService.rename(params),
-    'sessions.searchConversations': (params) => sessionService.searchConversations(params),
+    'sessions.searchConversations': async ({ words }) => {
+      if (!Array.isArray(words)) throw new Error('A search needs the words to look for.');
+      // What the Sessions have said so far counts.
+      await sessionService.flush();
+      return searchConversations(db, new Set(sessionService.list().map((s) => s.id)), words);
+    },
     'sessions.linkIssue': (params) => sessionService.linkIssue(params),
     'sessions.unlinkIssue': (params) => sessionService.unlinkIssue(params),
-    'sessions.issue': (params) => sessionService.issue(params),
+    'sessions.issue': (params) => sessionForge.issue(params),
     'sessions.setPanels': async ({ id, panels: state }) => {
       if (!sessionService.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
       // Kept in the Layout a move asked for just before, not the one it replaces.
@@ -444,6 +459,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     close: async () => {
       await babysitter.stop();
       await highlighter.stop();
+      sessionForge.stop();
       await terminals.closeAll();
       await sessionService.shutdown();
       await native.stop();

@@ -2,23 +2,19 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestDetails, type MergeRequestDiff, type ForgeStatus, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type ConversationMatch, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type IssueDetails, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
-import { exec, type BridgeCall, type ExecResult } from '../environments/exec';
+import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
 import type { FeedbackDelivery } from './babysit';
 import { diffCommentBlocks } from './diff-comment-prompt';
 import { feedbackPrompt } from './feedback-prompt';
-import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, replyToReviewThread, resolveReviewThread, squashAndMerge, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
-import { readMergeRequestDetails } from '../projects/merge-request-details';
-import { issueNamed, readIssue, readNamedIssue } from '../projects/issues';
-import { readMergeRequestDiff } from '../projects/merge-request-diff';
+import { findMergeRequest, isPageOf, mergeRequestForge, mergeRequestNamed, viewMergeRequest, type FoundMergeRequest } from '../projects/merge-requests';
 import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
-import { searchConversations } from './conversation-search';
 import { WorkingCopyDiff } from './diff';
 import { commitWork, createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
 import { capToolDiffs, capToolOutput } from './tool-output';
@@ -60,6 +56,8 @@ export interface SessionsOptions {
   attachments: Attachments;
   /** A turn has ended, however it did: its transcript runs through item `throughItem`. For Session highlights. */
   onTurnEnded?: (id: number, throughItem: number) => void;
+  /** Links the issue the agent named with Loom's `link_issue` tool (its number, `#12`, or its URL); rejects with why it can't. */
+  linkNamedIssue: (id: number, issue: string) => Promise<void>;
   /**
    * The Session has news for the user: it went Waiting for `reason`, or new
    * feedback came while it waits on an error or an interrupted run. Not
@@ -925,72 +923,6 @@ export class Sessions {
     this.setMergeRequest(id, found, { branch: branch ?? found.branch, byHand: true });
   }
 
-  /** The Session's Merge request as its Forge has it now, read in its working copy, or the Project's checkout once that is gone. */
-  async mergeRequest({ id }: { id: number }): Promise<MergeRequestDetails> {
-    const { call, forge, workingCopy, number } = this.mergeRequestRead(this.get(id));
-    return readMergeRequestDetails(call, forge, workingCopy, number);
-  }
-
-  /** The Session's Merge request's diff as its Forge has it now, read where `mergeRequest` reads it. */
-  async mergeRequestDiff({ id }: { id: number }): Promise<MergeRequestDiff> {
-    const { call, forge, workingCopy, number } = this.mergeRequestRead(this.get(id));
-    return readMergeRequestDiff(call, forge, workingCopy, number);
-  }
-
-  /**
-   * Squashes and merges the Session's Merge request, as the user confirmed in
-   * its Panel: no Approval request, the user asked for it themselves. Then
-   * says its state as the Forge has it, for whoever records it (Babysit, if
-   * it watches the Merge request).
-   */
-  async squashAndMerge({ id, title, head }: { id: number; title: string; head: string }): Promise<{ state?: MergeRequestState }> {
-    const session = this.get(id);
-    if (session.status === 'archived') throw new Error('This Session is archived.');
-    // A commit title is one line.
-    const subject = title.replace(/\s+/g, ' ').trim();
-    if (!subject) throw new Error('The squash commit needs a title.');
-    if (!head) throw new Error("Loom doesn't know which commit the Merge request is at: read it again first.");
-    const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
-    await squashAndMerge(call, forge, workingCopy, number, { title: subject, head });
-    try {
-      return { state: (await viewMergeRequest(call, forge, workingCopy, number)).state };
-    } catch {
-      // Merged all the same: the next read says how it stands.
-      return {};
-    }
-  }
-
-  /** Replies to a review thread of the Session's Merge request, as the user wrote it in its note on the diff. */
-  async replyToReviewThread({ id, thread, body }: { id: number; thread: string; body: string }): Promise<void> {
-    const session = this.get(id);
-    if (session.status === 'archived') throw new Error('This Session is archived.');
-    if (typeof body !== 'string' || !body.trim()) throw new Error('The reply is empty.');
-    const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
-    await replyToReviewThread(call, forge, workingCopy, this.environmentOf(session).tempDir(), number, String(thread), body.trim());
-  }
-
-  /** Resolves a review thread of the Session's Merge request, as the user asked from its note on the diff. */
-  async resolveReviewThread({ id, thread }: { id: number; thread: string }): Promise<void> {
-    const session = this.get(id);
-    if (session.status === 'archived') throw new Error('This Session is archived.');
-    const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
-    await resolveReviewThread(call, forge, workingCopy, number, String(thread));
-  }
-
-  /** What reading the Session's Merge request takes: its Environment, its Project's Forge, where glab runs and its number. */
-  private mergeRequestRead(session: Session): { call: BridgeCall; forge: ForgeStatus | undefined; workingCopy: string; number: number } {
-    if (!session.mergeRequest) throw new Error('This Session has no Merge request.');
-    return { ...this.forgeRead(session), number: session.mergeRequest.number };
-  }
-
-  /** What reading from the Session's Forge takes: its Environment, its Project's Forge, and where glab runs (its working copy, or the Project's checkout once that is gone). */
-  private forgeRead(session: Session): { call: BridgeCall; forge: ForgeStatus | undefined; workingCopy: string } {
-    const project = this.options.project(session.projectId);
-    if (!project) throw new Error("This Session's Project was removed.");
-    const gone = session.status === 'archived' || session.worktreeMissing;
-    return { call: this.environmentOf(session).request, forge: project.forge, workingCopy: gone ? project.checkout.path : session.workingCopy.path };
-  }
-
   /**
    * Answers the agent's question in transcript item `itemId`, or dismisses it
    * when `answer` is null. The Session is Working again once the agent waits
@@ -1594,13 +1526,6 @@ export class Sessions {
     this.save(id, { unread: unread ? 1 : 0 });
   }
 
-  /** The Sessions whose conversations hold any of `words` (see `sessions.searchConversations`), as written so far. */
-  async searchConversations({ words }: Commands['sessions.searchConversations']['params']): Promise<ConversationMatch[]> {
-    if (!Array.isArray(words)) throw new Error('A search needs the words to look for.');
-    await this.flush();
-    return searchConversations(this.options.db, new Set(this.sessions.keys()), words);
-  }
-
   /** Gives the Session a title of the user's, whatever its status, while its Project is there. */
   rename({ id, title }: Commands['sessions.rename']['params']): void {
     const session = this.get(id);
@@ -1628,14 +1553,6 @@ export class Sessions {
     if (!session.issue) return;
     this.update(id, { issue: undefined });
     this.save(id, { issue_number: null, issue_url: null });
-  }
-
-  /** The Session's linked issue as its Forge has it now, read where `forgeRead` says. */
-  async issue({ id }: Commands['sessions.issue']['params']): Promise<IssueDetails> {
-    const session = this.get(id);
-    if (!session.issue) throw new Error('This Session has no issue.');
-    const { call, forge, workingCopy } = this.forgeRead(session);
-    return readIssue(call, forge, workingCopy, session.issue.number);
   }
 
   /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */
@@ -2206,24 +2123,13 @@ export class Sessions {
     const [linked, refusal] =
       linking === 'merge-request'
         ? [this.linkMergeRequest({ id, mergeRequest: named }), (reason: string): NewItem => ({ kind: 'merge-request-refused', mergeRequest: named, reason })]
-        : [this.linkNamedIssue(id, named), (reason: string): NewItem => ({ kind: 'issue-refused', issue: named, reason })];
+        : [this.options.linkNamedIssue(id, named), (reason: string): NewItem => ({ kind: 'issue-refused', issue: named, reason })];
     // The agent was only told Loom checks it; the user sees why it wasn't linked.
     linked.catch((error: unknown) => {
       if (this.shuttingDown || this.get(id).status === 'archived') return;
       this.endStreaming(id);
       this.addItem(id, refusal((error as Error).message));
     });
-  }
-
-  /** Links the issue `issue` names (its number, `#12`, or its URL) to the Session, once the Forge has it. */
-  private async linkNamedIssue(id: number, issue: string): Promise<void> {
-    const named = issueNamed(issue);
-    if (!named) throw new Error('Name an issue by its number, such as 12, or by its URL.');
-    const session = this.get(id);
-    const { call, forge, workingCopy } = this.forgeRead(session);
-    const found = await readNamedIssue(call, forge, workingCopy, named);
-    if (this.shuttingDown || this.get(id).status === 'archived') return;
-    this.linkIssue({ id, issue: { number: found.number, url: found.url } });
   }
 
   private recordDiffStat(id: number, diffStat: DiffStat): void {
