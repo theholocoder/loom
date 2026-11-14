@@ -195,10 +195,12 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   const openSession = new Topic<OpenSessionRequest | null>(null);
   /** The Session the window shows, as the renderer last said. */
   let showing: number | null = null;
+  /** The Session with this id, if Loom has it. */
+  const sessionOf = (id: number) => sessionService.list().find((s) => s.id === id);
   const projectName = (id: number) => projectService.list().find((p) => p.id === id)?.name ?? `Project ${id}`;
   const notifications = new Notifications({
     settings: () => settingsService.value.notifications,
-    session: (id) => sessionService.list().find((s) => s.id === id),
+    session: sessionOf,
     projectName,
     inView: (id) => showing === id && (options.windowFocused?.() ?? false),
     show: (notification) => options.notify?.(notification),
@@ -206,10 +208,12 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   });
   /** The id of the Environment the Project's checkout is in. */
   const environmentIdOf = (projectId: number) => projectService.list().find((p) => p.id === projectId)?.checkout.environmentId;
+  /** The Environment a Session's agent and git run in, as the Session services take it, if Loom has it. */
+  const environmentForSession = (session: Session) => (environmentIdOf(session.projectId) === native.status.id ? nativeForSessions : undefined);
   /** The Environment a Session runs in, if Loom has it. */
   const sessionEnvironment = (session: Session) => (environmentIdOf(session.projectId) === native.status.id ? native : undefined);
   const terminals = new Terminals({
-    session: (id) => sessionService.list().find((s) => s.id === id),
+    session: sessionOf,
     environment: (session) => {
       const environment = sessionEnvironment(session);
       return environment && { label: environment.status.label, os: () => environment.status.bridge?.os, ready: () => environment.ready(), openChannel: (params) => environment.openChannel(params) };
@@ -218,9 +222,9 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   });
   // What Loom reads from, and does on, each Session's Merge request and issue.
   const sessionForge = new SessionForge({
-    session: (id) => sessionService.list().find((s) => s.id === id),
+    session: sessionOf,
     project: (id) => projectService.list().find((p) => p.id === id),
-    environment: (session) => (environmentIdOf(session.projectId) === native.status.id ? nativeForSessions : undefined),
+    environment: environmentForSession,
     linkIssue: (id, issue) => sessionService.linkIssue({ id, issue }),
   });
   const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
@@ -256,9 +260,9 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     clock: options.clock,
     adapter,
     settings: () => settingsService.value.highlights,
-    session: (id) => sessionService.list().find((s) => s.id === id),
+    session: sessionOf,
     sessions: () => sessionService.list(),
-    environment: (session) => (environmentIdOf(session.projectId) === native.status.id ? nativeForSessions : undefined),
+    environment: environmentForSession,
     transcript: (id) => sessionService.transcriptItems(id),
     projectName,
     onCounts: (id, counts) => sessionService.setHighlightCounts(id, counts),
@@ -278,7 +282,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
 
   /** Opens a Session's working copy in the user's editor or terminal, in its Environment. */
   const openInSession = (id: number, opener: Opener, file?: string) => {
-    const session = sessionService.list().find((s) => s.id === id);
+    const session = sessionOf(id);
     if (!session) throw new Error(`unknown Session ${id}`);
     const environmentId = environmentIdOf(session.projectId);
     if (environmentId !== native.status.id) throw new Error(`unknown Environment "${environmentId}"`);
@@ -399,7 +403,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.rename': (params) => sessionService.rename(params),
     'sessions.searchConversations': async ({ words }) => {
       if (!Array.isArray(words)) throw new Error('A search needs the words to look for.');
-      // What the Sessions have said so far counts.
+      // Searches the conversations as written so far, of the Sessions Loom has.
       await sessionService.flush();
       return searchConversations(db, new Set(sessionService.list().map((s) => s.id)), words);
     },
@@ -459,8 +463,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     close: async () => {
       await babysitter.stop();
       await highlighter.stop();
-      sessionForge.stop();
       await terminals.closeAll();
+      sessionForge.stop();
       await sessionService.shutdown();
       await native.stop();
       await db.destroy();

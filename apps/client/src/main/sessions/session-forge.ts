@@ -1,5 +1,5 @@
-// A Session's Forge: what Loom reads from, and does on, the Merge request and
-// issue linked to a Session. It touches no Session state but the issue a
+// What Loom reads from, and does on, a Session's Merge request and issue,
+// through its Project's Forge. It touches no Session state but the issue a
 // link tool names, which it hands back to the Session service to link.
 import type { ForgeLink, ForgeStatus, IssueDetails, MergeRequestDetails, MergeRequestDiff, MergeRequestState, Project, Session } from '../../shared/api';
 import type { BridgeCall } from '../environments/exec';
@@ -7,14 +7,21 @@ import { issueNamed, readIssue, readNamedIssue } from '../projects/issues';
 import { readMergeRequestDetails } from '../projects/merge-request-details';
 import { readMergeRequestDiff } from '../projects/merge-request-diff';
 import { replyToReviewThread, resolveReviewThread, squashAndMerge, viewMergeRequest } from '../projects/merge-requests';
-import type { SessionEnvironment } from './sessions';
+
+/** What SessionForge needs of the Environment a Session runs in. */
+export interface SessionForgeEnvironment {
+  request: BridgeCall;
+  /** Its temp directory, where a reply's body is written for the Forge's CLI to read. */
+  tempDir(): string;
+}
 
 export interface SessionForgeOptions {
   /** The Session with this id, if Loom has it. */
   session: (id: number) => Session | undefined;
+  /** The Project with this id, if it hasn't been removed. */
   project: (id: number) => Project | undefined;
   /** The Environment the Session runs in, if Loom has it. */
-  environment: (session: Session) => Pick<SessionEnvironment, 'request' | 'tempDir'> | undefined;
+  environment: (session: Session) => SessionForgeEnvironment | undefined;
   /** Links the Session to the issue `link`, as `sessions.linkIssue` does. */
   linkIssue: (id: number, link: ForgeLink) => void;
 }
@@ -46,8 +53,7 @@ export class SessionForge {
    * it watches the Merge request).
    */
   async squashAndMerge({ id, title, head }: { id: number; title: string; head: string }): Promise<{ state?: MergeRequestState }> {
-    const session = this.get(id);
-    if (session.status === 'archived') throw new Error('This Session is archived.');
+    const session = this.unarchived(id);
     // A commit title is one line.
     const subject = title.replace(/\s+/g, ' ').trim();
     if (!subject) throw new Error('The squash commit needs a title.');
@@ -64,8 +70,7 @@ export class SessionForge {
 
   /** Replies to a review thread of the Session's Merge request, as the user wrote it in its note on the diff. */
   async replyToReviewThread({ id, thread, body }: { id: number; thread: string; body: string }): Promise<void> {
-    const session = this.get(id);
-    if (session.status === 'archived') throw new Error('This Session is archived.');
+    const session = this.unarchived(id);
     if (typeof body !== 'string' || !body.trim()) throw new Error('The reply is empty.');
     const { call, tempDir, forge, workingCopy, number } = this.mergeRequestRead(session);
     await replyToReviewThread(call, forge, workingCopy, tempDir(), number, String(thread), body.trim());
@@ -73,13 +78,12 @@ export class SessionForge {
 
   /** Resolves a review thread of the Session's Merge request, as the user asked from its note on the diff. */
   async resolveReviewThread({ id, thread }: { id: number; thread: string }): Promise<void> {
-    const session = this.get(id);
-    if (session.status === 'archived') throw new Error('This Session is archived.');
+    const session = this.unarchived(id);
     const { call, forge, workingCopy, number } = this.mergeRequestRead(session);
     await resolveReviewThread(call, forge, workingCopy, number, String(thread));
   }
 
-  /** The Session's linked issue as its Forge has it now, read where `forgeRead` says. */
+  /** The Session's linked issue as its Forge has it now, read where `mergeRequest` reads. */
   async issue({ id }: { id: number }): Promise<IssueDetails> {
     const session = this.get(id);
     if (!session.issue) throw new Error('This Session has no issue.');
@@ -121,6 +125,13 @@ export class SessionForge {
       forge: project.forge,
       workingCopy: gone ? project.checkout.path : session.workingCopy.path,
     };
+  }
+
+  /** The Session, which mustn't be archived: what it does on the Forge is for one that is open. */
+  private unarchived(id: number): Session {
+    const session = this.get(id);
+    if (session.status === 'archived') throw new Error('This Session is archived.');
+    return session;
   }
 
   private get(id: number): Session {
