@@ -107,7 +107,7 @@ export class Babysit {
     return babysit;
   }
 
-  /** The Session's open review threads now, then as Babysit reads them again; none while it isn't watching. */
+  /** The Session's open review threads now, then as Babysit reads them again; none while Babysit isn't watching it. */
   subscribeThreads(id: number, listener: (threads: ReviewThread[]) => void): () => void {
     if (!this.options.sessions.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
     let topic = this.threadTopics.get(id);
@@ -210,8 +210,9 @@ export class Babysit {
     if (this.stopped || this.records.get(id) !== record || this.off.has(id)) return;
     if (activity) this.takeIn(id, record, activity);
     else record.stale = true;
-    this.options.sessions.setBabysit(id, statusOf(record));
+    // Threads before the Session's new lastPollAt: a thread resolved here stays hidden until the new list lands.
     if (activity) this.publishThreads(id);
+    this.options.sessions.setBabysit(id, statusOf(record));
     this.save(id, record);
     if (activity && activity.state !== 'open') {
       this.clearTimers(id);
@@ -369,7 +370,7 @@ export class Babysit {
     this.write(() => this.options.db.deleteFrom('babysit').where('session_id', '=', id).execute());
   }
 
-  /** The Session's open review threads, as last read; none while it isn't watched. */
+  /** The Session's open review threads, as last read; none while Babysit isn't watching it. */
   private threadsOf(id: number): ReviewThread[] {
     return (!this.off.has(id) && this.records.get(id)?.threads) || [];
   }

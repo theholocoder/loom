@@ -934,6 +934,7 @@ describe('the CI checks of a Merge request', () => {
 
 describe('review threads, as notes on the diff', () => {
   const others = { author: 'alice', body: 'Off by one', url: `${URLS.gh}#t1`, createdAt: '2026-11-01T10:00:00Z' };
+  const oneThread = { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] };
 
   it("publishes each open thread others wrote in, with its file, line and comments, on the Session's own topic", async () => {
     const { main, id } = await babysat('gh', {
@@ -967,7 +968,7 @@ describe('review threads, as notes on the diff', () => {
   });
 
   it('keeps the comments off the sessions topic, which every view gets on any change to any Session', async () => {
-    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    const { main, id } = await babysat('gh', oneThread);
     expect((await threadsWhere(main, id)).map((t) => t.id)).toEqual(['PRRT_1']);
     const session = sessionOf(await waitFor(main.api, 'sessions', () => true), id);
     expect(session.babysit).not.toHaveProperty('threads');
@@ -975,7 +976,7 @@ describe('review threads, as notes on the diff', () => {
   });
 
   it('publishes no threads while the Session is not watched, and again once it is', async () => {
-    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    const { main, id } = await babysat('gh', oneThread);
     await threadsWhere(main, id, (threads) => threads.length === 1);
 
     await main.api.invoke('sessions.setBabysitting', { id, on: false });
@@ -989,14 +990,14 @@ describe('review threads, as notes on the diff', () => {
 
   it('serves the threads kept from the last poll after a restart', async () => {
     const userDataDir = tempDir('loom-babysit-');
-    const first = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] }, { userDataDir });
+    const first = await babysat('gh', oneThread, { userDataDir });
     await first.main.close();
     const main = await startMain({ machine: first.machine, userDataDir });
     expect((await threadsWhere(main, first.id)).map((t) => t.id)).toEqual(['PRRT_1']);
   });
 
   it("drops a deleted Session's threads, telling those listening there are none", async () => {
-    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    const { main, id } = await babysat('gh', oneThread);
     const seen: ReviewThread[][] = [];
     main.api.subscribe('reviewThreads', (threads) => seen.push(threads), { sessionId: id });
     expect(await main.api.invoke('sessions.delete', { id, discard: true })).toEqual({ deleted: true });
@@ -1005,7 +1006,7 @@ describe('review threads, as notes on the diff', () => {
   });
 
   it('replies to and resolves a thread on GitHub, then reads the Merge request again', async () => {
-    const { machine, main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    const { machine, main, id } = await babysat('gh', oneThread);
 
     await main.api.invoke('sessions.replyToReviewThread', { id, thread: 'PRRT_1', body: '  Good catch:\nfixed in a & b  ' });
     const mutation = graphql(machine).find((args) => args.some((a) => a.includes('addPullRequestReviewThreadReply')))!;
@@ -1050,7 +1051,7 @@ describe('review threads, as notes on the diff', () => {
   });
 
   it('refuses an empty reply, a thread the Forge lacks or that names no thread, and an archived Session', async () => {
-    const { main, id } = await babysat('gh', { threads: [{ id: 'PRRT_1', path: 'src/a.ts', line: 10, comments: [others] }] });
+    const { main, id } = await babysat('gh', oneThread);
     await expect(main.api.invoke('sessions.replyToReviewThread', { id, thread: 'PRRT_1', body: '  ' })).rejects.toThrow('The reply is empty.');
     await expect(main.api.invoke('sessions.resolveReviewThread', { id, thread: 'PRRT_9' })).rejects.toThrow('Could not resolve to a node');
     await expect(main.api.invoke('sessions.resolveReviewThread', { id, thread: '../../merge' })).rejects.toThrow("isn't a review thread");

@@ -239,7 +239,7 @@ describe("the Merge request's review comments, as notes on the diff", () => {
   });
 
   it('shows no Resolve where the Forge says the user may not, and only Open with the Forge off', async () => {
-    renderApp({ s: { ...session, babysit: { stale: false } }, threads: [{ ...thread, canResolve: false }] });
+    renderApp({ threads: [{ ...thread, canResolve: false }] });
     const note = await noteInChanges();
     expect(within(note).queryByRole('button', { name: 'Resolve' })).toBeNull();
     expect(within(note).getByRole('button', { name: 'Reply' })).toBeTruthy();
