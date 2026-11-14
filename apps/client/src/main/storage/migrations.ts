@@ -3,7 +3,7 @@ import { sql, type Kysely } from 'kysely';
 // Bundled, forward-only migrations. A migration's version is its position in
 // this list (the first is version 1), and the database's `PRAGMA user_version`
 // records the last one applied. Never edit or reorder a shipped migration:
-// append a new one.
+// append a new one. test/seam-a/migrations.test.ts freezes the ones on `main`.
 
 export type Migration = (db: Kysely<any>) => Promise<void>;
 
