@@ -4,9 +4,9 @@
 // a turn settled. It runs as a second agent conversation in the Session's
 // Environment, with every tool refused, started for the check and closed
 // after it. Checks never hold up the Session; one that fails leaves its turns
-// for the next. At most MAX_CHECKS run at a time, across Sessions: the others
-// wait their turn in one queue. The checks' usage counts on the dashboard, but isn't the
-// Session's own.
+// for the next. At most MAX_CHECKS run at a time, across Sessions: the
+// others are pending, first come first checked. The checks' usage counts on
+// the dashboard, but isn't the Session's own.
 import { DEFAULT_APPROVALS, modelNameIn, type Highlight, type HighlightCounts, type HighlightResolution, type HighlightsSettings, type Session, type SessionHighlights, type TokenCounts, type TranscriptItem } from '../../shared/api';
 import type { AgentAdapter, AgentEnvironment, AgentEvent, AgentSession } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -61,8 +61,8 @@ interface State {
   error?: string;
   /** The item the latest turn to end ran through, while a check is to cover it. */
   dueThrough?: number;
-  /** While waiting in the queue for a check to start. */
-  queued: boolean;
+  /** While its check waits for one of the MAX_CHECKS to end. */
+  pending: boolean;
   checking: boolean;
 }
 
@@ -71,8 +71,8 @@ export class Highlights {
   private readonly topics = new Map<number, Topic<SessionHighlights>>();
   /** Checks running, so that shutting down can wait for their agents to close. */
   private readonly running = new Set<Promise<void>>();
-  /** The Sessions waiting for a check, first in first checked. */
-  private readonly queue: number[] = [];
+  /** The Sessions whose checks are pending, first come first checked. */
+  private readonly pendingChecks: number[] = [];
   private stopped = false;
 
   private constructor(private readonly options: HighlightsOptions) {}
@@ -90,7 +90,7 @@ export class Highlights {
         checkedThrough: check.checked_through,
         seenThrough: check.seen_through,
         ...(check.error ? { error: check.error } : {}),
-        queued: false,
+        pending: false,
         checking: false,
       });
     }
@@ -126,23 +126,22 @@ export class Highlights {
       return;
     }
     state.dueThrough = through;
-    // Already queued or being checked: its check covers this turn too.
-    if (state.checking || state.queued) return;
-    state.queued = true;
-    this.queue.push(id);
+    // Pending or being checked already: its check covers this turn too.
+    if (state.checking || state.pending) return;
+    this.addPending(id);
     this.publish(id);
     this.startChecks();
   }
 
-  /** The setting changed: what each Session's Panel means changes with it; turned off, the turns waiting for a check are passed over. */
+  /**
+   * The setting changed: what each Session's Panel means changes with it.
+   * Turned off, the pending checks are dropped; their turns are left for the
+   * next turn's check, as a check the setting stops leaves its own.
+   */
   settingsChanged(): void {
     if (!this.options.settings().on) {
-      for (const id of [...this.queue]) {
-        const state = this.state(id);
-        this.dequeue(id);
-        if (state.dueThrough !== undefined) state.checkedThrough = Math.max(state.checkedThrough ?? -1, state.dueThrough);
-        delete state.dueThrough;
-        void this.saveCheck(id);
+      for (const id of [...this.pendingChecks]) {
+        this.removePending(id);
         this.publish(id);
       }
     }
@@ -154,14 +153,14 @@ export class Highlights {
     const ids = new Set(sessions.map((s) => s.id));
     for (const id of [...this.states.keys()]) {
       if (ids.has(id)) continue;
-      this.dequeue(id);
+      this.removePending(id);
       this.states.delete(id);
       this.topics.delete(id);
     }
-    // An archived Session isn't checked: its turns waiting stay for when it is back and a turn ends.
+    // An archived Session isn't checked: its turns are left for the next turn's check, once it reopens.
     for (const session of sessions) {
-      if (session.status !== 'archived' || !this.states.get(session.id)?.queued) continue;
-      this.dequeue(session.id);
+      if (session.status !== 'archived' || !this.states.get(session.id)?.pending) continue;
+      this.removePending(session.id);
       this.publish(session.id);
     }
     // Not counted yet: made since Loom started, so not before its first check.
@@ -199,62 +198,63 @@ export class Highlights {
   /** Stops checking: the checks going on are left to end, their agents closed. */
   async stop(): Promise<void> {
     this.stopped = true;
-    for (const id of [...this.queue]) this.dequeue(id);
+    for (const id of [...this.pendingChecks]) this.removePending(id);
     await Promise.allSettled([...this.running]);
   }
 
-  /** Starts the checks the queue holds, while fewer than MAX_CHECKS run. */
+  /** Starts the pending checks, while fewer than MAX_CHECKS run. */
   private startChecks(): void {
-    while (!this.stopped && this.running.size < MAX_CHECKS && this.queue.length) {
-      const id = this.queue.shift()!;
+    while (!this.stopped && this.running.size < MAX_CHECKS && this.pendingChecks.length) {
+      const id = this.pendingChecks.shift()!;
       const state = this.states.get(id);
       if (!state) continue;
-      state.queued = false;
+      state.pending = false;
       this.track(this.check(id));
     }
   }
 
-  private dequeue(id: number): void {
-    const at = this.queue.indexOf(id);
-    if (at >= 0) this.queue.splice(at, 1);
+  private addPending(id: number): void {
+    this.state(id).pending = true;
+    this.pendingChecks.push(id);
+  }
+
+  private removePending(id: number): void {
+    const at = this.pendingChecks.indexOf(id);
+    if (at >= 0) this.pendingChecks.splice(at, 1);
     const state = this.states.get(id);
-    if (state) state.queued = false;
+    if (state) state.pending = false;
   }
 
   /**
    * Checks the Session's turns since the last check. Turns that end
-   * meanwhile queue it again, behind the Sessions already waiting.
+   * meanwhile make its check pending again, behind the others pending.
    */
   private async check(id: number): Promise<void> {
     const state = this.state(id);
     state.checking = true;
     this.publish(id);
-    let failed = false;
+    let checked = false;
     try {
       const through = state.dueThrough;
       const session = this.options.session(id);
-      if (this.stopped || through === undefined || through <= (state.checkedThrough ?? -1)) return;
-      if (!session || session.status === 'archived' || !this.options.settings().on) return;
+      if (this.stopped || !isDue(state) || !session || session.status === 'archived' || !this.options.settings().on) return;
       try {
-        await this.checkThrough(session, through);
+        await this.checkThrough(session, through!);
         // Never back: turns passed over meanwhile (the setting turned off) stay passed over.
-        state.checkedThrough = Math.max(state.checkedThrough ?? -1, through);
+        state.checkedThrough = Math.max(state.checkedThrough ?? -1, through!);
         delete state.error;
+        checked = true;
       } catch (error) {
-        state.error = (error as Error).message;
         // Its turns wait for the next turn's check.
-        failed = true;
+        state.error = (error as Error).message;
       } finally {
         if (this.states.has(id)) await this.saveCheck(id);
       }
     } finally {
       state.checking = false;
       if (this.states.has(id)) {
-        const more = !failed && state.dueThrough !== undefined && state.dueThrough > (state.checkedThrough ?? -1);
-        if (more && !this.stopped && this.options.settings().on) {
-          state.queued = true;
-          this.queue.push(id);
-        }
+        // Only after a check that went through: one that didn't run, or failed, leaves the turns for the next turn's.
+        if (checked && isDue(state) && !this.stopped && this.options.settings().on) this.addPending(id);
         this.publish(id);
       }
     }
@@ -423,13 +423,13 @@ export class Highlights {
 
   private state(id: number): State {
     let state = this.states.get(id);
-    if (!state) this.states.set(id, (state = { highlights: [], seenThrough: 0, queued: false, checking: false }));
+    if (!state) this.states.set(id, (state = { highlights: [], seenThrough: 0, pending: false, checking: false }));
     return state;
   }
 
   private view(id: number): SessionHighlights {
-    const { highlights, seenThrough, queued, checking, error } = this.state(id);
-    return { highlights, seenThrough, queued, checking, ...(error ? { error } : {}) };
+    const { highlights, seenThrough, pending, checking, error } = this.state(id);
+    return { highlights, seenThrough, pending, checking, ...(error ? { error } : {}) };
   }
 
   private publish(id: number): void {
@@ -453,6 +453,11 @@ export class Highlights {
     if (!session) throw new Error(`unknown Session ${id}`);
     return session;
   }
+}
+
+/** Whether turns have ended since the last check. */
+function isDue(state: State): boolean {
+  return state.dueThrough !== undefined && state.dueThrough > (state.checkedThrough ?? -1);
 }
 
 function highlightOf(row: Omit<HighlightsTable, 'id'> & { id: number }): Highlight {

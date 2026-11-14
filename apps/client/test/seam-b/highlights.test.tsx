@@ -44,7 +44,7 @@ const highlights: Highlight[] = [
   { id: 3, kind: 'for-you', text: 'Set REDIS_URL before deploying.', itemId: 2, createdAt: 2 },
   { id: 4, kind: 'risk', text: 'Sessions made before the switch are dropped.', itemId: 2, createdAt: 2 },
 ];
-const value: SessionHighlights = { highlights, seenThrough: 2, queued: false, checking: false };
+const value: SessionHighlights = { highlights, seenThrough: 2, pending: false, checking: false };
 const summary: DiffSummary = { available: true, readOnly: false, base: 'origin/main', files: [{ path: 'src/cache.ts', status: 'committed', added: 1, removed: 0, binary: false }] };
 
 function renderApp({ s = session, h = value, shown = 'highlights' as 'highlights' | 'changes', handlers = {} as Handlers, settings = { on: true, model: 'anthropic/claude-haiku-5-5' } as HighlightsSettings } = {}) {
@@ -135,7 +135,7 @@ describe('the Highlights Panel', () => {
     renderApp({ h: { ...value, checking: true } });
     expect(panel().getByRole('status').textContent).toContain('Checking the last turn with anthropic/claude-haiku-5-5');
     cleanup();
-    renderApp({ h: { ...value, queued: true } });
+    renderApp({ h: { ...value, pending: true } });
     expect(panel().getByRole('status').textContent).toContain('Waiting for other checks to end before checking the last turn');
     cleanup();
     renderApp({ h: { ...value, error: "Session highlights' model didn't answer as asked." } });
@@ -143,15 +143,15 @@ describe('the Highlights Panel', () => {
   });
 
   it('says what it is for before the first Highlight, and when the setting is off', () => {
-    renderApp({ h: { highlights: [], seenThrough: 0, queued: false, checking: false } });
+    renderApp({ h: { highlights: [], seenThrough: 0, pending: false, checking: false } });
     expect(panel().getByText(/No highlights yet\. After each turn, anthropic\/claude-haiku-5-5 notes here/)).toBeTruthy();
     cleanup();
-    renderApp({ h: { highlights: [], seenThrough: 0, queued: false, checking: false }, settings: { on: false } });
+    renderApp({ h: { highlights: [], seenThrough: 0, pending: false, checking: false }, settings: { on: false } });
     expect(panel().getByText(/Turn Session highlights on in Settings/)).toBeTruthy();
   });
 
   it('is offered by the + menu even with Session highlights off, saying so once open', () => {
-    renderApp({ s: { ...session, highlights: undefined }, h: { highlights: [], seenThrough: 0, queued: false, checking: false }, settings: { on: false }, shown: 'changes' });
+    renderApp({ s: { ...session, highlights: undefined }, h: { highlights: [], seenThrough: 0, pending: false, checking: false }, settings: { on: false }, shown: 'changes' });
     fireEvent.click(screen.getByRole('button', { name: 'Close Highlights' }));
     fireEvent.click(screen.getByRole('button', { name: /Add a Panel/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Highlights/ }));

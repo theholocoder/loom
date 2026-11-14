@@ -55,7 +55,7 @@ export function HighlightsPanel({
 
   return (
     <div className="highlights" aria-label="Highlights">
-      <HighlightsStatus queued={value.queued} checking={value.checking} error={value.error} on={settings?.on ?? false} model={checkModel || undefined} />
+      <HighlightsStatus pending={value.pending} checking={value.checking} error={value.error} on={settings?.on ?? false} model={checkModel || undefined} />
       <div className="scroll">
         {open.length === 0 ? (
           <div className="empty">
@@ -93,9 +93,9 @@ export function HighlightsPanel({
   );
 }
 
-/** How checking goes: waiting to start, running, or why the last check failed; and whether the setting is off. */
-function HighlightsStatus({ queued, checking, error, on, model }: { queued: boolean; checking: boolean; error?: string; on: boolean; model?: string }) {
-  if (queued) {
+/** How checking goes: pending, running, or why the last check failed; and whether the setting is off. */
+function HighlightsStatus({ pending, checking, error, on, model }: { pending: boolean; checking: boolean; error?: string; on: boolean; model?: string }) {
+  if (pending) {
     return (
       <div className="hl-status" role="status">
         <Hourglass className="sm" />

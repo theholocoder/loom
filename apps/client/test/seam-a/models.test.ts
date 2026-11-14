@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine, type StandInModel } from './harness';
+import { startMain, tempDir, tempMachine, until, waitFor, type AcpTurn, type Machine, type StandInModel } from './harness';
 import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -131,15 +131,6 @@ async function finishedSession(machine: Machine, checkout: string) {
   const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'First' });
   await waitFor(main.api, 'sessions', session(id, finished));
   return { main, id };
-}
-
-/** Resolves once `check` holds, polling: for what only the stand-in's logs show. */
-async function until(check: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!check()) {
-    if (Date.now() > deadline) throw new Error('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
 }
 
 const markers = (items: TranscriptItem[]) => items.filter((i) => i.kind === 'model');
