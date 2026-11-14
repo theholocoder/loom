@@ -55,6 +55,16 @@ describe("the old sidebar's settings", () => {
     expect(stored(userDataDir, 'sidebar')).toBeUndefined();
   });
 
+  it('on Session info, which is no longer a Panel, become Changes, open as the sidebar was', async () => {
+    const userDataDir = await before({ open: true, view: 'info', width: 500 });
+    const main = await startMain({ userDataDir });
+
+    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, stack: {}, width: { changes: 500 }, height: {} });
+    expect(await panelsOf(main, 7)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } });
+    await main.close();
+    expect(stored(userDataDir, 'layout')).toEqual({ width: { changes: 500 }, height: {} });
+  });
+
   it('as Loom had them until changed: closed, at the preferred widths', async () => {
     const main = await startMain({ userDataDir: await before() });
     expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, stack: {}, width: {}, height: {} });

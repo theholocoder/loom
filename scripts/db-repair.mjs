@@ -30,12 +30,12 @@ const { migrations } = await import(join(root, 'apps/client/src/main/storage/mig
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const at = args.indexOf('--set-version');
-const setVersion = at === -1 ? undefined : args[at + 1];
-if (at !== -1 && (!/^\d+$/.test(setVersion ?? '') || Number(setVersion) > migrations.length)) {
+const setVersion = at === -1 ? undefined : /^\d+$/.test(args[at + 1] ?? '') ? Number(args[at + 1]) : NaN;
+if (Number.isNaN(setVersion) || setVersion > migrations.length) {
   console.error(`--set-version takes a schema version from 0 to ${migrations.length}, the ones this checkout knows.`);
   process.exit(1);
 }
-const path = args.find((a, i) => !a.startsWith('--') && !(at !== -1 && i === at + 1)) ?? defaultPath();
+const path = args.find((a, i) => !a.startsWith('--') && (at === -1 || i !== at + 1)) ?? defaultPath();
 
 function defaultPath() {
   if (process.env.LOOM_USER_DATA_DIR) return join(process.env.LOOM_USER_DATA_DIR, 'loom.db');
@@ -66,18 +66,17 @@ async function backUp() {
   console.log(`  Backed up to ${backup}`);
 }
 
-if (at !== -1) {
-  const wanted = Number(setVersion);
-  if (wanted === version) {
+if (setVersion !== undefined) {
+  if (setVersion === version) {
     console.log(`${path}: schema version is already ${version}.`);
   } else if (dryRun) {
-    console.log(`${path}: would set schema version ${version} to ${wanted}; checking as if it were ${wanted}.`);
-    version = wanted;
+    console.log(`${path}: would set schema version ${version} to ${setVersion}; checking as if it were ${setVersion}.`);
+    version = setVersion;
   } else {
     await backUp();
-    target.pragma(`user_version = ${wanted}`);
-    console.log(`${path}: schema version set from ${version} to ${wanted}.`);
-    version = wanted;
+    target.pragma(`user_version = ${setVersion}`);
+    console.log(`${path}: schema version set from ${version} to ${setVersion}.`);
+    version = setVersion;
   }
 }
 const upto = Math.min(version, migrations.length);
