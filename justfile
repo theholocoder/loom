@@ -33,7 +33,7 @@ dev:
 
 alias start := dev
 
-# Add the tables, columns and indexes the dev database's schema version promises but lacks (backs it up first; --dry-run to only look)
+# Add the tables, columns and indexes the dev database's schema version promises but lacks (backs it up first; --dry-run to only look; --set-version <n> to first set the version to n)
 db-repair *args:
     #!/usr/bin/env bash
     set -euo pipefail

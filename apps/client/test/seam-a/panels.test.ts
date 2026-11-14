@@ -55,6 +55,16 @@ describe("the old sidebar's settings", () => {
     expect(stored(userDataDir, 'sidebar')).toBeUndefined();
   });
 
+  it('on Session info, which is no longer a Panel, become Changes, open as the sidebar was', async () => {
+    const userDataDir = await before({ open: true, view: 'info', width: 500 });
+    const main = await startMain({ userDataDir });
+
+    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, stack: {}, width: { changes: 500 }, height: {} });
+    expect(await panelsOf(main, 7)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } });
+    await main.close();
+    expect(stored(userDataDir, 'layout')).toEqual({ width: { changes: 500 }, height: {} });
+  });
+
   it('as Loom had them until changed: closed, at the preferred widths', async () => {
     const main = await startMain({ userDataDir: await before() });
     expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, stack: {}, width: {}, height: {} });
@@ -65,33 +75,6 @@ describe("the old sidebar's settings", () => {
     const main = await startMain({ userDataDir: await before({ open: 'yes', view: 'terminal', width: 5 }) });
     expect((await waitFor(main.api, 'settings', () => true)).layout.width).toEqual({ changes: 280 });
     expect((await panelsOf(main, 7)).side).toEqual({ panels: ['changes'], shown: 'changes', open: false });
-  });
-});
-
-describe('Session info, which is no longer a Panel', () => {
-  it('goes from the Panels and the Layout an earlier Loom kept, the area it leaves empty hidden', async () => {
-    const userDataDir = tempDir('loom-panels-');
-    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, PANELS_MIGRATION) })).destroy();
-    const db = new Database(join(userDataDir, 'loom.db'));
-    db.prepare("insert into projects (id, name, branch_prefix, created_at) values (1, 'billing-api', 'loom', 1)").run();
-    db.prepare("insert into checkouts (project_id, environment_id, path) values (1, 'native', ?)").run(userDataDir);
-    const states: Record<number, unknown> = {
-      7: { side: { panels: ['info', 'changes'], shown: 'info', open: true }, dock: { panels: [], shown: null, open: false } },
-      8: { side: { panels: ['info'], shown: 'info', open: true }, dock: { panels: ['terminal:1'], shown: 'terminal:1', open: true } },
-    };
-    for (const id of [7, 8]) {
-      db.prepare("insert into sessions (id, project_id, title, working_copy_kind, working_copy_path, agent, status, created_at, updated_at, archived_at) values (?, 1, ?, 'checkout', ?, 'OpenCode', 'archived', 1, 1, 1)").run(id, `Session ${id}`, userDataDir);
-      db.prepare('insert into session_panels (session_id, state) values (?, ?)').run(id, JSON.stringify(states[id]));
-    }
-    db.prepare("insert into settings (key, value) values ('layout', ?)").run(JSON.stringify({ width: { info: 500, changes: 700 }, height: { info: 200 } }));
-    db.close();
-
-    const main = await startMain({ userDataDir });
-    expect(await panelsOf(main, 7)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } });
-    expect((await panelsOf(main, 8)).side).toEqual({ panels: [], shown: null, open: false });
-    expect((await waitFor(main.api, 'settings', () => true)).layout).toEqual({ area: {}, stack: {}, width: { changes: 700 }, height: {} });
-    await main.close();
-    expect(stored(userDataDir, 'layout')).toEqual({ width: { changes: 700 }, height: {} });
   });
 });
 

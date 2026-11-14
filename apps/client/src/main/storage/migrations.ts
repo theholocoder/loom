@@ -3,7 +3,7 @@ import { sql, type Kysely } from 'kysely';
 // Bundled, forward-only migrations. A migration's version is its position in
 // this list (the first is version 1), and the database's `PRAGMA user_version`
 // records the last one applied. Never edit or reorder a shipped migration:
-// append a new one.
+// append a new one. test/seam-a/migrations.test.ts freezes the ones on `main`.
 
 export type Migration = (db: Kysely<any>) => Promise<void>;
 
@@ -163,8 +163,9 @@ export const migrations: Migration[] = [
       .addColumn('session_id', 'integer', (c) => c.primaryKey().references('sessions.id').onDelete('cascade'))
       .addColumn('state', 'text', (c) => c.notNull())
       .execute();
-    // The sidebar was app-wide, `{ open, view, width }`, with Session info and Changes as its views,
-    // closed on Session info at 420px until changed. Every Session had both views, as it left them.
+    // The sidebar was app-wide, `{ open, view, width }`, with Session info and Changes as its views.
+    // Session info is no Panel (the Glance strip and Session details took its place), so every
+    // Session gets Changes in its Side area, open if the sidebar was, at the sidebar's width.
     const row = (await db.selectFrom('settings').select('value').where('key', '=', 'sidebar').executeTakeFirst()) as { value: string } | undefined;
     let sidebar: Record<string, unknown> = {};
     try {
@@ -174,58 +175,16 @@ export const migrations: Migration[] = [
       // Unreadable: as if never set.
     }
     const open = typeof sidebar.open === 'boolean' ? sidebar.open : false;
-    const view = sidebar.view === 'changes' ? 'changes' : 'info';
-    const state = JSON.stringify({ side: { panels: ['info', 'changes'], shown: view, open }, dock: { panels: [], shown: null, open: false } });
+    const state = JSON.stringify({ side: { panels: ['changes'], shown: 'changes', open }, dock: { panels: [], shown: null, open: false } });
     const sessions = (await db.selectFrom('sessions').select('id').execute()) as Array<{ id: number }>;
     if (sessions.length) await db.insertInto('session_panels').values(sessions.map(({ id }) => ({ session_id: id, state }))).execute();
-    // The one width both views had becomes each one's.
     if (typeof sidebar.width === 'number' && Number.isFinite(sidebar.width)) {
       const width = Math.min(1200, Math.max(280, Math.round(sidebar.width)));
-      const layout = JSON.stringify({ width: { info: width, changes: width }, height: {} });
+      const layout = JSON.stringify({ width: { changes: width }, height: {} });
       await db.insertInto('settings').values({ key: 'layout', value: layout }).onConflict((c) => c.column('key').doUpdateSet({ value: layout })).execute();
     }
     await db.deleteFrom('settings').where('key', '=', 'sidebar').execute();
-  },
-  async (db) => {
-    // Session info is no longer a Panel: the Glance strip and Session details took its place.
-    // A Side area or Dock left with none is hidden; one that showed it shows its first Panel.
-    const rows = (await db.selectFrom('session_panels').selectAll().execute()) as Array<{ session_id: number; state: string }>;
-    for (const row of rows) {
-      let state: unknown;
-      try {
-        state = JSON.parse(row.state);
-      } catch {
-        continue; // Unreadable: dropped for the default when loaded.
-      }
-      if (typeof state !== 'object' || state === null) continue;
-      let changed = false;
-      for (const area of Object.values(state as Record<string, unknown>)) {
-        if (typeof area !== 'object' || area === null) continue;
-        const panels = (area as Record<string, unknown>).panels;
-        if (!Array.isArray(panels) || !panels.includes('info')) continue;
-        const kept = panels.filter((panel) => panel !== 'info');
-        const at = area as Record<string, unknown>;
-        at.panels = kept;
-        if (at.shown === 'info') at.shown = kept[0] ?? null;
-        if (kept.length === 0) at.open = false;
-        changed = true;
-      }
-      if (changed) await db.updateTable('session_panels').set({ state: JSON.stringify(state) }).where('session_id', '=', row.session_id).execute();
-    }
-    const layout = (await db.selectFrom('settings').select('value').where('key', '=', 'layout').executeTakeFirst()) as { value: string } | undefined;
-    if (!layout) return;
-    try {
-      const sizes: unknown = JSON.parse(layout.value);
-      if (typeof sizes !== 'object' || sizes === null) return;
-      for (const dimension of Object.values(sizes as Record<string, unknown>)) {
-        if (typeof dimension === 'object' && dimension !== null) delete (dimension as Record<string, unknown>).info;
-      }
-      await db.updateTable('settings').set({ value: JSON.stringify(sizes) }).where('key', '=', 'layout').execute();
-    } catch {
-      // Unreadable: the Layout reads it as unset.
-    }
-  },
-  async (db) => {
+
     // Session highlights (ADR 0010): each Session's Highlights, and how far its turns have been checked.
     await db.schema
       .createTable('highlights')
@@ -262,15 +221,13 @@ export const migrations: Migration[] = [
       .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
       .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
       .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addColumn('model_name', 'text')
       .addPrimaryKeyConstraint('highlight_usage_pk', ['session_id', 'day', 'model'])
       .execute();
     await db.schema.createIndex('highlight_usage_day').on('highlight_usage').column('day').execute();
-  },
-  async (db) => {
     // Each model's name as the agent gave it, so the dashboard names models as the rest of the Client does.
-    for (const table of ['usage_buckets', 'highlight_usage']) await db.schema.alterTable(table).addColumn('model_name', 'text').execute();
-  },
-  async (db) => {
+    await db.schema.alterTable('usage_buckets').addColumn('model_name', 'text').execute();
+
     // A Project's colour, avatar and default model, chosen by the user. Every
     // Project keeps the colour it had, picked by id among the first three.
     await db.schema.alterTable('projects').addColumn('color', 'text', (c) => c.notNull().defaultTo('blue')).execute();
