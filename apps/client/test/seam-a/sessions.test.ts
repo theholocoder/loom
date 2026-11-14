@@ -248,6 +248,23 @@ describe('Session status for the Inbox', () => {
     expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived', unread: false });
   });
 
+  it("isn't marked unread by the user once archived, nor while archiving", async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'] }, { chunks: ['Done.'] }]);
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Go' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await main.api.invoke('sessions.setUnread', { id, unread: false });
+
+    // Pressed just after Archive, before it is done.
+    const archiving = main.api.invoke('sessions.archive', { id });
+    expect(await main.api.invoke('sessions.setUnread', { id, unread: true })).toBe(false);
+    await archiving;
+    expect(await main.api.invoke('sessions.setUnread', { id, unread: true })).toBe(false);
+
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'archived', unread: false });
+    await main.close();
+  });
+
   it('archives a Working Session, stopping its run', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Working on it'], hold: 'never' }]);
     const { main, project } = await withProject(machine, checkout);

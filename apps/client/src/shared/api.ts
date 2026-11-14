@@ -1955,8 +1955,12 @@ export interface Commands {
   'sessions.resolveHighlight': { params: { id: number; highlightId: number; resolved: boolean }; result: void };
   /** The user has looked at the Session's Highlights Panel: what it has so far is seen, and its tab's badge goes. */
   'sessions.seeHighlights': { params: { id: number }; result: void };
-  /** Marks a Session read (the user opened it) or unread again. */
-  'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
+  /**
+   * Marks a Session read (the user opened it) or unread again. Not unread
+   * once archived, or while archiving, as the menus have it: false then, the
+   * Session left as it was.
+   */
+  'sessions.setUnread': { params: { id: number; unread: boolean }; result: boolean };
   /**
    * Snoozes a Waiting Session until `until`, a clock time to come: it leaves
    * the Inbox and comes back unread then, or as soon as its status changes.

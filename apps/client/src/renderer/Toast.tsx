@@ -2,7 +2,9 @@
 // with Undo for the ones that can be taken back (Archive, Mark unread), which
 // its shortcut (Ctrl+Z, unless remapped) runs too outside text fields, or why
 // an action failed, in view wherever the action was. One at a time: a new
-// one takes the place of the last.
+// one takes the place of the last, but an Undo it hides is kept: undoing the
+// one showing brings back the one before, to undo in turn, until the toast
+// closes.
 import { OctagonX, Undo2, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ErrorText } from './ErrorText';
@@ -22,7 +24,7 @@ export interface ToastContent {
 interface Toaster {
   /** Shows `toast`, in place of any showing. */
   show: (toast: ToastContent) => void;
-  /** Runs the Undo of the toast showing, if it has one; false if there was none. */
+  /** Runs the Undo of the toast showing, if it has one, and shows the one before with an Undo still to take; false if there was none. */
   undo: () => boolean;
 }
 
@@ -42,24 +44,44 @@ export function ToastHost({ children }: { children: ReactNode }) {
   const shown = useRef(toast);
   shown.current = toast;
   const next = useRef(0);
+  /** The toasts with an Undo not yet taken, the latest last: the one showing, if it has one, and those it took the place of. */
+  const undoable = useRef<ToastContent[]>([]);
   const toaster = useMemo<Toaster & { close: () => void }>(() => {
-    const show = (content: ToastContent) => {
+    const display = (content: ToastContent) => {
       const focused = document.activeElement instanceof HTMLElement && !element.current?.contains(document.activeElement) ? document.activeElement : (shown.current?.returnFocus ?? null);
       setHeld({ pointer: false, focus: false });
-      setToast({ ...content, key: next.current++, returnFocus: focused });
+      const toast = { ...content, key: next.current++, returnFocus: focused };
+      shown.current = toast;
+      setToast(toast);
     };
-    const close = () => {
+    const show = (content: ToastContent) => {
+      if (content.undo) undoable.current.push(content);
+      display(content);
+    };
+    const hide = () => {
       // Closing under the focus, it goes back where it was, rather than to the page, where keys would run shortcuts.
       if (element.current?.contains(document.activeElement) && shown.current?.returnFocus?.isConnected) shown.current.returnFocus.focus();
       shown.current = undefined;
       setToast(undefined);
     };
+    /** Closed, by the user or after a while: the Undos it kept go with it. */
+    const close = () => {
+      undoable.current = [];
+      hide();
+    };
     const undo = () => {
       const taken = shown.current;
       if (!taken?.undo) return false;
       // Taken once: a second Ctrl+Z or click doesn't run it again.
-      close();
-      taken.undo().catch((error: unknown) => show({ message: `Couldn’t undo: ${(error as Error).message}` }));
+      undoable.current = undoable.current.filter((content) => content.undo !== taken.undo);
+      const before = undoable.current.at(-1);
+      if (before) display(before);
+      else hide();
+      taken.undo().catch((error: unknown) => {
+        // What came before may hang on what couldn't be undone: it goes too.
+        undoable.current = [];
+        display({ message: `Couldn’t undo: ${(error as Error).message}` });
+      });
       return true;
     };
     return { show, undo, close };

@@ -1393,7 +1393,7 @@ export class Sessions {
       return true;
     }
     this.addItem(id, { ...card, archived: true });
-    if (state === 'closed') this.setUnread({ id, unread: true });
+    if (state === 'closed') this.writeUnread(id, true);
     return true;
   }
 
@@ -1520,8 +1520,15 @@ export class Sessions {
     await agent?.close();
   }
 
-  setUnread({ id, unread }: { id: number; unread: boolean }): void {
-    this.get(id);
+  /** The user marks the Session read or unread: not unread once archived, nor while archiving. */
+  setUnread({ id, unread }: { id: number; unread: boolean }): boolean {
+    const { status } = this.get(id);
+    if (unread && (status === 'archived' || this.archiving.has(id))) return false;
+    this.writeUnread(id, unread);
+    return true;
+  }
+
+  private writeUnread(id: number, unread: boolean): void {
     this.update(id, { unread });
     this.save(id, { unread: unread ? 1 : 0 });
   }

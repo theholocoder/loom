@@ -131,6 +131,57 @@ describe('a composer that disables while it has the focus', () => {
   });
 });
 
+describe('single-key shortcuts on a Session waiting on an answer', () => {
+  const approval: TranscriptItem = { kind: 'approval', id: 2, toolCallId: 'call_sh', title: 'git push', tool: 'shell', detail: 'git push --force', category: 'otherPush', state: 'asked' };
+  const question: TranscriptItem = {
+    kind: 'question',
+    id: 2,
+    message: 'Which branch?',
+    fields: [{ type: 'select', key: 'q0', title: 'Branch', required: false, options: [{ value: 'main', label: 'main' }, { value: 'dev', label: 'dev' }] }],
+    state: 'asked',
+  };
+
+  it.each([
+    ['an Approval request', approval, 'approval'],
+    ['a question', question, 'question'],
+  ] as const)('e archives nothing while it waits on %s, which stays unanswered', (_, asked, waitingReason) => {
+    const main = renderApp(new FakeMain({ projects: [project], sessions: [session(1, { waitingReason })] }, { 'sessions.archive': () => ({ archived: true }) }));
+    main.publish('transcript', [{ kind: 'user', id: 1, text: 'Ship it' }, asked], { sessionId: 1 });
+    press('j', document.body);
+    later(2000);
+
+    press('e', document.activeElement ?? document.body);
+    press('e', document.body);
+
+    expect(commands(main)).not.toContain('sessions.archive');
+    expect(commands(main).filter((c) => c === 'sessions.approve' || c === 'sessions.answer')).toEqual([]);
+  });
+});
+
+describe('u on an archived Session', () => {
+  it('does nothing, as the menus have it', async () => {
+    const main = renderApp(new FakeMain({ projects: [project], sessions: [session(1)] }));
+    press('j', document.body);
+    act(() => main.publish('sessions', [session(1, { status: 'archived', waitingReason: undefined })]));
+    expect(openSessionTitle()).toBe('Session 1');
+
+    await act(async () => press('u', document.body));
+
+    expect(commands(main)).not.toContain('sessions.setUnread');
+    expect(toast()).toBeNull();
+  });
+
+  it('says nothing was marked when it was archived meanwhile, main refusing', async () => {
+    const main = renderApp(new FakeMain({ projects: [project], sessions: [session(1)] }, { 'sessions.setUnread': () => false }));
+    press('j', document.body);
+
+    await act(async () => press('u', document.body));
+
+    expect(commands(main)).toContain('sessions.setUnread');
+    expect(toast()).toBeNull();
+  });
+});
+
 describe('the Undo toast', () => {
   it('follows Archive, and its Undo brings the Session back', async () => {
     const main = renderApp(new FakeMain({ projects: [project], sessions: [session(1)] }, { 'sessions.archive': () => ({ archived: true }) }));
@@ -156,6 +207,25 @@ describe('the Undo toast', () => {
 
     await act(async () => press('z', document.body, { ctrlKey: true }));
     expect(main.invoked.filter((i) => i.command === 'sessions.setUnread').at(-1)?.params).toEqual({ id: 1, unread: false });
+    expect(toast()).toBeNull();
+  });
+
+  it('keeps an Archive to undo after a later action with Undo, each undone in turn, the latest first', async () => {
+    const main = renderApp(new FakeMain({ projects: [project], sessions: [session(1), session(2)] }, { 'sessions.archive': () => ({ archived: true }) }));
+    press('j', document.body);
+    press('e');
+    await waitFor(() => expect(toast()?.textContent).toContain('Archived “Session 1”'));
+    press('j', document.body);
+    expect(openSessionTitle()).toBe('Session 2');
+    press('u', document.body);
+    await waitFor(() => expect(toast()?.textContent).toContain('Marked “Session 2” unread'));
+
+    await act(async () => press('z', document.body, { ctrlKey: true }));
+    expect(main.invoked.at(-1)).toEqual({ command: 'sessions.setUnread', params: { id: 2, unread: false } });
+    expect(toast()?.textContent).toContain('Archived “Session 1”');
+
+    await act(async () => fireEvent.click(within(toast()!).getByRole('button', { name: 'Undo' })));
+    expect(main.invoked.at(-1)).toEqual({ command: 'sessions.unarchive', params: { id: 1 } });
     expect(toast()).toBeNull();
   });
 
