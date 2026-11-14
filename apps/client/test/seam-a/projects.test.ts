@@ -511,5 +511,5 @@ describe('Projects from before they had a colour', () => {
   });
 });
 
-/** The migration that brought in Projects' colours, avatars and default models. */
-const COLOR_MIGRATION = 22;
+/** The migration that brought in Projects' colours, avatars and default models (with the Panel model and Session highlights). */
+const COLOR_MIGRATION = 18;

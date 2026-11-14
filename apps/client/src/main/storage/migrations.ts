@@ -163,6 +163,91 @@ export const migrations: Migration[] = [
       .addColumn('session_id', 'integer', (c) => c.primaryKey().references('sessions.id').onDelete('cascade'))
       .addColumn('state', 'text', (c) => c.notNull())
       .execute();
+    // The sidebar was app-wide, `{ open, view, width }`, with Session info and Changes as its views.
+    // Session info is no Panel (the Glance strip and Session details took its place), so every
+    // Session gets Changes in its Side area, open if the sidebar was, at the sidebar's width.
+    const row = (await db.selectFrom('settings').select('value').where('key', '=', 'sidebar').executeTakeFirst()) as { value: string } | undefined;
+    let sidebar: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = row ? JSON.parse(row.value) : {};
+      if (typeof parsed === 'object' && parsed !== null) sidebar = parsed as Record<string, unknown>;
+    } catch {
+      // Unreadable: as if never set.
+    }
+    const open = typeof sidebar.open === 'boolean' ? sidebar.open : false;
+    const state = JSON.stringify({ side: { panels: ['changes'], shown: 'changes', open }, dock: { panels: [], shown: null, open: false } });
+    const sessions = (await db.selectFrom('sessions').select('id').execute()) as Array<{ id: number }>;
+    if (sessions.length) await db.insertInto('session_panels').values(sessions.map(({ id }) => ({ session_id: id, state }))).execute();
+    if (typeof sidebar.width === 'number' && Number.isFinite(sidebar.width)) {
+      const width = Math.min(1200, Math.max(280, Math.round(sidebar.width)));
+      const layout = JSON.stringify({ width: { changes: width }, height: {} });
+      await db.insertInto('settings').values({ key: 'layout', value: layout }).onConflict((c) => c.column('key').doUpdateSet({ value: layout })).execute();
+    }
+    await db.deleteFrom('settings').where('key', '=', 'sidebar').execute();
+
+    // Session highlights (ADR 0010): each Session's Highlights, and how far its turns have been checked.
+    await db.schema
+      .createTable('highlights')
+      .addColumn('id', 'integer', (c) => c.primaryKey().autoIncrement())
+      .addColumn('session_id', 'integer', (c) => c.notNull().references('sessions.id').onDelete('cascade'))
+      .addColumn('kind', 'text', (c) => c.notNull())
+      .addColumn('text', 'text', (c) => c.notNull())
+      .addColumn('item_id', 'integer', (c) => c.notNull())
+      .addColumn('created_at', 'integer', (c) => c.notNull())
+      .addColumn('resolved_by', 'text')
+      .addColumn('resolved_reason', 'text')
+      .addColumn('resolved_item_id', 'integer')
+      .addColumn('resolved_at', 'integer')
+      .execute();
+    await db.schema.createIndex('highlights_session').on('highlights').column('session_id').execute();
+    await db.schema
+      .createTable('highlight_checks')
+      .addColumn('session_id', 'integer', (c) => c.primaryKey().references('sessions.id').onDelete('cascade'))
+      .addColumn('checked_through', 'integer', (c) => c.notNull())
+      .addColumn('seen_through', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('error', 'text')
+      .execute();
+    // Their checks' usage, apart from the Sessions' own: like usage_buckets, it outlives the Session and its Project.
+    await db.schema
+      .createTable('highlight_usage')
+      .addColumn('session_id', 'integer', (c) => c.notNull())
+      .addColumn('day', 'text', (c) => c.notNull())
+      .addColumn('model', 'text', (c) => c.notNull())
+      .addColumn('project_id', 'integer', (c) => c.notNull())
+      .addColumn('project_name', 'text', (c) => c.notNull())
+      .addColumn('input_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('output_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_read_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addColumn('model_name', 'text')
+      .addPrimaryKeyConstraint('highlight_usage_pk', ['session_id', 'day', 'model'])
+      .execute();
+    await db.schema.createIndex('highlight_usage_day').on('highlight_usage').column('day').execute();
+    // Each model's name as the agent gave it, so the dashboard names models as the rest of the Client does.
+    await db.schema.alterTable('usage_buckets').addColumn('model_name', 'text').execute();
+
+    // A Project's colour, avatar and default model, chosen by the user. Every
+    // Project keeps the colour it had, picked by id among the first three.
+    await db.schema.alterTable('projects').addColumn('color', 'text', (c) => c.notNull().defaultTo('blue')).execute();
+    await db.schema.alterTable('projects').addColumn('avatar', 'text').execute();
+    await db.schema.alterTable('projects').addColumn('default_model', 'text').execute();
+    await db.schema.alterTable('projects').addColumn('default_effort', 'text').execute();
+    await sql`update projects set color = case id % 3 when 0 then 'blue' when 1 then 'orange' else 'aqua' end`.execute(db);
+  },
+];
+
+// The five migrations feat/panels appended before #235 squashed them into the last one above,
+// kept only for the test that proves the two equivalent, and deleted with it.
+export const beforeSquash: Migration[] = [
+  async (db) => {
+    // One Panel model (ADR 0009): each Session's Panels, and the Layout's sizes in settings.
+    await db.schema
+      .createTable('session_panels')
+      .addColumn('session_id', 'integer', (c) => c.primaryKey().references('sessions.id').onDelete('cascade'))
+      .addColumn('state', 'text', (c) => c.notNull())
+      .execute();
     // The sidebar was app-wide, `{ open, view, width }`, with Session info and Changes as its views,
     // closed on Session info at 420px until changed. Every Session had both views, as it left them.
     const row = (await db.selectFrom('settings').select('value').where('key', '=', 'sidebar').executeTakeFirst()) as { value: string } | undefined;
