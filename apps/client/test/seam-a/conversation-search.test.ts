@@ -94,4 +94,11 @@ describe('the excerpt of an agent message in Markdown', () => {
     const [match] = await main.api.invoke('sessions.searchConversations', { words: ['snake_case'] });
     expect(match!.excerpt).toBe('Rename snake_case keys to 2*3 values');
   });
+
+  it('keeps what code says as it is', async () => {
+    const markdown = ['The `__init__` and `**kwargs` of `a|b`', '', '```sh', '# install - then run', '```'].join('\n');
+    const { main } = await twoSessions(['Fix it', 'Other'], [{ chunks: [markdown] }]);
+    const [match] = await main.api.invoke('sessions.searchConversations', { words: ['init'] });
+    expect(match!.excerpt).toBe('The __init__ and **kwargs of a|b # install - then run');
+  });
 });

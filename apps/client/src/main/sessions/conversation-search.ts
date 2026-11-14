@@ -1,8 +1,13 @@
 // Searching what was said in Sessions' conversations, for the Ctrl+K
 // palette: the user's messages and the agent's, as stored in `events`.
 import { sql } from 'kysely';
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { gfmFromMarkdown } from 'mdast-util-gfm';
+import { gfm } from 'micromark-extension-gfm';
 import type { ConversationMatch } from '../../shared/api';
 import { FOLD_CASE, type LoomDatabase } from '../storage/database';
+
+type MarkdownNode = ReturnType<typeof fromMarkdown> | ReturnType<typeof fromMarkdown>['children'][number];
 
 /** How long an excerpt is at most, ellipses aside. */
 const EXCERPT_LENGTH = 120;
@@ -43,35 +48,34 @@ export async function searchConversations(db: LoomDatabase, sessionIds: Readonly
 }
 
 /**
- * What Markdown `text` says, as plain text: the agent writes Markdown, and an
- * excerpt shows no heading marks, table pipes, emphasis, code ticks or link
- * targets. Stars and underscores inside words, as in snake_case, are kept.
+ * What Markdown `text` says, as plain text, read as the conversation renders
+ * it: no heading marks, table pipes, emphasis, code ticks or link targets, and
+ * code as it is. Blocks and table cells are kept apart by a line break.
  */
 function plainText(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => !/^\s*(`{3,}|~{3,})/.test(line) && !/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line) && !/^\s*([-*_])(\s*\1){2,}\s*$/.test(line))
-    .map((line) => {
-      let plain = line
-        .replace(/^\s{0,3}#{1,6}\s+(.*?)(\s+#+)?\s*$/, '$1')
-        .replace(/^\s*(>\s?)+/, '')
-        .replace(/^\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, '');
-      if (plain.trim().startsWith('|')) plain = plain.replace(/^\s*\|/, '').replace(/\|\s*$/, '').replace(/\s*\|\s*/g, ' ');
-      return inlinePlain(plain);
-    })
-    .join('\n');
+  return said(fromMarkdown(text, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }));
 }
 
-/** A line's inline Markdown, as plain text. */
-function inlinePlain(line: string): string {
-  return line
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/<((?:https?|mailto):[^>\s]+)>/g, '$1')
-    .replace(/(`+)(.+?)\1/g, (_, _ticks: string, code: string) => code.trim())
-    .replace(/(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1/g, '$2')
-    .replace(/(^|[^\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])/g, '$1$2')
-    .replace(/(^|[^\w])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, '$1$2');
+/** What a Markdown node says: its text, or its children's, a block's on a line of its own. */
+function said(node: MarkdownNode): string {
+  switch (node.type) {
+    case 'text':
+    case 'inlineCode':
+    case 'code':
+      return node.value;
+    case 'image':
+      return node.alt ?? '';
+    case 'html':
+    case 'definition':
+    case 'footnoteDefinition':
+    case 'thematicBreak':
+      return '';
+    case 'break':
+      return '\n';
+  }
+  if (!('children' in node)) return '';
+  const inline = node.type === 'paragraph' || node.type === 'heading' || node.type === 'tableCell' || node.type === 'link' || node.type === 'linkReference' || node.type === 'emphasis' || node.type === 'strong' || node.type === 'delete';
+  return (node.children as MarkdownNode[]).map(said).join(inline ? '' : '\n');
 }
 
 /** `text` on one line, cut down around the first of `words` it holds, with an ellipsis where cut. */
@@ -80,7 +84,7 @@ function excerpt(text: string, words: string[]): string {
   if (line.length <= EXCERPT_LENGTH) return line;
   const lower = line.toLowerCase();
   const found = words.map((w) => lower.indexOf(w.toLowerCase())).filter((i) => i >= 0);
-  // The best message holds a word, but perhaps only across the spaces that were folded.
+  // The best message holds a word, but perhaps only across the spaces that were folded, or in Markdown that isn't shown, such as a link's target.
   const at = found.length ? Math.min(...found) : 0;
   let start = Math.max(0, Math.min(at - EXCERPT_LEAD, line.length - EXCERPT_LENGTH));
   // From the start of a word.

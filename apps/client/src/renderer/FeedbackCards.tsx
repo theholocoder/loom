@@ -1,7 +1,7 @@
 // What Babysit found on the Session's Merge request, in its transcript: a card
 // of feedback the agent may need to act on, and quiet notes of progress.
 import { CircleCheckBig, CircleX, Eye, GitMerge, GitPullRequestClosed, MessageSquare, type LucideIcon } from 'lucide-react';
-import { codePlace, MAX_AUTO_PROMPTS, mergeRequestRef, FORGE_NAMES, type BabysitCi, type EndedMergeRequestState, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
+import { codePlace, forgeName, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type EndedMergeRequestState, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
 import { ErrorAlert, useAction } from './Questions';
 import { unsavedWorkSummary } from './Archive';
 
@@ -65,7 +65,7 @@ export function FeedbackCard({
               </button>
             )}
             <button type="button" onClick={() => onOpen(item.url)}>
-              Open on {forge ? FORGE_NAMES[forge] : 'the Forge'}
+              Open on {forgeName(forge)}
             </button>
           </div>
         </div>
