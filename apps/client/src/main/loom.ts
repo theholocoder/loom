@@ -2,7 +2,7 @@
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics, UpdateStatus } from '../shared/api';
+import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
@@ -70,28 +70,23 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
   const database = new Topic<DatabaseStatus>({ state: 'ok' });
   const open = () => openDatabase(options.userDataDir, { now: () => options.clock.now(), driver: options.sqliteDriver });
   // Looked for whatever state the database is in: a fixed release may be what it takes.
-  const updates = options.updater ? new Updates(options.updater, options.clock) : undefined;
-  const update: Shared = {
-    topic: updates?.status ?? new Topic<UpdateStatus>({ state: 'none' }),
-    restart: () => (updates ? updates.restart() : Promise.reject(new Error('There is no update downloaded to install.'))),
-    stop: () => updates?.stop(),
-  };
+  const updates = new Updates(options.updater, options.clock);
   let started: Loom | undefined;
   try {
-    started = await startLoom(options, await open(), database, update);
-    updates?.start();
+    started = await startLoom(options, await open(), database, updates);
+    updates.start();
     return started;
   } catch (error) {
     if (!(error instanceof DatabaseDamagedError)) throw error;
     database.set(damaged(options.userDataDir, error));
   }
-  updates?.start();
+  updates.start();
 
   let restoring: Promise<void> | undefined;
   const restore = async () => {
     restoreLatestSnapshot(join(options.userDataDir, DATABASE_FILE), options.userDataDir, options.clock.now());
     try {
-      started = await startLoom(options, await open(), database, update);
+      started = await startLoom(options, await open(), database, updates);
     } catch (error) {
       if (error instanceof DatabaseDamagedError) database.set(damaged(options.userDataDir, error));
       throw error;
@@ -103,39 +98,32 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     api: {
       invoke: async (command, ...params) => {
         if (started) return started.api.invoke(command, ...params);
-        if (command === 'update.status') return update.topic.value as never;
-        if (command === 'update.restart') return update.restart() as never;
+        if (command === 'update.status') return updates.status.value as never;
+        if (command === 'update.restart') return updates.restart() as never;
         if (command !== 'database.restoreLatestSnapshot') throw notStarted();
         restoring ??= restore().finally(() => (restoring = undefined));
         return restoring as never;
       },
       subscribe: (topic, listener, ...params) => {
         if (started) return started.api.subscribe(topic, listener, ...params);
-        if (topic === 'update') return update.topic.subscribe(listener as never);
+        if (topic === 'update') return updates.status.subscribe(listener as never);
         if (topic !== 'database') throw notStarted();
         return database.subscribe(listener as never);
       },
     },
     close: async () => {
-      update.stop();
+      updates.stop();
       await restoring?.catch(() => {});
       await started?.close();
     },
   };
 }
 
-/** What main serves whether or not the database could be opened. */
-interface Shared {
-  topic: Topic<UpdateStatus>;
-  restart(): Promise<void>;
-  stop(): void;
-}
-
 function damaged(userDataDir: string, error: DatabaseDamagedError): DatabaseStatus {
   return { state: 'damaged', path: error.path, problem: error.problem, snapshots: listSnapshots(userDataDir).reverse() };
 }
 
-async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic<DatabaseStatus>, update: Shared): Promise<Loom> {
+async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic<DatabaseStatus>, updates: Updates): Promise<Loom> {
   const spawnBridge: SpawnBridge = options.spawnBridge ?? ((command, args) => spawn(command, args, { stdio: 'pipe' }));
 
   const environments = new Topic<EnvironmentStatus[]>([]);
@@ -321,7 +309,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     });
   };
 
-  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database, openSession, update: update.topic };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database, openSession, update: updates.status };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
     panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
@@ -465,8 +453,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       await sessionService.flush();
       return dashboard(db, days, options.clock.now());
     },
-    'update.status': () => update.topic.value,
-    'update.restart': () => update.restart(),
+    'update.status': () => updates.status.value,
+    'update.restart': () => updates.restart(),
     'database.restoreLatestSnapshot': () => {
       throw new Error('the database is not damaged');
     },
@@ -490,7 +478,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   return {
     api,
     close: async () => {
-      update.stop();
+      updates.stop();
       await babysitter.stop();
       await highlighter.stop();
       await terminals.closeAll();

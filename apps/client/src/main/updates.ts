@@ -22,13 +22,15 @@ export class Updates {
   private timer: TimerHandle | undefined;
   private stopped = false;
 
+  /** With no updater, as in development, there is never an update. */
   constructor(
-    private readonly updater: Updater,
+    private readonly updater: Updater | undefined,
     private readonly clock: Clock,
   ) {}
 
   /** Checks now, then every UPDATE_CHECK_INTERVAL_MS. */
   start(): void {
+    if (!this.updater || this.stopped) return;
     this.check();
     this.schedule();
   }
@@ -40,7 +42,7 @@ export class Updates {
 
   /** Installs the update downloaded, restarting Loom. */
   async restart(): Promise<void> {
-    if (this.status.value.state !== 'ready') throw new Error('There is no update downloaded to install.');
+    if (!this.updater || this.status.value.state !== 'ready') throw new Error('There is no update downloaded to install.');
     await this.updater.quitAndInstall();
   }
 
@@ -54,7 +56,7 @@ export class Updates {
 
   private check(): void {
     // A slow download is still the latest check: the next one waits for it.
-    if (this.checking) return;
+    if (this.checking || !this.updater) return;
     this.checking = true;
     this.updater.checkAndDownload().then(
       (version) => {

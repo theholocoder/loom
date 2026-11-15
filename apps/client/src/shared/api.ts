@@ -1412,14 +1412,15 @@ export interface UsageDashboard {
 /** How many Sessions the dashboard's Top Sessions lists. */
 export const TOP_SESSIONS = 10;
 
-/**
- * Whether the Client's database could be opened. When `damaged`, it failed
- * `PRAGMA quick_check` or isn't a database: main serves only this topic and
- * `database.restoreLatestSnapshot` until it is restored.
- */
 /** A newer stable release Loom has downloaded, if any: it installs on the next quit, or on "Restart to update". */
 export type UpdateStatus = { state: 'none' } | { state: 'ready'; version: string };
 
+/**
+ * Whether the Client's database could be opened. When `damaged`, it failed
+ * `PRAGMA quick_check` or isn't a database: main serves only this topic, the
+ * `update` topic, `database.restoreLatestSnapshot` and the `update.` commands
+ * until it is restored.
+ */
 export type DatabaseStatus =
   | { state: 'ok' }
   | {
@@ -1984,6 +1985,7 @@ export interface Commands {
    * Rejects when the database isn't damaged or there is no snapshot.
    */
   'database.restoreLatestSnapshot': { params: void; result: void };
+  /** The `update` topic's current value. */
   'update.status': { params: void; result: UpdateStatus };
   /**
    * Installs the update downloaded and starts Loom again, asking first if

@@ -99,10 +99,13 @@ function notify({ title, body, onClick }: DesktopNotification): void {
   notification.show();
 }
 
-/** Asks before quitting if Sessions are Working; resolves true to quit. */
-async function confirmQuit(): Promise<boolean> {
-  const message = quitQuestion(sessions);
-  if (message === null || quitConfirmed) return true;
+/** What to ask before quitting, or null to quit without asking. */
+function quitAsking(): string | null {
+  return quitConfirmed ? null : quitQuestion(sessions);
+}
+
+/** Asks `message` before quitting; resolves true, and quits from then on without asking, if the user says to quit. */
+async function askToQuit(message: string): Promise<boolean> {
   const options = { type: 'warning' as const, message, buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true };
   const quit = (window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)).response === 0;
   if (quit) quitConfirmed = true;
@@ -132,8 +135,22 @@ function releaseUpdater(): Updater | undefined {
       return result.updateInfo.version;
     },
     quitAndInstall: async () => {
-      if (!(await confirmQuit())) return;
-      // Not silent, and Loom starts again once installed.
+      const message = quitAsking();
+      if (message !== null && !(await askToQuit(message))) return;
+      quitConfirmed = true;
+      if (process.platform === 'linux') {
+        // electron-updater would start the new AppImage at once, while this
+        // Loom still holds the single-instance lock as it shuts down, so it
+        // would quit straight away. Instead, the update installs as on any
+        // quit, and the new AppImage starts once this Loom has exited.
+        let appImage = process.env.APPIMAGE!;
+        autoUpdater.once('appimage-filename-updated', (path: string) => (appImage = path));
+        // After electron-updater's own quit handler, which installs.
+        app.once('quit', () => app.relaunch({ execPath: appImage, args: process.argv.slice(1) }));
+        app.quit();
+        return;
+      }
+      // The installer waits for Loom to exit, then starts it again.
       autoUpdater.quitAndInstall(false, true);
     },
   };
@@ -251,11 +268,8 @@ if (!app.requestSingleInstanceLock()) {
     win.on(
       'close',
       guardQuit({
-        question: () => (quitConfirmed ? null : quitQuestion(sessions)),
-        confirm: async (message) => {
-          const options = { type: 'warning' as const, message, buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true };
-          return (await dialog.showMessageBox(win, options)).response === 0;
-        },
+        question: quitAsking,
+        confirm: askToQuit,
         quit: () => app.quit(),
       }),
     );

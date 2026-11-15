@@ -44,6 +44,10 @@ jobs:
           path: release
           merge-multiple: true
 
+      # electron-updater reads these to find the release: without them it updates nobody.
+      - name: Check the update metadata is there
+        run: ls release/latest.yml release/latest-linux.yml release/Loom-*-x86_64.AppImage release/Loom-Setup-*.exe release/Loom-Setup-*.exe.blockmap
+
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

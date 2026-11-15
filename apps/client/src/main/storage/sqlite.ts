@@ -12,7 +12,6 @@ export type SqliteDriver = 'better-sqlite3' | 'node:sqlite';
 
 /** An open SQLite database, whichever driver opened it. */
 export interface Sqlite {
-  readonly driver: SqliteDriver;
   /** Every row `statement` gives. */
   all(statement: string, ...params: unknown[]): Record<string, unknown>[];
   /** Runs `statement`, which may give rows or not, for what it does. */
@@ -58,7 +57,6 @@ function openBetterSqlite3(path: string): Sqlite {
   const Database = load('better-sqlite3') as typeof BetterSqlite3;
   const db = new Database(path, { timeout: BUSY_TIMEOUT_MS });
   return {
-    driver: 'better-sqlite3',
     all: (statement, ...params) => db.prepare(statement).all(...params) as Record<string, unknown>[],
     run: (statement, ...params) => {
       const prepared = db.prepare(statement);
@@ -76,7 +74,6 @@ function openNodeSqlite(path: string): Sqlite {
   const db = new Database(path, { timeout: BUSY_TIMEOUT_MS });
   const input = (params: readonly unknown[]) => params as SQLInputValue[];
   return {
-    driver: 'node:sqlite',
     all: (statement, ...params) => db.prepare(statement).all(...input(params)) as Record<string, unknown>[],
     run: (statement, ...params) => {
       const prepared = db.prepare(statement);

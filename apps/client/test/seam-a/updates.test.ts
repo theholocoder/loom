@@ -51,7 +51,6 @@ describe('updates', () => {
     main.clock.advance(1);
     expect(updater.checks).toHaveLength(1);
     updater.answer(null);
-    await new Promise((resolve) => setTimeout(resolve, 10));
     expect((await main.api.invoke('update.status')).state).toBe('none');
   });
 
