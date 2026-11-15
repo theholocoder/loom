@@ -46,3 +46,6 @@ jobs:
         with:
           name: playwright-report-${{ matrix.os }}
           path: apps/client/playwright-report
+
+  package:
+    uses: ./.github/workflows/package.yml

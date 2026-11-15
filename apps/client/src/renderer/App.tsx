@@ -11,6 +11,7 @@ import {
   ArrowRightToLine,
   ChartColumn,
   CircleDot,
+  CircleFadingArrowUp,
   CodeXml,
   ExternalLink,
   FileDiff,
@@ -613,8 +614,34 @@ function PageNav({ className, page, onPage }: { className: string; page: Page | 
       <FootButton label="Projects" icon={FolderGit2} current={page === 'projects'} onClick={() => onPage('projects')} />
       <FootButton label="Dashboard" icon={ChartColumn} current={page === 'dashboard'} onClick={() => onPage('dashboard')} />
       <span className="grow" />
+      <RestartToUpdate labelled={className === 'side-foot'} />
       <FootButton label="Settings" icon={SettingsIcon} current={page === 'settings'} onClick={() => onPage('settings')} />
     </nav>
+  );
+}
+
+/**
+ * Once a newer release is downloaded: it installs on the next quit anyway,
+ * or now with this, which asks first if Sessions are Working. Loom never
+ * restarts on its own.
+ */
+function RestartToUpdate({ labelled }: { labelled: boolean }) {
+  const api = useApi();
+  const toast = useToast();
+  const update = useTopic('update');
+  if (update?.state !== 'ready') return null;
+  const restart = () => api.invoke('update.restart').catch((error: Error) => toast.show({ message: error.message, failed: true }));
+  return (
+    <button
+      className={labelled ? 'update-btn' : 'icon-btn update-btn'}
+      type="button"
+      title={`Loom ${update.version} is downloaded: restart to install it now, or it installs on the next quit`}
+      aria-label={labelled ? undefined : 'Restart to update'}
+      onClick={() => void restart()}
+    >
+      <CircleFadingArrowUp />
+      {labelled && 'Restart to update'}
+    </button>
   );
 }
 

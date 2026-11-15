@@ -33,7 +33,7 @@ export const HIDDEN_PANELS: SessionPanels = { side: { panels: ['changes'], shown
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
-type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database' | 'openSession'>;
+type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database' | 'openSession' | 'update'>;
 
 const EMPTY: { [T in TopicName]: Topics[T] } = {
   environments: [],
@@ -49,6 +49,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   terminalOutput: { data: new Uint8Array() },
   database: { state: 'ok' },
   openSession: null,
+  update: { state: 'none' },
 };
 
 export class FakeMain implements LoomApi {
@@ -265,6 +266,8 @@ export class FakeMain implements LoomApi {
       'sessions.approve': () => {},
       'usage.dashboard': ({ days }) => emptyDashboard(days),
       'database.restoreLatestSnapshot': () => {},
+      'update.status': () => this.value('update'),
+      'update.restart': () => {},
       ...handlers,
     };
   }

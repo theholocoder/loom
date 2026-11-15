@@ -50,3 +50,23 @@ Another opt-in suite (`apps/client/test/opencode-contract`) runs Loom's ACP adap
 ```sh
 LOOM_OPENCODE_CONTRACT=1 pnpm --filter @loom/client exec vitest run --project opencode-contract
 ```
+
+## Packaging and releasing
+
+`just package` builds the installer for this machine into `apps/client/dist`: a Linux x64 AppImage, or a Windows x64 per-user NSIS installer (no admin rights). Both are unsigned, and carry the `loom-bridge` binary in their resources (`resources/bridge`). electron-builder's config is `apps/client/electron-builder.yml`. Only main's run-time packages are `dependencies` in `apps/client/package.json`: what the renderer uses is bundled by Vite, so it belongs in `devDependencies` and stays out of the installer.
+
+`node scripts/self-test-package.mjs <AppImage or installer>` launches a build once in self-test mode (`LOOM_SELF_TEST=1`, `apps/client/src/main/self-test.ts`): Loom starts, opens its database, connects its bridge, prints the result and quits, exiting 1 if any of it failed. CI's Package job (`.github/workflows/package.yml`) runs it on every change, for each installer.
+
+### SQLite on older Linux
+
+better-sqlite3's Linux prebuild needs glibc 2.34 (Ubuntu 22.04, Debian 12, RHEL 9), while Electron runs on older Linux. Where it can't load, Loom opens its database with Node's built-in `node:sqlite` instead (`apps/client/src/main/storage/sqlite.ts`); both open the same file the same way. The oldest Linux Loom supports is RHEL 8 and its rebuilds (glibc 2.28): CI runs the AppImage's self-test in a Rocky Linux 8 container (`scripts/self-test-old-linux.sh`) to check the fallback takes over there. `LOOM_SQLITE_DRIVER=node:sqlite` forces the fallback anywhere, and seam A tests it (`sqlite-driver.test.ts`).
+
+### Updates
+
+Packaged builds update themselves with electron-updater from this repository's GitHub Releases, stable releases only (`apps/client/src/main/updates.ts`). Loom looks for an update at startup and every 4 hours, and downloads it in the background. It installs on the next quit, or when the user clicks **Restart to update** in the sidebar footer, which asks first if Sessions are Working. Loom never restarts on its own. There are no updates in development, in the self-test, with `LOOM_NO_UPDATES=1`, or on Linux outside the AppImage.
+
+### Releasing
+
+1. Set the version in `apps/client/package.json` (the bridge and the app are both stamped with it), and merge that to `main`.
+2. **Manual check: update from the previous release.** Install the previous release, then build the new one (`just package`) and serve it to that install as an update. Or publish it as a draft release first, and check the update before publishing the draft. Check that the update downloads, that **Restart to update** shows, that it installs on quit and on the button, that Loom doesn't restart on its own, and that the Projects and Sessions are still there.
+3. Tag the merge commit `vX.Y.Z` and push the tag. The Release workflow (`.github/workflows/release.yml`) checks the tag matches the version, builds and self-tests both installers, and publishes them with their update metadata (`latest.yml`, `latest-linux.yml`) as the latest GitHub Release. Only plain `vX.Y.Z` tags release: there are no prereleases.

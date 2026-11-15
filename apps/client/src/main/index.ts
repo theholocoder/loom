@@ -1,6 +1,7 @@
 // The Electron entry point: wires createLoom to the window and IPC.
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, nativeTheme, Notification, shell } from 'electron';
+import electronUpdater from 'electron-updater';
 import { DEFAULT_APPEARANCE, windowLook, type Appearance, type WindowLook } from '../shared/appearance';
 import { MIN_WINDOW } from '../shared/window';
 import { systemClock } from './clock';
@@ -10,6 +11,9 @@ import { createLoom, type Loom } from './loom';
 import type { DesktopNotification } from './notifications';
 import { isWebLink } from '../shared/links';
 import { guardQuit, quitQuestion } from './quit';
+import { selfTest } from './self-test';
+import type { SqliteDriver } from './storage/sqlite';
+import type { Updater } from './updates';
 import type { Session } from '../shared/api';
 import { applicationMenu, windowShortcut, type MenuContext, type WindowAction } from './window-menu';
 
@@ -19,6 +23,16 @@ if (process.env.LOOM_USER_DATA_DIR) app.setPath('userData', process.env.LOOM_USE
 let window: BrowserWindow | undefined;
 const menuContext: MenuContext = { platform: process.platform, dev: !app.isPackaged };
 let loom: Loom | undefined;
+/** Every Session, as main last said, for what to ask before quitting. */
+let sessions: Session[] = [];
+/** Set once the user has said to quit with Sessions Working, so the window closes without asking again. */
+let quitConfirmed = false;
+/**
+ * CI's check of a packaged build (see self-test.ts): Loom starts, opens its
+ * database, connects the bridge, then quits, exiting 1 if any of it failed.
+ */
+const selfTesting = !!process.env.LOOM_SELF_TEST;
+const SELF_TEST_TIMEOUT_MS = 60_000;
 
 function createWindow(look: WindowLook): BrowserWindow {
   const win = new BrowserWindow({
@@ -85,6 +99,69 @@ function notify({ title, body, onClick }: DesktopNotification): void {
   notification.show();
 }
 
+/** Asks before quitting if Sessions are Working; resolves true to quit. */
+async function confirmQuit(): Promise<boolean> {
+  const message = quitQuestion(sessions);
+  if (message === null || quitConfirmed) return true;
+  const options = { type: 'warning' as const, message, buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true };
+  const quit = (window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)).response === 0;
+  if (quit) quitConfirmed = true;
+  return quit;
+}
+
+/**
+ * electron-updater against this repository's GitHub Releases (the `publish`
+ * of electron-builder.yml), stable releases only. Updates download in the
+ * background and install on quit; Loom restarts only when the user asks.
+ * None in development, in the self-test, or outside an AppImage on Linux,
+ * which is the only Linux build that can update itself.
+ */
+function releaseUpdater(): Updater | undefined {
+  if (!app.isPackaged || selfTesting || process.env.LOOM_NO_UPDATES) return undefined;
+  if (process.platform === 'linux' && !process.env.APPIMAGE) return undefined;
+  const { autoUpdater } = electronUpdater;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.allowDowngrade = false;
+  return {
+    checkAndDownload: async () => {
+      const result = await autoUpdater.checkForUpdates();
+      if (!result?.isUpdateAvailable || !result.downloadPromise) return null;
+      await result.downloadPromise;
+      return result.updateInfo.version;
+    },
+    quitAndInstall: async () => {
+      if (!(await confirmQuit())) return;
+      // Not silent, and Loom starts again once installed.
+      autoUpdater.quitAndInstall(false, true);
+    },
+  };
+}
+
+async function runSelfTest(started: Loom): Promise<void> {
+  let code = 0;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`timed out after ${SELF_TEST_TIMEOUT_MS / 1000} s`)), SELF_TEST_TIMEOUT_MS)));
+    console.log(`Loom ${app.getVersion()} self-test passed: ${await Promise.race([selfTest(started.api), timeout])}`);
+  } catch (error) {
+    console.error(`Loom ${app.getVersion()} self-test failed: ${(error as Error).message}`);
+    code = 1;
+  } finally {
+    clearTimeout(timer);
+  }
+  loom = undefined;
+  await started.close();
+  app.exit(code);
+}
+
+/** LOOM_SQLITE_DRIVER=node:sqlite opens the database the way Linux older than glibc 2.34 does. */
+function sqliteDriverOverride(): SqliteDriver | undefined {
+  const driver = process.env.LOOM_SQLITE_DRIVER;
+  return driver === 'better-sqlite3' || driver === 'node:sqlite' ? driver : undefined;
+}
+
 function bridgeDir(): string {
   return app.isPackaged ? join(process.resourcesPath, 'bridge') : join(app.getAppPath(), '../../bridge/dist');
 }
@@ -129,21 +206,26 @@ if (!app.requestSingleInstanceLock()) {
         windowFocused: () => !!window && window.isFocused(),
         // The regional format, which on Windows and macOS may differ from the UI language the renderer's Intl takes.
         systemLocale: app.getSystemLocale(),
+        updater: releaseUpdater(),
+        sqliteDriver: sqliteDriverOverride(),
       });
     } catch (error) {
       console.error('Loom could not start:', error);
-      dialog.showErrorBox('Loom could not start', (error as Error).message);
+      if (!selfTesting) dialog.showErrorBox('Loom could not start', (error as Error).message);
       app.exit(1);
       return;
     }
     serveApi(loom.api);
+    if (selfTesting) {
+      void runSelfTest(loom);
+      return;
+    }
     // A topic gives its current value as soon as it's subscribed to, so the
     // saved look is known before the window opens. A damaged database serves
     // no settings or Sessions: the window opens with the default look and
     // closes without asking, and follows both once a snapshot is restored.
     // Matching the system, the theme follows its light or dark mode too.
     let appearance: Appearance = DEFAULT_APPEARANCE;
-    let sessions: Session[] = [];
     let stopWatching: (() => void)[] | undefined;
     const api = loom.api;
     const currentLook = () => windowLook(appearance, nativeTheme.shouldUseDarkColors);
@@ -169,7 +251,7 @@ if (!app.requestSingleInstanceLock()) {
     win.on(
       'close',
       guardQuit({
-        question: () => quitQuestion(sessions),
+        question: () => (quitConfirmed ? null : quitQuestion(sessions)),
         confirm: async (message) => {
           const options = { type: 'warning' as const, message, buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true };
           return (await dialog.showMessageBox(win, options)).response === 0;

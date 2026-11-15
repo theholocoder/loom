@@ -33,6 +33,11 @@ dev:
 
 alias start := dev
 
+# Build this machine's installer (Linux AppImage or Windows NSIS) into apps/client/dist
+package:
+    pnpm bridge:build
+    pnpm --filter @loom/client package
+
 # Add the tables, columns and indexes the dev database's schema version promises but lacks (backs it up first; --dry-run to only look; --set-version <n> to first set the version to n)
 db-repair *args:
     #!/usr/bin/env bash

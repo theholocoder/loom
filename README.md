@@ -61,7 +61,7 @@ Loom has no server and no account of its own. It drives the agent you already ha
 
 ## Requirements
 
-- **Linux** (x64) or **Windows** (x64). On Windows, a Project can live on Windows itself or in a WSL distro. macOS is not supported yet.
+- **Linux** (x64, glibc 2.28 or newer: RHEL 8, Ubuntu 20.04, Debian 10 and later) or **Windows** (x64). On Windows, a Project can live on Windows itself or in a WSL distro. macOS is not supported yet.
 - **git**.
 - **[OpenCode](https://opencode.ai)** 2.1.4 or newer, installed and signed in. It is the only agent Loom drives today; Claude Code and Codex are arriving soon.
 - **`gh`** and/or **`glab`**, signed in, for the Merge request and issue features on GitHub and GitLab. Loom works without them, with those features off.

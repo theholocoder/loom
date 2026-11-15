@@ -1,0 +1,73 @@
+name: Package
+
+# Builds the Linux AppImage and the Windows installer, and launches each one
+# once headless in self-test mode: Loom starts, opens its database, connects
+# its bridge and quits. Called by CI on every change, and by Release, which
+# publishes what it uploads.
+on:
+  workflow_call:
+    inputs:
+      upload:
+        description: Upload the builds and their update metadata as workflow artifacts.
+        type: boolean
+        default: false
+
+jobs:
+  package:
+    name: Package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: --linux
+            files: |
+              apps/client/dist/Loom-*-x86_64.AppImage
+              apps/client/dist/latest-linux.yml
+          - os: windows-latest
+            target: --win
+            files: |
+              apps/client/dist/Loom-Setup-*.exe
+              apps/client/dist/Loom-Setup-*.exe.blockmap
+              apps/client/dist/latest.yml
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go, Node and pnpm at the versions pinned in mise.toml.
+      - uses: jdx/mise-action@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the bridge
+        run: pnpm bridge:build
+
+      - name: Build the installer
+        working-directory: apps/client
+        run: pnpm package ${{ matrix.target }}
+
+      - name: Self-test (better-sqlite3)
+        run: node scripts/self-test-package.mjs ${{ runner.os == 'Linux' && 'apps/client/dist/Loom-*-x86_64.AppImage' || 'apps/client/dist/Loom-Setup-*.exe' }}
+        shell: bash
+
+      - name: Self-test (node:sqlite)
+        if: runner.os == 'Linux'
+        run: node scripts/self-test-package.mjs apps/client/dist/Loom-*-x86_64.AppImage
+        env:
+          LOOM_SQLITE_DRIVER: node:sqlite
+
+      # better-sqlite3's prebuild needs glibc 2.34: on the oldest Linux Loom
+      # supports, Loom must fall back to node:sqlite on its own.
+      - name: Self-test on Rocky Linux 8 (glibc 2.28)
+        if: runner.os == 'Linux'
+        run: docker run --rm -v "$PWD/apps/client/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" rockylinux:8 sh /scripts/self-test-old-linux.sh
+
+      - name: Upload the build
+        if: inputs.upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: loom-${{ runner.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: 7

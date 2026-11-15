@@ -3,7 +3,7 @@
 // or a damaged file never silently destroys the developer's data.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type BetterSqlite3 from 'better-sqlite3';
+import type { Sqlite } from './sqlite';
 
 export const SNAPSHOTS_DIR = 'snapshots';
 const KEEP = 3;
@@ -27,10 +27,10 @@ export function listSnapshots(userDataDir: string): string[] {
  * Copies the open database, at schema version `version`, into a new snapshot,
  * then prunes all but the last three. Must not run inside a transaction.
  */
-export function takeSnapshot(sqlite: BetterSqlite3.Database, userDataDir: string, version: number, now: number): void {
+export function takeSnapshot(sqlite: Sqlite, userDataDir: string, version: number, now: number): void {
   const dir = snapshotsDir(userDataDir);
   mkdirSync(dir, { recursive: true });
-  sqlite.prepare('VACUUM INTO ?').run(unused(now, (t) => join(dir, `${stamp(t)}-v${version}.db`)));
+  sqlite.run('VACUUM INTO ?', unused(now, (t) => join(dir, `${stamp(t)}-v${version}.db`)));
   for (const old of listSnapshots(userDataDir).slice(0, -KEEP)) rmSync(old, { force: true });
 }
 
