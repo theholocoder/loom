@@ -3,11 +3,12 @@
 import { Coins, DatabaseZap, GitMerge, MessagesSquare, Receipt, Timer, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
+import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
+import { useDates } from './dates';
 import { RemovedTag } from './Archive';
-
-/** Series colours, the prototype's categorical slots, in order. */
-const SERIES = ['var(--p1)', 'var(--p2)', 'var(--p3)', 'var(--accent)', 'var(--wait)', 'var(--work)'];
+import { ModelName } from './ModelPicker';
+import { projectColor } from './ProjectAvatar';
 
 const OUTCOME_LABEL: Record<SessionOutcome, string> = { merged: 'Merged', closed: 'Closed', archived: 'Archived', open: 'Open' };
 
@@ -33,15 +34,15 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
     };
   }, [api, days, changed]);
 
-  // Projects coloured by their place in the per-Project chart, the same in every chart.
+  // Each Project in its own colour, as everywhere else: a removed one in the colour it had.
   const colorOf = (projectId: number) => {
-    const at = data?.perProject.findIndex((p) => p.projectId === projectId) ?? -1;
-    return SERIES[(at < 0 ? 0 : at) % SERIES.length]!;
+    const color = data?.perProject.find((p) => p.projectId === projectId)?.color ?? projects.find((p) => p.id === projectId)?.color;
+    return color ? projectColor({ color }) : 'var(--muted)';
   };
   const shown = data?.days === days ? data : undefined;
 
   return (
-    <main className="dash" aria-label="Dashboard">
+    <div className="dash dashboard">
       <div className="row">
         <h1>Dashboard</h1>
         <span className="grow" />
@@ -54,11 +55,11 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
       </div>
       {error && (
         <div className="err" role="alert">
-          {error}
+          <ErrorText text={error} />
         </div>
       )}
       {shown && <Content data={shown} projects={projects} sessions={sessions} colorOf={colorOf} onOpenSession={onOpenSession} />}
-    </main>
+    </div>
   );
 }
 
@@ -96,14 +97,14 @@ function Content({
         <Tile icon={Coins} label="Tokens" value={formatTokens(data.tokens)} detail={`over the last ${data.days} days`} />
         <Tile icon={Receipt} label="Reported cost" value={formatCost(data.reportedCost)} detail="As agents report it. Subscription and local models report $0." />
         <Tile icon={MessagesSquare} label="Sessions started" value={String(data.sessionsStarted)} detail={`${data.outcomes.stuck} stuck at least once`} />
-        <Tile icon={GitMerge} label="Merge requests merged" value={String(data.mergeRequestsMerged)} detail={`${data.outcomes.open} Sessions still open`} />
+        <Tile icon={GitMerge} label="Merge requests merged" value={String(data.mergeRequestsMerged)} detail={`${data.outcomes.open} ${data.outcomes.open === 1 ? 'Session' : 'Sessions'} still open`} />
         <Tile
           icon={DatabaseZap}
           label="Cache hit rate"
           value={data.cacheHitRate === undefined ? '—' : percent(data.cacheHitRate)}
           detail="Cache reads out of all prompt tokens"
         />
-        <Tile icon={Timer} label="Median agent run" value={formatDuration(data.medianRunMs)} detail="Working → Waiting" />
+        <Tile icon={Timer} label="Median agent run" value={formatDuration(data.medianRunMs)} detail="Per run, Working → Waiting" />
       </div>
       <div className="cards">
         <section className="card wide" aria-labelledby="dash-per-day">
@@ -131,7 +132,7 @@ function Content({
           <div className="card-head">
             <h3 id="dash-per-model">Tokens per model</h3>
           </div>
-          <Bars label="Tokens per model" rows={data.perModel.map((m) => ({ label: m.model, value: m.tokens, color: 'var(--accent)', tech: true }))} format={formatTokens} />
+          <Bars label="Tokens per model" rows={data.perModel.map((m) => ({ key: m.model, label: m.name ?? m.model, title: m.model, value: m.tokens, color: 'var(--accent)', tech: !m.name }))} format={formatTokens} />
         </section>
         <section className="card" aria-labelledby="dash-mix">
           <div className="card-head">
@@ -201,7 +202,7 @@ function Content({
                       </td>
                       <td>{references(top, projects)}</td>
                       <td>
-                        <span className="tech">{top.model}</span>
+                        <ModelName id={top.model} name={top.modelName} />
                       </td>
                       <td className="n">{formatTokens(top.tokens)}</td>
                       <td className="n">{formatDuration(top.workingMs)}</td>
@@ -261,14 +262,14 @@ function Tile({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: s
   );
 }
 
-function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: string; label: string; removed?: boolean; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
+function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: string; label: string; title?: string; removed?: boolean; value: number; color: string; tech?: boolean }>; format: (value: number) => string }) {
   if (!rows.length) return <div className="empty">Nothing yet.</div>;
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
     <ul className="hbars" aria-label={label}>
       {rows.map((row) => (
         <li key={row.key ?? row.label} className="hbar">
-          <span className={row.tech ? 'ellipsis tech' : 'ellipsis'} title={row.label}>
+          <span className={row.tech ? 'ellipsis tech' : 'ellipsis'} title={row.title ?? row.label}>
             {row.label}
             {row.removed && <RemovedTag />}
           </span>
@@ -284,6 +285,7 @@ function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: stri
 
 /** Tokens per day as bars stacked by Project, with a tooltip per day. */
 function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId: number) => string }) {
+  const dates = useDates();
   const W = 820;
   const H = 230;
   const L = 46;
@@ -329,11 +331,11 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId
               {segments}
               {labelled && (
                 <text x={x + barW / 2} y={H - 8} textAnchor="middle">
-                  {shortDay(day.day)}
+                  {dates.calendarDay(day.day)}
                 </text>
               )}
               <rect className="hit" x={L + i * bw} y={T} width={bw} height={base - T}>
-                <title>{`${shortDay(day.day)}: ${formatTokens(day.tokens)} tokens${order
+                <title>{`${dates.calendarDay(day.day)}: ${formatTokens(day.tokens)} tokens${order
                   .filter(({ projectId }) => day.byProject[projectId])
                   .map(({ projectId, project }) => `\n${project}: ${formatTokens(day.byProject[projectId]!)}`)
                   .join('')}`}</title>
@@ -351,7 +353,7 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId
 function references(top: TopSession, projects: Project[]): string {
   const kind = projects.find((p) => p.id === top.projectId)?.forge.kind;
   const refs = [top.issue && `#${top.issue.number}`, top.mergeRequest && mergeRequestRef(kind, top.mergeRequest.number)].filter(Boolean);
-  return refs.length ? refs.join(' · ') : 'Session without issue';
+  return refs.length ? refs.join(' · ') : '—';
 }
 
 /** A token count, short: 950, 12k, 1.2M, 3.4B. */
@@ -368,10 +370,12 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-/** A duration, short: 30s, 6m 40s, 22m, 1h 12m; a dash for none. */
+/** A duration, short: <1s, 30s, 6m 40s, 22m, 1h 12m; a dash for none. */
 export function formatDuration(ms: number | undefined): string {
   if (ms === undefined) return '—';
   const seconds = Math.round(ms / 1000);
+  // Some time, too little to round to a second, isn't none.
+  if (seconds === 0 && ms > 0) return '<1s';
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return seconds % 60 ? `${minutes}m ${seconds % 60}s` : `${minutes}m`;
@@ -381,10 +385,4 @@ export function formatDuration(ms: number | undefined): string {
 
 function percent(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
-}
-
-/** `2026-11-05` as `Nov 5`. */
-function shortDay(day: string): string {
-  const [y, m, d] = day.split('-').map(Number);
-  return new Date(y!, m! - 1, d!).toLocaleDateString('en', { month: 'short', day: 'numeric' });
 }

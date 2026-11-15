@@ -7,7 +7,7 @@ import { DEFAULT_EFFORT, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentCommand,
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
 import type { AcpProfile } from './acp-adapter';
 import { agentCommandsOf } from './commands';
-import { OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
+import { NO_TOOLS, OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
 
 /**
  * Sessions run on `opencode acp`, one process each, with Loom's approval
@@ -18,8 +18,12 @@ export const OPENCODE_ACP: AcpProfile = {
   name: OPENCODE_NAME,
   command: 'opencode',
   args: ['acp'],
-  env: ({ approvals, workingCopy, tempDir }) => ({ OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: openCodePermission({ policy: approvals, workingCopy, tempDir }) }) }),
+  env: ({ approvals, workingCopy, tempDir, toolsOff }) => ({
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: toolsOff ? NO_TOOLS : openCodePermission({ policy: approvals, workingCopy, tempDir }) }),
+  }),
   ownTools: new Set(OPENCODE_TOOLS),
+  // OpenCode keeps its to-do list with a tool, and tells ACP nothing else of it.
+  planTool: 'todowrite',
 };
 const VERSION_TIMEOUT_MS = 10_000;
 // The bridge gives the probe 15 s; this leaves it room to answer.
@@ -75,19 +79,21 @@ export interface CheckoutOffer {
  * What OpenCode offers in the checkout `directory`, from a private
  * `opencode serve --stdio`: its models as `provider/model`, with their Effort
  * levels as its ACP bridge offers them (their variants, then `default`),
- * leaving out the models the user turned off; then its commands and skills,
+ * leaving out the models the user turned off, its default one marked when it
+ * says which; then its commands and skills,
  * none if it didn't list them, each skill with where it comes from as the
  * bridge tells.
  */
 export async function probeOpenCodeCheckout(call: BridgeCall, directory: string): Promise<CheckoutOffer> {
-  const { models, commands, skills } = await call<{ models?: ApiModel[]; commands?: unknown; skills?: unknown }>('opencode.probe', PROBE_REQUEST_TIMEOUT_MS, { directory });
+  const { models, defaultModel, commands, skills } = await call<{ models?: ApiModel[]; defaultModel?: { providerID?: unknown; id?: unknown }; commands?: unknown; skills?: unknown }>('opencode.probe', PROBE_REQUEST_TIMEOUT_MS, { directory });
   if (!Array.isArray(models)) throw new Error('OpenCode listed no models');
+  const defaultId = typeof defaultModel?.providerID === 'string' && typeof defaultModel.id === 'string' ? `${defaultModel.providerID}/${defaultModel.id}` : undefined;
   return {
     models: models.flatMap((model) => {
       if (typeof model?.providerID !== 'string' || typeof model.id !== 'string' || model.enabled === false) return [];
       const variants = (Array.isArray(model.variants) ? model.variants : []).flatMap((v) => (typeof v?.id === 'string' ? [v.id] : []));
       const id = `${model.providerID}/${model.id}`;
-      return [{ id, name: typeof model.name === 'string' && model.name ? model.name : id, efforts: variants.length ? [...new Set([...variants, DEFAULT_EFFORT])] : [] }];
+      return [{ id, name: typeof model.name === 'string' && model.name ? model.name : id, efforts: variants.length ? [...new Set([...variants, DEFAULT_EFFORT])] : [], ...(id === defaultId && { default: true as const }) }];
     }),
     commands: [...agentCommandsOf('command', commands), ...agentCommandsOf('skill', skills)],
   };

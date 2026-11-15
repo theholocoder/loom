@@ -9,6 +9,9 @@ export const DATABASE_FILE = 'loom.db';
 
 export type LoomDatabase = Kysely<Schema>;
 
+/** The SQL function lower-casing text as JavaScript does, any letter: `fold_case(text)`. */
+export const FOLD_CASE = 'fold_case';
+
 /** The database file failed `PRAGMA quick_check`, or isn't a database at all. Loom never repairs it. */
 export class DatabaseDamagedError extends Error {
   constructor(
@@ -48,6 +51,8 @@ export async function openDatabase(userDataDir: string, options: OpenOptions = {
     sqlite.close();
     throw error;
   }
+  // JavaScript's case folding, which SQLite's lower() and LIKE do for ASCII letters only.
+  sqlite.function(FOLD_CASE, { deterministic: true }, (text: unknown) => (typeof text === 'string' ? text.toLowerCase() : null));
   const db = new Kysely<Schema>({ dialect: new SqliteDialect({ database: sqlite }) });
   try {
     await migrate(db, all, current);

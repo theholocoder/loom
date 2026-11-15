@@ -3,6 +3,7 @@
 // worktrees.
 import { ChevronDown } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
+import { ErrorText } from './ErrorText';
 import { Popover } from './Popover';
 
 /** What main gave for a request, or why it failed; undefined while it runs. */
@@ -20,6 +21,8 @@ export interface PickerOption<T> {
 export function SearchPicker<T>({
   label,
   placeholder,
+  tooltip = label,
+  tech = true,
   icon,
   noun,
   loading,
@@ -33,6 +36,10 @@ export function SearchPicker<T>({
   label: string;
   /** What the trigger shows while nothing is selected. */
   placeholder: string;
+  /** The trigger's tooltip; its accessible name by default. */
+  tooltip?: string;
+  /** Whether the labels are names in code (branches, paths), shown as such; they are by default. */
+  tech?: boolean;
   icon?: ReactNode;
   /** What the options are, plural, for the list and its search box: `branches`. */
   noun: string;
@@ -53,6 +60,11 @@ export function SearchPicker<T>({
     setOpen(false);
     setSearch('');
   };
+  const pick = (value: T) => {
+    close();
+    trigger.current?.focus();
+    onChange(value);
+  };
   const listed = options && 'value' in options ? options.value : undefined;
   const wanted = search.trim().toLowerCase();
   const shown = (listed ?? []).filter((option) => `${option.label} ${option.detail ?? ''}`.toLowerCase().includes(wanted));
@@ -60,22 +72,35 @@ export function SearchPicker<T>({
 
   return (
     <>
-      <button ref={trigger} type="button" className="pick" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={() => {
+      <button ref={trigger} type="button" className="pick" title={tooltip} aria-label={label} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={() => {
           if (open) return close();
           setOpen(true);
           onOpen?.();
         }}
       >
         {icon}
-        <b className="tech ellipsis">{selected?.label ?? placeholder}</b>
+        <b className={tech ? 'tech ellipsis' : 'ellipsis'}>{selected?.label ?? placeholder}</b>
         <ChevronDown className="chev" aria-hidden />
       </button>
       {open && !disabled && (
         <Popover anchor={trigger} role="dialog" label={label} className="search-popover" onClose={close}>
-          <input aria-label={`Search ${noun}`} placeholder={`Search ${noun}…`} data-autofocus value={search} onChange={(event) => setSearch(event.target.value)} />
+          <input
+            aria-label={`Search ${noun}`}
+            placeholder={`Search ${noun}…`}
+            data-autofocus
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              // Enter in the search picks the first option shown, with no ↓ first.
+              event.preventDefault();
+              const first = shown[0];
+              if (first) pick(first.value);
+            }}
+          />
           {options && 'error' in options && (
             <div className="err" role="alert">
-              {options.error}
+              <ErrorText text={options.error} />
             </div>
           )}
           {!options && <div className="muted">{loading}</div>}
@@ -87,13 +112,10 @@ export function SearchPicker<T>({
                 type="button"
                 role="option"
                 aria-selected={option.key === selected?.key}
-                onClick={() => {
-                  close();
-                  trigger.current?.focus();
-                  onChange(option.value);
-                }}
+                data-enter={option === shown[0] ? '' : undefined}
+                onClick={() => pick(option.value)}
               >
-                <span className="tech ellipsis">{option.label}</span>
+                <span className={tech ? 'tech ellipsis' : 'ellipsis'}>{option.label}</span>
                 {option.detail && <span className="muted ellipsis">{option.detail}</span>}
               </button>
             ))}

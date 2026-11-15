@@ -14,3 +14,5 @@ We first designed a team-shared Server holding Projects, Project and User memory
 ## Amendment: one Loom tool (#66)
 
 Loom gives each Session's agent one tool of its own after all: `link_merge_request`, from Loom's MCP server, which the bridge binary serves when run as `loom-bridge mcp` and which Loom passes in ACP's `session/new`. It holds no knowledge and calls nothing: Loom sees the agent call it and links the Merge request it names, as a manual link does. Team knowledge still comes only from the user's own MCP servers.
+
+A second one joined it (#200): `link_issue`, which links the issue it names to the Session the same way, in place of any it had.

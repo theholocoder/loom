@@ -2,7 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
-import type { AgentCommand, AgentConfig, Answer, ApprovalPolicy, ModelPick, QuestionField, TokenCounts, ToolStatus } from '../../shared/api';
+import type { AgentCommand, AgentConfig, Answer, ApprovalPolicy, ModelPick, FileChange, PlanEntry, QuestionField, TokenCounts, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -17,6 +17,8 @@ export type AgentEvent =
   | { type: 'text-delta'; text: string }
   /** More of the agent's thinking, shown apart from its reply. */
   | { type: 'thinking-delta'; text: string }
+  /** The agent's plan for the run, whole: when it gives it, and whenever it changes. */
+  | { type: 'plan'; entries: PlanEntry[] }
   /** The agent called a tool: one of its own, or one from the user's MCP servers and plugins. */
   | ({ type: 'tool-started'; title: string } & ToolCall)
   /** What changed of a tool call; what's left out is as it was. `input` and `output` are given whole. */
@@ -58,9 +60,17 @@ export interface ToolCall {
   toolCallId: string;
   /** What sort of tool, such as read, edit or execute. */
   toolKind?: string;
+  /** The tool's own name, when the agent gives it. */
+  name?: string;
+  /** The command line, for a shell command. */
+  command?: string;
+  /** What it worked on: its files, in the working copy when they are in there, or what it searched for or fetched. */
+  subject?: string;
   status?: ToolStatus;
   input?: string;
   output?: string;
+  /** The files it changed, given whole; their paths in the working copy when they are in there. */
+  diffs?: FileChange[];
 }
 
 /** What an agent asks approval for, as it reports it. */
@@ -92,9 +102,15 @@ export interface OpenOptions {
   /** What the agent asks approval for, beyond its working copy and the temp directory. */
   approvals: ApprovalPolicy;
   /**
+   * Every tool refused, the agent's own included, rather than `approvals`:
+   * an agent that only reads what it is sent and answers (Session
+   * highlights' checks, ADR 0010).
+   */
+  toolsOff?: boolean;
+  /**
    * Loom's own MCP server, run in the Environment as `command args` over
-   * stdio: its tools (`link_merge_request`) are for Loom to see the agent
-   * call. None when the Environment can't run it.
+   * stdio: its tools (`link_merge_request`, `link_issue`) are for Loom to see
+   * the agent call. None when the Environment can't run it.
    */
   loomTools?: { command: string; args: string[] };
   /**

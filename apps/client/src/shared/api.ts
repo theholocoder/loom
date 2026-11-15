@@ -3,6 +3,11 @@
 // also the seam tests drive main through (seam A) and fake for the renderer
 // (seam B), so everything the UI can see or do goes through here.
 import { DEFAULT_APPEARANCE, type Appearance } from './appearance';
+import { DEFAULT_DATE_SETTINGS, type DateSettings } from './dates';
+import { DEFAULT_LAYOUT, type LayoutSettings, type PanelArea, type PanelDimension, type PanelKind, type PanelStack, type SessionPanels } from './panels';
+import type { ProjectColor } from './projects';
+import { DEFAULT_KEYBINDINGS, type KeybindingSettings, type Shortcut, type ShortcutName } from './shortcuts';
+import { DEFAULT_INBOX, type InboxSettings } from './window';
 
 /** What the Environment's bridge reported in its handshake. */
 export interface BridgeInfo {
@@ -77,6 +82,17 @@ export interface ModelChoice {
    * current model's are known (see AgentConfig.efforts).
    */
   efforts?: string[];
+  /**
+   * The model the agent runs when none is picked: at most one of a
+   * checkout's models (`projects.models`), when the agent says which.
+   */
+  default?: true;
+}
+
+/** The name `models` give the model `id`; none when they give it none but its id. */
+export function modelNameIn(models: readonly ModelChoice[] | undefined, id: string): string | undefined {
+  const name = models?.find((m) => m.id === id)?.name;
+  return name && name !== id ? name : undefined;
 }
 
 /** A model, `provider/model`, and an Effort level to run with; what is absent stays as it is, or is the agent's own. */
@@ -163,6 +179,14 @@ export function mergeRequestRef(kind: ForgeKind | undefined, number: number): st
   return `${kind === 'gitlab' ? '!' : '#'}${number}`;
 }
 
+/** Each Forge by its name. */
+export const FORGE_NAMES: Record<ForgeKind, string> = { github: 'GitHub', gitlab: 'GitLab' };
+
+/** A Forge by its name, as in "Open on GitHub": "the Forge" while which one is unknown. */
+export function forgeName(kind: ForgeKind | undefined): string {
+  return kind ? FORGE_NAMES[kind] : 'the Forge';
+}
+
 /** The CLI Loom reaches each Forge through, with the user's own login. */
 export const FORGE_CLI: Record<ForgeKind, 'gh' | 'glab'> = { github: 'gh', gitlab: 'glab' };
 
@@ -196,17 +220,34 @@ export interface ForgeStatus {
 
 export interface Project {
   id: number;
+  /** What the user calls it: its checkout folder's name until they rename it. */
   name: string;
+  /** Its colour, the same wherever it shows. */
+  color: ProjectColor;
+  /** What its avatar shows, set by the user; its name's first two letters while absent. */
+  avatar?: string;
+  /** The model and Effort a new Session in it starts on, until another is picked; the agent's own while absent. */
+  defaultModel?: ModelPick;
   /** What Loom's branch names start with: `<prefix>/<slug>`. */
   branchPrefix: string;
   checkout: Checkout;
   forge: ForgeStatus;
 }
 
+/** What `projects.edit` changes about a Project: what is absent stays as it is. */
+export interface ProjectEdit {
+  id: number;
+  name?: string;
+  color?: ProjectColor;
+  avatar?: string | null;
+  defaultModel?: ModelPick | null;
+}
+
 /** A Project the user removed: hidden, its Sessions archived, its history kept. */
 export interface RemovedProject {
   id: number;
   name: string;
+  color: ProjectColor;
 }
 
 /** A removed Project a checkout being added could restore, with how many Sessions it would bring back. */
@@ -273,6 +314,121 @@ export interface BabysitStatus {
   lastPollAt?: number;
   /** Set while the last poll failed: what's shown may be out of date. */
   stale: boolean;
+  /** The reviews and comments others left on it, as last seen; absent before the first poll that worked. */
+  reviews?: ReviewCount;
+}
+
+/** One comment of a review thread. */
+export interface ReviewThreadComment {
+  author: string;
+  /** Markdown. */
+  body: string;
+  /** Clock time it was written, when the Forge says. */
+  at?: number;
+  url: string;
+}
+
+/**
+ * A thread of review comments on a line of a Merge request's code, not
+ * resolved, that someone other than the user wrote in: shown as a note on its
+ * line in Changes and in the Merge request's diff, to reply to or resolve.
+ */
+export interface ReviewThread {
+  /** The Forge's own id for it, which replying and resolving name: GitHub's thread, GitLab's discussion. */
+  id: string;
+  path: string;
+  /** The line it is on, numbered as the Merge request's diff numbers its `side`; absent once the Forge no longer places it (outdated). */
+  line?: number;
+  /** `old` for a removed line, numbered in the old file. */
+  side: 'old' | 'new';
+  /** What the line read when it was commented on, when the Forge says (GitHub): a diff where it reads otherwise has moved on. */
+  code?: string;
+  /** Set when it came with a review asking for changes. */
+  changesRequested?: boolean;
+  /** Oldest first: the first one started it. */
+  comments: ReviewThreadComment[];
+  /** Whether the user may resolve it, as the Forge says. */
+  canResolve: boolean;
+}
+
+/** How many reviews and comments others left on a Merge request, for the Glance strip. */
+export interface ReviewCount {
+  /** Whole reviews, approvals among them. */
+  reviews: number;
+  /** Comments outside a review. */
+  comments: number;
+  /** Set while a reviewer's latest verdict asks for changes. */
+  changesRequested: boolean;
+}
+
+/** What a reviewer said of a Merge request as a whole. */
+export type ReviewVerdict = 'approved' | 'changes-requested' | 'commented' | 'dismissed';
+
+/** A review on a Merge request: its verdict, what it says, and its comments on the code. */
+export interface MergeRequestReview {
+  author: string;
+  verdict: ReviewVerdict;
+  /** Markdown; empty when the review says nothing but its verdict or its comments. */
+  body: string;
+  /** Clock time it was submitted, when the Forge says. */
+  at?: number;
+  url: string;
+  comments: MergeRequestComment[];
+}
+
+/** A comment on a Merge request, on a place in its code when `path` is set. */
+export interface MergeRequestComment {
+  author: string;
+  /** Markdown. */
+  body: string;
+  path?: string;
+  line?: number;
+  /** Clock time it was written, when the Forge says. */
+  at?: number;
+  url: string;
+}
+
+/**
+ * A Merge request as its Panel shows it, read from the Forge when asked:
+ * everyone's reviews and comments, the user's own among them.
+ */
+export interface MergeRequestDetails extends ForgeLink {
+  title: string;
+  state: MergeRequestState;
+  draft: boolean;
+  /** Its source branch, and the one it merges into. */
+  sourceBranch: string;
+  targetBranch: string;
+  /** The commit its source branch is at, when the Forge says: Squash and merge merges only while it still is. */
+  head?: string;
+  author: string;
+  /** Markdown, as its author wrote it; empty when there is none. */
+  description: string;
+  /** Who was asked to review it or did, its author aside: users, and on GitHub teams as `org/team`. */
+  reviewers: string[];
+  /** How many commits it has; `moreCommits` when the Forge listed only the first of them. */
+  commits: number;
+  moreCommits?: boolean;
+  /** What it changes, all commits together; `moreFiles` when the Forge listed only the first files, which these count. */
+  files: number;
+  moreFiles?: boolean;
+  added: number;
+  removed: number;
+  ci?: BabysitCi;
+  checks: BabysitCheck[];
+  /** Oldest first. */
+  reviews: MergeRequestReview[];
+  /** Those outside a review, oldest first. */
+  comments: MergeRequestComment[];
+}
+
+/** One file of a Merge request's diff, as its Forge has it: committed, with its unified diff. */
+export interface MergeRequestDiffFile extends DiffFile, FileDiff {}
+
+/** What a Merge request changes, file by file, as its Forge has it; `moreFiles` when the Forge listed only the first of them. */
+export interface MergeRequestDiff {
+  files: MergeRequestDiffFile[];
+  moreFiles?: boolean;
 }
 
 /** A comment on a place in the code. */
@@ -322,16 +478,38 @@ export interface Issue extends ForgeLink {
   body: string;
 }
 
+/** A Session's linked issue as its Panel shows it, read from the Project's Forge. */
+export interface IssueDetails extends ForgeLink {
+  title: string;
+  state: 'open' | 'closed';
+  /** Its labels' names, as the Forge orders them. */
+  labels: string[];
+  /** Who opened it: `ghost` for a deleted account. */
+  author: string;
+  /** When it was opened, as clock time; absent when the Forge gives no time. */
+  at?: number;
+  /** How many comments it has, not counting its body. */
+  comments: number;
+  /** Its description, as the Forge stores it (Markdown). */
+  body: string;
+}
+
 /**
  * What a worktree Session can start from, as `projects.branches` lists it
- * after fetching `origin`: a base for a new branch, an existing worktree to
- * work in, or an existing branch to check out in a new worktree.
+ * after fetching `origin` (or failing to): a base for a new branch, an
+ * existing worktree to work in, or an existing branch to check out in a new
+ * worktree.
  */
 export interface Branches {
-  /** `origin`'s default branch, as `origin` itself says, without `origin/`. */
-  defaultBranch: string;
-  /** `origin`'s branches, without `origin/`, by name: what a new branch can start from. */
-  remote: string[];
+  /**
+   * What a new branch starts from unless another base is picked: `origin`'s
+   * default branch, as `origin` says or else as the checkout last heard; or,
+   * with no `origin` branch here, the local default branch. Absent in a
+   * repository with no commit.
+   */
+  defaultBase?: ExistingBranch;
+  /** What a new branch can start from: `origin`'s branches, then the local ones, each by name. */
+  bases: ExistingBranch[];
   /**
    * The branches git can still check out in a new worktree, local ones first,
    * each by name: local branches not checked out in the checkout or any
@@ -345,6 +523,14 @@ export interface Branches {
    * missing and locked ones; those Sessions work in too, to share.
    */
   worktrees: ExistingWorktree[];
+  /** The branch the Project's checkout has checked out, where a checkout Session would work; absent on a detached HEAD. */
+  checkoutBranch?: string;
+  /**
+   * Why `origin` couldn't be fetched, when it couldn't (offline, or gone):
+   * its branches are then as the checkout last fetched them. Absent once
+   * fetched, and for a checkout with no `origin`.
+   */
+  fetchError?: string;
 }
 
 /** A git worktree of the Project's checkout that already exists. */
@@ -382,12 +568,15 @@ export interface UnsavedWork {
 }
 
 /**
- * Which Session to archive or delete, and whether to discard the unsaved
- * work of its worktree, which otherwise holds it back.
+ * Which Session to archive or delete, and what to do with the unsaved work
+ * of its worktree, which otherwise holds it back: `discard` it, or keep it,
+ * `commitWork`, as a WIP commit on its local branch (its unpushed commits
+ * stay there too), which reopening brings back.
  */
 export interface CloseSessionParams {
   id: number;
   discard?: boolean;
+  commitWork?: boolean;
 }
 
 /** What `sessions.archive` did: archived, or held back by unsaved work. */
@@ -395,6 +584,15 @@ export type ArchiveResult = { archived: true } | { archived: false; unsavedWork:
 
 /** What `sessions.delete` did: deleted, or held back by unsaved work. */
 export type DeleteResult = { deleted: true } | { deleted: false; unsavedWork: UnsavedWork };
+
+/** A Session whose conversation holds some of the words searched for (see `sessions.searchConversations`). */
+export interface ConversationMatch {
+  id: number;
+  /** The words searched for that it holds, as given. */
+  words: string[];
+  /** The message holding the most of them, cut down to around the first found, on one line. */
+  excerpt: string;
+}
 
 export interface Session {
   id: number;
@@ -435,7 +633,7 @@ export interface Session {
   worktreeMissing?: boolean;
   /**
    * What its branch changed against the merge-base with its start base, for
-   * Session info's diff stat: worked out after each turn and when the Session is
+   * the Glance strip's diff stat: worked out after each turn and when the Session is
    * opened, kept in memory only. Absent until known.
    */
   diffStat?: DiffStat;
@@ -467,8 +665,13 @@ export interface Session {
   agentCommands?: AgentCommand[];
   /** How full the agent's context was after its last run that reported it. */
   context?: ContextUsage;
-  /** What the Session has used so far, from its usage buckets and its runs; updated as turns end and runs start and stop. */
+  /** What the Session has used so far, from its usage buckets and its runs; updated as turns end and runs start and stop. Session highlights' checks aren't in it. */
   usage?: SessionUsage;
+  /**
+   * Its Highlights, counted: present while the Highlights Panel means
+   * something for it, Session highlights being on or it having some.
+   */
+  highlights?: HighlightCounts;
   /** Why the Session is `waiting`. */
   waitingReason?: WaitingReason;
   /** What went wrong, when waiting on an `error`. */
@@ -490,6 +693,115 @@ export interface Session {
   updatedAt: number;
 }
 
+/** How many Highlights a Session has, open or resolved, and how many came since the user last looked at its Highlights Panel. */
+export interface HighlightCounts {
+  count: number;
+  unseen: number;
+}
+
+/** The kinds of Highlight, in the order the Highlights Panel groups them. */
+export const HIGHLIGHT_KINDS = ['for-you', 'not-done', 'risk', 'assumption', 'decision'] as const;
+export type HighlightKind = (typeof HIGHLIGHT_KINDS)[number];
+
+/** Each kind of Highlight, as the user reads it. */
+export const HIGHLIGHT_LABELS: Record<HighlightKind, string> = { 'for-you': 'For you', 'not-done': 'Not done', risk: 'Risk', assumption: 'Assumption', decision: 'Decision' };
+
+export function isHighlightKind(value: unknown): value is HighlightKind {
+  return typeof value === 'string' && (HIGHLIGHT_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Something the user should know about a Session's work, which Session
+ * highlights' model noted after a turn: never rewritten, only resolved (by
+ * the model, giving why, or by the user) and reopened.
+ */
+export interface Highlight {
+  id: number;
+  kind: HighlightKind;
+  /** One or two sentences, as the model wrote them. */
+  text: string;
+  /** The transcript item the turn it came from starts at: the user's message. */
+  itemId: number;
+  /** Clock time it was noted. */
+  createdAt: number;
+  /** Set once resolved; gone when the user reopens it. */
+  resolved?: HighlightResolution;
+}
+
+export interface HighlightResolution {
+  /** The model, giving `reason`, or the user. */
+  by: 'model' | 'user';
+  reason?: string;
+  /** The transcript item the turn that resolved it starts at, when the model did. */
+  itemId?: number;
+  /** Clock time it was resolved. */
+  at: number;
+}
+
+/** A Session's Highlights, oldest first, and how checking them goes. */
+export interface SessionHighlights {
+  highlights: Highlight[];
+  /** The Highlights with a greater id came since the user last looked at the Panel. */
+  seenThrough: number;
+  /** While the Session's check waits for others to end: only so many run at a time, across Sessions. */
+  pending: boolean;
+  /** While a check of the turns since the last one runs. */
+  checking: boolean;
+  /** Why the last check failed; gone once one succeeds. Its turns are checked again with the next. */
+  error?: string;
+}
+
+/** The Session highlights setting: whether a model checks each turn for Highlights, and which. */
+export interface HighlightsSettings {
+  on: boolean;
+  /** `provider/model`, as the agent names it: required while on. */
+  model?: string;
+  /** Its Effort level; the model's default while absent. */
+  effort?: string;
+}
+
+export const DEFAULT_HIGHLIGHTS: HighlightsSettings = { on: false };
+
+/**
+ * The kinds of news a desktop notification tells when a Session goes
+ * Waiting, each turned on or off in Settings: its run finished (or failed),
+ * its agent asked a question or for approval, Babysit brought new feedback on
+ * its Merge request, or it got stuck. A Session stopped by the user, or
+ * interrupted by Loom quitting, notifies nothing.
+ */
+export const NOTIFICATION_KINDS = ['finished', 'question', 'approval', 'feedback', 'stuck'] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+export function isNotificationKind(value: unknown): value is NotificationKind {
+  return typeof value === 'string' && (NOTIFICATION_KINDS as readonly string[]).includes(value);
+}
+
+/** Whether each kind of news notifies. */
+export type NotificationSettings = Record<NotificationKind, boolean>;
+
+/** Notifications until the user turns them on: none. */
+export const DEFAULT_NOTIFICATIONS: NotificationSettings = { finished: false, question: false, approval: false, feedback: false, stuck: false };
+
+/** The kind of notification a Session gone Waiting for `reason` gives, if any. */
+export function notificationKindOf(reason: WaitingReason): NotificationKind | undefined {
+  switch (reason) {
+    case 'finished':
+    case 'error':
+      return 'finished';
+    case 'question':
+    case 'approval':
+    case 'feedback':
+    case 'stuck':
+      return reason;
+    // Its Merge request merged or closed with unsaved work in its worktree: Babysit's news.
+    case 'unsaved-work':
+      return 'feedback';
+    case 'stopped':
+    case 'interrupted':
+      return undefined;
+  }
+}
+
 /** A Session's usage so far. */
 export interface SessionUsage {
   /** Tokens of every kind, summed. */
@@ -508,6 +820,11 @@ export interface QueuedMessage {
   text: string;
   /** What is attached to it, stored already; absent when nothing is. */
   attachments?: Attachment[];
+}
+
+/** Whether a queued message, as edited, would leave the agent nothing: no text and nothing attached. */
+export function hasNothingToSend({ text, attachments }: Pick<QueuedMessage, 'text' | 'attachments'>): boolean {
+  return !text.trim() && !attachments?.length;
 }
 
 /** A file or image the user attaches to a message, as the renderer read it. */
@@ -598,6 +915,23 @@ export interface DiffStat {
 /** How a file in a Session's diff changed: committed on its branch, changed since its last commit, or new to git. */
 export type DiffFileStatus = 'committed' | 'modified' | 'untracked';
 
+/** A file the diff deletes, or renames (from its `oldPath`). */
+export type DiffFileChange = 'deleted' | 'renamed';
+
+/**
+ * Which of a Session's changes its diff shows: all of them (its working tree
+ * against its start base), those committed on its branch (HEAD against its
+ * start base), or those not committed yet (its working tree against HEAD,
+ * untracked files with them).
+ */
+export type DiffScope = 'all' | 'committed' | 'uncommitted';
+
+/** Every DiffScope, in the order the Changes Panel offers them. */
+export const DIFF_SCOPES: readonly DiffScope[] = ['all', 'committed', 'uncommitted'];
+
+/** How many files each DiffScope holds; one with no start base to compare with has none. */
+export type DiffCounts = Partial<Record<DiffScope, number>>;
+
 /** One file of a Session's diff. */
 export interface DiffFile {
   /** Its path in the working copy, with `/`. */
@@ -605,6 +939,8 @@ export interface DiffFile {
   /** Where it was before a rename. */
   oldPath?: string;
   status: DiffFileStatus;
+  /** Set when the diff deletes or renames it; none when it adds it or changes its content. */
+  change?: DiffFileChange;
   added: number;
   removed: number;
   binary: boolean;
@@ -613,24 +949,27 @@ export interface DiffFile {
 }
 
 /**
- * A Session's diff: its working tree against the merge-base of HEAD and its
- * start base (an `origin/…` branch as the local ref has it; see
- * DiffBaseSource for which), or against
- * HEAD for uncommitted changes only. An archived worktree Session's is its
- * branch's commits, read-only.
+ * A Session's diff, of one DiffScope: against the merge-base of HEAD and its
+ * start base (an `origin/…` branch as the local ref has it, else the local
+ * default branch; see DiffBaseSource for which), or against HEAD for
+ * uncommitted changes only. An archived worktree Session's is its branch's
+ * commits, read-only. `counts` is how many files each scope holds, for a
+ * Session that isn't archived.
  */
 export type DiffSummary =
   | { available: false; reason: string }
-  | { available: true; readOnly: boolean; base: string; baseSource?: DiffBaseSource; files: DiffFile[] };
+  | { available: true; readOnly: boolean; base: string; baseSource?: DiffBaseSource; files: DiffFile[]; counts?: DiffCounts };
 
 /**
  * Where a diff's start base came from (none for an uncommitted-only diff, against `HEAD`):
  * - `recorded`: Loom recorded it when it made the branch, or the user set it
  *   (`sessions.setDiffBase`), in the repository's local git config;
  * - `created-from`: the branch's reflog says it was created from it;
- * - `default`: neither says, so it is `origin`'s default branch, a guess.
+ * - `default`: neither says, so it is `origin`'s default branch, a guess;
+ * - `local`: there's no `origin` branch to compare with, so it is the local
+ *   default branch, which may be behind `origin`'s.
  */
-export type DiffBaseSource = 'recorded' | 'created-from' | 'default';
+export type DiffBaseSource = 'recorded' | 'created-from' | 'default' | 'local';
 
 /** One file's unified diff text, cut short past a size limit. */
 export interface FileDiff {
@@ -639,7 +978,7 @@ export interface FileDiff {
 }
 
 /** Loom's own settings, the same for every Project. */
-export interface Settings extends Appearance {
+export interface Settings extends Appearance, DateSettings {
   /**
    * Where new worktrees go, as `<root>/<project>/<session>`, the Session's
    * folder named after its branch without the prefix. A leading `~` is the
@@ -675,15 +1014,27 @@ export interface Settings extends Appearance {
   autoPromptDefault: boolean;
   /** The Approval mode the New Session composer starts on. */
   approvalModeDefault: ApprovalMode;
-  /** The open Session's right sidebar, as the user left it: the same for every Session. */
-  sidebar: SidebarSettings;
+  /** The Layout: the area and stack each Panel kind sits in and its size, as the user left them, the same for every Session. */
+  layout: LayoutSettings;
+  /** The Inbox's width, and whether it is shown or collapsed to a rail: the same for every Session. */
+  inbox: InboxSettings;
   /** How the Changes view is laid out, as the user left it: the same for every Session. */
   diffView: DiffViewSettings;
+  /** Session highlights: off until the user turns it on with a model. */
+  highlights: HighlightsSettings;
+  /**
+   * Which kinds of news a desktop notification tells, when a Session goes
+   * Waiting; none while the window has the focus on that Session. All off
+   * until the user turns them on.
+   */
+  notifications: NotificationSettings;
+  /** The shortcuts the user remapped, and whether the single-key ones run: Loom's own, all on, until changed. */
+  keybindings: KeybindingSettings;
 }
 
 /** The Changes view's layout, kept in settings. */
 export interface DiffViewSettings {
-  /** Whether the list of changed files shows beside the diffs. */
+  /** Whether the tree of changed files is open, where it stacks above the diffs in a narrow Panel; a wide one always shows it beside them. */
   fileList: boolean;
   /** Whether long lines wrap, rather than scroll sideways. */
   wrap: boolean;
@@ -691,41 +1042,8 @@ export interface DiffViewSettings {
   sideBySide: boolean;
 }
 
-/** The Changes view until the user changes it: unified, long lines scrolling, no file list. */
-export const DEFAULT_DIFF_VIEW: DiffViewSettings = { fileList: false, wrap: false, sideBySide: false };
-
-/** The right sidebar's views: Session info, or the Changes (the diff). */
-export const SIDEBAR_VIEWS = ['info', 'changes'] as const;
-/** One of the right sidebar's views. */
-export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
-
-/** How narrow the right sidebar can be dragged, in pixels. */
-export const SIDEBAR_MIN_WIDTH = 280;
-/** How wide the right sidebar can be dragged, in pixels; a narrower window caps it lower still (see the renderer's Sidebar). */
-export const SIDEBAR_MAX_WIDTH = 1200;
-
-/** The right sidebar's state, kept in settings. */
-export interface SidebarSettings {
-  /** Whether it shows, while a Session is selected. */
-  open: boolean;
-  /** The view it shows, or last showed. */
-  view: SidebarView;
-  /** Its width in pixels, one for all views, within SIDEBAR_MIN_WIDTH and SIDEBAR_MAX_WIDTH. */
-  width: number;
-}
-
-/** The sidebar until the user changes it: closed, on Session info. */
-export const DEFAULT_SIDEBAR: SidebarSettings = { open: false, view: 'info', width: 420 };
-
-/** Whether `value` names a sidebar view Loom has. */
-export function isSidebarView(value: unknown): value is SidebarView {
-  return typeof value === 'string' && (SIDEBAR_VIEWS as readonly string[]).includes(value);
-}
-
-/** A sidebar width, rounded and kept within the minimum and maximum. */
-export function clampSidebarWidth(width: number): number {
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
-}
+/** The Changes view until the user changes it: unified, long lines scrolling, the file tree open. */
+export const DEFAULT_DIFF_VIEW: DiffViewSettings = { fileList: true, wrap: false, sideBySide: false };
 
 /**
  * The kinds of action an Approval request is about (see APPROVAL_CATEGORIES
@@ -803,12 +1121,31 @@ export const DEFAULT_SETTINGS: Settings = {
   stuckAfterMinutes: 15,
   autoPromptDefault: false,
   approvalModeDefault: 'supervised',
-  sidebar: DEFAULT_SIDEBAR,
+  layout: DEFAULT_LAYOUT,
+  inbox: DEFAULT_INBOX,
   diffView: DEFAULT_DIFF_VIEW,
+  highlights: DEFAULT_HIGHLIGHTS,
+  notifications: DEFAULT_NOTIFICATIONS,
+  keybindings: DEFAULT_KEYBINDINGS,
   ...DEFAULT_APPEARANCE,
+  ...DEFAULT_DATE_SETTINGS,
 };
 
 export type ToolStatus = 'running' | 'completed' | 'failed';
+
+/**
+ * One file a tool call changed, as the agent reports it: its path, in the
+ * working copy when it is in there, its text before (none for a new file) and
+ * after; or, too large to keep (see TOOL_OUTPUT_CAP), only its path.
+ */
+export type ToolDiff = FileChange | { path: string; tooLarge: true };
+
+/** A file's text before (none for a new file) and after a change. */
+export interface FileChange {
+  path: string;
+  oldText?: string;
+  newText: string;
+}
 
 /** One choice of a `select` or `multiselect` question field. */
 export interface QuestionOption {
@@ -876,17 +1213,40 @@ export type ApprovalState = 'asked' | 'approved' | 'approved-session' | 'denied'
 /** The user's decision on an Approval request. */
 export type ApprovalDecision = 'once' | 'session' | 'deny';
 
+/**
+ * How a tool call reads on one line: its tool (its name, or else its kind)
+ * and what it worked on (its command, its subject, or a title saying more
+ * than the tool's name), if anything.
+ */
+export function toolLine(call: Pick<Extract<TranscriptItem, { kind: 'tool' }>, 'name' | 'toolKind' | 'command' | 'subject' | 'title'>): { tool: string; what?: string } {
+  const tool = call.name ?? call.toolKind ?? 'tool';
+  const what = call.command ?? call.subject ?? (call.title === tool ? undefined : call.title);
+  return what === undefined ? { tool } : { tool, what };
+}
+
+/** Where one step of the agent's plan is; `cancelled` when it gave the step up. */
+export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+/** One step of the agent's plan: its to-do list for the turn. */
+export interface PlanEntry {
+  content: string;
+  status: PlanStatus;
+}
+
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
   /** What the user sent, with what they attached to it, if anything. */
   | { kind: 'user'; id: number; text: string; attachments?: Attachment[] }
-  /** `streaming` while the agent is still adding to it. */
-  | { kind: 'agent'; id: number; text: string; streaming: boolean }
-  /** The agent's thinking, apart from its reply; `streaming` as for `agent`. */
-  | { kind: 'thinking'; id: number; text: string; streaming: boolean }
+  /** `streaming` while the agent is still adding to it; `model` the one that said it, as `provider/model`, when Loom knows. */
+  | { kind: 'agent'; id: number; text: string; streaming: boolean; model?: string }
+  /** The agent's plan for its run, as it last gave it: one per run, kept up to date. */
+  | { kind: 'plan'; id: number; entries: PlanEntry[] }
+  /** The agent's thinking, apart from its reply; `streaming` and `model` as for `agent`. */
+  | { kind: 'thinking'; id: number; text: string; streaming: boolean; model?: string }
   /**
    * One tool call, kept up to date. Its `input` and `output` are capped at
-   * 256 KB each, keeping head and tail around a marker; `truncated` if cut.
+   * 256 KB each, keeping head and tail around a marker, and a diff over 256 KB
+   * is left out; `truncated` if cut.
    * A call still running when its run ended is `failed`.
    */
   | {
@@ -895,9 +1255,17 @@ export type TranscriptItem =
       toolCallId: string;
       title: string;
       toolKind?: string;
+      /** The tool's own name, when the agent gives it: `bash`, `read`, `edit`. */
+      name?: string;
+      /** The command line, for a shell command. */
+      command?: string;
+      /** What it worked on, when the agent says: its files, or what it searched for or fetched. */
+      subject?: string;
       status: ToolStatus;
       input?: string;
       output?: string;
+      /** The files it changed, for an edit. */
+      diffs?: ToolDiff[];
       truncated?: boolean;
     }
   /**
@@ -927,8 +1295,12 @@ export type TranscriptItem =
       state: ApprovalState;
       message?: string;
     }
-  /** A run that failed, with the agent's message. */
-  | { kind: 'error'; id: number; message: string }
+  /**
+   * A run that failed, with the agent's message; `betweenRuns` when it
+   * came after the run had ended (its Environment restarted under a
+   * finished Session), leaving no run to go on with.
+   */
+  | { kind: 'error'; id: number; message: string; betweenRuns?: true }
   /** The run was interrupted: by the user, with Stop or to send a queued message now, or by Loom quitting or crashing. */
   | { kind: 'interruption'; id: number; by: 'stop' | 'send-now' | 'quit' }
   /**
@@ -941,6 +1313,8 @@ export type TranscriptItem =
   | { kind: 'merge-request'; id: number; number: number; url: string }
   /** The agent's Link merge request tool named a Merge request Loom couldn't link, as `mergeRequest` gave it, and why. */
   | { kind: 'merge-request-refused'; id: number; mergeRequest: string; reason: string }
+  /** The agent's Link issue tool named an issue Loom couldn't link, as `issue` gave it, and why. */
+  | { kind: 'issue-refused'; id: number; issue: string; reason: string }
   /**
    * Babysit found feedback on the Merge request; `state` is `sent` once Send
    * to agent or auto-prompt has passed it on. `paused` when auto-prompt would
@@ -986,14 +1360,16 @@ export interface TopSession {
   sessionId: number;
   title: string;
   projectId: number;
-  /** Its Project's name, as it was when its usage was last recorded. */
+  /** Its Project's name: the Project's own, or, without a Project row, as it was when its usage was last recorded. */
   project: string;
   /** Whether the user has removed its Project. */
   projectRemoved?: true;
   issue?: ForgeLink;
   mergeRequest?: ForgeLink;
-  /** The model it used the most tokens with in the range. */
+  /** The model it used the most tokens with in the range, `provider/model`. */
   model: string;
+  /** Its name, as the agent last gave it; absent when it never did. */
+  modelName?: string;
   tokens: number;
   /** How long it was Working in the range, in ms. */
   workingMs: number;
@@ -1020,9 +1396,10 @@ export interface UsageDashboard {
   medianRunMs?: number;
   /** The median wait for the user (on a question or Approval request, or finished and unanswered, while Loom ran), in ms; absent with none. */
   medianWaitMs?: number;
-  /** By tokens, most first; `project` is its name as its usage was last recorded. */
-  perProject: Array<{ projectId: number; project: string; tokens: number; removed?: true }>;
-  perModel: Array<{ model: string; tokens: number }>;
+  /** By tokens, most first; `project` is its name as TopSession's is, `color` its colour (removed or not). */
+  perProject: Array<{ projectId: number; project: string; color: ProjectColor; tokens: number; removed?: true }>;
+  /** By tokens, most first: `model` as `provider/model`, `name` as the agent last gave it (absent when it never did). */
+  perModel: Array<{ model: string; name?: string; tokens: number }>;
   mix: TokenCounts;
   /** Cache reads out of all prompt tokens (input, cache read and cache write), 0 to 1; absent with none. */
   cacheHitRate?: number;
@@ -1120,16 +1497,28 @@ export interface Commands {
    */
   'projects.setBranchPrefix': { params: { id: number; branchPrefix: string }; result: Project };
   /**
+   * Changes what is given of the Project's name, colour, avatar and default
+   * model; `null` clears the avatar (back to the initials) or the default
+   * model (back to the agent's own). Rejects an empty or overlong name, an
+   * avatar of more than two characters or with a space, an unknown colour,
+   * and an Effort level without a model.
+   */
+  'projects.edit': { params: ProjectEdit; result: Project };
+  /**
    * The open issues on the Project's Forge, any of them, not only the user's,
    * matching `search` if given, as many as the Forge's CLI lists by default.
-   * Rejects when the Project's Forge is off.
+   * A `search` naming an issue by its number (`12`, `#12`) puts that issue
+   * first, whatever its state; one that is an issue's URL gives only that
+   * issue. Rejects when the Project's Forge is off, or a URL that isn't one
+   * of the repository's issues.
    */
   'projects.issues': { params: { id: number; search?: string }; result: Issue[] };
   /**
-   * Fetches the Project's `origin`, then lists what a worktree Session can
-   * start from (see Branches): `origin`'s branches to branch from, the
-   * branches git can still check out, and the worktrees a Session can work
-   * in. Rejects if `origin` can't be fetched.
+   * Fetches the Project's `origin`, if it has one, then lists what a
+   * worktree Session can start from (see Branches): the branches to branch
+   * from, the branches git can still check out, and the worktrees a Session
+   * can work in. When `origin` can't be fetched, they are what the checkout
+   * already has, and `fetchError` says why.
    */
   'projects.branches': { params: { id: number }; result: Branches };
   /** Checks every Project's Forge again, and resolves once done. */
@@ -1138,7 +1527,8 @@ export interface Commands {
    * The models the agent offers in the Project's checkout, for starting a
    * Session: asked of a private agent probe (never `opencode models`), once
    * per checkout until the agent is checked again (`environments.detect`).
-   * Models the user turned off are left out.
+   * Models the user turned off are left out; the one the agent runs without
+   * one picked is marked `default`, when it says which.
    */
   'projects.models': { params: { id: number }; result: ModelChoice[] };
   /**
@@ -1185,27 +1575,68 @@ export interface Commands {
    * at once; going to Ask, only for agents started after.
    */
   'settings.setApproval': { params: { category: ApprovalCategory; setting: ApprovalSetting }; result: Settings };
+  /** Turns desktop notifications of one kind of news on or off. Rejects an unknown kind. */
+  'settings.setNotification': { params: { kind: NotificationKind; on: boolean }; result: Settings };
+  /**
+   * Sets an action's shortcut: to `shortcut`, to none for null, or back to
+   * Loom's own for 'default'. Any other action that had that shortcut is left
+   * with none. Rejects an action Settings can't remap, and a shortcut Loom
+   * can't run (Escape, Tab, a key without Ctrl that types more than a
+   * character, Ctrl 1…9, the Ctrl keys of text fields).
+   */
+  'settings.setKeybinding': { params: { name: ShortcutName; shortcut: Shortcut | null | 'default' }; result: Settings };
+  /** Turns the shortcuts without Ctrl on or off: off, `j k r d u e`, and any shortcut remapped to a key without Ctrl, run nothing. */
+  'settings.setSingleKeyShortcuts': { params: { on: boolean }; result: Settings };
+  /** Puts every shortcut back to Loom's own, the single-key ones on. */
+  'settings.resetKeybindings': { params: void; result: Settings };
   /** Sets the theme or fonts given. Rejects one not in Loom's lists. */
   'settings.setAppearance': { params: Partial<Appearance>; result: Settings };
-  /** Sets what is given of the right sidebar's state; a width is kept within its minimum and maximum. Rejects a view Loom has not. */
-  'settings.setSidebar': { params: Partial<SidebarSettings>; result: Settings };
+  /** Sets the regional format dates and times follow, or their clock, or both. Rejects one not in Loom's lists, setting neither. */
+  'settings.setDateFormat': { params: Partial<DateSettings>; result: Settings };
+  /** The system's regional format, as a locale such as `fr-FR`: the one dates and times follow until Settings picks another. */
+  'settings.systemLocale': { params: void; result: string };
+  /** Sets the width (in the Side area) or height (in the Dock) of a Panel kind in the Layout, kept within its minimum and maximum. */
+  'settings.setPanelSize': { params: { kind: PanelKind; dimension: PanelDimension; size: number }; result: Settings };
+  /** Sets the area a Panel kind sits in, in the Layout, and the stack of it: its first, unless `stack` says its second. Rejects a kind, an area or a stack Loom has not. */
+  'settings.setPanelPlace': { params: { kind: PanelKind; area: PanelArea; stack?: PanelStack }; result: Settings };
+  /** Sets the Inbox's width (kept within its least and most), whether it is shown, or both. */
+  'settings.setInbox': { params: Partial<InboxSettings>; result: Settings };
   /** Sets the Changes view's layout, all of it. Rejects anything but true or false. */
   'settings.setDiffView': { params: DiffViewSettings; result: Settings };
+  /**
+   * Sets Session highlights, all of it: on, Sessions are checked for
+   * Highlights from their next turn, with `model` (required while on) and
+   * `effort`. Off, no Session is checked, and its Highlights stay.
+   */
+  'settings.setHighlights': { params: HighlightsSettings; result: Settings };
+  /**
+   * Tells main which Session the window shows, null for none (another view,
+   * or a Page over it): while the window has the focus, that Session's news
+   * notifies nothing, as the user sees it come.
+   */
+  'window.showing': { params: { sessionId: number | null }; result: void };
   'sessions.list': { params: void; result: Session[] };
+  /**
+   * The Sessions whose conversations hold any of `words`, in what the user
+   * and the agent said: case aside, as plain text. Each says the words it
+   * holds and an excerpt of the first message holding the most of them.
+   */
+  'sessions.searchConversations': { params: { words: string[] }; result: ConversationMatch[] };
   /**
    * Starts a Session on a Project and sends it its first prompt. Resolves with
    * the new Session, Working, once its record exists; the run goes on after.
    *
-   * A `worktree` Session gets its own git worktree: Loom fetches `origin` and
-   * branches from `origin/<default branch>` as `branch` (by default
+   * A `worktree` Session gets its own git worktree: Loom fetches `origin`, if
+   * it can (using the branches the checkout already has otherwise), and
+   * branches from the default base (see Branches) as `branch` (by default
    * `<prefix>/<slug of the prompt>`, see suggestBranch), adding `-2`, `-3`, …
    * if that is taken, in a new folder under the worktree root. Files the
    * checkout's `.worktreeinclude` lists that git ignores are copied in. It
    * rejects if any of that fails. A `checkout` Session stays on whatever
    * branch the Project's checkout has.
    *
-   * `base` names another `origin` branch to branch from instead, without
-   * `origin/`; it rejects if `origin` has no such branch.
+   * `base` names another branch to branch from instead, on `origin` or
+   * local; it rejects if the checkout has no such branch.
    *
    * A `worktree` Session given an `existing` working copy names no new
    * branch (`branch` and `base` are not allowed):
@@ -1238,7 +1669,7 @@ export interface Commands {
       projectId: number;
       workingCopy: WorkingCopyKind;
       branch?: string;
-      base?: string;
+      base?: ExistingBranch;
       existing?: ExistingWorkingCopy;
       issue?: Issue;
       prompt: string;
@@ -1278,6 +1709,12 @@ export interface Commands {
   /** Drops a message from the Session's queue. */
   'sessions.removeQueued': { params: { id: number; queuedId: number }; result: void };
   /**
+   * Changes the text of a message in the Session's queue, which keeps its
+   * place and its attachments. Rejects once it has left the queue, and text
+   * that would leave it nothing to send.
+   */
+  'sessions.editQueued': { params: { id: number; queuedId: number; text: string }; result: void };
+  /**
    * Sends a queued message now: a run going is interrupted first, which the
    * transcript shows; the rest of the queue stays.
    */
@@ -1302,20 +1739,40 @@ export interface Commands {
    * Session's checkout is left as it is. A worktree Session's worktree is
    * removed, keeping its local branch and never touching the remote; if the
    * worktree has uncommitted changes or commits on no remote branch, it
-   * resolves with that unsaved work and archives nothing, unless `discard`.
+   * resolves with that unsaved work and archives nothing, unless `discard`
+   * or `commitWork`: the latter commits its uncommitted changes, untracked
+   * files included, as "WIP: <title>" on its branch first, skipping hooks,
+   * and rejects, archiving nothing, when its HEAD is on no branch.
    * A worktree another Session that isn't archived works in is left to it,
    * as a checkout is.
-   * A Session whose worktree is missing archives as it is.
+   * A Session whose worktree is missing archives as it is. Its queue is kept
+   * for when it reopens.
    */
   'sessions.archive': { params: CloseSessionParams; result: ArchiveResult };
   /**
+   * Undoes an archive: the Session is reopened as a message to it would
+   * reopen it (a worktree Session's worktree made again on its kept branch),
+   * but none is sent, so it is Waiting again for the reason it was before,
+   * or Stopped if it was archived mid-run or while it waited on an answer.
+   * Rejects, leaving it archived, when it can't be reopened.
+   */
+  'sessions.unarchive': { params: { id: number }; result: void };
+  /**
    * Deletes a Session for good, whatever its status: its agent is stopped
    * and its worktree removed as `sessions.archive` would (its local branch
-   * kept, held back by unsaved work unless `discard`), then its record, its
-   * conversation and its attachments are gone. Its usage still counts on the
-   * dashboard. Rejects while the Session is being archived or reopened.
+   * kept, held back by unsaved work unless `discard` or `commitWork`), then
+   * its record, its conversation and its attachments are gone. Its usage
+   * still counts on the dashboard. Rejects while the Session is being
+   * archived or reopened.
    */
   'sessions.delete': { params: CloseSessionParams; result: DeleteResult };
+  /**
+   * What archiving or deleting the Session would ask about: its worktree's
+   * unsaved work, or null with none, as for a checkout Session, one whose
+   * worktree another Session works in, or one whose worktree is gone.
+   * Touches nothing; the archive or deletion looks again.
+   */
+  'sessions.unsavedWork': { params: { id: number }; result: UnsavedWork | null };
   /**
    * Asks a Waiting Session's agent to open its branch's Merge request, or
    * update it, with a canned prompt; Loom never creates one itself. Rejects
@@ -1334,10 +1791,38 @@ export interface Commands {
    */
   'sessions.linkMergeRequest': { params: { id: number; mergeRequest: string }; result: void };
   /**
+   * The Session's Merge request as its Forge has it now, for its Panel: its
+   * state, branches, commits and changes, its checks, and its reviews and
+   * comments. Rejects with no Merge request linked, or the Project's Forge
+   * off or out of reach.
+   */
+  'sessions.mergeRequest': { params: { id: number }; result: MergeRequestDetails };
+  /** The Session's Merge request's diff as its Forge has it now, for its Panel's Diff tab: rejects as `sessions.mergeRequest` does. */
+  'sessions.mergeRequestDiff': { params: { id: number }; result: MergeRequestDiff };
+  /**
+   * Squashes and merges the Session's Merge request on its Forge, as the user
+   * confirmed in its Panel: one commit titled `title`, merged only while its
+   * source branch is still at `head`. The user's own confirmation stands for
+   * an Approval request. Resolves to its state just after: still open when
+   * the Forge merges it later (a merge queue, or once its pipeline passes).
+   * Rejects with what the Forge said when it won't merge it, and as
+   * `sessions.mergeRequest` does.
+   */
+  'sessions.squashAndMerge': { params: { id: number; title: string; head: string }; result: { state?: MergeRequestState } };
+  /**
    * Sends the agent the feedback on card `itemId`, as one message, queued if
    * the Session is Working. Rejects when the card has been sent already.
    */
   'sessions.sendFeedback': { params: { id: number; itemId: number }; result: void };
+  /**
+   * Replies `body` (Markdown) to review thread `thread` of the Session's
+   * Merge request, on its Forge, as the user asked in a note on the diff;
+   * Babysit then reads the Merge request again. Rejects an archived Session,
+   * an empty reply, and as `sessions.mergeRequest` does.
+   */
+  'sessions.replyToReviewThread': { params: { id: number; thread: string; body: string }; result: void };
+  /** Resolves review thread `thread` of the Session's Merge request on its Forge, then has Babysit read it again; rejects as `sessions.replyToReviewThread` does. */
+  'sessions.resolveReviewThread': { params: { id: number; thread: string }; result: void };
   /** Starts or stops Babysit watching the Session's Merge request; started again, it reports what came meanwhile. Rejects an archived Session. */
   'sessions.setBabysitting': { params: { id: number; on: boolean }; result: void };
   /** Turns auto-prompt on or off for the Session; rejects an archived Session or one whose worktree is gone. */
@@ -1350,11 +1835,18 @@ export interface Commands {
    */
   'sessions.openInEditor': { params: { id: number; file?: string }; result: void };
   /**
-   * Works out the Session's diff (and Session info's diff stat) again, in its
+   * Works out the Session's diff (and the Glance strip's diff stat) again, in its
    * Environment. Never fetches. Not available for an archived checkout
    * Session, or an archived worktree Session whose branch is gone.
    */
-  'sessions.diff': { params: { id: number; uncommittedOnly?: boolean }; result: DiffSummary };
+  'sessions.diff': { params: { id: number; scope?: DiffScope }; result: DiffSummary };
+  /**
+   * What the Session's working copy holds now, as a string that changes
+   * whenever its diff may have: a commit, a file added, removed or edited,
+   * by the agent or anyone else. Cheap enough to ask every few seconds.
+   * Never fetches.
+   */
+  'sessions.diffFingerprint': { params: { id: number }; result: string };
   /**
    * The `origin/…` branches the Session's diff can be against, as the local
    * refs have them, by name. Never fetches.
@@ -1368,7 +1860,7 @@ export interface Commands {
    */
   'sessions.setDiffBase': { params: { id: number; base: string }; result: void };
   /** One file of the Session's diff, as `sessions.diff` listed it. */
-  'sessions.diffFile': { params: { id: number; path: string; uncommittedOnly?: boolean }; result: FileDiff };
+  'sessions.diffFile': { params: { id: number; path: string; scope?: DiffScope }; result: FileDiff };
   /**
    * Runs the terminal command in the Session's working copy, in its
    * Environment. Rejects when no terminal command is set.
@@ -1381,9 +1873,13 @@ export interface Commands {
    */
   'sessions.retry': { params: { id: number }; result: void };
   /**
-   * Has the agent go on with the run Loom quit or crashed during: the
-   * Session, Waiting as interrupted, becomes Working, and its agent is sent
-   * CONTINUE_PROMPT in its resumed conversation. Rejects for any other Session.
+   * Has the agent go on with a run that ended early: one Loom quit or crashed
+   * during (Waiting as interrupted), one the user stopped (Waiting as
+   * stopped, the Stopped note ending the conversation), or one that failed
+   * partway through its answer (Waiting on an error the agent had said
+   * something before). The Session becomes Working, and its agent is sent a
+   * prompt to carry on, saying which, in its resumed conversation. Rejects
+   * for any other Session, an unanswered prompt being Retry's (see goingOn).
    */
   'sessions.continue': { params: { id: number }; result: void };
   /**
@@ -1435,8 +1931,41 @@ export interface Commands {
    * Rejects an empty title.
    */
   'sessions.rename': { params: { id: number; title: string }; result: void };
-  /** Marks a Session read (the user opened it) or unread again. */
-  'sessions.setUnread': { params: { id: number; unread: boolean }; result: void };
+  /**
+   * Links a Session to an issue on its Project's Forge, in place of any it
+   * had, while its Project is there. Rejects an issue with no number or no
+   * http(s) link.
+   */
+  'sessions.linkIssue': { params: { id: number; issue: ForgeLink }; result: void };
+  /** Unlinks the Session's issue, if it has one, while its Project is there. */
+  'sessions.unlinkIssue': { params: { id: number }; result: void };
+  /**
+   * The Session's linked issue as its Forge has it now, for its Panel: its
+   * state, labels, title, author, age, comment count and body, whatever its
+   * state. Rejects with no issue linked, or the Project's Forge off or out of
+   * reach.
+   */
+  'sessions.issue': { params: { id: number }; result: IssueDetails };
+  /**
+   * Keeps a Session's Panels as the user left them: which are open in each
+   * Panel area, the one shown and whether each area is shown. Its Terminals'
+   * Panels don't come back once Loom quits, as the Terminals end with it.
+   * Rejects Panels Loom has not, or one open twice.
+   */
+  'sessions.setPanels': { params: { id: number; panels: SessionPanels }; result: void };
+  /**
+   * Resolves one of a Session's Highlights by hand, or reopens one resolved
+   * (by the user or the model). Rejects a Highlight the Session hasn't.
+   */
+  'sessions.resolveHighlight': { params: { id: number; highlightId: number; resolved: boolean }; result: void };
+  /** The user has looked at the Session's Highlights Panel: what it has so far is seen, and its tab's badge goes. */
+  'sessions.seeHighlights': { params: { id: number }; result: void };
+  /**
+   * Marks a Session read (the user opened it) or unread again. Not unread
+   * once archived, or while archiving, as the menus have it: false then, the
+   * Session left as it was.
+   */
+  'sessions.setUnread': { params: { id: number; unread: boolean }; result: boolean };
   /**
    * Snoozes a Waiting Session until `until`, a clock time to come: it leaves
    * the Inbox and comes back unread then, or as soon as its status changes.
@@ -1466,6 +1995,17 @@ export interface Topics {
   sessions: Session[];
   /** One Session's conversation, as it streams in. */
   transcript: TranscriptItem[];
+  /** One Session's Panels in each Panel area, as the user left them. */
+  panels: SessionPanels;
+  /** One Session's Highlights, and how checking them goes. */
+  highlights: SessionHighlights;
+  /**
+   * One Session's review threads on the code still open that others wrote
+   * in, as Babysit last saw them: notes on their lines in the diffs. None
+   * while Babysit isn't watching its Merge request. Kept off `sessions`, which
+   * every view gets again on any change to any Session.
+   */
+  reviewThreads: ReviewThread[];
   /** One Session's open terminals, in the order they were opened. */
   terminals: TerminalInfo[];
   /**
@@ -1475,11 +2015,27 @@ export interface Topics {
    */
   terminalOutput: TerminalOutput;
   database: DatabaseStatus;
+  /**
+   * The Session a click on a desktop notification last asked the window to
+   * open, numbered so that each click counts, even on the same Session; null
+   * until one does.
+   */
+  openSession: OpenSessionRequest | null;
+}
+
+/** A click on a desktop notification, asking the window to open its Session. */
+export interface OpenSessionRequest {
+  sessionId: number;
+  /** Counts the clicks, from 1, so that each one is told apart. */
+  click: number;
 }
 
 /** What the topics that need one are subscribed with. */
 export interface TopicParams {
   transcript: { sessionId: number };
+  panels: { sessionId: number };
+  highlights: { sessionId: number };
+  reviewThreads: { sessionId: number };
   terminals: { sessionId: number };
   terminalOutput: { id: number };
 }

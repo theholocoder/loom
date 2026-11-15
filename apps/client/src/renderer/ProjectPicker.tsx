@@ -13,12 +13,16 @@ export function filterProjects(projects: Project[], filter: string): Project[] {
   return projects.filter((p) => p.name.toLowerCase().includes(needle) || p.checkout.path.toLowerCase().includes(needle));
 }
 
-/** Escape or a click on the backdrop closes it; the caller puts focus back on its trigger. */
-export function ProjectPicker({ projects, onPick, onClose }: { projects: Project[]; onPick: (project: Project) => void; onClose: () => void }) {
+/**
+ * `highlightedId` is the Project highlighted at first, if listed; else the
+ * first. Escape or a click on the backdrop closes it; the caller puts focus
+ * back on its trigger.
+ */
+export function ProjectPicker({ projects, highlightedId, onPick, onClose }: { projects: Project[]; highlightedId?: number; onPick: (project: Project) => void; onClose: () => void }) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState('');
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(() => Math.max(0, projects.findIndex((p) => p.id === highlightedId)));
   const matches = filterProjects(projects, filter);
   const highlighted = matches.length ? stepIndex(active, matches.length) : -1;
   const optionId = (index: number) => `${id}-option-${index}`;

@@ -10,6 +10,7 @@ afterEach(cleanup);
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -29,9 +30,9 @@ const worktreeSession: Session = {
   updatedAt: 1,
 };
 
-/** The app with Session info open on `session`. */
+/** The app with `session` open. */
 function renderInfo(session: Session = worktreeSession, handlers: ConstructorParameters<typeof FakeMain>[1] = {}) {
-  const main = new FakeMain({ projects: [project], sessions: [session], settings: { ...DEFAULT_SETTINGS, sidebar: { open: true, view: 'info', width: 420 } } }, handlers);
+  const main = new FakeMain({ projects: [project], sessions: [session], settings: DEFAULT_SETTINGS }, handlers);
   render(
     <ApiProvider api={main}>
       <App />
@@ -43,7 +44,11 @@ function renderInfo(session: Session = worktreeSession, handlers: ConstructorPar
   return main;
 }
 
-const info = () => within(screen.getByRole('complementary', { name: 'Session sidebar' })).getByRole('tabpanel');
+/** Delete…, from the Session header's ⋯ menu. */
+const deleteFromMenu = () => {
+  fireEvent.click(within(screen.getByRole('region', { name: 'Session header' })).getByRole('button', { name: 'More actions' }));
+  fireEvent.click(within(screen.getByRole('menu', { name: 'Session actions' })).getByRole('menuitem', { name: 'Delete…' }));
+};
 const deleteCalls = (main: FakeMain) => main.invoked.filter((i) => i.command === 'sessions.delete').map((i) => i.params);
 
 describe('deleting a Session', () => {
@@ -55,7 +60,7 @@ describe('deleting a Session', () => {
       },
     });
 
-    fireEvent.click(within(info()).getByRole('button', { name: 'Delete' }));
+    deleteFromMenu();
 
     const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
     expect(dialog.textContent).toMatch(/can't be undone/);
@@ -63,7 +68,7 @@ describe('deleting a Session', () => {
     expect(dialog.textContent).toContain('loom/fix-login');
     expect(deleteCalls(main)).toEqual([]);
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7 }]));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
@@ -73,27 +78,65 @@ describe('deleting a Session', () => {
   it('deletes nothing when cancelled', () => {
     const main = renderInfo();
 
-    fireEvent.click(within(info()).getByRole('button', { name: 'Delete' }));
+    deleteFromMenu();
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(deleteCalls(main)).toEqual([]);
   });
 
-  it('warns about unsaved work, and deletes only once told to discard it', async () => {
+  it('asks once, saying up front what unsaved work the worktree has, and deletes once told to discard it', async () => {
+    const unsaved = { uncommitted: true, unpushedCommits: 2, detached: false };
     const main = renderInfo(worktreeSession, {
-      'sessions.delete': ({ discard }) => (discard ? { deleted: true } : { deleted: false, unsavedWork: { uncommitted: true, unpushedCommits: 2, detached: false } }),
+      'sessions.unsavedWork': () => unsaved,
+      'sessions.delete': ({ discard }) => (discard ? { deleted: true } : { deleted: false, unsavedWork: unsaved }),
     });
-    fireEvent.click(within(info()).getByRole('button', { name: 'Delete' }));
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
+    deleteFromMenu();
 
-    const warning = await screen.findByRole('alertdialog', { name: 'Delete with unsaved work?' });
-    expect(warning.textContent).toMatch(/uncommitted changes and 2 unpushed commits/);
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    await waitFor(() => expect(dialog.textContent).toMatch(/uncommitted changes and 2 unpushed commits/));
+    expect(dialog.textContent).toMatch(/can't be undone/);
+    expect(within(dialog).queryByRole('button', { name: 'Delete' })).toBeNull();
 
-    fireEvent.click(within(warning).getByRole('button', { name: 'Discard and delete' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Discard and delete' }));
 
-    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7 }, { id: 7, discard: true }]));
+    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7, discard: true }]));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  });
+
+  it('keeps the unsaved work, when told to, as a WIP commit on the branch', async () => {
+    const main = renderInfo(worktreeSession, { 'sessions.unsavedWork': () => ({ uncommitted: true, unpushedCommits: 0, detached: false }) });
+    deleteFromMenu();
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Commit and delete' }));
+    // A deleted Session never reopens: the commit is on its branch, for whoever picks it up.
+    expect(dialog.textContent).toContain('keep them on its branch loom/fix-login as a WIP commit, or discard them');
+    expect(dialog.textContent).not.toMatch(/reopens/);
+
+    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7, commitWork: true }]));
+  });
+
+  it("can't keep the work of a worktree on no branch, whose commits are lost", async () => {
+    renderInfo(worktreeSession, { 'sessions.unsavedWork': () => ({ uncommitted: true, unpushedCommits: 1, detached: true }) });
+    deleteFromMenu();
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    await within(dialog).findByRole('button', { name: 'Discard and delete' });
+    expect(within(dialog).queryByRole('button', { name: 'Commit and delete' })).toBeNull();
+    expect(dialog.textContent).toMatch(/on no branch/);
+  });
+
+  it('asks about unsaved work found only once Delete is pressed, in the same dialog', async () => {
+    const main = renderInfo(worktreeSession, {
+      'sessions.delete': ({ discard }) => (discard ? { deleted: true } : { deleted: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } }),
+    });
+    deleteFromMenu();
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete' }));
+
+    fireEvent.click(await within(screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' })).findByRole('button', { name: 'Discard and delete' }));
+    await waitFor(() => expect(deleteCalls(main)).toEqual([{ id: 7 }, { id: 7, discard: true }]));
   });
 
   it('shows why the deletion failed, in the dialog', async () => {
@@ -102,18 +145,18 @@ describe('deleting a Session', () => {
         throw new Error('This Session is being archived.');
       },
     });
-    fireEvent.click(within(info()).getByRole('button', { name: 'Delete' }));
+    deleteFromMenu();
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
 
     expect((await within(screen.getByRole('alertdialog')).findByRole('alert')).textContent).toBe('This Session is being archived.');
   });
 
-  it('deletes an archived Session too, from Session info or the palette', async () => {
+  it('deletes an archived Session too, from its ⋯ menu or the palette', async () => {
     const archived: Session = { ...worktreeSession, status: 'archived', waitingReason: undefined };
     const main = renderInfo(archived);
 
     const dialogText = () => screen.getByRole('alertdialog', { name: 'Delete “Fix login”?' }).textContent;
-    fireEvent.click(within(info()).getByRole('button', { name: 'Delete' }));
+    deleteFromMenu();
     // An archived worktree Session's worktree is gone already.
     expect(dialogText()).not.toMatch(/worktree is removed/);
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
@@ -127,7 +170,7 @@ describe('deleting a Session', () => {
 
   it("says a checkout Session's checkout is left as it is", () => {
     renderInfo({ ...worktreeSession, workingCopy: { kind: 'checkout', path: '/home/dev/billing-api' } });
-    fireEvent.click(within(info()).getByRole('button', { name: 'Delete' }));
+    deleteFromMenu();
     expect(screen.getByRole('alertdialog').textContent).toMatch(/checkout is left as it is/);
   });
 });

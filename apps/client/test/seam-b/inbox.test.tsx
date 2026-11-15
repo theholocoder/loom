@@ -24,6 +24,7 @@ const inbox = () => screen.getByRole('complementary', { name: 'Inbox' });
 const loom: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/loom' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'theholocoder/loom' },
@@ -31,6 +32,7 @@ const loom: Project = {
 const billing: Project = {
   id: 2,
   name: 'billing-api',
+  color: 'orange',
   branchPrefix: 'billing',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'gitlab', repository: 'acme/billing-api' },
@@ -81,6 +83,17 @@ describe('the Inbox', () => {
     expect(within(loomGroup).getAllByRole('listitem').map((row) => row.getAttribute('aria-label'))).toEqual(['Add Merge request button', 'Fix flaky cleanup test']);
   });
 
+  it('animates the logo while a Session is Working, and only then', () => {
+    const busy = session({ title: 'Busy', status: 'working', waitingReason: undefined });
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Done' }), busy] }));
+    const logo = () => inbox().querySelector('.logo')!;
+    expect(logo().classList.contains('working')).toBe(true);
+
+    act(() => main.publish('sessions', [{ ...busy, status: 'waiting', waitingReason: 'finished' }]));
+
+    expect(logo().classList.contains('working')).toBe(false);
+  });
+
   it('shows why each Session is Waiting', () => {
     const reasons = ['finished', 'stopped', 'question', 'approval', 'stuck', 'error', 'interrupted', 'feedback'] as const;
     renderApp(new FakeMain({ projects: [loom], sessions: reasons.map((reason) => session({ title: reason, waitingReason: reason })) }));
@@ -90,16 +103,17 @@ describe('the Inbox', () => {
     expect(why).toEqual(['Finished', 'Stopped', 'Asked a question', 'Needs approval', 'Stuck', 'Error', 'Interrupted', 'Feedback']);
   });
 
-  it('shows the title, an unread marker, when it went Waiting and its branch', () => {
+  it('shows the title, an unread marker, how long ago it went Waiting and its branch', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: NOW });
     renderApp(
       new FakeMain({
         projects: [loom],
         sessions: [
           session({ title: 'Just now', unread: true, updatedAt: NOW - 10_000, branch: 'loom/31-mr-button' }),
+          session({ title: 'Minutes ago', updatedAt: NOW - 4 * 60_000 }),
           session({ title: 'This morning', updatedAt: new Date(2026, 10, 2, 9, 5).getTime() }),
-          session({ title: 'Last night', updatedAt: new Date(2026, 10, 1, 23, 30).getTime() }),
-          session({ title: 'Last week', updatedAt: new Date(2026, 9, 26, 15, 0).getTime() }),
+          session({ title: 'Last night', updatedAt: new Date(2026, 10, 1, 7, 30).getTime() }),
+          session({ title: 'Last month', updatedAt: new Date(2026, 9, 6, 15, 0).getTime() }),
         ],
       }),
     );
@@ -109,9 +123,10 @@ describe('the Inbox', () => {
     expect(within(row('Just now')).getByRole('img', { name: 'Unread' })).toBeTruthy();
     expect(within(row('This morning')).queryByRole('img', { name: 'Unread' })).toBeNull();
     expect(within(row('Just now')).getByText('now')).toBeTruthy();
-    expect(within(row('This morning')).getByText(/^0?9.05/)).toBeTruthy();
-    expect(within(row('Last night')).getByText('Yesterday')).toBeTruthy();
-    expect(within(row('Last week')).getByText(/26/)).toBeTruthy();
+    expect(within(row('Minutes ago')).getByText('4m')).toBeTruthy();
+    expect(within(row('This morning')).getByText('1h')).toBeTruthy();
+    expect(within(row('Last night')).getByText('1d')).toBeTruthy();
+    expect(within(row('Last month')).getByText(/6/)).toBeTruthy();
     expect(within(row('Just now')).getByTitle('Branch').textContent).toBe('loom/31-mr-button');
     expect(within(row('This morning')).queryByTitle('Branch')).toBeNull();
   });
@@ -136,6 +151,116 @@ describe('the Inbox', () => {
       fireEvent.click(head);
       expect(within(inbox()).getByRole('button', { name: title })).toBeTruthy();
     }
+  });
+
+  it('keeps the Inbox at the top, with Snoozed, Working and Archived together at the bottom, above the footer', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [
+          session({ title: 'Needs me' }),
+          session({ title: 'Later', snoozedUntil: NOW + 3_600_000 }),
+          session({ title: 'Busy', status: 'working', waitingReason: undefined }),
+          session({ title: 'Done long ago', status: 'archived', waitingReason: undefined }),
+        ],
+      }),
+    );
+    const card = within(inbox()).getByRole('listitem', { name: 'Needs me' });
+    const heads = ['Snoozed', 'Working', 'Archived'].map((name) => within(inbox()).getByRole('button', { name }));
+    const footer = within(inbox()).getByRole('navigation');
+    const follows = (a: Node, b: Node) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+    // In this order: the Inbox's cards, then each section, then the footer.
+    for (const [before, after] of [[card, heads[0]], [heads[0], heads[1]], [heads[1], heads[2]], [heads[2], footer]] as const) {
+      expect(follows(before!, after!)).toBe(true);
+    }
+    // The Inbox scrolls on its own, taking the space in between; the sections share the bottom block.
+    const bottom = heads[0]!.closest('.side-bottom');
+    expect(bottom).toBeTruthy();
+    expect(heads.every((head) => head.closest('.side-bottom') === bottom)).toBe(true);
+    expect(card.closest('.side-list')).toBeTruthy();
+    expect(bottom!.closest('.side-list')).toBeNull();
+    // Each is still collapsible.
+    fireEvent.click(heads[0]!);
+    expect(within(bottom as HTMLElement).getByRole('listitem', { name: 'Later' })).toBeTruthy();
+  });
+
+  it('shows Snoozed, Working and Archived cards with their Project, issue, Merge request and branch, and when each wakes, how long it has run, or when it was archived', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    const refs = { branch: 'billing/21-pdf-renderer-v4', issue: { number: 21, url: 'https://gitlab.com/acme/billing-api/-/issues/21' }, mergeRequest: { number: 38, url: 'https://gitlab.com/acme/billing-api/-/merge_requests/38' } };
+    renderApp(
+      new FakeMain({
+        projects: [loom, billing],
+        sessions: [
+          session({ title: 'Later', projectId: billing.id, snoozedUntil: new Date(2026, 10, 2, 16, 0).getTime(), ...refs }),
+          session({ title: 'Busy', projectId: billing.id, status: 'working', waitingReason: undefined, updatedAt: NOW - 4 * 60_000, ...refs }),
+          session({ title: 'Done long ago', projectId: billing.id, status: 'archived', waitingReason: undefined, updatedAt: new Date(2026, 9, 26, 15, 0).getTime(), ...refs }),
+        ],
+      }),
+    );
+    for (const section of ['Snoozed', 'Working', 'Archived']) fireEvent.click(within(inbox()).getByRole('button', { name: section }));
+    const card = (title: string) => within(within(inbox()).getByRole('listitem', { name: title }));
+
+    for (const title of ['Later', 'Busy', 'Done long ago']) {
+      expect(card(title).getByTitle('Project').textContent).toBe('billing-api');
+      expect(['Issue', 'Merge request', 'Branch'].map((what) => card(title).getByTitle(what).textContent)).toEqual(['#21', '!38', 'billing/21-pdf-renderer-v4']);
+    }
+    expect(card('Later').getByRole('time').textContent).toMatch(/^until 0?4:00|^until 16:00/);
+    expect(card('Busy').getByRole('time').textContent).toBe('4m');
+    expect(card('Done long ago').getByRole('time').textContent).toMatch(/26/);
+  });
+
+  it('brings relative times up to date as time passes', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'], now: NOW });
+    renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [session({ title: 'Just in', updatedAt: NOW }), session({ title: 'Busy', status: 'working', waitingReason: undefined, updatedAt: NOW - 4 * 60_000 })],
+      }),
+    );
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Working' }));
+    const time = (title: string) => within(within(inbox()).getByRole('listitem', { name: title })).getByRole('time').textContent;
+    expect([time('Just in'), time('Busy')]).toEqual(['now', '4m']);
+
+    act(() => vi.advanceTimersByTime(3 * 60_000));
+
+    expect([time('Just in'), time('Busy')]).toEqual(['3m', '7m']);
+  });
+
+  it('makes a Session waiting on the user, for an approval or a question, stand out from a Finished one', () => {
+    renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [session({ title: 'Asks', waitingReason: 'question' }), session({ title: 'Blocked', waitingReason: 'approval' }), session({ title: 'Done', waitingReason: 'finished' })],
+      }),
+    );
+    const needsYou = (title: string) => within(inbox()).getByRole('listitem', { name: title }).classList.contains('needs-you');
+
+    expect([needsYou('Asks'), needsYou('Blocked'), needsYou('Done')]).toEqual([true, true, false]);
+  });
+
+  it('opens the section the viewed Session moves into, its card selected', () => {
+    const waiting = session({ title: 'Mine' });
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [waiting, session({ title: 'Other', status: 'working', waitingReason: undefined })] }));
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Mine' }));
+    expect(within(inbox()).getByRole('button', { name: 'Working' }).getAttribute('aria-expanded')).toBe('false');
+
+    act(() => main.publish('sessions', [{ ...waiting, status: 'working', waitingReason: undefined, updatedAt: waiting.updatedAt + 1 }, main.value('sessions')[1]!]));
+
+    expect(within(inbox()).getByRole('button', { name: 'Working' }).getAttribute('aria-expanded')).toBe('true');
+    expect(within(inbox()).getByRole('button', { name: 'Mine' }).getAttribute('aria-current')).toBe('true');
+  });
+
+  it("reserves room for a card's hover actions, one per action", () => {
+    renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Waiting' }), session({ title: 'Busy', status: 'working', waitingReason: undefined })] }));
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Working' }));
+    const card = (title: string) => within(inbox()).getByRole('listitem', { name: title });
+
+    // Reply, Create Merge request, Snooze, Archive and Mark unread.
+    expect(within(card('Waiting').querySelector('.hover-actions') as HTMLElement).getAllByRole('button')).toHaveLength(5);
+    expect(card('Waiting').style.getPropertyValue('--actions')).toBe('5');
+    expect(card('Busy').querySelector('.hover-actions')).toBeNull();
   });
 
   it('marks a Session read when it is opened, and lets Mark unread stick while it is shown', async () => {
@@ -166,7 +291,7 @@ describe('the Inbox', () => {
     expect(main.invoked.filter((i) => i.command === 'sessions.archive')).toEqual([{ command: 'sessions.archive', params: { id: waiting.id } }]);
   });
 
-  it('warns before archiving a row with unsaved work: Cancel keeps it, Discard archives it', async () => {
+  it('warns before archiving a row with unsaved work: Cancel keeps it, Discard and archive archives it', async () => {
     const dirty = session({ title: 'Half done', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/loom/half' } });
     const main = renderApp(
       new FakeMain({ projects: [loom], sessions: [dirty] }, { 'sessions.archive': ({ discard }) => (discard ? { archived: true } : { archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 2, detached: false } }) }),
@@ -180,9 +305,34 @@ describe('the Inbox', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
 
     archive();
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard and archive' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: dirty.id }, { id: dirty.id }, { id: dirty.id, discard: true }]);
+  });
+
+  it('keeps unsaved work, when told to, as a WIP commit on the branch, and says the archive can be undone', async () => {
+    const dirty = session({ title: 'Half done', branch: 'loom/half', workingCopy: { kind: 'worktree', path: '/home/dev/loom/worktrees/loom/half' } });
+    const main = renderApp(
+      new FakeMain({ projects: [loom], sessions: [dirty] }, { 'sessions.archive': ({ commitWork }) => (commitWork ? { archived: true } : { archived: false, unsavedWork: { uncommitted: true, unpushedCommits: 0, detached: false } }) }),
+    );
+    fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Half done' })).getByRole('button', { name: 'Archive' }));
+
+    const warning = await screen.findByRole('alertdialog', { name: 'Archive with unsaved work?' });
+    expect(warning.textContent).toContain('keep them on its branch loom/half as a WIP commit, there when the Session reopens');
+    fireEvent.click(within(warning).getByRole('button', { name: 'Commit and archive' }));
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: dirty.id }, { id: dirty.id, commitWork: true }]));
+    const toast = await screen.findByRole('group', { name: 'What was done' });
+    expect(toast.textContent).toContain('Archived “Half done”');
+    expect(within(toast).getByRole('button', { name: /Undo/ })).toBeTruthy();
+  });
+
+  it('says, archiving a Session with queued messages, that they are kept for when it reopens', async () => {
+    const queued = session({ title: 'Busy', queue: [{ id: 1, text: 'Next' }, { id: 2, text: 'After' }] });
+    renderApp(new FakeMain({ projects: [loom], sessions: [queued] }));
+    fireEvent.click(within(within(inbox()).getByRole('listitem', { name: 'Busy' })).getByRole('button', { name: 'Archive' }));
+
+    expect((await screen.findByText(/its 2 queued messages are kept for when it reopens/)).textContent).toContain('Archived “Busy”');
   });
 
   it('flags a Session whose worktree is missing, offering only Archive', () => {
@@ -210,9 +360,10 @@ describe('the Inbox', () => {
     fireEvent.change(prompt, { target: { value: 'Yes, go ahead' } });
     fireEvent.keyDown(prompt, { key: 'Enter' });
 
-    await waitFor(() => expect(within(inbox()).queryByRole('listitem', { name: 'Asked me something' })).toBeNull());
-    expect(within(inbox()).queryByRole('group')).toBeNull();
+    await waitFor(() => expect(within(inbox()).queryByRole('group')).toBeNull());
     expect(within(inbox()).getByRole('button', { name: 'Working' }).textContent).toContain('1');
+    // Still viewed, it stays in sight, under Working.
+    expect(within(within(inbox()).getByRole('list', { name: 'Working' })).getByRole('button', { name: 'Asked me something' }).getAttribute('aria-current')).toBe('true');
   });
 
   it('shows the linked issue and Merge request before the branch, numbered the way each Forge does', () => {

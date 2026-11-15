@@ -5,10 +5,6 @@ const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
 const MARKER = /\n… (\d+) bytes truncated …\n/;
 
 describe('capping a tool output', () => {
-  it('is 256 KB of UTF-8', () => {
-    expect(TOOL_OUTPUT_CAP).toBe(262144);
-  });
-
   it('keeps an output at or under the cap untouched', () => {
     for (const text of ['', 'ok', 'a'.repeat(TOOL_OUTPUT_CAP), 'é'.repeat(TOOL_OUTPUT_CAP / 2)]) {
       expect(capToolOutput(text)).toEqual({ text, truncated: false });

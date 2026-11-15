@@ -39,6 +39,7 @@ afterEach(() => {
 const loom: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/loom' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'theholocoder/loom' },
@@ -108,15 +109,17 @@ describe("a Session's right-click menu", () => {
     expect(invoked(main, 'sessions.archive')).toEqual([{ id: main.value('sessions')[0]!.id }]);
   });
 
-  it("can't snooze a Working Session, nor archive an archived one, nor mark an unread one unread", () => {
-    renderApp([session({ title: 'Busy', status: 'working', waitingReason: undefined }), session({ title: 'Done', status: 'archived', waitingReason: undefined, unread: true })]);
+  it("can't snooze a Working Session nor mark an unread one unread, and offers an archived one Reopen instead of Snooze and Archive", async () => {
+    const main = renderApp([session({ title: 'Busy', status: 'working', waitingReason: undefined }), session({ title: 'Done', status: 'archived', waitingReason: undefined, unread: true })]);
     fireEvent.click(screen.getByRole('button', { name: 'Working' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Busy' }));
     expect(items()).toContain('(Snooze…)');
     fireEvent.keyDown(menu(), { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Done' }));
-    expect(items()).toEqual(['New Session on this branch', '(Snooze…)', '—', 'Rename…', '(Mark unread)', '—', '(Archive)', 'Delete…']);
+    expect(items()).toEqual(['New Session on this branch', '—', 'Rename…', '(Mark unread)', '—', 'Reopen', 'Delete…']);
+    pick('Reopen');
+    await waitFor(() => expect(invoked(main, 'sessions.unarchive')).toEqual([{ id: main.value('sessions').find((s) => s.title === 'Done')!.id }]));
   });
 
   it('snoozes from the snooze times the Inbox card offers', async () => {
@@ -277,6 +280,8 @@ describe('commenting on the conversation', () => {
 
     const chips = within(screen.getByRole('list', { name: 'Comments' }));
     expect(chips.getByRole('listitem').textContent).toContain('“The login form retries twice.”');
+    // Not a comment on the diff.
+    expect(screen.getByRole('textbox', { name: 'Prompt' }).getAttribute('placeholder')).toBe('Reply to OpenCode… @ to mention a file');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(invoked(main, 'sessions.send')).toEqual([{ id: fix.id, prompt: '', comments: [{ quote: 'The login form retries twice.', note: 'Why twice?' }] }]));
   });
@@ -288,6 +293,95 @@ describe('commenting on the conversation', () => {
     fireEvent.click(within(card('Fix login')).getByRole('button', { name: 'Fix login' }));
     fireEvent.contextMenu(await screen.findByText('The login form retries twice.'));
     expect(screen.queryByRole('menu', { name: 'Context menu' })).toBeNull();
+  });
+});
+
+describe("a link's and a code block's right-click menu in the conversation", () => {
+  const reply = (text: string): TranscriptItem[] => [
+    { kind: 'user', id: 1, text: 'Fix the login bug' },
+    { kind: 'agent', id: 2, text, streaming: false },
+  ];
+  async function openConversation(text: string) {
+    const fix = session({ title: 'Fix login' });
+    const main = renderApp([fix]);
+    main.publish('transcript', reply(text), { sessionId: fix.id });
+    fireEvent.click(within(card('Fix login')).getByRole('button', { name: 'Fix login' }));
+    await screen.findByRole('log', { name: 'Conversation' });
+    return { main, fix };
+  }
+
+  it('opens a link in the browser, or copies its address', async () => {
+    const { main } = await openConversation('See [the docs](https://example.com/login) first.');
+    const link = await screen.findByRole('link', { name: 'the docs' });
+    fireEvent.contextMenu(link);
+    expect(items()).toEqual(['Open link', 'Copy link address']);
+    pick('Open link');
+    await waitFor(() => expect(invoked(main, 'links.open')).toEqual([{ url: 'https://example.com/login' }]));
+    fireEvent.contextMenu(link);
+    pick('Copy link address');
+    await waitFor(() => expect(clipboard).toEqual(['https://example.com/login']));
+  });
+
+  /** The code of the conversation's code block, highlighted. */
+  const codeBlock = () =>
+    waitFor(() => {
+      const code = screen.getByRole('log', { name: 'Conversation' }).querySelector('pre code');
+      if (!code) throw new Error('no code block in the conversation');
+      return code;
+    });
+  const code = 'Here is the fix:\n\n```ts\nconst retries = 1;\nlogin(retries);\n```\n';
+
+  it("copies a code block's code", async () => {
+    await openConversation(code);
+    const block = await codeBlock();
+    fireEvent.contextMenu(block);
+    expect(items()[0]).toBe('Copy code');
+    pick('Copy code');
+    await waitFor(() => expect(clipboard).toEqual(['const retries = 1;\nlogin(retries);']));
+  });
+
+  it('comments on the whole code block, with nothing selected', async () => {
+    const { main, fix } = await openConversation(code);
+    fireEvent.contextMenu(await codeBlock());
+    expect(items()).toEqual(['Copy code', '—', 'Comment…']);
+    pick('Comment…');
+    const dialog = screen.getByRole('dialog', { name: 'Comment on the conversation' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: 'Why once?' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(invoked(main, 'sessions.send')).toEqual([{ id: fix.id, prompt: '', comments: [{ quote: 'const retries = 1;\nlogin(retries);', note: 'Why once?' }] }]),
+    );
+  });
+
+  it('comments on the part of a code block selected, its indentation kept', async () => {
+    const { main, fix } = await openConversation('```ts\nif (retry) {\n  login(retries);\n}\n```');
+    const block = await codeBlock();
+    // From the indentation to the end of the call.
+    const indent = [...block.childNodes].find((node) => node.textContent?.includes('\n  '))!;
+    const call = [...block.querySelectorAll('span')].find((span) => span.textContent === 'login')!;
+    const range = document.createRange();
+    range.setStart(indent, indent.textContent!.indexOf('\n  ') + 1);
+    range.setEnd(call.nextSibling!, '(retries);'.length);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.contextMenu(call);
+    expect(items()).toEqual(['Copy code', '—', 'Comment…', '—', 'Copy']);
+    pick('Comment…');
+    const dialog = screen.getByRole('dialog', { name: 'Comment on the conversation' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: 'Why?' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(invoked(main, 'sessions.send')).toEqual([{ id: fix.id, prompt: '', comments: [{ quote: '  login(retries);', note: 'Why?' }] }]));
+  });
+
+  it('comments on the text selected rather than the code block, when the selection is elsewhere in the conversation', async () => {
+    await openConversation(`Retry once.\n\n${code}`);
+    select(await screen.findByText('Retry once.'));
+    fireEvent.contextMenu(await codeBlock());
+    pick('Comment…');
+    const dialog = screen.getByRole('dialog', { name: 'Comment on the conversation' });
+    expect(dialog.querySelector('blockquote')!.getAttribute('title')).toBe('Retry once.');
   });
 });
 
@@ -311,8 +405,8 @@ describe('copying from any right-click', () => {
     await waitFor(() => expect(clipboard).toEqual(['loom/fix-login']));
 
     fireEvent.click(within(card('Fix login')).getByRole('button', { name: 'Fix login' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
-    fireEvent.contextMenu(within(screen.getByRole('complementary', { name: 'Session sidebar' })).getByText('/wt/fix-login'));
+    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
+    fireEvent.contextMenu(within(screen.getByRole('dialog', { name: 'Session details' })).getByText('/wt/fix-login'));
     expect(items()).toEqual(['Copy worktree name', 'Copy worktree path']);
     pick('Copy worktree name');
     await waitFor(() => expect(clipboard).toEqual(['loom/fix-login', 'fix-login']));

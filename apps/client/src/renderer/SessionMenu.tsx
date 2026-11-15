@@ -1,16 +1,16 @@
-// A Session's right-click menu, on its sidebar card and its header: a new
-// Session on the same working copy, Snooze, Rename, Mark unread, Archive and
-// Delete.
-import { AlarmClock, AlarmClockOff, Archive, Mail, MessageSquarePlus, Pencil, Trash2 } from 'lucide-react';
+// A Session's right-click menu, on its Inbox card and its header, and the
+// header's ⋯ menu: a new Session on the same working copy, Snooze, Rename,
+// Mark unread, Archive (Reopen, for an archived one) and Delete.
+import { AlarmClock, AlarmClockOff, Archive, ArchiveRestore, Mail, MessageSquarePlus, Pencil, Trash2 } from 'lucide-react';
 import { createContext, useContext, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import type { Session } from '../shared/api';
 import { useApi, useTopic } from './api';
 import { useArchive } from './Archive';
-import { addToContextMenu, type ContextMenuItem } from './ContextMenu';
+import { addToContextMenu, type ContextMenuItem, type ContextMenuSection } from './ContextMenu';
 import { useDelete } from './Delete';
 import { Popover } from './Popover';
 import type { NewSessionWorkingCopy } from './Sessions';
-import { isSnoozed, SnoozeMenu } from './Snooze';
+import { canSnooze, isSnoozed, SnoozeMenu } from './Snooze';
 
 /** Opens New Session on a Project and working copy; given by the window, which shows it. */
 export const NewSessionContext = createContext<(projectId: number, workingCopy: NewSessionWorkingCopy) => void>(() => {});
@@ -35,6 +35,8 @@ export function sameWorkingCopy(session: Session, sessions: Session[]): { label:
 export interface SessionMenu {
   /** Adds the Session's items to a right-click's menu; give it as `onContextMenu`. */
   onContextMenu: (event: ReactMouseEvent) => void;
+  /** The Session's items as they stand, for a menu of its own (the header's ⋯). */
+  sections: () => ContextMenuSection[];
   /** The Archive and Delete dialogs, while one is open; render it anywhere. */
   dialogs: ReactNode;
 }
@@ -48,34 +50,42 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
   const archiver = useArchive();
   const deleter = useDelete();
   const fail = (e: unknown) => onError((e as Error).message);
-  const onContextMenu = (event: ReactMouseEvent) => {
-    // Its dialogs are rendered inside the card or header, but aren't part of them.
-    if (event.target instanceof Element && event.target.closest('[aria-modal="true"]')) return;
+  const sections = (): ContextMenuSection[] => {
     const same = project ? sameWorkingCopy(session, sessions) : undefined;
-    const waiting = session.status === 'waiting' && !session.worktreeMissing;
     const snooze: ContextMenuItem = isSnoozed(session)
       ? { label: 'Wake', icon: AlarmClockOff, run: () => void api.invoke('sessions.snooze', { id: session.id, until: null }).catch(fail) }
       : {
           label: 'Snooze…',
           icon: AlarmClock,
-          disabled: !waiting,
+          disabled: !canSnooze(session),
           open: (anchor, close) => <SnoozeMenu anchor={anchor} session={session} onClose={close} onError={onError} />,
         };
-    addToContextMenu(
-      event,
-      [{ label: same?.label ?? 'New Session here', icon: MessageSquarePlus, disabled: !same, run: () => same && newSession(session.projectId, same.start) }, snooze],
+    const archived = session.status === 'archived';
+    const archiveOrReopen: ContextMenuItem = archived
+      ? // A removed Project's Sessions are read-only.
+        { label: 'Reopen', icon: ArchiveRestore, disabled: !project, run: () => void api.invoke('sessions.unarchive', { id: session.id }).catch(fail) }
+      : { label: 'Archive', icon: Archive, run: () => void archiver.archive(session).catch(fail) };
+    return [
+      // An archived Session isn't Waiting, so it has no snooze to offer.
+      [{ label: same?.label ?? 'New Session here', icon: MessageSquarePlus, disabled: !same, run: () => same && newSession(session.projectId, same.start) }, ...(archived ? [] : [snooze])],
       [
         { label: 'Rename…', icon: Pencil, disabled: !project, open: (anchor, close) => <RenameSession anchor={anchor} session={session} onClose={close} onError={onError} /> },
         { label: 'Mark unread', icon: Mail, disabled: session.unread, run: () => void api.invoke('sessions.setUnread', { id: session.id, unread: true }).catch(fail) },
       ],
       [
-        { label: 'Archive', icon: Archive, disabled: session.status === 'archived', run: () => void archiver.archive(session).catch(fail) },
+        archiveOrReopen,
         { label: 'Delete…', icon: Trash2, run: () => deleter.delete(session) },
       ],
-    );
+    ];
+  };
+  const onContextMenu = (event: ReactMouseEvent) => {
+    // Its dialogs and the header's popovers are rendered inside the card or header, but aren't part of them.
+    if (event.target instanceof Element && event.target.closest('[aria-modal="true"], .popover')) return;
+    addToContextMenu(event, ...sections());
   };
   return {
     onContextMenu,
+    sections,
     dialogs: (
       <>
         {archiver.dialog}
@@ -86,7 +96,7 @@ export function useSessionMenu(session: Session, onError: (message: string) => v
 }
 
 /** The Session's title to edit, beside `anchor`: Enter renames it, Escape leaves it be. */
-function RenameSession({ anchor, session, onClose, onError }: { anchor: RefObject<HTMLElement | null>; session: Session; onClose: () => void; onError: (message: string) => void }) {
+export function RenameSession({ anchor, session, onClose, onError }: { anchor: RefObject<HTMLElement | null>; session: Session; onClose: () => void; onError: (message: string) => void }) {
   const api = useApi();
   const [title, setTitle] = useState(session.title);
   const valid = title.trim() !== '';

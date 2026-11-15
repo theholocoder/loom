@@ -1,5 +1,6 @@
 // A tool's input or output can be huge (a whole file, a long build log). What
 // the transcript keeps of it, in the database and in memory, is capped.
+import type { FileChange, ToolDiff } from '../../shared/api';
 
 /** The most of one tool's input or output kept, in bytes of UTF-8: 256 KB. */
 export const TOOL_OUTPUT_CAP = 256 * 1024;
@@ -26,4 +27,19 @@ export function capToolOutput(text: string, cap = TOOL_OUTPUT_CAP): { text: stri
   const head = bytes.subarray(0, headEnd).toString('utf8');
   const tail = bytes.subarray(tailStart).toString('utf8');
   return { text: head + marker(tailStart - headEnd) + tail, truncated: true };
+}
+
+/**
+ * Diffs as kept: each whole, or, its texts together over `cap` bytes of
+ * UTF-8, only its path, as too large; a diff can't be cut and still read.
+ */
+export function capToolDiffs(diffs: FileChange[], cap = TOOL_OUTPUT_CAP): { diffs: ToolDiff[]; truncated: boolean } {
+  let truncated = false;
+  const kept = diffs.map((diff): ToolDiff => {
+    const size = (diff.oldText ?? '').length + diff.newText.length;
+    if (size * 3 <= cap || Buffer.byteLength(diff.oldText ?? '') + Buffer.byteLength(diff.newText) <= cap) return diff;
+    truncated = true;
+    return { path: diff.path, tooLarge: true };
+  });
+  return { diffs: kept, truncated };
 }

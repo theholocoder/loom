@@ -1,11 +1,15 @@
 // The Projects service: the git checkouts the user has added to Loom, kept in
 // the database, and what each one's Environment reports about them.
-import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type Project, type RemovedProject, type RestorableProject } from '../../shared/api';
+import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type ModelPick, type Project, type ProjectEdit, type RemovedProject, type RestorableProject } from '../../shared/api';
+import { branchPrefixError, branchPrefixOf } from '../../shared/branches';
+import { avatarError, isProjectColor, nextProjectColor, projectColorOf, projectNameError } from '../../shared/projects';
+import { splitDetails, withDetails } from '../../shared/errors';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
+import { describeFailure, NOT_A_REPOSITORY } from '../environments/failures';
 import type { LoomDatabase } from '../storage/database';
 import { detectForge, GIT_TIMEOUT_MS, parseRemote } from './forge';
-import { listIssues } from './issues';
+import { searchIssues } from './issues';
 
 /** What the Projects service needs from an Environment. */
 export interface ProjectEnvironment {
@@ -24,6 +28,33 @@ export interface ProjectsOptions {
 
 const UNCHECKED: ForgeStatus = { state: 'unknown', checking: false };
 
+/** The columns a Project is read from. */
+const PROJECT_COLUMNS = ['id', 'name', 'color', 'avatar', 'default_model', 'default_effort', 'branch_prefix', 'trusted'] as const;
+
+interface ProjectRow {
+  id: number;
+  name: string;
+  color: string;
+  avatar: string | null;
+  default_model: string | null;
+  default_effort: string | null;
+  branch_prefix: string;
+}
+
+function projectOf(row: ProjectRow, checkout: Project['checkout'], forge: ForgeStatus): Project {
+  const defaultModel: ModelPick | undefined = row.default_model === null ? undefined : { model: row.default_model, ...(row.default_effort !== null && { effort: row.default_effort }) };
+  return {
+    id: row.id,
+    name: row.name,
+    color: projectColorOf(row.color),
+    ...(row.avatar !== null && { avatar: row.avatar }),
+    ...(defaultModel && { defaultModel }),
+    branchPrefix: row.branch_prefix,
+    checkout,
+    forge,
+  };
+}
+
 export class Projects {
   private projects = new Map<number, Project>();
   private removed = new Map<number, RemovedProject>();
@@ -40,20 +71,14 @@ export class Projects {
     const rows = await options.db
       .selectFrom('projects')
       .innerJoin('checkouts', 'checkouts.project_id', 'projects.id')
-      .select(['id', 'name', 'branch_prefix', 'trusted', 'environment_id', 'path'])
+      .select([...PROJECT_COLUMNS, 'environment_id', 'path'])
       .execute();
     for (const row of rows) {
       if (row.trusted !== null) projects.trust.set(row.id, row.trusted !== 0);
-      projects.projects.set(row.id, {
-        id: row.id,
-        name: row.name,
-        branchPrefix: row.branch_prefix,
-        checkout: { environmentId: row.environment_id, path: row.path },
-        forge: UNCHECKED,
-      });
+      projects.projects.set(row.id, projectOf(row, { environmentId: row.environment_id, path: row.path }, UNCHECKED));
     }
-    const removed = await options.db.selectFrom('projects').select(['id', 'name']).where('removed_at', 'is not', null).execute();
-    for (const { id, name } of removed) projects.removed.set(id, { id, name });
+    const removed = await options.db.selectFrom('projects').select(['id', 'name', 'color']).where('removed_at', 'is not', null).execute();
+    for (const { id, name, color } of removed) projects.removed.set(id, { id, name, color: projectColorOf(color) });
     return projects;
   }
 
@@ -81,12 +106,19 @@ export class Projects {
     }
     const db = this.options.db;
     const row = await db.transaction().execute(async (trx) => {
-      let project: { id: number; name: string; branch_prefix: string; trusted: number | null };
+      let project: ProjectRow & { trusted: number | null };
       if (restore === undefined) {
+        // Ordered by id, so the newest Project's colour is the last.
+        const color = nextProjectColor(
+          this.list()
+            .sort((a, b) => a.id - b.id)
+            .map((p) => p.color),
+          this.listRemoved().map((p) => p.color),
+        );
         project = await trx
           .insertInto('projects')
-          .values({ name, branch_prefix: DEFAULT_BRANCH_PREFIX, created_at: this.options.clock.now() })
-          .returning(['id', 'name', 'branch_prefix', 'trusted'])
+          .values({ name, color, branch_prefix: DEFAULT_BRANCH_PREFIX, created_at: this.options.clock.now() })
+          .returning(PROJECT_COLUMNS)
           .executeTakeFirstOrThrow();
       } else {
         // Only still removed, in case a restore of it alongside got there first.
@@ -95,7 +127,7 @@ export class Projects {
           .set({ removed_at: null, identity: null })
           .where('id', '=', restore)
           .where('removed_at', 'is not', null)
-          .returning(['id', 'name', 'branch_prefix', 'trusted'])
+          .returning(PROJECT_COLUMNS)
           .executeTakeFirst();
         if (!restored) throw new Error('That Project is no longer removed.');
         project = restored;
@@ -109,7 +141,7 @@ export class Projects {
     const { id } = row;
     if (row.trusted !== null) this.trust.set(id, row.trusted !== 0);
     this.removed.delete(id);
-    this.projects.set(id, { id, name: row.name, branchPrefix: row.branch_prefix, checkout: { environmentId, path: topLevel }, forge: UNCHECKED });
+    this.projects.set(id, projectOf(row, { environmentId, path: topLevel }, UNCHECKED));
     this.publish();
     if (restore !== undefined) this.publishRemoved();
     await this.checkForge(id);
@@ -155,18 +187,55 @@ export class Projects {
       await trx.updateTable('projects').set({ removed_at: this.options.clock.now(), identity }).where('id', '=', id).execute();
     });
     this.projects.delete(id);
-    this.removed.set(id, { id, name: project.name });
+    this.removed.set(id, { id, name: project.name, color: project.color });
     this.publish();
     this.publishRemoved();
   }
 
   async setBranchPrefix(id: number, branchPrefix: string): Promise<Project> {
     if (!this.projects.has(id)) throw new Error(`unknown Project ${id}`);
-    const prefix = branchPrefix.trim();
-    const problem = branchPrefixProblem(prefix);
-    if (problem) throw new Error(`"${branchPrefix}" can't be a branch prefix: ${problem}`);
+    const error = branchPrefixError(branchPrefix);
+    if (error) throw new Error(error);
+    const prefix = branchPrefixOf(branchPrefix);
     await this.options.db.updateTable('projects').set({ branch_prefix: prefix }).where('id', '=', id).execute();
     this.update(id, { branchPrefix: prefix });
+    return this.projects.get(id)!;
+  }
+
+  /** Changes the Project's name, colour, avatar or default model: what `edit` gives, the rest as it is. */
+  async edit({ id, name, color, avatar, defaultModel }: ProjectEdit): Promise<Project> {
+    if (!this.projects.has(id)) throw new Error(`unknown Project ${id}`);
+    const change: Partial<ProjectRow> = {};
+    if (name !== undefined) {
+      const error = projectNameError(name);
+      if (error) throw new Error(error);
+      change.name = name.trim();
+    }
+    if (color !== undefined) {
+      if (!isProjectColor(color)) throw new Error(`unknown Project colour "${String(color)}"`);
+      change.color = color;
+    }
+    if (avatar !== undefined) {
+      const text = avatar?.trim();
+      const error = text && avatarError(text);
+      if (error) throw new Error(error);
+      // An empty avatar is the initials again.
+      change.avatar = text || null;
+    }
+    if (defaultModel !== undefined) {
+      const model = defaultModel?.model?.trim() || undefined;
+      const effort = defaultModel?.effort?.trim() || undefined;
+      if (effort && !model) throw new Error('An Effort level is a model\'s: pick the model too.');
+      change.default_model = model ?? null;
+      change.default_effort = model ? (effort ?? null) : null;
+    }
+    if (Object.keys(change).length > 0) await this.options.db.updateTable('projects').set(change).where('id', '=', id).execute();
+    const row = await this.options.db.selectFrom('projects').select(PROJECT_COLUMNS).where('id', '=', id).executeTakeFirstOrThrow();
+    // Read again for the Forge, which a check may have changed meanwhile.
+    const current = this.projects.get(id);
+    if (!current) throw new Error(`unknown Project ${id}`);
+    this.projects.set(id, projectOf(row, current.checkout, current.forge));
+    this.publish();
     return this.projects.get(id)!;
   }
 
@@ -202,13 +271,13 @@ export class Projects {
     return check;
   }
 
-  /** The open issues on the Project's Forge, matching `search` if given. */
+  /** The open issues on the Project's Forge, matching `search` if given, or the issue it names (searchIssues). */
   async issues(id: number, search?: string): Promise<Issue[]> {
     const project = this.projects.get(id);
     if (!project) throw new Error(`unknown Project ${id}`);
     const environment = this.environment(project.checkout.environmentId);
     if (!environment.connected()) throw new Error(`${environment.label} isn't connected.`);
-    return listIssues(environment.request, project.forge, project.checkout.path, search);
+    return searchIssues(environment.request, project.forge, project.checkout.path, search);
   }
 
   /** Checks the Forge of every Project, or of those in the Environment `environmentId`. */
@@ -267,25 +336,10 @@ async function topLevelOf(environment: ProjectEnvironment, path: string): Promis
     }
     throw error;
   }
-  if (result.exitCode !== 0) throw new Error(`${path} is not a git repository`);
+  if (result.exitCode !== 0) {
+    const why = describeFailure('git', result);
+    const { message, details } = splitDetails(why);
+    throw new Error(message === NOT_A_REPOSITORY ? withDetails(`${path} isn't in a git repository`, details) : `git can't open ${path}: ${why}`);
+  }
   return result.stdout.trim();
-}
-
-/**
- * Why git would refuse `<prefix>/<slug>` as a branch name, following
- * `git check-ref-format --branch`; undefined if it wouldn't.
- */
-function branchPrefixProblem(prefix: string): string | undefined {
-  if (!prefix) return 'it is empty';
-  if (prefix.startsWith('-')) return "it starts with '-'";
-  if (prefix === '@') return "it is '@'";
-  // Control characters and DEL, then the characters git reserves.
-  if (/[\x00-\x20\x7f~^:?*[\\]/.test(prefix)) return 'it contains a space, a control character or one of ~ ^ : ? * [ \\';
-  if (prefix.includes('..')) return "it contains '..'";
-  if (prefix.includes('@{')) return "it contains '@{'";
-  const parts = prefix.split('/');
-  if (parts.some((part) => part === '')) return "it starts or ends with '/', or contains '//'";
-  if (parts.some((part) => part.startsWith('.'))) return "a part of it starts with '.'";
-  if (parts.some((part) => part.endsWith('.lock'))) return "a part of it ends with '.lock'";
-  return undefined;
 }

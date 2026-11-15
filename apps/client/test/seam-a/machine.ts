@@ -16,7 +16,8 @@ export interface OpencodeScript {
   /**
    * The models the user's providers offer, in the order `GET /api/model`
    * lists them; `opencode acp`'s `model` and `effort` config options offer
-   * them too, the first being the current one of a new session.
+   * them too, the first being the current one of a new session, and
+   * `GET /api/model/default` answers it (404 with none).
    */
   models?: StandInModel[];
   /**
@@ -47,6 +48,12 @@ export interface OpencodeScript {
     images?: boolean;
     /** What a process that resumed or loaded a session plays instead of `turns`. */
     resumedTurns?: AcpTurn[];
+    /**
+     * What Session highlights' checks play, one per check across processes
+     * (a process with every tool denied is one); past the end, an answer
+     * with nothing to add.
+     */
+    highlightTurns?: AcpTurn[];
     /** The ways of taking up a session each process turns down, as OpenCode does one it doesn't know. */
     refuse?: Array<'session/resume' | 'session/load'>;
   };
@@ -138,9 +145,15 @@ export interface ForgeCliScript {
   authStatus?: Record<string, { stdout?: string; stderr?: string; exitCode: number }>;
   /** What `repo view --output json` prints and exits with (default: fails, not a repository). */
   repoView?: { stdout?: string | object; stderr?: string; exitCode?: number };
-  /** The open issues `issue list` lists. */
-  issues?: { number: number; title: string; body: string; url: string }[];
-  /** The Merge requests `pr`/`mr list` and `view` know of; `state` defaults to open. */
+  /**
+   * The issues on the Forge: `issue list` lists the open ones, and reading
+   * one (`api repos/…/issues/<n>`, `api projects/…/issues/<n>`) gives any
+   * of them, with its `state` (default open), labels, author, when it was
+   * opened and how many comments it has; `pullRequest` makes it one of
+   * GitHub's pull requests, which its issues API gives too.
+   */
+  issues?: { number: number; title: string; body: string; url: string; state?: 'open' | 'closed'; labels?: string[]; author?: string; createdAt?: string; comments?: number; pullRequest?: boolean }[];
+  /** The Merge requests `pr`/`mr list` and `view` know of; `state` defaults to open, and `pr`/`mr merge` makes it merged. */
   mergeRequests?: ({ number: number; url: string; branch: string; state?: 'open' | 'merged' | 'closed' } & ScriptedActivity)[];
   /** The account signed in, whose comments are the user's own (default: `octocat`). */
   viewer?: string;
@@ -151,9 +164,16 @@ export interface ForgeCliScript {
 /** What Babysit's polls see of a Merge request, in terms common to both stand-ins. */
 export interface ScriptedActivity {
   /** GitHub's issue comments, or GitLab's notes (`system` ones and `path`/`line` diff notes too). */
-  comments?: { id: number; author: string | null; body: string; url?: string; path?: string; line?: number; system?: boolean }[];
+  comments?: { id: number; author: string | null; body: string; url?: string; path?: string; line?: number; system?: boolean; createdAt?: string }[];
   /** GitHub's reviews with their inline comments. */
-  reviews?: { id: number; author: string | null; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'; body?: string; url: string; comments?: { path: string; line?: number; originalLine?: number; body: string; url: string }[] }[];
+  reviews?: { id: number; author: string | null; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'; body?: string; url: string; submittedAt?: string; comments?: { path: string; line?: number; originalLine?: number; body: string; url: string; createdAt?: string }[] }[];
+  /**
+   * Its review threads on the code: GitHub's, or GitLab's diff discussions.
+   * `side` defaults to `new`; `outdated` is GitHub's, whose line is then lost.
+   * Replying adds the viewer's comment, resolving sets `resolved`. `code` is
+   * the line as GitHub's diff hunk ends with it.
+   */
+  threads?: { id: string; path: string; line?: number; side?: 'old' | 'new'; code?: string; outdated?: boolean; resolved?: boolean; canResolve?: boolean; changesRequested?: boolean; comments: { id?: number; author: string; body: string; url?: string; createdAt?: string }[] }[];
   /** GitHub's check runs (`id`) and commit statuses (`context`) on the head commit. */
   checks?: ({ id: number; name: string; status?: string; conclusion?: string; url?: string; context?: undefined } | { context: string; state: string; url?: string; createdAt?: string })[];
   /** What GitHub sums the checks up as, when it isn't what they say (a suite with no runs yet). */
@@ -166,6 +186,31 @@ export interface ScriptedActivity {
   pipeline?: { id: number; status: string; failedJobs?: { id: number; name: string; url: string }[]; jobs?: { id: number; name: string; status: string; url: string }[] };
   /** Who approved it on GitLab. */
   approvedBy?: string[];
+  /** What the Merge request Panel shows of it (default: `Merge request <n>`, by octocat, into main, one commit). */
+  title?: string;
+  draft?: boolean;
+  author?: string;
+  /** Its Markdown description (default: none). */
+  description?: string;
+  /** Who is asked to review it; on GitHub, those who haven't yet, a name with a slash being a team. */
+  reviewers?: string[];
+  /** The branch it merges into. */
+  target?: string;
+  commits?: number;
+  /** GitHub's sums of its changes. */
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+  /** GitLab's diffs of its files, without file headers. */
+  diffs?: { old_path?: string; new_path: string; diff: string; new_file?: boolean; renamed_file?: boolean; deleted_file?: boolean; too_large?: boolean }[];
+  /** GitHub's list of its files, each with its patch, without file headers. */
+  files?: { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; patch?: string }[];
+  /** Those of its `reviewers` asking for changes, on GitLab. */
+  requestedChanges?: string[];
+  /** What `pr merge` / `mr merge` fails with, as a Forge refusing to merge it would. */
+  mergeRefusal?: string;
+  /** Set when a merge leaves it open, to be merged later (a merge queue, or once its pipeline passes). */
+  mergeLater?: boolean;
 }
 
 export type ForgeCli = 'gh' | 'glab';

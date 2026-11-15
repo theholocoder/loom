@@ -1,8 +1,10 @@
-// Searching Sessions from the Ctrl+K palette: free text, narrowed by filters.
-//   is:waiting | is:working | is:archived | is:unread
+// Searching Sessions from the Ctrl+K palette: free text, found in what the
+// Sessions are or in what was said in them, narrowed by filters.
+//   is:waiting | is:snoozed | is:working | is:archived | is:unread
 //   project:<name>   Projects whose name starts with it; quote names with spaces
 //   has:mr | has:issue   any other has: narrows nothing
-import { mergeRequestRef, type Project, type Session } from '../shared/api';
+import { mergeRequestRef, type ConversationMatch, type Project, type Session } from '../shared/api';
+import { isSnoozed } from './Snooze';
 
 export type Filter = { kind: 'is' | 'project' | 'has'; value: string };
 
@@ -31,10 +33,19 @@ export function filterToken({ kind, value }: Filter): string {
   return /\s/.test(value) ? `${kind}:"${value}"` : `${kind}:${value}`;
 }
 
+/** What each `is:` filter keeps; any other narrows to nothing. */
+const IS_FILTERS: Record<string, (s: Session) => boolean> = {
+  waiting: (s) => s.status === 'waiting',
+  snoozed: isSnoozed,
+  working: (s) => s.status === 'working',
+  archived: (s) => s.status === 'archived',
+  unread: (s) => s.unread,
+};
+
 /** The filters the palette offers as chips: every status, unread, links, then each Project. */
 export function suggestedFilters(projects: Project[]): string[] {
   return [
-    ...['waiting', 'working', 'archived', 'unread'].map((value) => `is:${value}`),
+    ...Object.keys(IS_FILTERS).map((value) => `is:${value}`),
     ...['mr', 'issue'].map((value) => `has:${value}`),
     ...projects.map((p) => filterToken({ kind: 'project', value: p.name })),
   ];
@@ -50,13 +61,29 @@ export function toggleFilter(query: string, token: string): string {
 
 const STATUS_ORDER: Record<Session['status'], number> = { waiting: 0, working: 1, archived: 2 };
 
-/** The Sessions the query finds, each word in its title, branch, Project, issue or Merge request number: Waiting, then Working, then Archived, most recently changed first in each. */
-export function searchSessions(sessions: Session[], projects: Project[], { filters, words }: SessionQuery): Session[] {
+/** A Session the search found, with what was said in it that it was found by, if any. */
+export interface SessionHit {
+  session: Session;
+  /** Where the conversation holds words not found in the Session itself. */
+  excerpt?: string;
+}
+
+/**
+ * The Sessions the query finds, each word in its title, branch, Project,
+ * issue or Merge request number, or in its conversation as `conversations`
+ * say: they may be for other words while their search is under way, a
+ * conversation holding `fonts` holding `font` too. Those found in
+ * themselves come first, then those found by their conversations, each
+ * Waiting, then Working, then Archived, most recently changed first: the
+ * conversations' answer adds Sessions after those already shown.
+ */
+export function searchSessions(sessions: Session[], projects: Project[], { filters, words }: SessionQuery, conversations: ConversationMatch[] = []): SessionHit[] {
+  const said = new Map(conversations.map((match) => [match.id, match]));
   const projectOf = (s: Session) => projects.find((p) => p.id === s.projectId);
   const passes = (s: Session, { kind, value }: Filter) => {
     switch (kind) {
       case 'is':
-        return value === 'unread' ? s.unread : s.status === value;
+        return Object.hasOwn(IS_FILTERS, value) && IS_FILTERS[value]!(s);
       case 'has':
         return value === 'mr' ? !!s.mergeRequest : value === 'issue' ? !!s.issue : true;
       case 'project':
@@ -71,10 +98,18 @@ export function searchSessions(sessions: Session[], projects: Project[], { filte
       .toLowerCase();
   };
   return sessions
-    .filter((s) => {
-      if (!filters.every((f) => passes(s, f))) return false;
-      const found = haystack(s);
-      return words.every((word) => found.includes(word));
+    .flatMap((session): SessionHit[] => {
+      if (!filters.every((f) => passes(session, f))) return [];
+      const found = haystack(session);
+      const unfound = words.filter((word) => !found.includes(word));
+      if (!unfound.length) return [{ session }];
+      const match = said.get(session.id);
+      return match && unfound.every((word) => match.words.some((held) => held.includes(word))) ? [{ session, excerpt: match.excerpt }] : [];
     })
-    .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.updatedAt - a.updatedAt);
+    .sort(
+      (a, b) =>
+        Number(a.excerpt !== undefined) - Number(b.excerpt !== undefined) ||
+        STATUS_ORDER[a.session.status] - STATUS_ORDER[b.session.status] ||
+        b.session.updatedAt - a.session.updatedAt,
+    );
 }

@@ -33,11 +33,11 @@ const turns: AcpTurn[] = [
       thought('The tests fail '),
       thought('on a typo in the reducer.'),
       'Let me look at the code.\n\n',
-      tool('tool_call', { toolCallId: 'call_1', title: 'Read src/app.ts', kind: 'read', status: 'pending', rawInput: { filePath: 'src/app.ts' } }),
+      tool('tool_call', { toolCallId: 'call_1', name: 'read', title: 'read', kind: 'read', status: 'pending', locations: [{ path: 'src/app.ts' }], rawInput: { filePath: 'src/app.ts' } }),
       tool('tool_call_update', { toolCallId: 'call_1', status: 'completed', content: text('export const app = 1;') }),
-      tool('tool_call', { toolCallId: 'call_2', title: 'pnpm test', kind: 'execute', status: 'in_progress', rawInput: { command: 'pnpm test' } }),
+      tool('tool_call', { toolCallId: 'call_2', name: 'bash', title: 'pnpm test', kind: 'execute', status: 'in_progress', rawInput: { command: 'pnpm test' } }),
       tool('tool_call_update', { toolCallId: 'call_2', status: 'failed', rawOutput: { output: 'FAIL src/app.test.ts\n  ✕ adds (3 ms)\n\nExpected: 2\nReceived: 3', metadata: { exit: 1 } } }),
-      tool('tool_call', { toolCallId: 'call_3', title: 'Edit src/app.ts', kind: 'edit', status: 'completed', content: [{ type: 'diff', path: 'src/app.ts', oldText: 'export const app = 1;\n', newText: 'export const app = 2;\n' }] }),
+      tool('tool_call', { toolCallId: 'call_3', name: 'edit', title: 'edit', kind: 'edit', status: 'completed', locations: [{ path: 'src/app.ts' }], content: [...text('Edit applied successfully.'), { type: 'diff', path: 'src/app.ts', oldText: 'export const app = 1;\n', newText: 'export const app = 2;\n' }] }),
       { update: { sessionUpdate: 'plan', entries: [{ content: 'Read the failing test', status: 'completed', priority: 'high' }, { content: 'Fix the reducer', status: 'in_progress', priority: 'high' }, { content: 'Run the suite', status: 'pending', priority: 'medium' }] } },
       '## Fixed\n\nThe reducer added `1` twice. I changed:\n\n```ts\nexport const app = 2;\n```\n\n| File | Change |\n|---|---|\n| `src/app.ts` | constant fixed |\n\n- [x] tests pass\n- [ ] docs\n\nSee [the docs](https://example.com).',
     ],
@@ -59,6 +59,25 @@ const turns: AcpTurn[] = [
   { chunks: ['Trying'], error: 'Provider error: rate limit exceeded (429). Try again later.' },
 ];
 
+/** What Session highlights' checks answer, one per check: notes on the first turn, then a resolution. */
+const highlightTurns: AcpTurn[] = [
+  {
+    chunks: [
+      JSON.stringify({
+        add: [
+          { kind: 'for-you', text: 'Run the currency migration before deploying: `src/currency.ts:2` now falls back to EUR.' },
+          { kind: 'risk', text: 'Invoices cached before the change keep their old currency.' },
+          { kind: 'assumption', text: 'Assumed every EU customer bills in EUR.' },
+          { kind: 'not-done', text: 'The failing test was skipped rather than fixed.' },
+        ],
+        resolve: [],
+      }),
+    ],
+    tokens: { inputTokens: 900, outputTokens: 120 },
+  },
+  { chunks: [JSON.stringify({ add: [{ kind: 'decision', text: 'Kept the old API for one more release.' }], resolve: [{ id: 4, reason: 'The test was fixed in this turn.' }] })] },
+];
+
 const machine = new Machine();
 machine.installOpencode({
   version: 'opencode v2.1.4',
@@ -70,14 +89,14 @@ machine.installOpencode({
   ],
   commands: [{ name: 'review', description: 'Review the current changes' }, { name: 'init', description: 'Write AGENTS.md' }],
   skills: [{ id: 'tdd', name: 'tdd', description: 'Test-driven development' }],
-  acp: { images: true, turns },
+  acp: { images: true, turns, highlightTurns },
 });
 const branch = 'loom/12-invoices-show-the-wrong-currency';
 machine.installForgeCli('gh', {
   signedInHosts: ['github.com'],
   repoView: { stdout: { nameWithOwner: 'acme/billing-api', url: 'https://github.com/acme/billing-api' } },
   issues: [
-    { number: 12, title: 'Invoices show the wrong currency', body: 'When a customer is in EU the currency is USD.', url: 'https://github.com/acme/billing-api/issues/12' },
+    { number: 12, title: 'Invoices show the wrong currency', body: 'When a customer is in EU the currency is USD.', url: 'https://github.com/acme/billing-api/issues/12', labels: ['bug'], author: 'aduval', createdAt: '2026-11-09T10:00:00Z', comments: 2 },
     { number: 15, title: 'Add CSV export', body: 'Export invoices to CSV.', url: 'https://github.com/acme/billing-api/issues/15' },
   ],
   mergeRequests: [
@@ -86,8 +105,46 @@ machine.installForgeCli('gh', {
       url: 'https://github.com/acme/billing-api/pull/40',
       branch,
       oid: 'abc123',
-      comments: [{ id: 1, author: 'alice', body: 'Can we keep the old helper around for one release?' }],
-      reviews: [{ id: 2, author: 'bob', state: 'CHANGES_REQUESTED', body: 'A few things', url: 'https://github.com/acme/billing-api/pull/40#r2', comments: [{ path: 'src/currency.ts', line: 3, body: 'This should use Intl.NumberFormat', url: 'https://github.com/acme/billing-api/pull/40#c3' }] }],
+      title: 'Invoices use the billing currency',
+      author: 'octocat',
+      description: [
+        '<!-- Say what this changes and why. -->',
+        '## What',
+        '',
+        'Invoices showed every amount in euros, whatever the account is billed in. Closes #12.',
+        '',
+        '## How',
+        '',
+        "- `currencyFor(account)` picks the account's billing currency, with EUR as the fallback.",
+        '- `formatAmount` takes the currency.',
+        '',
+        '```mermaid',
+        'flowchart LR',
+        '  showInvoice --> currencyFor --> formatAmount',
+        '```',
+      ].join('\n'),
+      reviewers: ['carol'],
+      commits: 2,
+      additions: 67,
+      deletions: 1,
+      changedFiles: 3,
+      files: [
+        { filename: 'src/currency.ts', status: 'added', additions: 9, deletions: 0, patch: "@@ -0,0 +1,9 @@\n+export const FALLBACK_CURRENCY = 'EUR';\n+\n+export function currencyFor(account: { billingCurrency?: string }): string {\n+  return account.billingCurrency ?? FALLBACK_CURRENCY;\n+}\n+\n+export function formatAmount(cents: number, currency: string): string {\n+  return `${(cents / 100).toFixed(2)} ${currency}`;\n+}" },
+        { filename: 'src/invoices/show.ts', status: 'modified', additions: 3, deletions: 1, patch: "@@ -1,3 +1,5 @@\n+import { currencyFor, formatAmount } from '../currency';\n+\n export function showInvoice(invoice: Invoice, account: Account): string {\n-  return `€${(invoice.total / 100).toFixed(2)}`;\n+  return formatAmount(invoice.total, currencyFor(account));\n }\n" },
+        { filename: 'docs/logo.png', status: 'added', additions: 0, deletions: 0 },
+      ],
+      comments: [{ id: 1, author: 'alice', body: 'Can we keep the old helper around for one release?', url: 'https://github.com/acme/billing-api/pull/40#c1', createdAt: '2026-11-01T10:30:00Z' }],
+      reviews: [{ id: 2, author: 'bob', state: 'CHANGES_REQUESTED', body: 'A few things', url: 'https://github.com/acme/billing-api/pull/40#r2', submittedAt: '2026-11-01T10:00:00Z', comments: [{ path: 'src/currency.ts', line: 3, body: 'This should use `Intl.NumberFormat`', url: 'https://github.com/acme/billing-api/pull/40#c3', createdAt: '2026-11-01T10:00:00Z' }] }],
+      threads: [
+        {
+          id: 'PRRT_kwDOA1',
+          path: 'src/currency.ts',
+          line: 3,
+          code: 'export function currencyFor(account: { billingCurrency?: string }): string {',
+          changesRequested: true,
+          comments: [{ author: 'bob', body: 'This should use `Intl.NumberFormat`', url: 'https://github.com/acme/billing-api/pull/40#c3', createdAt: '2026-11-01T10:00:00Z' }],
+        },
+      ],
       checks: [
         { id: 5, name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', url: 'https://github.com/acme/billing-api/actions/5' },
         { id: 6, name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },

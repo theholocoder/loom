@@ -1,5 +1,6 @@
 // Naming the branches Loom creates for worktree Sessions. Shared so the
 // composer shows the name main will use.
+import type { ExistingBranch } from './api';
 
 const MAX_SLUG_LENGTH = 40;
 
@@ -33,4 +34,50 @@ export function suggestBranch(prefix: string, prompt: string): string {
 /** The branch Loom suggests for a worktree Session started from an issue: `<prefix>/<issue#>-<slug of its title>`. */
 export function issueBranch(prefix: string, issue: { number: number; title: string }): string {
   return `${prefix}/${issue.number}-${slugOf(issue.title)}`;
+}
+
+/** How git names a branch on `origin` or a local one: `origin/<name>`, or its name. */
+export function branchName(branch: ExistingBranch): string {
+  return branch.remote ? `origin/${branch.name}` : branch.name;
+}
+
+/**
+ * The branch prefix the user meant by `prefix`: trimmed, without the trailing
+ * `/` Loom adds itself between the prefix and the rest of the branch name.
+ */
+export function branchPrefixOf(prefix: string): string {
+  return prefix.trim().replace(/\/+$/, '');
+}
+
+/** Why `prefix`, as the user typed it, can't be a branch prefix, as a sentence; undefined if it can. */
+export function branchPrefixError(prefix: string): string | undefined {
+  const problem = branchPrefixProblem(branchPrefixOf(prefix));
+  return problem && `"${prefix}" can't be a branch prefix: ${problem}`;
+}
+
+/**
+ * Why git would refuse `<prefix>/<slug>` as a branch name, following
+ * `git check-ref-format --branch`; undefined if it wouldn't.
+ */
+export function branchPrefixProblem(prefix: string): string | undefined {
+  if (!prefix) return 'it is empty';
+  if (prefix.startsWith('-')) return "it starts with '-'";
+  if (prefix === '@') return "it is '@'";
+  // Control characters and DEL, then the characters git reserves.
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(prefix)) return 'it contains a space, a control character or one of ~ ^ : ? * [ \\';
+  if (prefix.includes('..')) return "it contains '..'";
+  if (prefix.includes('@{')) return "it contains '@{'";
+  const parts = prefix.split('/');
+  if (parts.some((part) => part === '')) return "it starts or ends with '/', or contains '//'";
+  if (parts.some((part) => part.startsWith('.'))) return "a part of it starts with '.'";
+  if (parts.some((part) => part.endsWith('.lock'))) return "a part of it ends with '.lock'";
+  return undefined;
+}
+
+/**
+ * Why git would refuse `name` as a branch name, following
+ * `git check-ref-format --branch`; undefined if it wouldn't.
+ */
+export function branchNameProblem(name: string): string | undefined {
+  return branchPrefixProblem(name) ?? (name.endsWith('.') ? "it ends with '.'" : undefined);
 }

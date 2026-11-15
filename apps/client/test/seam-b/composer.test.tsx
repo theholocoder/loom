@@ -19,6 +19,7 @@ function renderApp(main: FakeMain) {
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -122,7 +123,7 @@ describe('attachments when starting a Session', () => {
 
 describe('@-mentions', () => {
   it("suggests, when starting a new worktree, the files of the branch it starts from", async () => {
-    const main = new FakeMain({ projects: [project] }, { 'projects.files': () => ['README.md'], 'projects.branches': () => ({ defaultBranch: 'trunk', remote: ['trunk'], existing: [], worktrees: [] }) });
+    const main = new FakeMain({ projects: [project] }, { 'projects.files': () => ['README.md'], 'projects.branches': () => ({ defaultBase: { name: 'trunk', remote: true }, bases: [{ name: 'trunk', remote: true }], existing: [], worktrees: [] }) });
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
@@ -166,6 +167,28 @@ describe('@-mentions', () => {
 
     expect(composer.queryByRole('listbox', { name: 'Files' })).toBeNull();
     expect(prompt.value).toBe('@READ');
+  });
+});
+
+describe("the composer's placeholder", () => {
+  it('tips @ for a file, and / once there are skills or commands, with no help line under the prompt', async () => {
+    const { composer, prompt } = openSession(new FakeMain({ projects: [project], sessions: [finished] }));
+    expect(prompt.placeholder).toBe('Reply to OpenCode… @ to mention a file');
+    expect(composer.queryByText(/Shift Enter|newline/)).toBeNull();
+    cleanup();
+
+    const commands: AgentCommand[] = [{ kind: 'skill', name: 'tdd' }];
+    const withCommands = openSession(new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => commands }));
+    await waitFor(() => expect(withCommands.prompt.placeholder).toBe('Reply to OpenCode… @ to mention a file, / for commands'));
+  });
+
+  it('tips them when starting a Session too', async () => {
+    renderApp(new FakeMain({ projects: [project] }, { 'projects.commands': () => [{ kind: 'command', name: 'init' }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter Projects' }), { key: 'Enter' });
+    const prompt = within(screen.getByRole('main', { name: 'New Session' })).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+    await waitFor(() => expect(prompt.placeholder).toBe('Tell OpenCode what to do… @ to mention a file, / for commands'));
   });
 });
 

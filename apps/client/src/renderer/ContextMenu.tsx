@@ -123,28 +123,50 @@ function OpenMenu({ open, onPick, onClose }: { open: Open; onPick: (item: Contex
     open.returnFocus?.focus();
     onClose();
   };
+  return (
+    <>
+      {/* What the menu is placed against: the point clicked. */}
+      <div ref={point} className="context-point" style={{ left: open.x, top: open.y }} />
+      {open.item?.open ? open.item.open(point, () => close()) : <MenuItems anchor={point} label="Context menu" sections={open.sections} onPick={onPick} onClose={close} />}
+    </>
+  );
+}
+
+/**
+ * A menu of `sections` opened by a button, `anchor`, rather than a
+ * right-click: themed and run like the right-click menu, an item's popover
+ * taking its place against the button. `onClose` closes it, the focus
+ * going back to the button.
+ */
+export function MenuButtonMenu({ anchor, label, sections, onClose }: { anchor: RefObject<HTMLElement | null>; label: string; sections: ContextMenuSection[]; onClose: () => void }) {
+  const [item, setItem] = useState<ContextMenuItem>();
+  const close = () => {
+    anchor.current?.focus();
+    onClose();
+  };
+  if (item?.open) return <>{item.open(anchor, close)}</>;
+  return <MenuItems anchor={anchor} label={label} sections={sections.filter((section) => section.length > 0)} onPick={setItem} onClose={close} maxHeight={MENU_MAX_HEIGHT} />;
+}
+
+/** A button's menu shows whole, room allowing, rather than scroll like a picker's list. */
+const MENU_MAX_HEIGHT = 520;
+
+/** A menu's sections against `anchor`: an item that opens a popover goes to `onPick`; the others close the menu, then run. */
+function MenuItems({ anchor, label, sections, onPick, onClose, maxHeight }: { anchor: RefObject<HTMLElement | null>; label: string; sections: ContextMenuSection[]; onPick: (item: ContextMenuItem) => void; onClose: () => void; maxHeight?: number }) {
   const pick = (item: ContextMenuItem) => {
     if (item.open) {
       onPick(item);
       return;
     }
-    close();
+    onClose();
     item.run?.();
   };
   return (
-    <>
-      {/* What the menu is placed against: the point clicked. */}
-      <div ref={point} className="context-point" style={{ left: open.x, top: open.y }} />
-      {open.item?.open ? (
-        open.item.open(point, () => close())
-      ) : (
-        <Popover anchor={point} role="menu" label="Context menu" className="context-menu" onClose={close}>
-          {open.sections.map((section, index) => (
-            <Section key={index} first={index === 0} section={section} onPick={pick} />
-          ))}
-        </Popover>
-      )}
-    </>
+    <Popover anchor={anchor} role="menu" label={label} className="context-menu" maxHeight={maxHeight} onClose={onClose}>
+      {sections.map((section, index) => (
+        <Section key={index} first={index === 0} section={section} onPick={pick} />
+      ))}
+    </Popover>
   );
 }
 

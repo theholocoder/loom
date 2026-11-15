@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/theholocoder/loom/bridge/protocol"
 )
@@ -45,6 +46,35 @@ func TestFilesExistSaysWhetherAPathIsTaken(t *testing.T) {
 		if got := p.call(i+1, "files.exists", map[string]any{"path": c.path})["exists"]; got != c.want {
 			t.Errorf("files.exists %s = %v, want %v", c.path, got, c.want)
 		}
+	}
+}
+
+func TestFilesCheckFolderTakesAFolderOrOneThatCouldBeMadeLeavingNothing(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "there", "file"), "x", 0o644)
+	p := startBridge(t)
+
+	p.call(1, "files.checkFolder", map[string]any{"path": filepath.Join(dir, "there")})
+	p.call(2, "files.checkFolder", map[string]any{"path": filepath.Join(dir, "loom", "worktrees")})
+
+	if _, err := os.Lstat(filepath.Join(dir, "loom")); !os.IsNotExist(err) {
+		t.Fatalf("files.checkFolder left %s behind: %v", filepath.Join(dir, "loom"), err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "there", "file")); err != nil {
+		t.Fatalf("files.checkFolder touched what was there: %v", err)
+	}
+}
+
+func TestFilesCheckFolderUnderAFileIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "taken")
+	write(t, path, "x", 0o644)
+	p := startBridge(t)
+
+	p.send(map[string]any{"id": 1, "method": "files.checkFolder", "params": map[string]any{"path": filepath.Join(path, "worktrees")}})
+
+	errObj, ok := p.response(1)["error"].(map[string]any)
+	if !ok || errObj["code"] != "not_a_folder" {
+		t.Fatalf("reply error = %v, want not_a_folder", errObj)
 	}
 }
 
@@ -153,5 +183,38 @@ func TestFilesWriteNeedsAPath(t *testing.T) {
 
 	if code := p.response(1)["error"].(map[string]any)["code"]; code != "bad_params" {
 		t.Fatalf("files.write without a path: error %v, want bad_params", code)
+	}
+}
+
+func TestFilesStatReadsEachPathsSizeAndTime(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "src", "a.txt"), "abc", 0o644)
+	when := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(dir, "src", "a.txt"), when, when); err != nil {
+		t.Fatal(err)
+	}
+	p := startBridge(t)
+
+	files := p.call(1, "files.stat", map[string]any{"root": dir, "paths": []string{"src/a.txt", "gone.txt", "../escape"}})["files"].([]any)
+
+	if len(files) != 3 {
+		t.Fatalf("files.stat gave %d entries, want 3", len(files))
+	}
+	first := files[0].(map[string]any)
+	if first["size"] != float64(3) || first["mtimeNs"] != float64(when.UnixNano()) {
+		t.Errorf("files.stat src/a.txt = %v, want size 3 and mtime %d", first, when.UnixNano())
+	}
+	if files[1] != nil || files[2] != nil {
+		t.Errorf("files.stat of a missing path and one outside the root = %v, %v, want null", files[1], files[2])
+	}
+}
+
+func TestFilesStatNeedsARoot(t *testing.T) {
+	p := startBridge(t)
+
+	p.send(map[string]any{"id": 1, "method": "files.stat", "params": map[string]any{"paths": []string{"a"}}})
+
+	if code := p.response(1)["error"].(map[string]any)["code"]; code != "bad_params" {
+		t.Fatalf("files.stat without a root: error %v, want bad_params", code)
 	}
 }

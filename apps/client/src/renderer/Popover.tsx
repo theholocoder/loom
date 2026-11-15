@@ -28,12 +28,12 @@ export const POPOVER_MAX_HEIGHT = 320;
 /**
  * Where a popover of the given size goes beside its trigger: below when it
  * fits, otherwise on whichever side has more room, its height capped to that
- * room, and shifted left to stay inside the viewport.
+ * room (and to `tallest`), and shifted left to stay inside the viewport.
  */
-export function placePopover(trigger: Rect, viewport: { width: number; height: number }, size: { width: number; height: number }): Placement {
+export function placePopover(trigger: Rect, viewport: { width: number; height: number }, size: { width: number; height: number }, tallest = POPOVER_MAX_HEIGHT): Placement {
   const below = viewport.height - trigger.bottom - GAP - MARGIN;
   const above = trigger.top - GAP - MARGIN;
-  const wanted = Math.min(size.height, POPOVER_MAX_HEIGHT);
+  const wanted = Math.min(size.height, tallest);
   const side = wanted <= below || below >= above ? 'down' : 'up';
   const room = Math.max(0, side === 'down' ? below : above);
   const left = Math.max(MARGIN, Math.min(trigger.left, viewport.width - MARGIN - size.width));
@@ -41,7 +41,7 @@ export function placePopover(trigger: Rect, viewport: { width: number; height: n
     side,
     ...(side === 'down' ? { top: trigger.bottom + GAP } : { bottom: viewport.height - trigger.top + GAP }),
     left,
-    maxHeight: Math.min(POPOVER_MAX_HEIGHT, room),
+    maxHeight: Math.min(tallest, room),
   };
 }
 
@@ -76,7 +76,8 @@ function navigate(event: KeyboardEvent<HTMLElement>) {
 /**
  * A popover beside `anchor` (the trigger). Escape closes it and returns focus
  * to the trigger; a mousedown outside both closes it. On open, focus goes to
- * `[data-autofocus]`, else the selected item, else the first item.
+ * `[data-autofocus]`, else the selected item, else the first item. It grows
+ * to `maxHeight` before it scrolls, room allowing.
  */
 export function Popover({
   anchor,
@@ -84,6 +85,7 @@ export function Popover({
   role,
   label,
   className,
+  maxHeight = POPOVER_MAX_HEIGHT,
   children,
 }: {
   anchor: RefObject<HTMLElement | null>;
@@ -91,6 +93,7 @@ export function Popover({
   role: 'menu' | 'listbox' | 'dialog';
   label: string;
   className?: string;
+  maxHeight?: number;
   children: ReactNode;
 }) {
   const popover = useRef<HTMLDivElement>(null);
@@ -104,9 +107,9 @@ export function Popover({
     if (!el || !trigger) return;
     const box = el.getBoundingClientRect();
     // Unmeasured (no layout yet): assume it is as tall as it may grow.
-    const next = placePopover(trigger.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, { width: box.width, height: el.scrollHeight || POPOVER_MAX_HEIGHT });
+    const next = placePopover(trigger.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, { width: box.width, height: el.scrollHeight || maxHeight }, maxHeight);
     setPlacement((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
-  }, [anchor]);
+  }, [anchor, maxHeight]);
 
   // Contents change size as they load: re-place after every render.
   useLayoutEffect(place);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { startMain, tempDir, tempMachine, waitFor, type AcpTurn, type Machine, type StandInModel } from './harness';
+import { startMain, tempDir, tempMachine, until, waitFor, type AcpTurn, type Machine, type StandInModel } from './harness';
 import type { EnvironmentStatus, Session, TranscriptItem } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -29,14 +29,14 @@ async function withProject(machine: Machine, checkout: string) {
 const modelListings = (machine: Machine) => machine.opencodeRequests().filter((r) => r.path === '/api/model');
 
 describe('the models before a Session exists', () => {
-  it("lists the models OpenCode offers in the Project's checkout, as provider/model with their Effort levels, leaving out those turned off", async () => {
+  it("lists the models OpenCode offers in the Project's checkout, as provider/model with their Effort levels, leaving out those turned off, and which it runs without one picked", async () => {
     const { machine, checkout } = machineWith();
     const { main, project } = await withProject(machine, checkout);
 
     const listed = await main.api.invoke('projects.models', { id: project.id });
 
     expect(listed).toEqual([
-      { id: 'opencode/pulse-free', name: 'Pulse Free', efforts: [] },
+      { id: 'opencode/pulse-free', name: 'Pulse Free', efforts: [], default: true },
       { id: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: ['low', 'high', 'max', 'default'] },
     ]);
     expect(modelListings(machine)).toEqual([{ method: 'GET', path: '/api/model', directory: checkout }]);
@@ -133,15 +133,6 @@ async function finishedSession(machine: Machine, checkout: string) {
   return { main, id };
 }
 
-/** Resolves once `check` holds, polling: for what only the stand-in's logs show. */
-async function until(check: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!check()) {
-    if (Date.now() > deadline) throw new Error('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
 const markers = (items: TranscriptItem[]) => items.filter((i) => i.kind === 'model');
 
 describe('changing the model and Effort between runs', () => {
@@ -168,6 +159,20 @@ describe('changing the model and Effort between runs', () => {
     await waitFor(main.api, 'sessions', session(id, finished));
     const prompts = asked(machine).filter((m) => m !== 'initialize' && m !== 'session/new');
     expect(prompts).toEqual(['session/prompt', 'model=anthropic/claude-sonnet-5-5', 'effort=max', 'session/prompt', 'session/prompt']);
+  });
+
+  it('notes on each reply the model that gave it', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['On Pulse.'] }, { chunks: ['On Sonnet.'] }]);
+    const { main, id } = await finishedSession(machine, checkout);
+
+    await main.api.invoke('sessions.setModel', { id, model: 'anthropic/claude-sonnet-5-5' });
+    await main.api.invoke('sessions.send', { id, prompt: 'Second' });
+    const items = await waitFor(main.api, 'transcript', (all) => all.some((i) => i.kind === 'agent' && i.text === 'On Sonnet.' && !i.streaming), { sessionId: id });
+
+    expect(items.filter((i) => i.kind === 'agent').map((i) => (i.kind === 'agent' ? [i.text, i.model] : []))).toEqual([
+      ['On Pulse.', 'opencode/pulse-free'],
+      ['On Sonnet.', 'anthropic/claude-sonnet-5-5'],
+    ]);
   });
 
   it("goes back to the new model's default Effort when the model changes", async () => {

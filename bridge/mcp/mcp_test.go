@@ -81,7 +81,7 @@ func TestInitializeAgreesOnTheClientsProtocolVersionAndOffersTools(t *testing.T)
 	}
 }
 
-func TestListsTheLinkMergeRequestTool(t *testing.T) {
+func TestListsTheLinkTools(t *testing.T) {
 	c := start(t)
 	c.send(map[string]any{"method": "notifications/initialized"})
 	c.send(map[string]any{"id": "list", "method": "tools/list"})
@@ -91,8 +91,13 @@ func TestListsTheLinkMergeRequestTool(t *testing.T) {
 		t.Fatalf("a notification was answered, or the id is wrong: %v", reply)
 	}
 	tools := reply["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 1 {
+	if len(tools) != 2 {
 		t.Fatalf("tools = %v", tools)
+	}
+	if issue := tools[1].(map[string]any); issue["name"] != "link_issue" {
+		t.Errorf("name = %v, want link_issue", issue["name"])
+	} else if _, ok := issue["inputSchema"].(map[string]any)["properties"].(map[string]any)["url"]; !ok {
+		t.Errorf("link_issue inputSchema = %v, want url", issue["inputSchema"])
 	}
 	tool := tools[0].(map[string]any)
 	if tool["name"] != "link_merge_request" {
@@ -115,6 +120,24 @@ func TestCallingTheToolSaysLoomLinksIt(t *testing.T) {
 	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
 	if !strings.Contains(text, "12") {
 		t.Errorf("text = %q, want it to name the Merge request", text)
+	}
+}
+
+func TestCallingTheIssueToolSaysLoomLinksIt(t *testing.T) {
+	c := start(t)
+	c.send(map[string]any{"id": 7, "method": "tools/call", "params": map[string]any{"name": "link_issue", "arguments": map[string]any{"url": "https://github.com/o/r/issues/31"}}})
+
+	result := c.receive()["result"].(map[string]any)
+	if result["isError"] == true {
+		t.Fatalf("isError: %v", result)
+	}
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	if !strings.Contains(text, "issue https://github.com/o/r/issues/31") {
+		t.Errorf("text = %q, want it to name the issue", text)
+	}
+	c.send(map[string]any{"id": 8, "method": "tools/call", "params": map[string]any{"name": "link_issue", "arguments": map[string]any{}}})
+	if result := c.receive()["result"].(map[string]any); result["isError"] != true {
+		t.Errorf("result = %v, want isError", result)
 	}
 }
 

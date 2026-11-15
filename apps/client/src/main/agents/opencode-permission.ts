@@ -59,7 +59,7 @@ const SYSTEM_COMMANDS = [
   ...Object.entries(SYSTEM_INSTALLS).flatMap(([cli, subs]) => subs.map((sub) => `${cli} ${sub.startsWith('-') ? `${sub}*` : sub} *`)),
 ];
 
-type Effect = 'ask' | 'allow';
+type Effect = 'ask' | 'allow' | 'deny';
 export type OpenCodePermission = Record<string, Effect | Record<string, Effect>>;
 
 /** The `permission` config for an agent working in `workingCopy` under `policy`. */
@@ -91,6 +91,9 @@ export function openCodePermission({ policy, workingCopy, tempDir }: PermissionS
   }
   return permission;
 }
+
+/** The `permission` config for an agent with every tool refused: Session highlights' checks (ADR 0010). */
+export const NO_TOOLS: OpenCodePermission = { '*': 'deny' };
 
 /** A path with `/` only and no trailing one, as OpenCode's patterns want it. */
 function slashed(path: string): string {

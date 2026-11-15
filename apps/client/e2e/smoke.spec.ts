@@ -55,11 +55,13 @@ test('launches into the three-pane window and connects the native Environment', 
 
   await expect(window.getByRole('complementary', { name: 'Inbox' })).toBeVisible();
   await expect(window.getByRole('main', { name: 'Session' })).toBeVisible();
-  // The right sidebar is the open Session's: this empty start screen has none, nor its toggle.
-  await expect(window.getByRole('button', { name: /sidebar/i })).toHaveCount(0);
-  await expect(window.getByRole('complementary', { name: 'Session sidebar' })).toHaveCount(0);
+  // The Side area is the open Session's: this empty start screen has none, nor its toggle.
+  await expect(window.getByRole('button', { name: /Side area/ })).toHaveCount(0);
+  await expect(window.getByRole('complementary', { name: 'Side area' })).toHaveCount(0);
 
   await window.getByRole('button', { name: 'Settings' }).click();
+  // Each section of Settings is a page of its own.
+  await window.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: 'Environments' }).click();
   const native = window.getByRole('row', { name: /Native/ });
   await expect(native.getByText('connected')).toBeVisible();
   await expect(native.getByText(`loom-bridge ${clientPackage.version}`)).toBeVisible();
@@ -85,6 +87,18 @@ test('a second launch exits and leaves the first window in place', async () => {
   expect(await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 });
 
+test('the window has no menu bar, and only macOS keeps an application menu', async () => {
+  const window = await launch();
+  await expect(window.getByRole('complementary', { name: 'Inbox' })).toBeVisible();
+  const menu = await app!.evaluate(({ Menu, BrowserWindow }) => ({
+    items: Menu.getApplicationMenu()?.items.map((item) => item.role ?? item.label) ?? null,
+    barShown: BrowserWindow.getAllWindows()[0]!.isMenuBarVisible(),
+  }));
+  // macOS's menu sits in its own bar at the top of the screen, never in the window.
+  if (process.platform === 'darwin') expect(menu.items).not.toBeNull();
+  else expect(menu).toEqual({ items: null, barShown: false });
+});
+
 test('the composer pickers open inside the window, themed', async () => {
   // A throwaway clone to link as the Project, removed once the app has exited.
   const repo = join(userDataDir, 'picker-repo');
@@ -100,11 +114,11 @@ test('the composer pickers open inside the window, themed', async () => {
   await app!.evaluate(({ dialog }, path) => {
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [path] })) as typeof dialog.showOpenDialog;
   }, repo);
-  await window.getByRole('button', { name: 'New' }).click();
-  await window.getByRole('menuitem', { name: 'Add Project from existing clone…' }).click();
+  await window.getByRole('button', { name: 'New', exact: true }).click();
+  await window.getByRole('menuitem', { name: 'Add a Project…' }).click();
   // Linked once Projects lists it; New Session only asks for a Project when there is one.
   await expect(window.getByRole('row', { name: /picker-repo/ })).toBeVisible();
-  await window.getByRole('button', { name: 'New' }).click();
+  await window.getByRole('button', { name: 'New', exact: true }).click();
   await window.getByRole('menuitem', { name: 'New Session' }).click();
   const picker = window.getByRole('dialog', { name: 'Pick a Project' });
   await expect(picker).toBeVisible();
@@ -161,7 +175,9 @@ function luminance(color: string): number {
 test('the Settings dropdowns take on the theme', async () => {
   const window = await launch();
   await window.getByRole('button', { name: 'Settings' }).click();
-  const theme = window.getByRole('button', { name: 'Theme' });
+  await window.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: 'Appearance' }).click();
+  const themes = window.getByRole('radiogroup', { name: 'Theme' });
+  const dropdown = window.getByRole('button', { name: 'UI font' });
 
   const dir = process.env.LOOM_SMOKE_SCREENSHOT_DIR;
   if (dir) mkdirSync(dir, { recursive: true });
@@ -172,13 +188,13 @@ test('the Settings dropdowns take on the theme', async () => {
     ['Mocha', 'dark'],
     ['Daylight', 'light'],
   ] as const) {
-    await theme.click();
-    await window.getByRole('listbox', { name: 'Theme' }).getByRole('option', { name: label }).click();
+    // Each theme is picked from its preview.
+    await themes.getByText(label, { exact: true }).click();
     await expect(window.locator('html')).toHaveAttribute('data-theme', label.toLowerCase());
-    await expect(theme).toHaveText(label);
+    await expect(themes.getByRole('radio', { name: label })).toBeChecked();
 
-    // The trigger reads as a field: a themed border or background, a pointer.
-    const field = await theme.evaluate((element) => {
+    // A dropdown's trigger reads as a field: a themed border or background, a pointer.
+    const field = await dropdown.evaluate((element) => {
       const style = getComputedStyle(element);
       return { border: style.borderTopWidth, borderColor: style.borderTopColor, background: style.backgroundColor, cursor: style.cursor, chevron: !!element.querySelector('svg.chev') };
     });
@@ -187,8 +203,8 @@ test('the Settings dropdowns take on the theme', async () => {
     expect(field.border !== '0px' && field.borderColor !== 'rgba(0, 0, 0, 0)' || field.background !== 'rgba(0, 0, 0, 0)').toBe(true);
     if (dir) await window.screenshot({ path: join(dir, `settings-${label.toLowerCase()}.png`) });
 
-    await theme.click();
-    const listbox = window.getByRole('listbox', { name: 'Theme' });
+    await dropdown.click();
+    const listbox = window.getByRole('listbox', { name: 'UI font' });
     await expect(listbox).toBeVisible();
     await expect(listbox).toBeInViewport({ ratio: 1 });
     const look = await listbox.evaluate((element) => {
@@ -338,7 +354,8 @@ test('Ctrl+` opens a terminal in the dock, which takes what is typed, Ctrl+C inc
     await expect(dock).toHaveCount(0);
     await window.keyboard.press('Control+Backquote');
     await expect(dock.getByRole('tab', { name: 'Terminal 1' })).toBeVisible();
-    await expect(dock.getByRole('tab')).toHaveCount(2);
+    // The same Terminal, no new one.
+    await expect(dock.getByRole('tab')).toHaveCount(1);
   } finally {
     await app?.close();
     app = undefined;

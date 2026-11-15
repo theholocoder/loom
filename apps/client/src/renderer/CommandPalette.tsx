@@ -1,10 +1,11 @@
-// The Ctrl+K palette, following docs/prototypes/ui-layout.html: the main
-// actions, then the Sessions the search finds (see session-search.ts). The
-// search keeps the focus while the arrow keys move the highlight
-// (aria-activedescendant).
+// The Ctrl+K palette, following docs/prototypes/ui-layout.html: the Sessions
+// the search finds (see session-search.ts) and the main actions, the
+// Sessions first until something is typed. The search keeps the focus while
+// the arrow keys move the highlight (aria-activedescendant).
 import { CircleDot, GitPullRequest, Search, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import { mergeRequestRef, type Project, type Session } from '../shared/api';
+import { mergeRequestRef, type ConversationMatch, type Project, type Session } from '../shared/api';
+import { useApi } from './api';
 import { ProjectRemoved, useRemovedProjectIds } from './Archive';
 import { stepIndex } from './Popover';
 import { ProjectAvatar } from './ProjectAvatar';
@@ -32,6 +33,9 @@ export interface CommandPaletteProps {
   onClose: () => void;
 }
 
+/** How long typing pauses before the conversations are searched, in ms. */
+const CONVERSATION_SEARCH_DELAY_MS = 150;
+
 /** Filters hide the actions: they are a Session search. */
 export function CommandPalette({ actions, sessions, projects, onRun, onOpenSession, onClose }: CommandPaletteProps) {
   const id = useId();
@@ -41,30 +45,36 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
   const parsed = parseQuery(query);
   const text = parsed.words.join(' ');
   const shownActions = parsed.filters.length ? [] : actions.filter((action) => action.label.toLowerCase().includes(text));
-  const found = searchSessions(sessions, projects, parsed);
+  const found = searchSessions(sessions, projects, parsed, useConversationSearch(parsed.words));
   const removed = useRemovedProjectIds();
   const results = shownActions.length + found.length;
   const highlighted = results ? stepIndex(active, results) : -1;
+  // Until something is typed, the Sessions come first: there are many actions.
+  const sessionsFirst = query.trim() === '';
+  const sessionsAt = sessionsFirst ? 0 : shownActions.length;
+  const actionsAt = sessionsFirst ? found.length : 0;
   const optionId = (index: number) => `${id}-option-${index}`;
   useEffect(() => {
     if (highlighted < 0) return;
     document.getElementById(optionId(highlighted))?.scrollIntoView?.({ block: 'nearest' });
   });
   const run = (index: number) => {
-    if (index < shownActions.length) onRun(shownActions[index]!);
-    else onOpenSession(found[index - shownActions.length]!);
+    const inActions = index >= actionsAt && index < actionsAt + shownActions.length;
+    if (inActions) onRun(shownActions[index - actionsAt]!);
+    else onOpenSession(found[index - sessionsAt]!.session);
   };
   const changeQuery = (next: string) => {
     setQuery(next);
     setActive(0);
   };
   const activeFilters = new Set(parsed.filters.map(filterToken));
-  const option = (index: number, label: string, children: ReactNode) => (
+  const option = (index: number, label: string, children: ReactNode, description?: string) => (
     <div
       key={index}
       id={optionId(index)}
       role="option"
       aria-label={label}
+      aria-description={description}
       aria-selected={index === highlighted}
       onMouseMove={() => index !== highlighted && setActive(index)}
       // Keep the focus in the search.
@@ -73,6 +83,59 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
     >
       {children}
     </div>
+  );
+
+  const actionGroup = shownActions.length > 0 && (
+    <Group id={`${id}-actions`} label="Actions">
+      {shownActions.map((action, index) =>
+        option(
+          actionsAt + index,
+          action.label,
+          <>
+            <action.icon className="sm" />
+            <span className="grow ellipsis">{action.label}</span>
+            {action.shortcut && <kbd>{shortcutLabel(action.shortcut)}</kbd>}
+          </>,
+        ),
+      )}
+    </Group>
+  );
+  const sessionGroup = found.length > 0 && (
+    <Group id={`${id}-sessions`} label="Sessions" count={found.length}>
+      {found.map(({ session, excerpt }, at) => {
+        const project = projects.find((p) => p.id === session.projectId);
+        return option(
+          sessionsAt + at,
+          session.title,
+          <>
+            <StatusIcon session={session} />
+            {project && <ProjectAvatar project={project} size={18} />}
+            <span className="grow palette-session">
+              <span className="ellipsis">{session.title}</span>
+              {excerpt && (
+                <span className="muted ellipsis palette-excerpt" title={excerpt}>
+                  {excerpt}
+                </span>
+              )}
+            </span>
+            {session.issue && (
+              <span className="row muted tech" title="Issue">
+                <CircleDot className="sm" />#{session.issue.number}
+              </span>
+            )}
+            {session.mergeRequest && (
+              <span className="row muted tech" title="Merge request">
+                <GitPullRequest className="sm" />
+                {mergeRequestRef(project?.forge.kind, session.mergeRequest.number)}
+              </span>
+            )}
+            {project && <span className="muted ellipsis palette-project">{project.name}</span>}
+            {!project && removed.has(session.projectId) && <ProjectRemoved />}
+          </>,
+          excerpt,
+        );
+      })}
+    </Group>
   );
 
   return (
@@ -116,49 +179,16 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
         ))}
       </div>
       <div id={`${id}-list`} role="listbox" aria-label="Results" className="palette-results">
-        {shownActions.length > 0 && (
-          <Group id={`${id}-actions`} label="Actions">
-            {shownActions.map((action, index) =>
-              option(
-                index,
-                action.label,
-                <>
-                  <action.icon className="sm" />
-                  <span className="grow ellipsis">{action.label}</span>
-                  {action.shortcut && <kbd>{shortcutLabel(action.shortcut)}</kbd>}
-                </>,
-              ),
-            )}
-          </Group>
-        )}
-        {found.length > 0 && (
-          <Group id={`${id}-sessions`} label="Sessions" count={found.length}>
-            {found.map((session, at) => {
-              const project = projects.find((p) => p.id === session.projectId);
-              return option(
-                shownActions.length + at,
-                session.title,
-                <>
-                  <StatusIcon session={session} />
-                  {project && <ProjectAvatar project={project} size={18} />}
-                  <span className="grow ellipsis">{session.title}</span>
-                  {session.issue && (
-                    <span className="row muted tech" title="Issue">
-                      <CircleDot className="sm" />#{session.issue.number}
-                    </span>
-                  )}
-                  {session.mergeRequest && (
-                    <span className="row muted tech" title="Merge request">
-                      <GitPullRequest className="sm" />
-                      {mergeRequestRef(project?.forge.kind, session.mergeRequest.number)}
-                    </span>
-                  )}
-                  {project && <span className="muted ellipsis palette-project">{project.name}</span>}
-                  {!project && removed.has(session.projectId) && <ProjectRemoved />}
-                </>,
-              );
-            })}
-          </Group>
+        {sessionsFirst ? (
+          <>
+            {sessionGroup}
+            {actionGroup}
+          </>
+        ) : (
+          <>
+            {actionGroup}
+            {sessionGroup}
+          </>
         )}
         {results === 0 && <div className="muted palette-empty">No match.</div>}
       </div>
@@ -176,6 +206,38 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
       </footer>
     </SearchDialog>
   );
+}
+
+/**
+ * What the conversations say of `words`, searched once typing pauses: the
+ * last answer had, which may be for other words until the next comes. None
+ * while no word is typed, or if the search failed.
+ */
+function useConversationSearch(words: string[]): ConversationMatch[] {
+  const api = useApi();
+  const [matches, setMatches] = useState<ConversationMatch[]>([]);
+  const key = words.join(' ');
+  useEffect(() => {
+    if (!words.length) {
+      setMatches([]);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      api.invoke('sessions.searchConversations', { words }).then(
+        (found) => current && setMatches(found),
+        (error: unknown) => {
+          console.error('conversation search failed:', error);
+          if (current) setMatches([]);
+        },
+      );
+    }, CONVERSATION_SEARCH_DELAY_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [key]);
+  return matches;
 }
 
 function Group({ id, label, count, children }: { id: string; label: string; count?: number; children: ReactNode }) {

@@ -53,6 +53,7 @@ afterEach(() => {
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -137,9 +138,9 @@ describe('the dock', () => {
     openSession('Fix login');
     const header = screen.getByRole('region', { name: 'Session header' });
 
-    fireEvent.click(within(header).getByRole('button', { name: 'Show terminal' }));
+    fireEvent.click(within(header).getByRole('button', { name: 'Show the Dock' }));
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
-    fireEvent.click(within(header).getByRole('button', { name: 'Hide terminal' }));
+    fireEvent.click(within(header).getByRole('button', { name: 'Hide the Dock' }));
 
     expect(dock()).toBeNull();
   });
@@ -166,7 +167,8 @@ describe('the dock', () => {
     toggleTerminal();
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
 
-    fireEvent.click(within(dock()!).getByRole('button', { name: 'New terminal' }));
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getByRole('menuitem', { name: 'Terminal' }));
     await waitFor(() => expect(terminalTabs().map((t) => t.textContent)).toEqual(['Terminal 1', 'Terminal 2']));
     expect(terminalTabs()[1]!.getAttribute('aria-selected')).toBe('true');
 
@@ -174,13 +176,34 @@ describe('the dock', () => {
     expect(terminalTabs()[0]!.getAttribute('aria-selected')).toBe('true');
     expect(within(dock()!).getByRole('tabpanel').contains(screens[0]!.element)).toBe(true);
 
+    const kept = calls(main, 'sessions.setPanels').length;
     fireEvent.click(within(dock()!).getByRole('button', { name: 'Close Terminal 1' }));
     await waitFor(() => expect(terminalTabs().map((t) => t.textContent)).toEqual(['Terminal 2']));
+    // Main drops the Panel of a Terminal that ends: nothing for the renderer to keep.
+    expect(calls(main, 'sessions.setPanels')).toHaveLength(kept);
     expect(screens[0]!.disposed).toBe(true);
     fireEvent.click(within(dock()!).getByRole('button', { name: 'Close Terminal 2' }));
 
     await waitFor(() => expect(dock()).toBeNull());
     expect(calls(main, 'terminals.close')).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  it('has its tabs as one Tab stop, the arrow keys moving between them', async () => {
+    renderApp(fakeMain());
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getByRole('menuitem', { name: 'Terminal' }));
+    await waitFor(() => expect(terminalTabs()).toHaveLength(2));
+
+    expect(terminalTabs().map((t) => t.tabIndex)).toEqual([-1, 0]);
+    fireEvent.keyDown(terminalTabs()[1]!, { key: 'ArrowRight' });
+    expect(terminalTabs()[0]!.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(terminalTabs()[0]);
+    expect(terminalTabs().map((t) => t.tabIndex)).toEqual([0, -1]);
+    fireEvent.keyDown(terminalTabs()[0]!, { key: 'End' });
+    expect(terminalTabs()[1]!.getAttribute('aria-selected')).toBe('true');
   });
 
   it('is open or not for each Session, and keeps its terminals going while another Session is shown', async () => {
@@ -201,16 +224,26 @@ describe('the dock', () => {
     expect(within(dock()!).getByRole('tabpanel').contains(screens[0]!.element)).toBe(true);
   });
 
-  it('keeps Loom shortcuts away from a focused terminal, all but Ctrl+`, which hides the dock', async () => {
+  it('keeps Loom shortcuts away from a focused terminal, all but Ctrl+K, Ctrl+? and Ctrl+`, which hides the dock', async () => {
     renderApp(fakeMain());
     openSession('Fix login');
     toggleTerminal();
     await waitFor(() => expect(document.activeElement).toBe(focusedInput()));
 
-    fireEvent.keyDown(focusedInput(), { key: 'k', ctrlKey: true });
     fireEvent.keyDown(focusedInput(), { key: 'b', ctrlKey: true });
+    fireEvent.keyDown(focusedInput(), { key: 'e' });
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.queryByRole('complementary', { name: 'Session sidebar' })).toBeNull();
+    // Ctrl+B left the Side area as it was.
+    expect(screen.getByRole('complementary', { name: 'Side area' })).toBeTruthy();
+
+    fireEvent.keyDown(focusedInput(), { key: 'k', ctrlKey: true });
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(document.activeElement).toBe(focusedInput());
+    fireEvent.keyDown(focusedInput(), { key: '?', ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(document.activeElement).toBe(focusedInput());
 
     toggleTerminal(focusedInput());
     expect(dock()).toBeNull();
@@ -230,17 +263,52 @@ describe('the dock', () => {
   });
 
   it('is resized by its top edge, with the arrow keys', async () => {
-    renderApp(fakeMain());
+    const main = renderApp(fakeMain());
     openSession('Fix login');
     toggleTerminal();
     await waitFor(() => expect(terminalTabs()).toHaveLength(1));
-    const edge = within(dock()!).getByRole('separator', { name: 'Resize dock' });
+    const edge = within(dock()!).getByRole('separator', { name: 'Resize the Dock' });
     const height = Number(edge.getAttribute('aria-valuenow'));
 
     fireEvent.keyDown(edge, { key: 'ArrowUp' });
 
     expect(Number(edge.getAttribute('aria-valuenow'))).toBe(height + 24);
     expect(dock()!.style.height).toBe(`${height + 24}px`);
+    // One height for every Terminal, kept in the Layout.
+    expect(calls(main, 'settings.setPanelSize')).toEqual([{ kind: 'terminal', dimension: 'height', size: height + 24 }]);
+  });
+
+  it('opens at the height the Layout has for Terminals', async () => {
+    const main = fakeMain();
+    main.publish('settings', { ...main.value('settings'), layout: { area: {}, stack: {}, width: {}, height: { terminal: 333 } } });
+    renderApp(main);
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    expect(dock()!.style.height).toBe('333px');
+  });
+
+  it("keeps each Session's Terminal tabs while Loom runs, and offers every Panel in its + menu", async () => {
+    const main = renderApp(fakeMain());
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    expect(main.value('panels', { sessionId: 7 }).dock).toEqual({ panels: ['terminal:1'], shown: 'terminal:1', open: true });
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    expect(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Changes', 'Highlights', 'Terminal']);
+  });
+
+  it('brings a Panel of the Side area into it from its + menu, its kind kept there', async () => {
+    const main = renderApp(fakeMain());
+    openSession('Fix login');
+    toggleTerminal();
+    await waitFor(() => expect(terminalTabs()).toHaveLength(1));
+    fireEvent.click(within(dock()!).getByRole('button', { name: 'Add a Panel to the Dock' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add a Panel to the Dock' })).getByRole('menuitem', { name: 'Changes' }));
+    expect(within(dock()!).getAllByRole('tab').map((t) => t.getAttribute('aria-label'))).toEqual(['Terminal 1', 'Changes']);
+    expect(within(dock()!).getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
+    expect(calls(main, 'settings.setPanelPlace')).toEqual([{ kind: 'changes', area: 'dock', stack: 'first' }]);
+    await waitFor(() => expect(main.value('panels', { sessionId: 7 }).dock).toEqual({ panels: ['terminal:1', 'changes'], shown: 'changes', open: true }));
   });
 
   it('says why when a terminal fails to open', async () => {

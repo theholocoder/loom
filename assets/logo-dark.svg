@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="96" height="96">
+  <title>Loom</title>
+  <g fill="none" stroke="#eef0f6" stroke-width="2" stroke-linecap="round">
+    <path d="M6 4V9.8M6 16.2V20"/>
+    <path d="M4 13H7.8M14.2 13H20"/>
+    <path d="M9.2 18H20"/>
+    <path d="M11 4V14.8" stroke="#f2b863"/>
+  </g>
+</svg>

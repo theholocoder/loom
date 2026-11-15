@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingWorkingCopy, type MessageComment, type DiffFile, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type Issue, type ModelChoice, type ModelPick, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -16,9 +16,10 @@ import type { LoomDatabase } from '../storage/database';
 import type { EventsTable, Schema, SessionsTable } from '../storage/schema';
 import { Topic } from '../topic';
 import { WorkingCopyDiff } from './diff';
-import { createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
-import { capToolOutput } from './tool-output';
+import { commitWork, createWorktree, findWorktree, listBranches, listFiles, pathExists, removeWorktree, unsavedWork, type GitEnvironment } from './working-copies';
+import { capToolDiffs, capToolOutput } from './tool-output';
 import { checkAnswer } from '../../shared/answers';
+import { goingOn } from '../../shared/going-on';
 import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict } from './approvals';
 import { checkAttachments, type Attachments } from './attachments';
 import { recordSpan, recordTurn } from '../usage/usage';
@@ -53,6 +54,16 @@ export interface SessionsOptions {
   models: (projectId: number) => Promise<ModelChoice[]>;
   /** Where the files attached to messages are kept. */
   attachments: Attachments;
+  /** A turn has ended, however it did: its transcript runs through item `throughItem`. For Session highlights. */
+  onTurnEnded?: (id: number, throughItem: number) => void;
+  /** Links the issue the agent named with Loom's `link_issue` tool (its number, `#12`, or its URL); rejects with why it can't. */
+  linkNamedIssue: (id: number, issue: string) => Promise<void>;
+  /**
+   * The Session has news for the user: it went Waiting for `reason`, or new
+   * feedback came while it waits on an error or an interrupted run. Not
+   * called when the user reopens it. For desktop notifications.
+   */
+  onNews?: (id: number, reason: WaitingReason) => void;
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -78,6 +89,12 @@ export const CHECKPOINT_MS = 1000;
 /** What Continue sends the agent of a run Loom quit or crashed during. */
 export const CONTINUE_PROMPT = 'Loom stopped while you were working. Continue where you left off.';
 
+/** What Continue sends the agent after the user stopped its run. */
+export const CONTINUE_AFTER_STOP_PROMPT = 'I stopped you partway. Continue where you left off.';
+
+/** What Continue sends the agent after its run failed partway through, with `error`. */
+export const continueAfterErrorPrompt = (error: string) => `Your last run failed (${error}). Continue where you left off.`;
+
 /** How long a Session waits with nothing in flight before its agent's process is stopped; its next prompt resumes it. */
 export const IDLE_STOP_MS = 10 * 60_000;
 
@@ -100,6 +117,9 @@ type OpenSpan = { kind: 'run' | 'wait'; since: number; carried?: number };
 type Write = (trx: Transaction<Schema>) => Promise<unknown>;
 /** What the user sends the agent: text, and the files attached to it, stored already. */
 type Message = { text: string; attachments?: Attachment[] };
+/** What archiving does with a worktree's unsaved work: hold back (neither flag), discard it, or commit it to keep it. */
+type UnsavedHandling = Required<Pick<CloseSessionParams, 'discard' | 'commitWork'>>;
+const NO_BRANCH_TO_COMMIT_TO = "This Session's worktree is on no branch, so its work can't be committed to one.";
 /** A transcript item before it has its place in the transcript. */
 type NewItem = TranscriptItem extends infer I ? (I extends TranscriptItem ? Omit<I, 'id'> : never) : never;
 
@@ -128,7 +148,7 @@ export class Sessions {
   private readonly stuckWatches = this.perSessionTimers();
   /** Idle agents still closing, by Session: the next one opened for the Session waits for the process to exit, so two never share its conversation. */
   private readonly closing = this.perSession<Promise<void>>();
-  /** The last diff summary worked out per Session and `uncommittedOnly`, which `diffFile` looks its file up in. */
+  /** The last diff summary worked out per Session and DiffScope, which `diffFile` looks its file up in. */
   private readonly diffSummaries = new Map<string, DiffSummary>();
   /**
    * Archives running, by Session: an agent that opens meanwhile waits for the
@@ -141,6 +161,8 @@ export class Sessions {
   private readonly deleted = new Set<number>();
   /** Archived Sessions being reopened, by Session. */
   private readonly reopening = new Map<number, Promise<void>>();
+  /** Why each Session archived since the Client started was Waiting, or would be once stopped: what undoing the archive brings back. */
+  private readonly archivedFrom = this.perSession<WaitingReason>();
   /** Projects being removed, which no new Session may start on. */
   private readonly removing = new Set<number>();
   /** What each Session's agent asked and waits on: the agent's request id, by transcript item id. */
@@ -181,8 +203,10 @@ export class Sessions {
   private readonly mergeRequestLookups = this.perSession<number>();
   /** What is being looked up after each Session's last turn, until it is done. */
   private readonly afterTurns = this.perSession<Promise<unknown>>();
-  /** The calls of Loom's `link_merge_request` tool in each Session's run, until they complete. */
-  private readonly linkCalls = this.perSession<Set<string>>();
+  /** The calls of Loom's link tools in each Session's run, by tool call id, with what each links, until they complete. */
+  private readonly linkCalls = this.perSession<Map<string, LinkTool>>();
+  /** The plan card of each Session's run, by its item id, once the agent has given one. */
+  private readonly plans = this.perSession<number>();
   /** The cost each Session's agent last reported for its conversation, which its next turn's cost is counted from. */
   private readonly reportedCosts = this.perSession<number>();
   /** The auto-prompts each Session has been sent since the user's last message; none if absent. */
@@ -243,7 +267,7 @@ export class Sessions {
     }
     for (const session of sessions.list()) {
       // A Session waiting on a question or an Approval request, or stuck, was mid-run too: what the agent asked went with its process.
-      if (session.status !== 'working' && !(session.status === 'waiting' && (session.waitingReason === 'question' || session.waitingReason === 'approval' || session.waitingReason === 'stuck'))) continue;
+      if (!inRunOrAsking(session)) continue;
       await sessions.loadTranscript(session.id);
       sessions.endRun(session.id);
       sessions.addItem(session.id, { kind: 'interruption', by: 'quit' });
@@ -359,6 +383,7 @@ export class Sessions {
       if (workingCopy !== 'worktree') throw new Error('Only a worktree Session works on an existing branch or worktree.');
       if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch or worktree doesn't name or base a new one.");
     }
+    if (params.base !== undefined) checkBranch(params.base, 'A base');
     const newAttachments = checkAttachments(params.attachments);
     const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt, { attached: newAttachments.length > 0 });
     let path = project.checkout.path;
@@ -383,7 +408,7 @@ export class Sessions {
             ? { existing: existing.branch }
             : {
                 new: params.branch?.trim() || (issue ? issueBranch(project.branchPrefix, issue) : suggestBranch(project.branchPrefix, text)),
-                ...(params.base?.trim() ? { base: params.base.trim() } : {}),
+                ...(params.base !== undefined && { base: params.base }),
               },
           root: this.options.worktreeRoot(),
         }),
@@ -490,9 +515,14 @@ export class Sessions {
       await running.catch(() => {});
       return this.send({ id, prompt, attachments: attached, comments });
     }
+    await this.reopen(id, () => this.prompt(id, text, newAttachments, { reopening: true }));
+  }
+
+  /** Reopens the archived Session (see `prepareReopen`), then runs `then` on it, tracked as one reopen. */
+  private async reopen(id: number, then: () => Promise<void> | void): Promise<void> {
     const reopening = (async () => {
       await this.prepareReopen(id);
-      await this.prompt(id, text, newAttachments, { reopening: true });
+      await then();
     })();
     this.reopening.set(id, reopening);
     try {
@@ -500,6 +530,29 @@ export class Sessions {
     } finally {
       if (this.reopening.get(id) === reopening) this.reopening.delete(id);
     }
+  }
+
+  /**
+   * Undoes an archive: reopens the Session as a message would (see
+   * `prepareReopen`), but sends none, so that it is Waiting again, as it was
+   * before; Stopped if it was archived mid-run or while it waited on an
+   * answer, which archiving denied.
+   */
+  async unarchive({ id }: { id: number }): Promise<void> {
+    this.get(id);
+    await this.loadTranscript(id);
+    const running = this.reopening.get(id);
+    if (running) {
+      await running.catch(() => {});
+      if (this.get(id).status !== 'archived') return;
+    }
+    if (this.get(id).status !== 'archived') throw new Error('This Session is not archived.');
+    await this.reopen(id, () => {
+      // Asked again: the Project may have started being removed meanwhile.
+      this.assertCanReopen(id);
+      this.setStatus(id, { status: 'waiting', waitingReason: this.archivedFrom.get(id) ?? 'finished' });
+      this.archivedFrom.delete(id);
+    });
   }
 
   /** Sends a prompt to the Session, or queues it; `reopening`, to an archived Session made ready by `prepareReopen`. */
@@ -602,6 +655,15 @@ export class Sessions {
     if (!this.dequeue(id, queuedId)) throw new Error('There is no such queued message.');
   }
 
+  /** Changes the text of a queued message, which keeps its place and attachments. */
+  editQueued({ id, queuedId, text }: { id: number; queuedId: number; text: string }): void {
+    const message = this.queued(id, queuedId);
+    if (hasNothingToSend({ text, attachments: message.attachments })) throw new Error('A queued message needs something to send: remove it instead.');
+    const edited = { ...message, text };
+    this.update(id, { queue: this.get(id).queue!.map((m) => (m === message ? edited : m)) });
+    this.write((trx) => trx.updateTable('queued_messages').set({ text }).where('id', '=', queuedId).execute());
+  }
+
   /**
    * Interrupts the Session's run without sending its queue: once the run
    * ends, the Session is Waiting (stopped), its queue kept.
@@ -674,11 +736,12 @@ export class Sessions {
     const files = await this.deliver(id, message.attachments);
     // The run may have ended, or the message gone, while the files were written.
     const steer = steerable();
-    this.queued(id, queuedId); // throws if it's gone
-    this.dequeue(id, message.id);
+    // Throws if it's gone; its text as it is now, which may have been edited meanwhile.
+    const current = this.queued(id, queuedId);
+    this.dequeue(id, current.id);
     this.endStreaming(id);
-    this.addItem(id, { kind: 'user', ...messageOf(message) });
-    steer({ text: message.text, files });
+    this.addItem(id, { kind: 'user', ...messageOf(current) });
+    steer({ text: current.text, files });
   }
 
   /**
@@ -760,7 +823,7 @@ export class Sessions {
     const found = offered.find((m) => m.id === model);
     const name = this.options.adapter.name;
     if (!found) throw new Error(`${name} doesn't offer ${model} in this Project.`);
-    if (effort !== undefined && !(found.efforts ?? []).includes(effort)) throw new Error(`${name} offers no Effort ${effort} for ${model}.`);
+    if (effort !== undefined && !(found.efforts ?? []).includes(effort)) throw new Error(`${name} offers no Effort ${effort} for ${modelNameIn(offered, model) ?? model}.`);
   }
 
   /** Puts a message at the end of the Session's queue. */
@@ -797,11 +860,9 @@ export class Sessions {
     const items = (await this.loadTranscript(id)).value;
     await this.switched(id);
     const session = this.get(id);
-    const [prompt, error] = items.slice(-2);
-    if (session.status !== 'waiting' || session.waitingReason !== 'error' || prompt?.kind !== 'user' || error?.kind !== 'error') {
-      throw new Error('There is nothing to retry: send a new prompt instead.');
-    }
     if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
+    const prompt = items.at(-2);
+    if (goingOn(session, items) !== 'retry' || prompt?.kind !== 'user') throw new Error('There is nothing to retry: send a new prompt instead.');
     this.assertCanPrompt(id);
     const environment = this.environmentOf(session);
     this.setStatus(id, { status: 'working' });
@@ -810,14 +871,23 @@ export class Sessions {
     void this.run(id, messageOf(prompt));
   }
 
-  /** Has the agent go on with the run Loom quit during: sends it CONTINUE_PROMPT, resuming its conversation. */
+  /**
+   * Has the agent go on with the run that ended early, resuming its
+   * conversation: one Loom quit during (CONTINUE_PROMPT), the user stopped
+   * (CONTINUE_AFTER_STOP_PROMPT), or that failed partway through its answer
+   * (continueAfterErrorPrompt).
+   */
   async continue({ id }: { id: number }): Promise<void> {
     this.get(id);
-    await this.loadTranscript(id);
+    const items = (await this.loadTranscript(id)).value;
     await this.switched(id);
     const session = this.get(id);
-    if (session.status !== 'waiting' || session.waitingReason !== 'interrupted') throw new Error('There is nothing to continue: send a new prompt instead.');
-    this.reply(id, { text: CONTINUE_PROMPT });
+    if (session.worktreeMissing) throw new Error("This Session's worktree is missing; it can only be archived.");
+    if (goingOn(session, items) !== 'continue') throw new Error('There is nothing to continue: send a new prompt instead.');
+    const last = items.at(-1);
+    const text =
+      session.waitingReason === 'stopped' ? CONTINUE_AFTER_STOP_PROMPT : session.waitingReason === 'error' && last?.kind === 'error' ? continueAfterErrorPrompt(last.message) : CONTINUE_PROMPT;
+    this.reply(id, { text });
   }
 
   /** Sends the agent the Merge request prompt shortcut. */
@@ -1038,14 +1108,14 @@ export class Sessions {
    * Session counts as archived only once its worktree is gone, so a removal
    * that fails can be tried again.
    */
-  async archive({ id, discard = false }: CloseSessionParams): Promise<ArchiveResult> {
+  async archive({ id, discard = false, commitWork = false }: CloseSessionParams): Promise<ArchiveResult> {
     if (this.deleting.has(id)) throw new Error('This Session is being deleted.');
-    return this.archiveTracked(id, discard);
+    return this.archiveTracked(id, { discard, commitWork });
   }
 
-  private async archiveTracked(id: number, discard: boolean): Promise<ArchiveResult> {
+  private async archiveTracked(id: number, unsaved: UnsavedHandling): Promise<ArchiveResult> {
     // An agent still starting up for this Session waits for this, and is closed if the Session is archived.
-    const archiving = this.archiveSession(id, discard);
+    const archiving = this.archiveSession(id, unsaved);
     this.archiving.set(id, archiving);
     try {
       return await archiving;
@@ -1060,14 +1130,14 @@ export class Sessions {
    * holding it back unless `discard`), then forgets it: its record, its
    * conversation, its queue and its attachments. Its usage stays.
    */
-  async delete({ id, discard = false }: CloseSessionParams): Promise<DeleteResult> {
+  async delete({ id, discard = false, commitWork = false }: CloseSessionParams): Promise<DeleteResult> {
     const session = this.get(id);
     if (this.deleting.has(id)) throw new Error('This Session is already being deleted.');
     if (this.archiving.has(id)) throw new Error('This Session is being archived.');
     if (this.reopening.has(id)) throw new Error('This Session is being reopened.');
     const project = this.options.project(session.projectId);
     if (project && this.removing.has(project.id)) throw beingRemoved(project);
-    const deleting = this.deleteSession(id, discard);
+    const deleting = this.deleteSession(id, { discard, commitWork });
     this.deleting.set(id, deleting);
     try {
       return await deleting;
@@ -1076,13 +1146,22 @@ export class Sessions {
     }
   }
 
-  private async deleteSession(id: number, discard: boolean): Promise<DeleteResult> {
+  /** What archiving or deleting the Session would ask about: its own worktree's unsaved work, if it has any. */
+  async unsavedWork({ id }: { id: number }): Promise<UnsavedWork | null> {
+    const session = this.get(id);
+    if (session.workingCopy.kind !== 'worktree' || this.worktreeShared(id) || !this.options.project(session.projectId)) return null;
+    const environment = this.environmentOf(session);
+    if (!(await pathExists(environment, session.workingCopy.path))) return null;
+    return (await unsavedWork(environment, session.workingCopy.path)) ?? null;
+  }
+
+  private async deleteSession(id: number, unsaved: UnsavedHandling): Promise<DeleteResult> {
     const session = this.get(id);
     // An archived worktree Session's worktree may be left over: its Environment must say, or the worktree would outlive the Session.
     if (session.status === 'archived' && session.workingCopy.kind === 'worktree' && this.options.project(session.projectId)) {
       await pathExists(this.environmentOf(session), session.workingCopy.path);
     }
-    const result = await this.archiveTracked(id, discard);
+    const result = await this.archiveTracked(id, unsaved);
     if (!result.archived) return { deleted: false, unsavedWork: result.unsavedWork };
     // What was being looked up after its last turn ends before it is forgotten.
     await this.afterTurns.get(id)?.catch(() => {});
@@ -1167,7 +1246,7 @@ export class Sessions {
     }
   }
 
-  private async archiveSession(id: number, discard: boolean): Promise<ArchiveResult> {
+  private async archiveSession(id: number, { discard, commitWork: keep }: UnsavedHandling): Promise<ArchiveResult> {
     // Ending the agent's text needs the transcript, so it is read first.
     this.get(id);
     await this.loadTranscript(id);
@@ -1187,16 +1266,29 @@ export class Sessions {
     // The check runs with the agent alive, so Cancel on the warning leaves the Session as it was.
     if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
-      if (work) return { archived: false, unsavedWork: work };
+      if (work?.detached && keep) throw new Error(NO_BRANCH_TO_COMMIT_TO);
+      if (work && !keep) return { archived: false, unsavedWork: work };
     }
     // Confirmed: stop the agent, then look again in case it wrote in its last moment.
     // A run waiting on the user's answer ends here too, so it fails like a Working one.
     const evenIfWaiting = this.inRun(id);
     this.denyApprovals(id);
     await this.stopAgent(id);
+    if (keep && (await pathExists(environment, worktree))) {
+      try {
+        // On no branch since the check, its commit would be lost with the worktree.
+        if ((await unsavedWork(environment, worktree))?.detached) throw new Error(NO_BRANCH_TO_COMMIT_TO);
+        await commitWork(environment, worktree, `WIP: ${session.title}`);
+      } catch (error) {
+        this.fail(id, `Loom stopped the agent to archive this Session, but couldn't commit its work, so the Session was not archived. ${(error as Error).message}`, { evenIfWaiting });
+        throw error;
+      }
+    }
     if (!discard && (await pathExists(environment, worktree))) {
       const work = await unsavedWork(environment, worktree);
-      if (work) {
+      // Kept, its unpushed commits are on its local branch, which archiving keeps.
+      const keptOnBranch = keep && work && !work.uncommitted && !work.detached;
+      if (work && !keptOnBranch) {
         this.fail(id, 'Loom stopped the agent to archive this Session, but it left unsaved work, so the Session was not archived.', { evenIfWaiting });
         return { archived: false, unsavedWork: work };
       }
@@ -1224,17 +1316,30 @@ export class Sessions {
 
   private markArchived(id: number): void {
     // Also guards a concurrent archive of the same Session: it was archived while this one waited.
-    if (this.get(id).status === 'archived') return;
+    const was = this.get(id);
+    if (was.status === 'archived') return;
+    // Asked again, a run or a question doesn't come back: the agent is stopped, and what it asked denied.
+    this.archivedFrom.set(id, inRunOrAsking(was) ? 'stopped' : (was.waitingReason ?? 'finished'));
     this.endRun(id);
     this.denyMessages.delete(id);
-    if (this.get(id).queue) {
-      this.update(id, { queue: undefined });
-      this.write((trx) => trx.deleteFrom('queued_messages').where('session_id', '=', id).execute());
-    }
+    // Its queue is kept for when it reopens: then a reply goes first, and the queue after it, as after a Stop.
     this.setStatus(id, { status: 'archived' });
     this.update(id, { worktreeMissing: undefined, diffStat: undefined });
     if (!this.deleting.has(id)) void this.lookUpMergeRequestState(id);
-    for (const key of [`${id}:true`, `${id}:false`]) this.diffSummaries.delete(key);
+    for (const scope of DIFF_SCOPES) this.diffSummaries.delete(summaryKey(id, scope));
+  }
+
+  /** The Session's conversation so far. */
+  async transcriptItems(id: number): Promise<TranscriptItem[]> {
+    return (await this.loadTranscript(id)).value;
+  }
+
+  /** Records how many Highlights the Session has, as the Highlights service counts them; undefined while its Panel means nothing. */
+  setHighlightCounts(id: number, counts: HighlightCounts | undefined): void {
+    if (!this.sessions.has(id)) return;
+    const was = this.get(id).highlights;
+    if (was?.count === counts?.count && was?.unseen === counts?.unseen) return;
+    this.update(id, { highlights: counts });
   }
 
   /** Says what Babysit last saw of the Session's Merge request. */
@@ -1288,7 +1393,7 @@ export class Sessions {
       return true;
     }
     this.addItem(id, { ...card, archived: true });
-    if (state === 'closed') this.setUnread({ id, unread: true });
+    if (state === 'closed') this.writeUnread(id, true);
     return true;
   }
 
@@ -1327,8 +1432,8 @@ export class Sessions {
     this.addItem(id, { kind: 'feedback', ...feedback, state: 'new', ...(paused ? { paused } : {}) });
     if (session.waitingReason === 'error' || session.waitingReason === 'interrupted') {
       this.endSnooze(id);
-      this.update(id, { unread: true });
-      this.save(id, { unread: 1 });
+      this.writeUnread(id, true);
+      this.options.onNews?.(id, 'feedback');
     } else {
       this.setStatus(id, { status: 'waiting', waitingReason: 'feedback' });
     }
@@ -1414,8 +1519,15 @@ export class Sessions {
     await agent?.close();
   }
 
-  setUnread({ id, unread }: { id: number; unread: boolean }): void {
-    this.get(id);
+  /** The user marks the Session read or unread: not unread once archived, nor while archiving. */
+  setUnread({ id, unread }: { id: number; unread: boolean }): boolean {
+    const { status } = this.get(id);
+    if (unread && (status === 'archived' || this.archiving.has(id))) return false;
+    this.writeUnread(id, unread);
+    return true;
+  }
+
+  private writeUnread(id: number, unread: boolean): void {
     this.update(id, { unread });
     this.save(id, { unread: unread ? 1 : 0 });
   }
@@ -1428,6 +1540,25 @@ export class Sessions {
     if (!trimmed) throw new Error('A Session needs a title.');
     this.update(id, { title: trimmed });
     this.save(id, { title: trimmed });
+  }
+
+  /** Links the Session to `issue`, in place of any it had, while its Project is there. */
+  linkIssue({ id, issue }: Commands['sessions.linkIssue']['params']): void {
+    const session = this.get(id);
+    if (!this.options.project(session.projectId)) throw new Error("This Session's Project was removed, so it can't be linked to an issue.");
+    checkIssue(issue);
+    const link = { number: issue.number, url: issue.url };
+    this.update(id, { issue: link });
+    this.save(id, { issue_number: link.number, issue_url: link.url });
+  }
+
+  /** Unlinks the Session's issue, if it has one, while its Project is there. */
+  unlinkIssue({ id }: Commands['sessions.unlinkIssue']['params']): void {
+    const session = this.get(id);
+    if (!this.options.project(session.projectId)) throw new Error("This Session's Project was removed, so its issue can't be unlinked.");
+    if (!session.issue) return;
+    this.update(id, { issue: undefined });
+    this.save(id, { issue_number: null, issue_url: null });
   }
 
   /** Snoozes the Waiting Session until `until`, or ends its snooze (`null`). */
@@ -1674,6 +1805,9 @@ export class Sessions {
         return this.appendText(id, 'agent', event.text);
       case 'thinking-delta':
         return this.appendText(id, 'thinking', event.text);
+      case 'plan':
+        if (!this.inRun(id)) return;
+        return this.recordPlan(id, event.entries);
       case 'tool-started':
       case 'tool-updated':
         // A run's cards are settled when it ends; what comes after can't reopen them.
@@ -1713,7 +1847,9 @@ export class Sessions {
         return this.afterTurn(id);
       case 'closed':
         this.live.delete(id);
-        return this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
+        this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
+        // A run it ended is a turn that ended; with none, Session highlights finds nothing new to check.
+        return this.turnEnded(id);
     }
   }
 
@@ -1734,11 +1870,13 @@ export class Sessions {
   /** Adds tokens and cost to the Session's bucket for today and the model its run went with. */
   private recordUsage(id: number, tokens: TokenCounts, cost: number): void {
     const session = this.get(id);
+    const model = this.runModels.get(id) ?? this.modelOf(id);
     const turn = {
       sessionId: id,
       projectId: session.projectId,
       projectName: this.options.project(session.projectId)?.name ?? `Project ${session.projectId}`,
-      model: this.runModels.get(id) ?? this.modelOf(id),
+      model,
+      modelName: modelNameIn(session.agentConfig?.models, model),
       endedAt: this.options.clock.now(),
       tokens,
       cost,
@@ -1755,16 +1893,23 @@ export class Sessions {
   /** The model the Session runs with: the one picked, or else the agent's own. */
   private modelOf(id: number): string {
     const session = this.get(id);
-    return session.model ?? session.agentConfig?.model ?? 'default';
+    return session.model ?? session.agentConfig?.model ?? DEFAULT_MODEL;
   }
 
   /** Once a turn has ended, however it did: reads the branch again, then the diff and the Merge request on it. */
   private afterTurn(id: number): void {
+    this.turnEnded(id);
     const looking = this.lookUpBranch(id).then(() => Promise.all([this.lookUpDiffStat(id), this.lookUpMergeRequest(id)]));
     this.afterTurns.set(id, looking);
     void looking.finally(() => {
       if (this.afterTurns.get(id) === looking) this.afterTurns.delete(id);
     });
+  }
+
+  /** Tells Session highlights a turn ended, with where its transcript runs through. */
+  private turnEnded(id: number): void {
+    const through = this.transcripts.get(id)?.value.at(-1)?.id;
+    if (through !== undefined) this.options.onTurnEnded?.(id, through);
   }
 
   /** Sends `message` as the next run, the Session staying Working. */
@@ -1808,14 +1953,27 @@ export class Sessions {
     this.save(id, { branch });
   }
 
-  /** Works out the Session's diff, and Session info's diff stat with it. */
-  async diff(id: number, uncommittedOnly = false): Promise<DiffSummary> {
+  /**
+   * Works out the Session's diff of `scope`, with how many files each scope
+   * holds while it isn't archived, and the Glance strip's diff stat with
+   * the whole diff.
+   */
+  async diff(id: number, scope: DiffScope = 'all'): Promise<DiffSummary> {
+    checkScope(scope);
     const diff = await this.diffOf(id);
     if (!diff) return { available: false, reason: 'No diff available' };
-    const summary = await diff.summary(uncommittedOnly);
-    this.diffSummaries.set(`${id}:${uncommittedOnly}`, summary);
-    if (!uncommittedOnly && this.get(id).status !== 'archived') this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
-    return summary;
+    const live = this.get(id).status !== 'archived';
+    // Counting is a nicety: the diff shows without it.
+    const [summary, counts] = await Promise.all([diff.summary(scope), live ? diff.counts().catch(() => undefined) : undefined]);
+    this.diffSummaries.set(summaryKey(id, scope), summary);
+    if (scope === 'all' && live) this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
+    return summary.available && counts ? { ...summary, counts } : summary;
+  }
+
+  /** What the Session's working copy holds now, as a string that changes whenever its diff may have. */
+  async diffFingerprint(id: number): Promise<string> {
+    const diff = await this.diffOf(id);
+    return diff ? diff.fingerprint() : '';
   }
 
   /** The `origin/…` branches the Session's diff can be against, as the local refs have them. */
@@ -1839,19 +1997,20 @@ export class Sessions {
   }
 
   /** One file of the Session's diff; the renderer names the path, what git is asked about it is worked out here. */
-  async diffFile(id: number, path: string, uncommittedOnly = false): Promise<FileDiff> {
+  async diffFile(id: number, path: string, scope: DiffScope = 'all'): Promise<FileDiff> {
+    checkScope(scope);
     const diff = await this.diffOf(id);
     if (!diff) throw new Error('No diff available');
-    const key = `${id}:${uncommittedOnly}`;
+    const key = summaryKey(id, scope);
     const known = this.diffSummaries.get(key);
     let file = known && filesOf(known).find((f) => f.path === path);
     if (!file) {
-      const summary = await diff.summary(uncommittedOnly);
+      const summary = await diff.summary(scope);
       this.diffSummaries.set(key, summary);
       file = filesOf(summary).find((f) => f.path === path);
     }
     if (!file) throw new Error(`${path} isn't in this diff`);
-    return diff.file(file, uncommittedOnly);
+    return diff.file(file, scope);
   }
 
   /**
@@ -1872,14 +2031,14 @@ export class Sessions {
     return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }, this.options.maxUntrackedCounted) : undefined;
   }
 
-  /** Records Session info's diff stat; keeps the last one known if git can't say. */
+  /** Records the Glance strip's diff stat; keeps the last one known if git can't say. */
   private async lookUpDiffStat(id: number): Promise<void> {
     try {
       const session = this.get(id);
       if (session.status === 'archived' || session.worktreeMissing) return;
       const diff = new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path }, this.options.maxUntrackedCounted);
       const summary = await diff.summary();
-      this.diffSummaries.set(`${id}:false`, summary);
+      this.diffSummaries.set(summaryKey(id, 'all'), summary);
       this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));
     } catch {
       return;
@@ -1948,27 +2107,34 @@ export class Sessions {
   }
 
   /**
-   * Links the Merge request the agent named with Loom's `link_merge_request`
-   * tool, once the call has completed: Loom's MCP server only answers it.
+   * Links the Merge request or issue the agent named with Loom's
+   * `link_merge_request` or `link_issue` tool, once the call has completed:
+   * Loom's MCP server only answers it.
    */
   private noticeLinkCall(id: number, { toolCallId, title, status }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
     let calls = this.linkCalls.get(id);
-    if (title !== undefined && LINK_TOOL.test(title.trim())) {
-      if (!calls) this.linkCalls.set(id, (calls = new Set()));
-      calls.add(toolCallId);
+    const tool = title === undefined ? undefined : linkToolOf(title);
+    if (tool) {
+      if (!calls) this.linkCalls.set(id, (calls = new Map()));
+      calls.set(toolCallId, tool);
     }
-    if (!calls?.has(toolCallId) || (status !== 'completed' && status !== 'failed')) return;
+    const linking = calls?.get(toolCallId);
+    if (!calls || !linking || (status !== 'completed' && status !== 'failed')) return;
     calls.delete(toolCallId);
     if (calls.size === 0) this.linkCalls.delete(id);
     if (status === 'failed') return;
     const card = this.transcript(id).value.findLast((i) => i.kind === 'tool' && i.toolCallId === toolCallId);
     const named = card?.kind === 'tool' ? linkToolInput(card.input) : undefined;
     if (!named) return;
+    const [linked, refusal] =
+      linking === 'merge-request'
+        ? [this.linkMergeRequest({ id, mergeRequest: named }), (reason: string): NewItem => ({ kind: 'merge-request-refused', mergeRequest: named, reason })]
+        : [this.options.linkNamedIssue(id, named), (reason: string): NewItem => ({ kind: 'issue-refused', issue: named, reason })];
     // The agent was only told Loom checks it; the user sees why it wasn't linked.
-    this.linkMergeRequest({ id, mergeRequest: named }).catch((error: unknown) => {
+    linked.catch((error: unknown) => {
       if (this.shuttingDown || this.get(id).status === 'archived') return;
       this.endStreaming(id);
-      this.addItem(id, { kind: 'merge-request-refused', mergeRequest: named, reason: (error as Error).message });
+      this.addItem(id, refusal((error as Error).message));
     });
   }
 
@@ -2027,10 +2193,11 @@ export class Sessions {
   /** Puts a Working Session (or, `evenIfWaiting`, a Waiting one) in Waiting (error), showing why in its conversation. */
   private fail(id: number, error: string, { evenIfWaiting = false } = {}): void {
     const { status } = this.get(id);
-    if (!this.inRun(id) && !(evenIfWaiting && status === 'waiting')) return;
+    const inRun = this.inRun(id);
+    if (!inRun && !(evenIfWaiting && status === 'waiting')) return;
     this.endRun(id);
     this.denyMessages.delete(id);
-    this.addItem(id, { kind: 'error', message: error });
+    this.addItem(id, { kind: 'error', message: error, ...(inRun ? {} : { betweenRuns: true as const }) });
     this.setStatus(id, { status: 'waiting', waitingReason: 'error', error });
   }
 
@@ -2047,7 +2214,9 @@ export class Sessions {
       if (!this.checkpoints.has(id)) this.checkpoints.set(id, this.options.clock.setTimeout(() => this.checkpoint(id), CHECKPOINT_MS));
     } else {
       this.endStreaming(id);
-      this.addItem(id, { kind, text, streaming: true });
+      // Which model said it: the one the run goes with, when Loom knows it.
+      const model = this.runModels.get(id);
+      this.addItem(id, { kind, text, streaming: true, ...(model && model !== DEFAULT_MODEL ? { model } : {}) });
     }
   }
 
@@ -2087,6 +2256,7 @@ export class Sessions {
     this.asks.delete(id);
     this.approvedCalls.delete(id);
     this.linkCalls.delete(id);
+    this.plans.delete(id);
     const items = this.transcript(id).value;
     if (!items.some(leftGoing)) return;
     const ended = items.map((i) => (!leftGoing(i) ? i : i.kind === 'tool' ? { ...i, status: 'failed' as const } : { ...i, state: 'expired' as const }));
@@ -2096,22 +2266,36 @@ export class Sessions {
 
   /**
    * Adds a tool call's card, or updates the one with its id wherever it is in
-   * the transcript, writing it at once. Its input and output are capped.
+   * the transcript, writing it at once. Its input, output and diffs are capped.
    */
   private recordTool(id: number, { type: _type, ...call }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
     const input = call.input === undefined ? undefined : capToolOutput(call.input);
     const output = call.output === undefined ? undefined : capToolOutput(call.output);
-    const changes = withoutUndefined({ ...call, input: input?.text, output: output?.text });
+    const diffs = call.diffs === undefined ? undefined : capToolDiffs(call.diffs);
+    const changes = withoutUndefined({ ...call, input: input?.text, output: output?.text, diffs: diffs?.diffs });
     const items = this.transcript(id).value;
     const at = items.findLastIndex((i) => i.kind === 'tool' && i.toolCallId === call.toolCallId);
     const card = items[at];
     // A card stays marked once cut: what's kept of it is still partial.
-    const truncated = (card?.kind === 'tool' && card.truncated) || input?.truncated || output?.truncated;
+    const truncated = (card?.kind === 'tool' && card.truncated) || input?.truncated || output?.truncated || diffs?.truncated;
     if (card?.kind !== 'tool') {
       this.endStreaming(id);
       return this.addItem(id, { kind: 'tool', title: 'Tool call', status: 'running', ...changes, ...(truncated ? { truncated } : {}) });
     }
     this.replaceItem(id, { ...card, ...changes, ...(truncated ? { truncated } : {}) });
+  }
+
+  /**
+   * Adds the run's plan card, or, the run having one, updates it: each plan
+   * the agent gives is the whole of it. An empty plan before any is no card.
+   */
+  private recordPlan(id: number, entries: PlanEntry[]): void {
+    const card = this.plans.get(id);
+    if (card !== undefined) return this.replaceItem(id, { kind: 'plan', id: card, entries });
+    if (entries.length === 0) return;
+    this.endStreaming(id);
+    this.plans.set(id, this.transcript(id).value.length);
+    this.addItem(id, { kind: 'plan', entries });
   }
 
   /** Puts `item` in place of the transcript item with its id, and writes it. */
@@ -2189,6 +2373,10 @@ export class Sessions {
     this.save(id, { status, waiting_reason: waitingReason ?? null, error: error ?? null, unread: unread ? 1 : 0, updated_at: updatedAt, snoozed_until: null });
     this.watchIdle(id);
     this.watchStuck(id);
+    // Reopening is the user's doing, not news; nor is another ask while one is pending. New feedback always is.
+    const reason = waitingReason ?? 'finished';
+    const again = was.status === 'waiting' && was.waitingReason === reason && reason !== 'feedback';
+    if (status === 'waiting' && was.status !== 'archived' && !again) this.options.onNews?.(id, reason);
   }
 
   /**
@@ -2327,6 +2515,11 @@ export class Sessions {
  * a `wait` for the user while Waiting on a question or Approval request, or
  * finished and unanswered; none otherwise.
  */
+/** Whether the Session's agent is mid-run: Working, or Waiting on what it asked (a question, an Approval request) or stuck. */
+function inRunOrAsking({ status, waitingReason }: Pick<Session, 'status' | 'waitingReason'>): boolean {
+  return status === 'working' || (status === 'waiting' && (waitingReason === 'question' || waitingReason === 'approval' || waitingReason === 'stuck'));
+}
+
 function spanOf(status: SessionStatus, waitingReason: WaitingReason | undefined): OpenSpan['kind'] | undefined {
   if (status === 'working') return 'run';
   if (status === 'waiting' && (waitingReason === 'question' || waitingReason === 'approval' || waitingReason === 'finished')) return 'wait';
@@ -2347,8 +2540,8 @@ function messageOf({ text, attachments }: Message): Message {
 }
 
 /** Rejects an issue Loom couldn't link to, or open in the browser. */
-function checkIssue(issue: Issue): void {
-  if (!Number.isInteger(issue.number) || issue.number <= 0 || !/^https?:\/\//i.test(issue.url ?? '')) {
+function checkIssue(issue: ForgeLink): void {
+  if (typeof issue !== 'object' || issue === null || !Number.isInteger(issue.number) || issue.number <= 0 || !/^https?:\/\//i.test(issue.url ?? '')) {
     throw new Error('An issue needs a number and an http(s) link.');
   }
 }
@@ -2366,9 +2559,13 @@ function checkExisting(existing: ExistingWorkingCopy): void {
     if (typeof existing.worktree !== 'string' || !existing.worktree) throw new Error('An existing worktree needs its path.');
     return;
   }
-  const { branch } = existing;
+  checkBranch(existing.branch, 'An existing branch');
+}
+
+/** Checks a branch named in a request: `what` needs a name, and whether it is on origin. */
+function checkBranch(branch: ExistingBranch | undefined, what: string): void {
   if (typeof branch?.name !== 'string' || !branch.name || branch.name.startsWith('-') || typeof branch.remote !== 'boolean') {
-    throw new Error('An existing branch needs a name, and whether it is on origin.');
+    throw new Error(`${what} needs a name, and whether it is on origin.`);
   }
 }
 
@@ -2384,10 +2581,19 @@ interface MergeRequestLinkage {
   byHand: boolean;
 }
 
-/** Loom's `link_merge_request` tool, as agents name it: prefixed with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others. */
-const LINK_TOOL = /^(?:mcp__)?loom(?:__|[_.:-])link_merge_request$/i;
+/** What one of Loom's link tools links. */
+type LinkTool = 'merge-request' | 'issue';
 
-/** What the agent gave Loom's `link_merge_request` tool, as `linkMergeRequest` takes it: the number, or else the URL. */
+/**
+ * Which of Loom's link tools `title` names, as agents name them: prefixed
+ * with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others.
+ */
+function linkToolOf(title: string): LinkTool | undefined {
+  const tool = /^(?:mcp__)?loom(?:__|[_.:-])link_(merge_request|issue)$/i.exec(title.trim())?.[1]?.toLowerCase();
+  return tool === 'merge_request' ? 'merge-request' : tool === 'issue' ? 'issue' : undefined;
+}
+
+/** What the agent gave one of Loom's link tools, as `linkMergeRequest` and `linkNamedIssue` take it: the number, or else the URL. */
 function linkToolInput(input: string | undefined): string | undefined {
   try {
     const { number, url } = JSON.parse(input ?? '') as { number?: unknown; url?: unknown };
@@ -2453,6 +2659,9 @@ function isStreamingText(item: TranscriptItem | undefined): item is Extract<Tran
   return (item?.kind === 'agent' || item?.kind === 'thinking') && item.streaming;
 }
 
+/** What usage is filed under when neither the user nor the agent named a model. */
+const DEFAULT_MODEL = 'default';
+
 function itemOf(row: EventsTable): TranscriptItem {
   return { ...(JSON.parse(row.data) as object), kind: row.kind, id: row.seq } as TranscriptItem;
 }
@@ -2464,6 +2673,16 @@ function linkOf(number: number | null, url: string | null): ForgeLink | undefine
 /** Drops absent optional fields, so a Session compares equal however it was built. */
 function withoutUndefined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
+
+/** Where a Session's last summary of a scope is kept. */
+function summaryKey(id: number, scope: DiffScope): string {
+  return `${id}:${scope}`;
+}
+
+/** Rejects what isn't a DiffScope, as the renderer may send anything. */
+function checkScope(scope: DiffScope): void {
+  if (!DIFF_SCOPES.includes(scope)) throw new Error(`${String(scope)} isn't a diff scope.`);
 }
 
 function filesOf(summary: DiffSummary): DiffFile[] {

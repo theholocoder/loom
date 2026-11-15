@@ -3,9 +3,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { AgentStatus, EnvironmentStatus, ForgeStatus, Project } from '../../src/shared/api';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
+
+/** Projects' own Add a Project…, rather than the welcome's behind it. */
+const addProjectButton = () => within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' });
 
 function renderApp(main = new FakeMain()) {
   render(
@@ -36,6 +40,8 @@ describe('the window', () => {
       expect(within(inbox).getByRole('button', { name: section }).getAttribute('aria-expanded')).toBe('false');
     }
     expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy();
+    // No Project yet: the welcome, in the main pane.
+    expect(within(screen.getByRole('main', { name: 'Session' })).getByRole('region', { name: 'Welcome' })).toBeTruthy();
     // No Session selected: no header, so no diff toggle, and no panel or rail taking space.
     expect(screen.queryByRole('button', { name: /changes/i })).toBeNull();
     expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
@@ -50,6 +56,7 @@ describe('Settings', () => {
     renderApp(new FakeMain({ environments: [connectedNative] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Environments');
 
     const row = screen.getByRole('row', { name: /Native/ });
     expect(within(row).getByText('connected')).toBeTruthy();
@@ -59,6 +66,7 @@ describe('Settings', () => {
   it('follows the Environment as main reports changes', () => {
     const main = renderApp(new FakeMain({ environments: [{ id: 'native', label: 'Native', state: 'starting' }] }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Environments');
     const row = () => screen.getByRole('row', { name: /Native/ });
     expect(within(row()).getByText('starting')).toBeTruthy();
 
@@ -75,6 +83,7 @@ describe('Settings: worktrees', () => {
   const openSettings = (main: FakeMain) => {
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Worktrees');
     return screen.getByRole('textbox', { name: 'Worktree root' }) as HTMLInputElement;
   };
 
@@ -117,6 +126,7 @@ describe('Settings: the agent in each Environment', () => {
   function openSettings(environment: EnvironmentStatus) {
     const main = renderApp(new FakeMain({ environments: [environment] }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Environments');
     return { main, row: screen.getByRole('row', { name: /Native/ }) };
   }
 
@@ -179,6 +189,7 @@ describe('Projects', () => {
   const project = (name: string, forge: Partial<ForgeStatus> = {}, id = 1): Project => ({
     id,
     name,
+    color: 'blue',
     branchPrefix: 'loom',
     checkout: { environmentId: 'native', path: `/home/dev/code/${name}` },
     forge: { state: 'available', checking: false, kind: 'github', host: 'github.com', repository: `acme/${name}`, ...forge },
@@ -209,8 +220,6 @@ describe('Projects', () => {
   });
 
   it.each([
-    [{ state: 'no-remote', kind: undefined, host: undefined }, /no origin remote/],
-    [{ state: 'unsupported', kind: undefined, host: 'bitbucket.org', remote: 'https://bitbucket.org/acme/x.git' }, /https:\/\/bitbucket\.org\/acme\/x\.git.*isn't on GitHub or GitLab/],
     [{ state: 'cli-missing', kind: 'gitlab', host: 'gitlab.com' }, /glab isn't installed in Native/],
     [{ state: 'signed-out', kind: 'github', host: 'github.com' }, /gh isn't signed in to github\.com.*gh auth login --hostname github\.com/],
     [{ state: 'error', error: 'bridge did not answer' }, /couldn't check.*bridge did not answer/],
@@ -220,6 +229,37 @@ describe('Projects', () => {
     const row = screen.getByRole('row', { name: /loom/ });
     expect(within(row).getByText('off')).toBeTruthy();
     expect(within(row).getByRole('alert').textContent).toMatch(reason);
+  });
+
+  it('shows a checkout with no origin remote as local only, muted, with why on hover', () => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('notes', { state: 'no-remote', kind: undefined, host: undefined })] }));
+
+    const row = screen.getByRole('row', { name: /notes/ });
+    const local = within(row).getByText('Local only').parentElement!;
+    expect(local.className).toMatch('fg-local');
+    expect(local.getAttribute('title')).toMatch(/no origin remote/);
+    expect(within(row).queryByRole('alert')).toBeNull();
+    expect(within(row).queryByText('off')).toBeNull();
+  });
+
+  it("shows an origin that isn't on GitHub or GitLab as no Forge, muted, with why on hover", () => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('notes', { state: 'unsupported', kind: undefined, host: 'bitbucket.org', remote: 'https://bitbucket.org/acme/x.git' })] }));
+
+    const row = screen.getByRole('row', { name: /notes/ });
+    const none = within(row).getByText('No Forge').parentElement!;
+    expect(none.className).toMatch('fg-local');
+    expect(none.getAttribute('title')).toMatch(/https:\/\/bitbucket\.org\/acme\/x\.git.*isn't on GitHub or GitLab/);
+    expect(within(row).queryByRole('alert')).toBeNull();
+    expect(within(row).queryByText('off')).toBeNull();
+  });
+
+  it('cuts a long Project name to one line, with the full name on hover', () => {
+    const name = 'customer-billing-and-invoicing-platform-api-gateway';
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project(name)] }));
+
+    const shown = within(screen.getByRole('row', { name: new RegExp(name) })).getByText(name);
+    expect(shown.className).toMatch('ellipsis');
+    expect(shown.getAttribute('title')).toBe(name);
   });
 
   it('checks the Forges again when Projects opens', () => {
@@ -236,10 +276,10 @@ describe('Projects', () => {
     expect(main.invoked.map((i) => i.command)).toContain('sessions.check');
   });
 
-  it('links the folder chosen with "Use existing clone…"', async () => {
+  it('links the folder chosen with "Add a Project…"', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => project('loom') }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(addProjectButton());
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
   });
@@ -247,7 +287,7 @@ describe('Projects', () => {
   it('links nothing when the folder picker is cancelled', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => null }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(addProjectButton());
 
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));
     expect(main.invoked.map((i) => i.command)).not.toContain('projects.link');
@@ -266,9 +306,71 @@ describe('Projects', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(addProjectButton());
 
     expect((await screen.findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
+  });
+
+  const rejecting = () =>
+    new FakeMain(
+      {},
+      {
+        'dialogs.chooseFolder': () => '/home/dev/notes',
+        'projects.link': () => {
+          throw new Error('/home/dev/notes is not a git repository');
+        },
+      },
+    );
+
+  it('dismisses why a folder was rejected', async () => {
+    openProjects(rejecting());
+    fireEvent.click(addProjectButton());
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('forgets why a folder was rejected when leaving Projects', async () => {
+    openProjects(rejecting());
+    fireEvent.click(addProjectButton());
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it("doesn't show why a folder was rejected after leaving Projects while it was being linked", async () => {
+    let fail!: (e: Error) => void;
+    const main = openProjects(
+      new FakeMain(
+        {},
+        {
+          'dialogs.chooseFolder': () => '/home/dev/notes',
+          'projects.link': () => new Promise<never>((_, reject) => (fail = reject)),
+        },
+      ),
+    );
+    fireEvent.click(addProjectButton());
+    await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('projects.link'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fail(new Error('/home/dev/notes is not a git repository'));
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+
+    await waitFor(() => expect(addProjectButton().hasAttribute('disabled')).toBe(false));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('labels Remove, with the Project in its tooltip', () => {
+    openProjects(new FakeMain({ projects: [project('loom')] }));
+
+    const remove = within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Remove loom' });
+    expect(remove.textContent).toBe('Remove');
+    expect(remove.getAttribute('title')).toBe('Remove loom');
   });
 
   it('saves a new branch prefix', async () => {
@@ -292,23 +394,152 @@ describe('Projects', () => {
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.setBranchPrefix')).toHaveLength(1));
   });
 
-  it('says why a branch prefix was refused', async () => {
+  it('previews the branches a prefix makes, without the trailing / Loom adds itself', () => {
+    openProjects(new FakeMain({ projects: [project('loom')] }));
+    const row = screen.getByRole('row', { name: /loom/ });
+    expect(within(row).getByText('loom/<session>')).toBeTruthy();
+
+    fireEvent.change(within(row).getByRole('textbox', { name: 'Branch prefix for loom' }), { target: { value: 'feat/' } });
+
+    expect(within(row).getByText('feat/<session>')).toBeTruthy();
+  });
+
+  it('saves a branch prefix typed with a trailing /', async () => {
+    const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
+
+    fireEvent.change(input, { target: { value: 'feat/' } });
+    fireEvent.submit(input);
+
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.setBranchPrefix', params: { id: 1, branchPrefix: 'feat/' } }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps an invalid branch prefix in the field, saying why, until it is fixed', () => {
+    const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'a b' } });
+    fireEvent.blur(input);
+
+    expect(input.value).toBe('a b');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('alert').textContent).toMatch(/"a b" can't be a branch prefix: it contains a space/);
+    expect(main.invoked.map((i) => i.command)).not.toContain('projects.setBranchPrefix');
+
+    fireEvent.change(input, { target: { value: 'ab' } });
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText('ab/<session>')).toBeTruthy();
+  });
+
+  it('says why main refused a branch prefix', async () => {
     openProjects(
       new FakeMain(
         { projects: [project('loom')] },
         {
           'projects.setBranchPrefix': () => {
-            throw new Error(`"a b" can't be a branch prefix: it contains a space`);
+            throw new Error('database is locked');
           },
         },
       ),
     );
     const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
 
-    fireEvent.change(input, { target: { value: 'a b' } });
+    fireEvent.change(input, { target: { value: 'feat' } });
     fireEvent.submit(input);
 
-    expect((await screen.findByRole('alert')).textContent).toMatch(/can't be a branch prefix/);
+    expect((await screen.findByRole('alert')).textContent).toMatch('database is locked');
+  });
+
+  describe('Edit', () => {
+    const editDialog = () => screen.getByRole('dialog', { name: 'Edit loom' });
+
+    function openEdit(main: FakeMain) {
+      openProjects(main);
+      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
+      return editDialog();
+    }
+
+    it('saves a new name, colour, avatar and default model together, then closes', async () => {
+      const main = new FakeMain({ projects: [project('loom')] }, { 'projects.models': () => [{ id: 'anthropic/claude-haiku-5-5', name: 'Claude Haiku 5.5', efforts: ['low', 'high', 'default'] }] });
+      const dialog = openEdit(main);
+
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'Loom app' } });
+      fireEvent.click(within(dialog).getByRole('radio', { name: 'Violet' }));
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: '🦊' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Model' }));
+      fireEvent.click(await screen.findByRole('option', { name: /claude-haiku-5-5/ }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Effort' }));
+      fireEvent.click(screen.getByRole('option', { name: 'Effort: high' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull());
+      expect(main.invoked).toContainEqual({
+        command: 'projects.edit',
+        params: { id: 1, name: 'Loom app', color: 'violet', avatar: '🦊', defaultModel: { model: 'anthropic/claude-haiku-5-5', effort: 'high' } },
+      });
+      const row = screen.getByRole('row', { name: /Loom app/ });
+      expect(within(row).getByText('anthropic/claude-haiku-5-5')).toBeTruthy();
+    });
+
+    it('sends only what changed, and nothing when nothing did', async () => {
+      const main = new FakeMain({ projects: [{ ...project('loom'), avatar: 'LM', defaultModel: { model: 'anthropic/claude-haiku-5-5' } }] });
+      let dialog = openEdit(main);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull();
+      expect(main.invoked.map((i) => i.command)).not.toContain('projects.edit');
+
+      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
+      dialog = editDialog();
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: '' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: "Use OpenCode's own" }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.edit', params: { id: 1, avatar: null, defaultModel: null } }));
+    });
+
+    it('says why a name or avatar is refused, and holds Save until it is fixed', () => {
+      const dialog = openEdit(new FakeMain({ projects: [project('loom')] }));
+
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: '  ' } });
+      expect(within(dialog).getByRole('alert').textContent).toMatch('needs a name');
+      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'loom' } });
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: 'ABC' } });
+      expect(within(dialog).getByRole('alert').textContent).toMatch('at most 2 characters');
+      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("shows main's error and stays open", async () => {
+      const dialog = openEdit(
+        new FakeMain(
+          { projects: [project('loom')] },
+          {
+            'projects.edit': () => {
+              throw new Error('database is locked');
+            },
+          },
+        ),
+      );
+      fireEvent.click(within(dialog).getByRole('radio', { name: 'Red' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+      expect((await within(dialog).findByRole('alert')).textContent).toMatch('database is locked');
+      expect(editDialog()).toBeTruthy();
+    });
+
+    it('closes on Escape without saving', () => {
+      const main = new FakeMain({ projects: [project('loom')] });
+      const dialog = openEdit(main);
+      fireEvent.click(within(dialog).getByRole('radio', { name: 'Red' }));
+
+      fireEvent.keyDown(within(dialog).getByRole('textbox', { name: 'Name' }), { key: 'Escape' });
+
+      expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull();
+      expect(main.invoked.map((i) => i.command)).not.toContain('projects.edit');
+    });
   });
 
   it("doesn't list Projects in the Inbox when they have no Sessions", () => {
@@ -324,6 +555,7 @@ describe('the + menu', () => {
   const linked: Project = {
     id: 1,
     name: 'loom',
+    color: 'blue',
     branchPrefix: 'loom',
     checkout: { environmentId: 'native', path: '/home/dev/code/loom' },
     forge: { state: 'no-remote', checking: false },
@@ -335,13 +567,13 @@ describe('the + menu', () => {
     return main;
   }
 
-  it('adds a Project from an existing clone, then shows Projects', async () => {
+  it('adds a Project, then shows Projects', async () => {
     const main = openMenu(new FakeMain({}, { 'dialogs.chooseFolder': () => '/home/dev/code/loom', 'projects.link': () => linked }));
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add a Project…' }));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
-    expect(screen.getByRole('main', { name: 'Projects' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Projects' })).toBeTruthy();
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
@@ -358,9 +590,9 @@ describe('the + menu', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add Project from existing clone…' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add a Project…' }));
 
-    const page = screen.getByRole('main', { name: 'Projects' });
+    const page = screen.getByRole('dialog', { name: 'Projects' });
     expect((await within(page).findByRole('alert')).textContent).toMatch('/home/dev/notes is not a git repository');
   });
 
@@ -377,7 +609,7 @@ describe('the + menu', () => {
   it('closes when clicking elsewhere', () => {
     openMenu(new FakeMain());
 
-    fireEvent.mouseDown(screen.getByRole('main', { name: 'Session' }));
+    fireEvent.mouseDown(screen.getByRole('region', { name: 'Welcome' }));
 
     expect(screen.queryByRole('menu')).toBeNull();
   });
@@ -387,6 +619,7 @@ describe('Settings: editor and terminal', () => {
   const field = (main: FakeMain, name: string) => {
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Editor and terminal');
     return screen.getByRole('textbox', { name }) as HTMLInputElement;
   };
 
@@ -424,6 +657,7 @@ describe('Settings: stuck Sessions', () => {
   const field = (main: FakeMain) => {
     renderApp(main);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Sessions');
     return screen.getByRole('textbox', { name: 'Stuck after (minutes)' }) as HTMLInputElement;
   };
 
@@ -453,5 +687,158 @@ describe('Settings: stuck Sessions', () => {
     fireEvent.submit(input);
 
     expect((await screen.findByRole('alert')).textContent).toContain('a whole number of minutes');
+  });
+});
+
+describe('Settings: sections, search and feedback', () => {
+  const openSettings = (main = new FakeMain()) => {
+    renderApp(main);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    return main;
+  };
+  const sections = () => within(screen.getByRole('navigation', { name: 'Settings sections' })).queryAllByRole('link');
+  const sectionNames = () => sections().map((link) => link.textContent);
+  const search = (query: string) => fireEvent.change(screen.getByRole('searchbox', { name: 'Search settings' }), { target: { value: query } });
+  /** The setting row holding the named control. */
+  const rowOf = (control: HTMLElement) => control.closest('.setting') as HTMLElement;
+
+  const currentPage = () => sections().filter((link) => link.getAttribute('aria-current') === 'page').map((link) => link.textContent);
+  const pageHeadings = () => within(screen.getByRole('dialog', { name: 'Settings' })).getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+
+  it('gives each section a page of its own, listed beside it, the first one shown', () => {
+    openSettings();
+
+    expect(sectionNames()).toEqual(['Appearance', 'Dates and times', 'Sessions', 'Notifications', 'Approvals', 'Worktrees', 'Editor and terminal', 'Changes', 'Keybindings', 'Environments']);
+    expect(pageHeadings()).toEqual(['Appearance']);
+    expect(currentPage()).toEqual(['Appearance']);
+    expect(screen.queryByRole('textbox', { name: 'Worktree root' })).toBeNull();
+  });
+
+  it('goes to the page picked in the list', () => {
+    openSettings();
+
+    fireEvent.click(sections().find((link) => link.textContent === 'Editor and terminal')!);
+
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Editor and terminal' }));
+    expect(pageHeadings()).toEqual(['Editor and terminal']);
+    expect(currentPage()).toEqual(['Editor and terminal']);
+  });
+
+  it('shows what the search finds in every section on one page, and a section picked then shows all of it', () => {
+    openSettings();
+
+    search('terminal');
+    expect(pageHeadings()).toEqual(['Appearance', 'Editor and terminal', 'Keybindings']);
+    expect(currentPage()).toEqual([]);
+
+    fireEvent.click(sections().find((link) => link.textContent === 'Appearance')!);
+    expect((screen.getByRole('searchbox', { name: 'Search settings' }) as HTMLInputElement).value).toBe('');
+    expect(pageHeadings()).toEqual(['Appearance']);
+    expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeTruthy();
+  });
+
+  it('finds a setting by its name or what it does, keeping only its section, and clears on Escape', () => {
+    openSettings();
+
+    search('terminal');
+    expect(sectionNames()).toEqual(['Appearance', 'Editor and terminal', 'Keybindings']);
+    expect(screen.getByRole('button', { name: 'Monospace font' })).toBeTruthy();
+    expect(screen.queryByRole('radiogroup', { name: 'Theme' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Worktree root' })).toBeNull();
+
+    search('stuck');
+    expect(sectionNames()).toEqual(['Sessions', 'Notifications']);
+    expect(screen.getByRole('textbox', { name: 'Stuck after (minutes)' })).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Auto-prompt new Sessions' })).toBeNull();
+
+    search('sudo approvals');
+    expect(screen.getByRole('button', { name: 'sudo and global installs' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'MCP and extension tools' })).toBeNull();
+
+    // A section's own name finds all of it.
+    search('appearance');
+    expect(['UI font', 'Monospace font', 'Font size', 'Density'].map((name) => !!screen.queryByRole('button', { name }))).toEqual([true, true, true, true]);
+    expect(['Theme', 'Accent colour'].map((name) => !!screen.queryByRole('radiogroup', { name }))).toEqual([true, true]);
+
+    search('nothing like this');
+    expect(sections()).toEqual([]);
+    expect(screen.getByText(/No setting matches “nothing like this”/)).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Search settings' }), { key: 'Escape' });
+    expect(sections()).toHaveLength(10);
+  });
+
+  it('says Saved once main kept a change', async () => {
+    openSettings();
+    settingsPage('Editor and terminal');
+    const input = screen.getByRole('textbox', { name: 'Editor command' }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'zed' } });
+    fireEvent.submit(input);
+
+    expect((await within(rowOf(input)).findByRole('status')).textContent).toBe('Saved');
+  });
+
+  it('says Saved for a picked option or a ticked box', async () => {
+    openSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: 'UI font' }));
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'UI font' })).getByRole('option', { name: 'Figtree' }));
+    await waitFor(() => expect(within(rowOf(screen.getByRole('button', { name: 'UI font' }))).getByRole('status').textContent).toBe('Saved'));
+
+    settingsPage('Sessions');
+    const box = screen.getByRole('checkbox', { name: 'Auto-prompt new Sessions' });
+    fireEvent.click(box);
+    await waitFor(() => expect(within(rowOf(box)).getByRole('status').textContent).toBe('Saved'));
+  });
+
+  it('forgets a refusal once the field holds the saved value again, and Escape puts it back', async () => {
+    const main = openSettings(
+      new FakeMain({}, {
+        'settings.setStuckAfterMinutes': ({ minutes }) => {
+          if (minutes < 1) throw new Error('A Session is stuck after a whole number of minutes, at least 1.');
+          return main.value('settings');
+        },
+      }),
+    );
+    settingsPage('Sessions');
+    const input = screen.getByRole('textbox', { name: 'Stuck after (minutes)' }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.submit(input);
+    await screen.findByRole('alert');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+
+    fireEvent.change(input, { target: { value: '15' } });
+    fireEvent.blur(input);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+
+    fireEvent.change(input, { target: { value: '-3' } });
+    fireEvent.submit(input);
+    await screen.findByRole('alert');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input.value).toBe('15');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows the patterns collapsed in the diff one a line, all of them, and saves them', async () => {
+    const main = openSettings();
+    settingsPage('Changes');
+    const field = screen.getByRole('textbox', { name: 'Collapsed in the diff' }) as HTMLTextAreaElement;
+    expect(field.tagName).toBe('TEXTAREA');
+    expect(field.value.split('\n')).toEqual(main.value('settings').diffCollapsedPatterns);
+
+    fireEvent.change(field, { target: { value: '*.lock\ndist/**' } });
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true });
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'settings.setDiffCollapsedPatterns').map((i) => i.params)).toEqual([{ patterns: ['*.lock', 'dist/**'] }]));
+  });
+
+  it("gives the terminal command an example for the Environment's system", () => {
+    openSettings(new FakeMain({ environments: [{ ...connectedNative, bridge: { ...connectedNative.bridge!, os: 'windows' } }] }));
+    settingsPage('Editor and terminal');
+
+    expect(screen.getByRole('textbox', { name: 'Terminal command' }).getAttribute('placeholder')).toBe('For example: wt -d {path}');
   });
 });

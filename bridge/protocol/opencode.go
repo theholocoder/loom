@@ -46,6 +46,10 @@ type probeResult struct {
 	// Models is OpenCode's `GET /api/model` list for the checkout params.Directory,
 	// as it reported it; absent without a directory.
 	Models json.RawMessage `json:"models,omitempty"`
+	// DefaultModel is which model OpenCode's `GET /api/model/default` says a
+	// session runs without one picked, for params.Directory; absent without a
+	// directory, or when OpenCode doesn't say.
+	DefaultModel *modelRef `json:"defaultModel,omitempty"`
 	// Commands is OpenCode's `GET /api/command` list for params.Directory, as
 	// it reported it; absent without a directory, or when OpenCode can't list
 	// them.
@@ -54,6 +58,12 @@ type probeResult struct {
 	// with only its id, name, description and where it comes from; absent when there are none, or as
 	// Commands is.
 	Skills []probeSkill `json:"skills,omitempty"`
+}
+
+// modelRef is which model a model is: not its settings, which may hold a key.
+type modelRef struct {
+	ID         string `json:"id"`
+	ProviderID string `json:"providerID"`
 }
 
 // probeSkill is what the probe reports of a skill: not its path or content.
@@ -203,6 +213,13 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 			return nil, failure
 		}
 		result.Models = models
+		// Without a default the models are still worth having.
+		if model, failure := probeGet(ctx, base, password, "/api/model/default", params.Directory, maxOutput); failure == nil {
+			var ref modelRef
+			if json.Unmarshal(model, &ref) == nil && ref.ID != "" && ref.ProviderID != "" {
+				result.DefaultModel = &ref
+			}
+		}
 		// After the models, which wait for OpenCode to load the checkout: until
 		// then it lists no skills. Without them the models are still worth having.
 		if commands, failure := probeGet(ctx, base, password, "/api/command", params.Directory, maxOutput); failure == nil {

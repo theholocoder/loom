@@ -1,6 +1,6 @@
 // The database's typed schema, as of the latest migration.
 import type { Generated } from 'kysely';
-import type { ApprovalMode, MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
+import type { ApprovalMode, HighlightKind, MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
 
 export interface SettingsTable {
   key: string;
@@ -12,6 +12,14 @@ export interface ProjectsTable {
   id: Generated<number>;
   name: string;
   branch_prefix: string;
+  /** Its colour, a key of PROJECT_COLORS. */
+  color: Generated<string>;
+  /** What its avatar shows, set by the user; null for its initials. */
+  avatar: string | null;
+  /** The model a new Session in it starts on, `provider/model`; null for the agent's own. */
+  default_model: string | null;
+  /** The Effort level a new Session starts on with `default_model`; null for the model's own. */
+  default_effort: string | null;
   /** Whether the agent may trust the checkout's local files, as the user said once: 1 or 0, null until asked. */
   trusted: number | null;
   /** Clock time the Project was added. */
@@ -98,6 +106,8 @@ export interface UsageBucketsTable {
   day: string;
   /** The model Loom ran them with, `provider/model`. */
   model: string;
+  /** What the agent last called it, when it said; null when it didn't, as before Loom kept it. */
+  model_name: string | null;
   project_id: number;
   /** The Project's name when they were recorded, so usage outlives the Project. */
   project_name: string;
@@ -150,6 +160,38 @@ export interface BabysitTable {
   state: string;
 }
 
+/** Each Session's Panels as the user left them (shared/panels' SessionPanels, JSON-encoded); none until changed. */
+export interface SessionPanelsTable {
+  session_id: number;
+  state: string;
+}
+
+/** A Session's Highlight (shared/api's Highlight): the resolution's columns all null while open. */
+export interface HighlightsTable {
+  id: Generated<number>;
+  session_id: number;
+  kind: HighlightKind;
+  text: string;
+  /** The transcript item the turn it came from starts at. */
+  item_id: number;
+  created_at: number;
+  resolved_by: 'model' | 'user' | null;
+  resolved_reason: string | null;
+  resolved_item_id: number | null;
+  resolved_at: number | null;
+}
+
+/** How far a Session's turns have been checked for Highlights, and what the user has seen of them. */
+export interface HighlightChecksTable {
+  session_id: number;
+  /** The last transcript item a check covered, or that was left unchecked (Session highlights off); -1 for none. */
+  checked_through: number;
+  /** The greatest Highlight id the user has seen in the Panel. */
+  seen_through: number;
+  /** Why the last check failed; null once one succeeds. */
+  error: string | null;
+}
+
 export interface Schema {
   settings: SettingsTable;
   projects: ProjectsTable;
@@ -160,4 +202,9 @@ export interface Schema {
   usage_buckets: UsageBucketsTable;
   session_spans: SessionSpansTable;
   babysit: BabysitTable;
+  session_panels: SessionPanelsTable;
+  highlights: HighlightsTable;
+  highlight_checks: HighlightChecksTable;
+  /** Session highlights' checks' usage, by Session × day × model: as usage_buckets, but no Session's own. */
+  highlight_usage: UsageBucketsTable;
 }

@@ -2,7 +2,7 @@
 // ends in the order the patch has them, whichever end was picked first and
 // whichever side (old or new) each end is on, and the lines it spans in one
 // file's numbering.
-import type { DiffComment } from '../shared/api';
+import type { DiffComment, MessageComment } from '../shared/api';
 
 /** A side of a diff: the old file's (removed lines) or the new file's. */
 export type Side = 'deletions' | 'additions';
@@ -19,6 +19,18 @@ export interface LineRange {
   side?: Side;
   end: number;
   endSide?: Side;
+}
+
+/**
+ * A comment waiting to go with the next message. One on the diff keeps the
+ * range it was picked as, to show as a note in the diff until it is sent.
+ */
+export type PendingComment = { comment: DiffComment; range: LineRange } | { comment: Exclude<MessageComment, DiffComment>; range?: undefined };
+
+/** `pending` with its note changed to `note`. */
+export function withNote(pending: PendingComment, note: string): PendingComment {
+  // Each branch narrows `pending`, so that the comment keeps its kind.
+  return pending.range ? { ...pending, comment: { ...pending.comment, note } } : { ...pending, comment: { ...pending.comment, note } };
 }
 
 /** A range's quote: what a comment on it holds but the note, and its last line, where the note goes. */

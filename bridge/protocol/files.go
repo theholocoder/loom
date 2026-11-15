@@ -32,6 +32,39 @@ func pathExists(params existsParams) (*existsResult, *Error) {
 	return &existsResult{Exists: true}, nil
 }
 
+type folderParams struct {
+	Path string `json:"path"`
+}
+
+// checkFolder says whether a folder is there, or could be made with the
+// folders it needs: it makes them as `mkdir -p` does, then removes those it
+// made, so it leaves nothing behind. A file in the way is an error.
+func checkFolder(params folderParams) (*struct{}, *Error) {
+	if params.Path == "" {
+		return nil, &Error{Code: "bad_params", Message: "files.checkFolder needs a path"}
+	}
+	path := filepath.Clean(params.Path)
+	var missing []string
+	for dir := path; ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(dir); err == nil || !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		missing = append(missing, dir)
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	err := os.MkdirAll(path, 0o755)
+	// Deepest first, each one empty but for the next.
+	for _, dir := range missing {
+		os.Remove(dir)
+	}
+	if err != nil {
+		return nil, &Error{Code: "not_a_folder", Message: err.Error()}
+	}
+	return &struct{}{}, nil
+}
+
 type copyParams struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -138,4 +171,40 @@ func writeFile(params fileWriteParams) (*struct{}, *Error) {
 		return nil, &Error{Code: "write_failed", Message: err.Error()}
 	}
 	return &struct{}{}, nil
+}
+
+type statParams struct {
+	Root string `json:"root"`
+	// Paths are relative to Root, with `/` separators.
+	Paths []string `json:"paths"`
+}
+
+type fileStat struct {
+	Size    int64 `json:"size"`
+	MtimeNs int64 `json:"mtimeNs"`
+}
+
+type statResult struct {
+	// One per path, in order: null for a path with nothing there, or outside Root.
+	Files []*fileStat `json:"files"`
+}
+
+// statFiles reads the size and modification time of each path in a folder,
+// without following a link at the end of a path, so a caller can tell when
+// files change without reading them.
+func statFiles(params statParams) (*statResult, *Error) {
+	if params.Root == "" {
+		return nil, &Error{Code: "bad_params", Message: "files.stat needs a root"}
+	}
+	files := make([]*fileStat, len(params.Paths))
+	for i, path := range params.Paths {
+		local := filepath.FromSlash(path)
+		if !filepath.IsLocal(local) {
+			continue
+		}
+		if info, err := os.Lstat(filepath.Join(params.Root, local)); err == nil {
+			files[i] = &fileStat{Size: info.Size(), MtimeNs: info.ModTime().UnixNano()}
+		}
+	}
+	return &statResult{Files: files}, nil
 }

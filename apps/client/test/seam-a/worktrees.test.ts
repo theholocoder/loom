@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { git, processEnded, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus, Session } from '../../src/shared/api';
+import { splitDetails } from '../../src/shared/errors';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
 const signedIn = [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }];
@@ -101,13 +102,13 @@ describe('a worktree Session', () => {
     expect(existsSync(`${machine.home}/loom`)).toBe(false);
   });
 
-  it('rejects when origin cannot be fetched', async () => {
+  it('rejects in a repository with no commit to start from', async () => {
     const machine = tempMachine();
     machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [] } });
     const checkout = machine.gitRepo('billing-api');
     const { main, project } = await withProject(machine, checkout);
 
-    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Go' })).rejects.toThrow("Couldn't fetch origin");
+    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Go' })).rejects.toThrow("There's no branch to start the worktree from");
     expect(await main.api.invoke('sessions.list')).toEqual([]);
   });
 
@@ -157,10 +158,27 @@ describe('a worktree Session', () => {
     const created = await again.api.invoke('sessions.create', { projectId: project!.id, workingCopy: 'worktree', prompt: 'Go' });
     expect(created.workingCopy.path).toBe(`${root}/billing-api/go`);
   });
+
+});
+
+describe('the worktree root setting', () => {
+  it('takes a folder that could be made, without making it, and refuses one that could not be', async () => {
+    const { machine, checkout } = machineWithClone();
+    const { main } = await withProject(machine, checkout);
+    const root = `${machine.folder('roots')}/new/worktrees`;
+    const taken = join(machine.folder('roots-taken'), 'a-file');
+    writeFileSync(taken, 'not a folder\n');
+
+    expect(await main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: root })).toMatchObject({ worktreeRoot: root });
+    expect(existsSync(`${machine.folder('roots')}/new`)).toBe(false);
+
+    await expect(main.api.invoke('settings.setWorktreeRoot', { worktreeRoot: `${taken}/worktrees` })).rejects.toThrow(`"${taken}/worktrees" can't be the worktree root: there can't be a folder there in Native`);
+    expect((await waitFor(main.api, 'settings', () => true)).worktreeRoot).toBe(root);
+  });
 });
 
 describe('the branches a worktree Session can start from', () => {
-  it("fetches origin, then lists all origin's branches as bases, the branches git can still check out, and the other worktrees", async () => {
+  it("fetches origin, then lists all origin's branches and the local ones as bases, the branches git can still check out, and the other worktrees", async () => {
     const { machine, origin, checkout } = machineWithClone('trunk');
     pushedByOthers(machine, origin, 'release/1.2');
     pushedByOthers(machine, origin, 'shared');
@@ -182,14 +200,18 @@ describe('the branches a worktree Session can start from', () => {
     const { main, project } = await withProject(machine, checkout);
 
     expect(await main.api.invoke('projects.branches', { id: project.id })).toEqual({
-      defaultBranch: 'trunk',
-      remote: ['busy', 'mine', 'release/1.2', 'shared', 'trunk'],
+      defaultBase: { name: 'trunk', remote: true },
+      bases: [
+        ...['busy', 'mine', 'release/1.2', 'shared', 'trunk'].map((name) => ({ name, remote: true })),
+        ...['busy', 'elsewhere', 'locked', 'mine', 'trunk'].map((name) => ({ name, remote: false })),
+      ],
       existing: [
         { name: 'mine', remote: false },
         { name: 'release/1.2', remote: true },
         { name: 'shared', remote: true },
       ],
       worktrees: [{ path: busyWorktree, branch: 'busy' }, { path: detached }, { path: elsewhere, branch: 'elsewhere' }],
+      checkoutBranch: 'trunk',
     });
   });
 
@@ -211,6 +233,17 @@ describe('the branches a worktree Session can start from', () => {
     const { main, project } = await withProject(machine, linked);
 
     expect((await main.api.invoke('projects.branches', { id: project.id })).worktrees).toEqual([{ path: other, branch: 'other' }]);
+  });
+
+  it("names the branch the Project's checkout is on, and none on a detached HEAD", async () => {
+    const { machine, checkout } = machineWithClone();
+    const linked = machine.folder('linked-wt');
+    git(checkout, 'worktree', 'add', '--quiet', '-b', 'linked', linked);
+    const { main, project } = await withProject(machine, linked);
+    expect((await main.api.invoke('projects.branches', { id: project.id })).checkoutBranch).toBe('linked');
+
+    git(linked, 'switch', '--quiet', '--detach');
+    expect((await main.api.invoke('projects.branches', { id: project.id })).checkoutBranch).toBeUndefined();
   });
 });
 
@@ -344,7 +377,7 @@ describe('a worktree Session in an existing worktree', () => {
     const locked = machine.folder('locked-wt');
     git(checkout, 'worktree', 'add', '--quiet', '--lock', '-b', 'locked', locked);
     await expect(create(locked)).rejects.toThrow(`${locked} is locked; unlock it with \`git worktree unlock\` to work in it`);
-    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { worktree: checkout }, base: 'main', prompt: 'Go' })).rejects.toThrow(
+    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { worktree: checkout }, base: { name: 'main', remote: true }, prompt: 'Go' })).rejects.toThrow(
       "doesn't name or base a new one",
     );
     expect(await main.api.invoke('sessions.list')).toEqual([]);
@@ -421,7 +454,7 @@ describe('a worktree Session branching from another base', () => {
     pushedByOthers(machine, origin, 'main');
     const { main, project } = await withProject(machine, checkout);
 
-    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', base: 'release/1.2', prompt: 'Backport the fix' });
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', base: { name: 'release/1.2', remote: true }, prompt: 'Backport the fix' });
 
     expect(created.branch).toBe('loom/backport-the-fix');
     expect(git(created.workingCopy.path, 'rev-parse', 'HEAD')).toBe(tip);
@@ -434,7 +467,108 @@ describe('a worktree Session branching from another base', () => {
     const { machine, checkout } = machineWithClone();
     const { main, project } = await withProject(machine, checkout);
 
-    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', base: 'nope', prompt: 'Go' })).rejects.toThrow('origin has no branch "nope"');
+    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', base: { name: 'nope', remote: true }, prompt: 'Go' })).rejects.toThrow('origin has no branch "nope"');
+    expect(await main.api.invoke('sessions.list')).toEqual([]);
+  });
+});
+
+/** The user's clone of a Forge repository whose `origin` can't be reached now: offline, or gone. */
+function offlineClone(): { machine: Machine; checkout: string } {
+  const { machine, origin, checkout } = machineWithClone();
+  pushedByOthers(machine, origin, 'release/1.2');
+  git(checkout, 'fetch', '--quiet', 'origin');
+  git(checkout, 'remote', 'set-url', 'origin', join(machine.folder('gone'), 'billing-api.git'));
+  return { machine, checkout };
+}
+
+describe('a worktree Session without a reachable origin', () => {
+  it('starts in a Project with no origin from its local default branch, and lists its local branches', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [] } });
+    const checkout = machine.gitRepo('notes');
+    git(checkout, 'switch', '--quiet', '-c', 'main');
+    const tip = machine.commit(checkout, 'README.md', '# notes\n');
+    git(checkout, 'branch', 'drafts');
+    const { main, project } = await withProject(machine, checkout);
+
+    expect(await main.api.invoke('projects.branches', { id: project.id })).toEqual({
+      defaultBase: { name: 'main', remote: false },
+      bases: [
+        { name: 'drafts', remote: false },
+        { name: 'main', remote: false },
+      ],
+      existing: [{ name: 'drafts', remote: false }],
+      worktrees: [],
+      checkoutBranch: 'main',
+    });
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Tidy up' });
+
+    expect(git(created.workingCopy.path, 'rev-parse', 'HEAD')).toBe(tip);
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    expect(await main.api.invoke('sessions.diff', { id: created.id })).toMatchObject({ available: true, base: 'main', baseSource: 'recorded' });
+  });
+
+  it('branches from a local branch picked as its base, and diffs against it', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns: [] } });
+    const checkout = machine.gitRepo('notes');
+    git(checkout, 'switch', '--quiet', '-c', 'main');
+    machine.commit(checkout, 'README.md', '# notes\n');
+    git(checkout, 'switch', '--quiet', '-c', 'drafts');
+    const tip = machine.commit(checkout, 'draft.md', 'wip\n');
+    git(checkout, 'switch', '--quiet', 'main');
+    const { main, project } = await withProject(machine, checkout);
+
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', base: { name: 'drafts', remote: false }, prompt: 'Finish the draft' });
+
+    expect(git(created.workingCopy.path, 'rev-parse', 'HEAD')).toBe(tip);
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    expect(await main.api.invoke('sessions.diff', { id: created.id })).toMatchObject({ available: true, base: 'drafts', files: [] });
+  });
+
+  it("lists what the checkout already has when origin can't be fetched, saying why", async () => {
+    const { machine, checkout } = offlineClone();
+    const { main, project } = await withProject(machine, checkout);
+
+    const branches = await main.api.invoke('projects.branches', { id: project.id });
+
+    expect(branches).toMatchObject({
+      defaultBase: { name: 'main', remote: true },
+      bases: [
+        { name: 'main', remote: true },
+        { name: 'release/1.2', remote: true },
+        { name: 'main', remote: false },
+      ],
+      existing: [{ name: 'release/1.2', remote: true }],
+    });
+    expect(splitDetails(branches.fetchError!)).toEqual({
+      message: "Couldn't fetch origin: the repository wasn't found, or you don't have access to it",
+      details: expect.stringContaining('does not appear to be a git repository'),
+    });
+  });
+
+  it("starts from origin's branches as last fetched, new or existing, when origin can't be fetched", async () => {
+    const { machine, checkout } = offlineClone();
+    const known = git(checkout, 'rev-parse', 'origin/release/1.2');
+    const { main, project } = await withProject(machine, checkout);
+
+    const fresh = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix it' });
+    const backport = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', base: { name: 'release/1.2', remote: true }, prompt: 'Backport it' });
+    const existing = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { branch: { name: 'release/1.2', remote: true } }, prompt: 'Carry on' });
+
+    expect(git(fresh.workingCopy.path, 'rev-parse', 'HEAD')).toBe(git(checkout, 'rev-parse', 'origin/main'));
+    expect(git(backport.workingCopy.path, 'rev-parse', 'HEAD')).toBe(known);
+    expect(existing.branch).toBe('release/1.2');
+    expect(git(existing.workingCopy.path, 'rev-parse', 'HEAD')).toBe(known);
+  });
+
+  it("rejects an origin branch the checkout hasn't fetched, saying origin couldn't be fetched", async () => {
+    const { machine, checkout } = offlineClone();
+    const { main, project } = await withProject(machine, checkout);
+
+    await expect(main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', base: { name: 'nope', remote: true }, prompt: 'Go' })).rejects.toThrow(
+      /^origin has no branch "nope" here, and couldn't be fetched: /,
+    );
     expect(await main.api.invoke('sessions.list')).toEqual([]);
   });
 });
@@ -538,6 +672,36 @@ describe('archiving a worktree Session', () => {
     expect(existsSync(path)).toBe(false);
     expect(git(checkout, 'rev-parse', 'loom/fix-the-login-bug')).toBe(commit);
     expect(remoteRefs(origin)).toBe(before);
+  });
+
+  it('keeps uncommitted changes, when told to, as a WIP commit on its local branch that reopening brings back', async () => {
+    const { machine, origin, checkout, main, id, path } = await worktreeSession();
+    writeFileSync(join(machine.home, '.gitconfig'), '[user]\n\tname = Dev\n\temail = dev@example.com\n[commit]\n\tgpgsign = false\n');
+    const before = remoteRefs(origin);
+    writeFileSync(join(path, 'README.md'), 'half done\n');
+    writeFileSync(join(path, 'notes.txt'), 'untracked\n');
+
+    expect(await main.api.invoke('sessions.archive', { id, commitWork: true })).toEqual({ archived: true });
+
+    expect(existsSync(path)).toBe(false);
+    expect(git(checkout, 'log', '-1', '--format=%s', 'loom/fix-the-login-bug')).toBe('WIP: Fix the login bug');
+    expect(git(checkout, 'show', 'loom/fix-the-login-bug:notes.txt')).toBe('untracked');
+    expect(remoteRefs(origin)).toBe(before);
+
+    await main.api.invoke('sessions.unarchive', { id });
+    // Checked out again, git may give them Windows line endings.
+    expect(readFileSync(join(path, 'README.md'), 'utf8').replace(/\r\n/g, '\n')).toBe('half done\n');
+    expect(readFileSync(join(path, 'notes.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('untracked\n');
+  });
+
+  it("won't commit the work of a worktree on no branch, where the commit would be lost, and archives nothing", async () => {
+    const { main, id, path } = await worktreeSession();
+    git(path, 'checkout', '--quiet', '--detach');
+    writeFileSync(join(path, 'notes.txt'), 'untracked\n');
+
+    await expect(main.api.invoke('sessions.archive', { id, commitWork: true })).rejects.toThrow("This Session's worktree is on no branch, so its work can't be committed to one.");
+    expect(readFileSync(join(path, 'notes.txt'), 'utf8')).toBe('untracked\n');
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting' });
   });
 
   it('archives a pushed branch without asking', async () => {

@@ -1,6 +1,10 @@
 // Seam B: a fake main implementing the same typed API the real one does, so
 // renderer tests control exactly what main reports.
-import { clampSidebarWidth, DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
+import { ownLocale } from '../../src/shared/dates';
+import { DEFAULT_KEYBINDINGS, remap } from '../../src/shared/shortcuts';
+import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
+import { clampPanelSize, DEFAULT_SESSION_PANELS, servedPanels, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
+import { clampInboxWidth } from '../../src/shared/window';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
 export function emptyDashboard(days: UsageRange): UsageDashboard {
@@ -23,10 +27,13 @@ export function emptyDashboard(days: UsageRange): UsageDashboard {
   };
 }
 
+/** A Session's Panels with both areas hidden: Changes open in the Side area, but not shown. */
+export const HIDDEN_PANELS: SessionPanels = { side: { panels: ['changes'], shown: 'changes', open: false }, dock: { panels: [], shown: null, open: false } };
+
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
-type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database'>;
+type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database' | 'openSession'>;
 
 const EMPTY: { [T in TopicName]: Topics[T] } = {
   environments: [],
@@ -35,9 +42,13 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   settings: DEFAULT_SETTINGS,
   sessions: [],
   transcript: [],
+  panels: DEFAULT_SESSION_PANELS,
+  highlights: { highlights: [], seenThrough: 0, pending: false, checking: false },
+  reviewThreads: [],
   terminals: [],
   terminalOutput: { data: new Uint8Array() },
   database: { state: 'ok' },
+  openSession: null,
 };
 
 export class FakeMain implements LoomApi {
@@ -63,14 +74,31 @@ export class FakeMain implements LoomApi {
       'projects.restorable': () => null,
       'projects.remove': () => ({ removed: true }),
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
+      // Applies the edit, as main does once it has checked it.
+      'projects.edit': ({ id, name, color, avatar, defaultModel }) => {
+        const projects = this.value('projects').map((p) => {
+          if (p.id !== id) return p;
+          const { avatar: _avatar, defaultModel: _model, ...rest } = p;
+          const nextAvatar = avatar === undefined ? p.avatar : (avatar ?? undefined);
+          const nextModel = defaultModel === undefined ? p.defaultModel : (defaultModel ?? undefined);
+          return { ...rest, ...(name !== undefined && { name: name.trim() }), ...(color && { color }), ...(nextAvatar && { avatar: nextAvatar }), ...(nextModel && { defaultModel: nextModel }) };
+        });
+        this.publish('projects', projects);
+        return projects.find((p) => p.id === id)!;
+      },
       'projects.issues': () => [],
-      'projects.branches': () => ({ defaultBranch: 'main', remote: ['main'], existing: [], worktrees: [] }),
+      'projects.branches': () => ({ defaultBase: { name: 'main', remote: true }, bases: [{ name: 'main', remote: true }], existing: [], worktrees: [] }),
       'projects.check': () => {},
       'projects.models': () => [],
       'projects.commands': () => [],
       'projects.files': () => [],
       'sessions.files': () => [],
       'sessions.check': () => {},
+      'sessions.linkIssue': () => {},
+      'sessions.unlinkIssue': () => {},
+      'sessions.issue': () => {
+        throw new Error('sessions.issue is not scripted');
+      },
       'settings.setWorktreeRoot': ({ worktreeRoot }) => {
         const settings = { ...this.value('settings'), worktreeRoot };
         this.publish('settings', settings);
@@ -111,15 +139,40 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setDateFormat': (dates) => {
+        const settings = { ...this.value('settings'), ...dates };
+        this.publish('settings', settings);
+        return settings;
+      },
+      // The runner's own regional format, as the renderer takes it before main says.
+      'settings.systemLocale': ownLocale,
+      'settings.setHighlights': (highlights) => {
+        if (highlights.on && !highlights.model) throw new Error('Pick the model that checks Sessions for highlights before turning it on.');
+        const settings = { ...this.value('settings'), highlights };
+        this.publish('settings', settings);
+        return settings;
+      },
       'settings.setDiffView': (diffView) => {
         const settings = { ...this.value('settings'), diffView };
         this.publish('settings', settings);
         return settings;
       },
-      'settings.setSidebar': (sidebar) => {
+      'settings.setPanelSize': ({ kind, dimension, size }) => {
         const current = this.value('settings');
-        const next = { ...current.sidebar, ...sidebar };
-        const settings = { ...current, sidebar: { ...next, width: clampSidebarWidth(next.width) } };
+        const { layout } = current;
+        const settings = { ...current, layout: { ...layout, [dimension]: { ...layout[dimension], [kind]: clampPanelSize(kind, dimension, size) } } };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setPanelPlace': ({ kind, area, stack = 'first' }) => {
+        const current = this.value('settings');
+        const settings = { ...current, layout: withPanelPlace(current.layout, kind, { area, stack }) };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setInbox': ({ width, open }) => {
+        const current = this.value('settings');
+        const settings = { ...current, inbox: { width: width === undefined ? current.inbox.width : clampInboxWidth(width), open: open ?? current.inbox.open } };
         this.publish('settings', settings);
         return settings;
       },
@@ -129,6 +182,30 @@ export class FakeMain implements LoomApi {
         this.publish('settings', settings);
         return settings;
       },
+      'settings.setNotification': ({ kind, on }) => {
+        const current = this.value('settings');
+        const settings = { ...current, notifications: { ...current.notifications, [kind]: on } };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setKeybinding': ({ name, shortcut }) => {
+        const current = this.value('settings');
+        const settings = { ...current, keybindings: remap(current.keybindings, name, shortcut) };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.setSingleKeyShortcuts': ({ on }) => {
+        const current = this.value('settings');
+        const settings = { ...current, keybindings: { ...current.keybindings, singleKeys: on } };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'settings.resetKeybindings': () => {
+        const settings = { ...this.value('settings'), keybindings: DEFAULT_KEYBINDINGS };
+        this.publish('settings', settings);
+        return settings;
+      },
+      'window.showing': () => {},
       'sessions.list': () => this.value('sessions'),
       'sessions.create': () => {
         throw new Error('sessions.create is not scripted');
@@ -136,19 +213,37 @@ export class FakeMain implements LoomApi {
       'sessions.send': () => {},
       'sessions.stop': () => {},
       'sessions.removeQueued': () => {},
+      'sessions.editQueued': () => {},
       'sessions.sendNow': () => {},
       'sessions.steer': () => {},
       'sessions.setModel': () => {},
       'sessions.archive': () => ({ archived: true }),
+      'sessions.unarchive': () => {},
       'sessions.delete': () => ({ deleted: true }),
+      'sessions.unsavedWork': () => null,
       'sessions.requestMergeRequest': () => {},
       'sessions.linkMergeRequest': () => {},
+      'sessions.mergeRequest': () => {
+        throw new Error('sessions.mergeRequest is not scripted');
+      },
+      'sessions.mergeRequestDiff': () => {
+        throw new Error('sessions.mergeRequestDiff is not scripted');
+      },
+      'sessions.squashAndMerge': () => {
+        throw new Error('sessions.squashAndMerge is not scripted');
+      },
+      'sessions.replyToReviewThread': () => {},
+      'sessions.resolveReviewThread': () => {},
       'sessions.sendFeedback': () => {},
       'sessions.setAutoPrompt': () => {},
       'sessions.setBabysitting': () => {},
-      'sessions.setUnread': () => {},
+      'sessions.setUnread': () => true,
       'sessions.snooze': () => {},
       'sessions.rename': () => {},
+      'sessions.searchConversations': () => [],
+      'sessions.setPanels': ({ id, panels }) => this.publish('panels', panels, { sessionId: id }),
+      'sessions.resolveHighlight': () => {},
+      'sessions.seeHighlights': () => {},
       'sessions.openInEditor': () => {},
       'sessions.openInTerminal': () => {},
       'terminals.open': () => {
@@ -160,6 +255,7 @@ export class FakeMain implements LoomApi {
       'terminals.close': () => {},
       'sessions.diff': () => ({ available: false, reason: 'No diff available' }),
       'sessions.diffFile': () => ({ text: '', truncated: false }),
+      'sessions.diffFingerprint': () => '',
       'sessions.diffBases': () => [],
       'sessions.setDiffBase': () => {},
       'sessions.retry': () => {},
@@ -173,17 +269,35 @@ export class FakeMain implements LoomApi {
     };
   }
 
-  /** The topic's current value. */
+  /**
+   * The topic's current value. A Session's Panels are served as main serves
+   * them: each where the Layout has its kind, without the Terminals the
+   * Session's list doesn't have.
+   */
   value<T extends TopicName>(topic: T, ...params: TopicArgs<T>): Topics[T] {
     const k = key(topic, params);
-    return (this.values.has(k) ? this.values.get(k) : EMPTY[topic]) as Topics[T];
+    const value = (this.values.has(k) ? this.values.get(k) : EMPTY[topic]) as Topics[T];
+    if (topic !== 'panels') return value;
+    const running = new Set(this.value('terminals', ...(params as TopicArgs<'terminals'>)).map((t) => t.id));
+    return servedPanels(value as SessionPanels, this.value('settings').layout, (id) => !running.has(id)) as Topics[T];
   }
 
-  /** Publishes a new value on `topic`, as main does when its state changes. */
+  /** Publishes a new value on `topic`, as main does when its state changes; the Panels it changes with it too. */
   publish<T extends TopicName>(topic: T, value: Topics[T], ...params: TopicArgs<T>): void {
     const k = key(topic, params);
     this.values.set(k, value);
-    for (const listener of this.listeners.get(k) ?? []) (listener as (value: Topics[T]) => void)(value);
+    this.notify(k, this.value(topic, ...params));
+    if (topic === 'settings') {
+      for (const listened of this.listeners.keys()) {
+        const [name, panelParams] = JSON.parse(listened) as [TopicName, TopicArgs<'panels'>[0]];
+        if (name === 'panels') this.notify(listened, this.value('panels', panelParams));
+      }
+    }
+    if (topic === 'terminals') this.notify(key('panels', params), this.value('panels', ...(params as TopicArgs<'panels'>)));
+  }
+
+  private notify(k: string, value: unknown): void {
+    for (const listener of this.listeners.get(k) ?? []) (listener as (value: unknown) => void)(value);
   }
 
   invoke: LoomApi['invoke'] = async (command, ...params) => {

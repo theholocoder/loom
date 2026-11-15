@@ -190,13 +190,15 @@ describe('a native bridge that fails to start', () => {
     expect(prompts.map((m) => (m.message.params?.prompt as Array<{ text: string }>)[0]!.text)).toEqual(['Fix it']);
   });
 
-  it('refuses Retry once the prompt has had an answer', async () => {
+  it('refuses Retry once the prompt has had an answer, and Continue once the run had finished', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Done.'] }]);
     const { main, project } = await withProject(machine, checkout);
     const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'First' });
     await waitFor(main.api, 'sessions', session(id, (s) => s.waitingReason === 'finished'));
     await killBridge(main);
+    await waitFor(main.api, 'sessions', session(id, (s) => s.waitingReason === 'error'));
 
     await expect(main.api.invoke('sessions.retry', { id })).rejects.toThrow(/nothing to retry/i);
+    await expect(main.api.invoke('sessions.continue', { id })).rejects.toThrow(/nothing to continue/i);
   });
 });

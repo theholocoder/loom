@@ -20,6 +20,7 @@ beforeEach(() => {
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -145,6 +146,17 @@ describe('Markdown in chat messages', () => {
     fireEvent.click(within(plain).getByRole('button', { name: 'Copy code' }));
     await within(plain).findByRole('button', { name: 'Copied' });
     expect(clipboard.at(-1)).toBe('plain');
+  });
+
+  it("keeps a mermaid block in a reply as code, and an HTML comment as text: only a Forge's Markdown draws and hides them", async () => {
+    const { chat, show } = openSession();
+    show(user('Draw it'), agent('<!-- note -->\n\n```mermaid\nflowchart LR\n  a --> b\n```'));
+
+    const figure = within(chat()).getByRole('figure');
+    expect(within(figure).getByText('mermaid')).toBeTruthy();
+    expect(chat().textContent).toContain('<!-- note -->');
+    await act(async () => {});
+    expect(within(chat()).queryByRole('img', { name: 'Diagram' })).toBeNull();
   });
 
   it('renders a reply as it streams, with a code fence not yet closed', () => {

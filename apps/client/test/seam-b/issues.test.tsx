@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { Issue, Project, Session } from '../../src/shared/api';
+import type { Issue, IssueDetails, Project, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -19,6 +19,7 @@ function renderApp(main: FakeMain) {
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -78,6 +79,38 @@ describe('starting a Session from an issue', () => {
     expect(main.invoked.find((i) => i.command === 'projects.issues')?.params).toEqual({ id: 1 });
   });
 
+  it('goes from Ctrl+Shift+N to a started Session with the keyboard alone: Enter picks the first issue listed, then sends', async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project] }, {
+        'projects.issues': ({ search }) => [loginBug, darkMode].filter((i) => !search || i.title.toLowerCase().includes(search.toLowerCase())),
+        'sessions.create': () => {
+          main.publish('sessions', [fromIssue]);
+          return fromIssue;
+        },
+      }),
+    );
+
+    fireEvent.keyDown(document.body, { key: 'N', ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter Projects' }), { key: 'Enter' });
+    const search = screen.getByRole('textbox', { name: 'Search issues' });
+    expect(document.activeElement).toBe(search);
+    await screen.findByRole('option', { name: '#7 Dark mode' });
+    // The first listed, the one Enter picks, shows it.
+    expect(screen.getAllByRole('option')[0]!.hasAttribute('data-enter')).toBe(true);
+    // Pressed before the search's own list comes, Enter picks from that list, not the one shown.
+    fireEvent.change(search, { target: { value: 'login' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+
+    const pane = screen.getByRole('main', { name: 'New Session' });
+    expect((await within(pane).findByTitle(loginBug.url)).textContent).toContain('#31 Fix the login bug');
+    const prompt = within(pane).getByRole('textbox', { name: 'Prompt' });
+    expect(document.activeElement).toBe(prompt);
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+
+    await waitFor(() => expect(screen.getByRole('main', { name: 'Session' })).toBeTruthy());
+    expect(main.invoked.find((i) => i.command === 'sessions.create')?.params).toMatchObject({ issue: loginBug, prompt: '' });
+  });
+
   it('can be unlinked before starting, going back to the branch from the prompt', async () => {
     renderApp(new FakeMain({ projects: [project] }, { 'projects.issues': () => [loginBug] }));
     const pane = startNewSession();
@@ -120,15 +153,185 @@ describe('starting a Session from an issue', () => {
 });
 
 describe("a Session's linked issue", () => {
-  it('shows in Session info, opening the issue', () => {
-    const main = renderApp(new FakeMain({ projects: [project], sessions: [fromIssue] }));
-    fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: fromIssue.title }));
+  const glance = () => screen.getByRole('group', { name: 'Session at a glance' });
+  const openSession = (title: string) => fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: title }));
+  const plain: Session = { ...fromIssue, title: 'Fix SSO', issue: undefined };
 
-    expect(within(screen.getByRole('region', { name: 'Session header' })).queryByText('#31')).toBeNull();
-    fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
-    const git = within(screen.getByRole('tabpanel', { name: 'Session info' })).getByRole('region', { name: 'Git' });
-    const link = within(git).getByRole('button', { name: '#31' });
-    fireEvent.click(link);
+  it('is linked from the Link issue chip, searching the open issues', async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project], sessions: [plain] }, {
+        'projects.issues': () => [loginBug, darkMode],
+        'sessions.linkIssue': ({ issue }) => main.publish('sessions', [{ ...plain, issue }]),
+      }),
+    );
+    openSession('Fix SSO');
+
+    fireEvent.click(within(glance()).getByRole('button', { name: 'Link issue' }));
+    const picker = screen.getByRole('dialog', { name: 'Pick an issue' });
+    fireEvent.click(await within(picker).findByRole('option', { name: '#7 Dark mode' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Pick an issue' })).toBeNull();
+    expect(main.invoked).toContainEqual({ command: 'sessions.linkIssue', params: { id: 9, issue: { number: 7, url: darkMode.url } } });
+    await waitFor(() => expect(within(glance()).getByRole('button', { name: '#7' })).toBeTruthy());
+  });
+
+  it('links the issue a pasted URL names, with Enter', async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project], sessions: [plain] }, {
+        // Main reads the issue a URL names (searchIssues).
+        'projects.issues': ({ search }) => (search === darkMode.url ? [darkMode] : [loginBug]),
+        'sessions.linkIssue': ({ issue }) => main.publish('sessions', [{ ...plain, issue }]),
+      }),
+    );
+    openSession('Fix SSO');
+    fireEvent.click(within(glance()).getByRole('button', { name: 'Link issue' }));
+    const search = within(screen.getByRole('dialog', { name: 'Pick an issue' })).getByRole('textbox', { name: 'Search issues' });
+    expect(search.getAttribute('placeholder')).toBe('Search open issues, or paste a number or URL…');
+
+    fireEvent.change(search, { target: { value: darkMode.url } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.linkIssue', params: { id: 9, issue: { number: 7, url: darkMode.url } } }));
+    expect(main.invoked.filter((c) => c.command === 'sessions.linkIssue')).toHaveLength(1);
+  });
+
+  it("shows why the agent's Link issue tool couldn't link one", () => {
+    const main = renderApp(new FakeMain({ projects: [project], sessions: [plain] }));
+    const reason = "https://github.com/someone/else/issues/31 isn't an issue of this Project's repository.";
+    main.publish('transcript', [{ kind: 'issue-refused', id: 0, issue: 'https://github.com/someone/else/issues/31', reason }], { sessionId: 9 });
+    openSession('Fix SSO');
+    expect(within(screen.getByRole('log', { name: 'Conversation' })).getByRole('note').textContent).toBe(`Couldn't link issue https://github.com/someone/else/issues/31: ${reason}`);
+  });
+
+  it('says why linking one failed', async () => {
+    renderApp(
+      new FakeMain({ projects: [project], sessions: [plain] }, {
+        'projects.issues': () => [loginBug],
+        'sessions.linkIssue': () => {
+          throw new Error("This Session's Project was removed, so it can't be linked to an issue.");
+        },
+      }),
+    );
+    openSession('Fix SSO');
+    fireEvent.click(within(glance()).getByRole('button', { name: 'Link issue' }));
+    fireEvent.click(await within(screen.getByRole('dialog', { name: 'Pick an issue' })).findByRole('option', { name: '#31 Fix the login bug' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain("can't be linked to an issue");
+  });
+
+  it('offers no Link issue with the Forge off, nor on an archived Session', () => {
+    renderApp(new FakeMain({ projects: [{ ...project, forge: { state: 'no-remote', checking: false } }], sessions: [plain] }));
+    openSession('Fix SSO');
+    expect(within(glance()).queryByRole('button', { name: 'Link issue' })).toBeNull();
+    cleanup();
+
+    renderApp(new FakeMain({ projects: [project], sessions: [{ ...plain, status: 'archived', waitingReason: undefined }] }));
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: 'Archived' }));
+    openSession('Fix SSO');
+    expect(within(glance()).queryByRole('button', { name: 'Link issue' })).toBeNull();
+  });
+});
+
+describe('the Issue Panel', () => {
+  const glance = () => screen.getByRole('group', { name: 'Session at a glance' });
+  const openSession = (title: string) => fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: title }));
+  const details: IssueDetails = {
+    number: 31,
+    url: loginBug.url,
+    title: 'Fix the login bug',
+    state: 'open',
+    labels: ['bug', 'sso'],
+    author: 'aduval',
+    at: Date.now() - 3 * 60 * 60_000,
+    comments: 2,
+    body: 'Signing in with **SSO** returns a 500.',
+  };
+  /** The Issue Panel, shown from the `#31` chip in the Glance strip if it isn't shown. */
+  const panel = () => {
+    if (!screen.queryByRole('tabpanel', { name: 'Issue' })) fireEvent.click(within(glance()).getByRole('button', { name: '#31' }));
+    return screen.getByRole('tabpanel', { name: 'Issue' });
+  };
+
+  it("opens from the issue's chip in the Glance strip, showing its state, reference, labels, title, author, age, comments and body", async () => {
+    const main = renderApp(new FakeMain({ projects: [project], sessions: [fromIssue] }, { 'sessions.issue': () => details }));
+    openSession(fromIssue.title);
+
+    const shown = panel();
+    await within(shown).findByRole('heading', { name: 'Fix the login bug' });
+    expect(main.invoked).toContainEqual({ command: 'sessions.issue', params: { id: 9 } });
+    expect(within(shown).getByText('Open')).toBeTruthy();
+    expect(within(shown).getByText('acme/billing-api#31')).toBeTruthy();
+    expect(within(shown).getByRole('list', { name: 'Labels' }).textContent).toBe('bugsso');
+    expect(within(shown).getByText(/Opened by aduval/).textContent).toBe('Opened by aduval · 3 h ago');
+    expect(within(shown).getByText('2 comments')).toBeTruthy();
+    expect(within(shown).getByText('SSO').tagName).toBe('STRONG');
+    // Not opened in the browser: the Panel has the button for that.
+    expect(main.invoked.some((i) => i.command === 'links.open')).toBe(false);
+  });
+
+  it('opens it on the Forge, and unlinks it, closing the Panel', async () => {
+    const main = renderApp(
+      new FakeMain({ projects: [project], sessions: [fromIssue] }, {
+        'sessions.issue': () => details,
+        'sessions.unlinkIssue': () => main.publish('sessions', [{ ...fromIssue, issue: undefined }]),
+      }),
+    );
+    openSession(fromIssue.title);
+    const shown = panel();
+
+    fireEvent.click(within(shown).getByRole('button', { name: 'Open on GitHub' }));
     expect(main.invoked).toContainEqual({ command: 'links.open', params: { url: loginBug.url } });
+
+    fireEvent.click(within(shown).getByRole('button', { name: 'Unlink' }));
+    await waitFor(() => expect(screen.queryByRole('tabpanel', { name: 'Issue' })).toBeNull());
+    expect(main.invoked).toContainEqual({ command: 'sessions.unlinkIssue', params: { id: 9 } });
+    expect(within(glance()).getByRole('button', { name: 'Link issue' })).toBeTruthy();
+  });
+
+  it('says it is closed, and on GitLab, opens it there', async () => {
+    const gitlab: Project = { ...project, forge: { state: 'available', checking: false, kind: 'gitlab', repository: 'acme/billing-api' } };
+    renderApp(new FakeMain({ projects: [gitlab], sessions: [fromIssue] }, { 'sessions.issue': () => ({ ...details, state: 'closed', labels: [], comments: 1, body: '' }) }));
+    openSession(fromIssue.title);
+
+    const shown = panel();
+    await within(shown).findByText('Closed');
+    expect(within(shown).queryByRole('list', { name: 'Labels' })).toBeNull();
+    expect(within(shown).getByText('1 comment')).toBeTruthy();
+    expect(within(shown).getByText('No description.')).toBeTruthy();
+    expect(within(shown).getByRole('button', { name: 'Open on GitLab' })).toBeTruthy();
+  });
+
+  it("says why it couldn't be read, and reads it again on asking", async () => {
+    let fail = true;
+    renderApp(
+      new FakeMain({ projects: [project], sessions: [fromIssue] }, {
+        'sessions.issue': () => {
+          if (fail) throw new Error('gh: Not Found (HTTP 404)');
+          return details;
+        },
+      }),
+    );
+    openSession(fromIssue.title);
+
+    const shown = panel();
+    expect((await within(shown).findByRole('alert')).textContent).toContain("Couldn't read it from GitHub: gh: Not Found (HTTP 404)");
+    fail = false;
+    fireEvent.click(within(shown).getByRole('button', { name: 'Try again' }));
+    await within(shown).findByRole('heading', { name: 'Fix the login bug' });
+    expect(within(shown).queryByRole('alert')).toBeNull();
+  });
+
+  it('is offered by the + menu only while the Session has an issue', () => {
+    renderApp(new FakeMain({ projects: [project], sessions: [fromIssue] }, { 'sessions.issue': () => details }));
+    openSession(fromIssue.title);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a Panel to the Side area' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Issue' }));
+    expect(screen.getByRole('tabpanel', { name: 'Issue' })).toBeTruthy();
+    cleanup();
+
+    renderApp(new FakeMain({ projects: [project], sessions: [{ ...fromIssue, issue: undefined }] }));
+    openSession(fromIssue.title);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a Panel to the Side area' }));
+    expect(screen.queryByRole('menuitem', { name: 'Issue' })).toBeNull();
   });
 });

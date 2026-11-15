@@ -7,6 +7,9 @@ import { emptyDashboard, FakeMain } from './fake-main';
 
 afterEach(cleanup);
 
+/** Projects' own Add a Project…, rather than the welcome's behind it. */
+const addProjectButton = () => within(screen.getByRole('dialog', { name: 'Projects' })).getByRole('button', { name: 'Add a Project…' });
+
 function renderApp(main: FakeMain) {
   render(
     <ApiProvider api={main}>
@@ -19,6 +22,7 @@ function renderApp(main: FakeMain) {
 const loom: Project = {
   id: 1,
   name: 'loom',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/code/loom' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'theholocoder/loom' },
@@ -119,7 +123,7 @@ describe('adding a checkout of a removed Project', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(addProjectButton());
 
     const offer = await screen.findByRole('alertdialog', { name: 'Restore loom?' });
     expect(offer.textContent).toMatch(/14 archived Sessions/);
@@ -132,12 +136,24 @@ describe('adding a checkout of a removed Project', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   });
 
+  it('offers to restore one with no archived Sessions without counting them', async () => {
+    openProjects(
+      new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.restorable': () => ({ id: 1, name: 'loom', sessions: 0 }), 'projects.link': () => loom }),
+    );
+
+    fireEvent.click(addProjectButton());
+
+    const offer = await screen.findByRole('alertdialog', { name: 'Restore loom?' });
+    expect(offer.textContent).toContain('Restore loom with its usage history, or start a new Project?');
+    expect(offer.textContent).not.toMatch(/archived Session/);
+  });
+
   it('starts a new Project instead when asked', async () => {
     const main = openProjects(
       new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.restorable': () => ({ id: 1, name: 'loom', sessions: 2 }), 'projects.link': () => loom }),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(addProjectButton());
     fireEvent.click(await screen.findByRole('button', { name: 'New Project' }));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen } }));
@@ -146,7 +162,7 @@ describe('adding a checkout of a removed Project', () => {
   it('links straight away when nothing matches', async () => {
     const main = openProjects(new FakeMain({}, { 'dialogs.chooseFolder': () => chosen, 'projects.link': () => loom }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use existing clone…' }));
+    fireEvent.click(addProjectButton());
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen } }));
     expect(screen.queryByRole('alertdialog')).toBeNull();
@@ -155,7 +171,7 @@ describe('adding a checkout of a removed Project', () => {
 
 describe('a removed Project', () => {
   it("marks its Sessions in the Archive as the removed Project's", () => {
-    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom' }], sessions: [session({ title: 'Done long ago', status: 'archived', waitingReason: undefined })] }));
+    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom', color: 'blue' as const }], sessions: [session({ title: 'Done long ago', status: 'archived', waitingReason: undefined })] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
 
@@ -163,7 +179,7 @@ describe('a removed Project', () => {
   });
 
   it("names it in an archived Session's header, marked removed", () => {
-    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom' }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
+    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom', color: 'blue' as const }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     fireEvent.click(screen.getByRole('button', { name: /Old work/ }));
@@ -174,7 +190,7 @@ describe('a removed Project', () => {
   });
 
   it("turns its archived Sessions' composer off entirely", () => {
-    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom' }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
+    renderApp(new FakeMain({ removedProjects: [{ id: 1, name: 'loom', color: 'blue' as const }], sessions: [session({ title: 'Old work', status: 'archived', waitingReason: undefined })] }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     fireEvent.click(screen.getByRole('button', { name: /Old work/ }));
@@ -213,7 +229,7 @@ describe('a removed Project', () => {
     const dashboard = {
       ...emptyDashboard(7),
       tokens: 100,
-      perProject: [{ projectId: 1, project: 'loom', tokens: 100, removed: true as const }],
+      perProject: [{ projectId: 1, project: 'loom', color: 'blue' as const, tokens: 100, removed: true as const }],
       topSessions: [{ sessionId: 3, title: 'Fix the login bug', projectId: 1, project: 'loom', projectRemoved: true as const, model: 'anthropic/claude-sonnet-5-5', tokens: 100, workingMs: 0, outcome: 'archived' as const }],
     };
     renderApp(new FakeMain({}, { 'usage.dashboard': () => dashboard }));

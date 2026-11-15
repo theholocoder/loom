@@ -2,7 +2,7 @@
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
@@ -11,15 +11,22 @@ import { Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
 import { Attachments } from './sessions/attachments';
 import { Babysit } from './sessions/babysit';
+import { searchConversations } from './sessions/conversation-search';
+import { Highlights } from './sessions/highlights';
+import { Notifications, type DesktopNotification } from './notifications';
 import { openIn, type Opener } from './sessions/open-in';
+import { Panels } from './sessions/panels';
+import { SessionForge } from './sessions/session-forge';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Terminals } from './sessions/terminals';
+import { checkWorktreeRootFolder } from './sessions/working-copies';
 import { Settings } from './settings';
 import { DATABASE_FILE, DatabaseDamagedError, openDatabase, type LoomDatabase } from './storage/database';
 import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
 import { Topic } from './topic';
 import { dashboard } from './usage/usage';
 import { isWebLink } from '../shared/links';
+import { ownLocale } from '../shared/dates';
 
 export interface LoomOptions {
   userDataDir: string;
@@ -35,6 +42,12 @@ export interface LoomOptions {
   openExternal: (url: string) => Promise<void>;
   /** The agent Sessions run on; OpenCode over ACP unless a test gives another. */
   adapter?: AgentAdapter;
+  /** Shows a desktop notification; `onClick` asks the window to open its Session. None are shown without it. */
+  notify?: (notification: DesktopNotification) => void;
+  /** Whether Loom's window has the focus; taken as not without it. */
+  windowFocused?: () => boolean;
+  /** The system's regional format, such as `fr-FR`; Intl's own locale without it. */
+  systemLocale?: string;
 }
 
 export interface Loom {
@@ -141,7 +154,19 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   projects.set(projectService.list());
   removedProjects.set(projectService.listRemoved());
 
-  const settingsService = await Settings.load(db, (value) => settings.set(value));
+  let highlights: Highlights | undefined;
+  // Each Session's Panels, served in the Layout without the Terminals that ended (ADR 0009).
+  const panels = await Panels.load(db, { layout: () => settingsService.value.layout, ended: (id) => terminals.ended(id) });
+  const settingsService = await Settings.load(
+    db,
+    (value) => {
+      settings.set(value);
+      highlights?.settingsChanged();
+      panels.settingsChanged();
+    },
+    // Checked where worktrees go, when Loom can: an Environment not up yet tells at the next worktree Session.
+    { checkWorktreeRootFolder: (root) => (native.status.state === 'connected' ? checkWorktreeRootFolder(nativeForSessions, root) : Promise.resolve()) },
+  );
   const settings = new Topic<SettingsValues>(settingsService.value);
 
   const nativeForSessions: SessionEnvironment = {
@@ -167,21 +192,46 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   /** The commands and skills the agent offers in the Project's checkout, once its Environment is up. */
   const listCommands = async (projectId: number) => native.listCommands(await readyCheckout(projectId));
   const sessions = new Topic<Session[]>([]);
+  const openSession = new Topic<OpenSessionRequest | null>(null);
+  /** The Session the window shows, as the renderer last said. */
+  let showing: number | null = null;
+  /** The Session with this id, if Loom has it. */
+  const sessionOf = (id: number) => sessionService.list().find((s) => s.id === id);
+  const projectName = (id: number) => projectService.list().find((p) => p.id === id)?.name ?? `Project ${id}`;
+  const notifications = new Notifications({
+    settings: () => settingsService.value.notifications,
+    session: sessionOf,
+    projectName,
+    inView: (id) => showing === id && (options.windowFocused?.() ?? false),
+    show: (notification) => options.notify?.(notification),
+    open: (sessionId) => openSession.set({ sessionId, click: (openSession.value?.click ?? 0) + 1 }),
+  });
   /** The id of the Environment the Project's checkout is in. */
   const environmentIdOf = (projectId: number) => projectService.list().find((p) => p.id === projectId)?.checkout.environmentId;
+  /** The Environment a Session's agent and git run in, as the Session services take it, if Loom has it. */
+  const environmentForSession = (session: Session) => (environmentIdOf(session.projectId) === native.status.id ? nativeForSessions : undefined);
   /** The Environment a Session runs in, if Loom has it. */
   const sessionEnvironment = (session: Session) => (environmentIdOf(session.projectId) === native.status.id ? native : undefined);
   const terminals = new Terminals({
-    session: (id) => sessionService.list().find((s) => s.id === id),
+    session: sessionOf,
     environment: (session) => {
       const environment = sessionEnvironment(session);
       return environment && { label: environment.status.label, os: () => environment.status.bridge?.os, ready: () => environment.ready(), openChannel: (params) => environment.openChannel(params) };
     },
+    onChange: (sessionId) => panels.terminalsChanged(sessionId),
   });
+  // What Loom reads from, and does on, each Session's Merge request and issue.
+  const sessionForge = new SessionForge({
+    session: sessionOf,
+    project: (id) => projectService.list().find((p) => p.id === id),
+    environment: environmentForSession,
+    linkIssue: (id, issue) => sessionService.linkIssue({ id, issue }),
+  });
+  const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
-    adapter: options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion),
+    adapter,
     project: (id) => projectService.list().find((p) => p.id === id),
     environment: (id) => (id === native.status.id ? nativeForSessions : undefined),
     worktreeRoot: () => settingsService.value.worktreeRoot,
@@ -189,7 +239,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       sessions.set(list);
       babysit?.sessionsChanged(list);
       terminals.sessionsChanged(list);
+      highlights?.sessionsChanged(list);
     },
+    onTurnEnded: (id, through) => highlights?.turnEnded(id, through),
+    linkNamedIssue: (id, issue) => sessionForge.linkNamedIssue(id, issue),
+    onNews: (id, reason) => notifications.news(id, reason),
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
@@ -201,6 +255,19 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     models: (projectId) => (native.status.state === 'connected' ? listModels(projectId) : Promise.reject(new Error(`${native.status.label} is not connected`))),
   });
   sessions.set(sessionService.list());
+  highlights = await Highlights.load({
+    db,
+    clock: options.clock,
+    adapter,
+    settings: () => settingsService.value.highlights,
+    session: sessionOf,
+    sessions: () => sessionService.list(),
+    environment: environmentForSession,
+    transcript: (id) => sessionService.transcriptItems(id),
+    projectName,
+    onCounts: (id, counts) => sessionService.setHighlightCounts(id, counts),
+  });
+  const highlighter = highlights;
 
   babysit = await Babysit.load({
     db,
@@ -215,7 +282,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
 
   /** Opens a Session's working copy in the user's editor or terminal, in its Environment. */
   const openInSession = (id: number, opener: Opener, file?: string) => {
-    const session = sessionService.list().find((s) => s.id === id);
+    const session = sessionOf(id);
     if (!session) throw new Error(`unknown Session ${id}`);
     const environmentId = environmentIdOf(session.projectId);
     if (environmentId !== native.status.id) throw new Error(`unknown Environment "${environmentId}"`);
@@ -228,9 +295,12 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     });
   };
 
-  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database, openSession };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
+    panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
+    highlights: ({ sessionId }, listener) => highlighter.subscribe(sessionId, listener),
+    reviewThreads: ({ sessionId }, listener) => babysitter.subscribeThreads(sessionId, listener),
     terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
     terminalOutput: ({ id }, listener) => terminals.subscribeOutput(id, listener),
   };
@@ -256,6 +326,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       return sessionService.removeProject(id, discard ?? false, () => projectService.remove(id));
     },
     'projects.setBranchPrefix': ({ id, branchPrefix }) => projectService.setBranchPrefix(id, branchPrefix),
+    'projects.edit': (params) => projectService.edit(params),
     'projects.issues': ({ id, search }) => projectService.issues(id, search),
     'projects.branches': ({ id }) => sessionService.branches(id),
     'projects.check': () => projectService.checkForges(),
@@ -274,9 +345,22 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'settings.setApprovalModeDefault': ({ mode }) => settingsService.setApprovalModeDefault(mode),
     'settings.setDiffCollapsedPatterns': ({ patterns }) => settingsService.setDiffCollapsedPatterns(patterns),
     'settings.setAppearance': (appearance) => settingsService.setAppearance(appearance),
-    'settings.setSidebar': (sidebar) => settingsService.setSidebar(sidebar),
+    'settings.setPanelSize': ({ kind, dimension, size }) => settingsService.setPanelSize(kind, dimension, size),
+    'settings.setPanelPlace': ({ kind, area, stack }) => settingsService.setPanelPlace(kind, area, stack),
+    'settings.setInbox': (inbox) => settingsService.setInbox(inbox),
     'settings.setDiffView': (diffView) => settingsService.setDiffView(diffView),
+    'settings.setHighlights': (value) => settingsService.setHighlights(value),
     'settings.setApproval': ({ category, setting }) => settingsService.setApproval(category, setting),
+    'settings.setNotification': ({ kind, on }) => settingsService.setNotification(kind, on),
+    'settings.setKeybinding': ({ name, shortcut }) => settingsService.setKeybinding(name, shortcut),
+    'settings.setSingleKeyShortcuts': ({ on }) => settingsService.setSingleKeyShortcuts(on),
+    'settings.resetKeybindings': () => settingsService.resetKeybindings(),
+    'settings.setDateFormat': (dates) => settingsService.setDateFormat(dates),
+    'settings.systemLocale': () => options.systemLocale || ownLocale(),
+    'window.showing': ({ sessionId }) => {
+      if (sessionId !== null && typeof sessionId !== 'number') throw new Error('The Session shown is a Session id, or null for none.');
+      showing = sessionId;
+    },
     'sessions.list': () => sessions.value,
     'sessions.create': (params) => sessionService.create(params),
     'sessions.diffBases': ({ id }) => sessionService.diffBases(id),
@@ -285,19 +369,56 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.files': ({ id }) => sessionService.files(id),
     'sessions.stop': (params) => sessionService.stop(params),
     'sessions.removeQueued': (params) => sessionService.removeQueued(params),
+    'sessions.editQueued': (params) => sessionService.editQueued(params),
     'sessions.sendNow': (params) => sessionService.sendNow(params),
     'sessions.steer': (params) => sessionService.steer(params),
     'sessions.setModel': (params) => sessionService.setModel(params),
     'sessions.archive': (params) => sessionService.archive(params),
+    'sessions.unarchive': (params) => sessionService.unarchive(params),
     'sessions.delete': (params) => sessionService.delete(params),
+    'sessions.unsavedWork': (params) => sessionService.unsavedWork(params),
     'sessions.requestMergeRequest': (params) => sessionService.requestMergeRequest(params),
     'sessions.linkMergeRequest': (params) => sessionService.linkMergeRequest(params),
+    'sessions.mergeRequest': (params) => sessionForge.mergeRequest(params),
+    'sessions.mergeRequestDiff': (params) => sessionForge.mergeRequestDiff(params),
+    'sessions.squashAndMerge': async (params) => {
+      const result = await sessionForge.squashAndMerge(params);
+      // Babysit archives the Session once it sees it merged, so it looks now; without Babysit, the merge is just recorded.
+      if (!babysitter.pollNow(params.id) && result.state && result.state !== 'open') sessionService.setMergeRequestState(params.id, result.state);
+      return result;
+    },
+    // Babysit reads the Merge request again, so that its notes show the reply, or go once resolved.
+    'sessions.replyToReviewThread': async (params) => {
+      await sessionForge.replyToReviewThread(params);
+      babysitter.pollNow(params.id);
+    },
+    'sessions.resolveReviewThread': async (params) => {
+      await sessionForge.resolveReviewThread(params);
+      babysitter.pollNow(params.id);
+    },
     'sessions.sendFeedback': (params) => sessionService.sendFeedback(params),
     'sessions.setAutoPrompt': (params) => sessionService.setAutoPrompt(params),
     'sessions.setBabysitting': (params) => sessionService.setBabysitting(params),
     'sessions.setUnread': (params) => sessionService.setUnread(params),
     'sessions.snooze': (params) => sessionService.snooze(params),
     'sessions.rename': (params) => sessionService.rename(params),
+    'sessions.searchConversations': async ({ words }) => {
+      if (!Array.isArray(words)) throw new Error('A search needs the words to look for.');
+      // Searches the conversations as written so far, of the Sessions Loom has.
+      await sessionService.flush();
+      return searchConversations(db, new Set(sessionService.list().map((s) => s.id)), words);
+    },
+    'sessions.linkIssue': (params) => sessionService.linkIssue(params),
+    'sessions.unlinkIssue': (params) => sessionService.unlinkIssue(params),
+    'sessions.issue': (params) => sessionForge.issue(params),
+    'sessions.setPanels': async ({ id, panels: state }) => {
+      if (!sessionService.list().some((s) => s.id === id)) throw new Error(`unknown Session ${id}`);
+      // Kept in the Layout a move asked for just before, not the one it replaces.
+      await settingsService.layoutKept();
+      return panels.set(id, state);
+    },
+    'sessions.resolveHighlight': (params) => highlighter.resolve(params),
+    'sessions.seeHighlights': (params) => highlighter.see(params),
     'sessions.openInEditor': ({ id, file }) => openInSession(id, 'editor', file),
     'sessions.openInTerminal': ({ id }) => openInSession(id, 'terminal'),
     'terminals.open': (params) => terminals.open(params),
@@ -305,8 +426,9 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'terminals.resize': ({ id, cols, rows }) => terminals.resize(id, { cols, rows }),
     'terminals.ack': ({ id, bytes }) => terminals.ack(id, bytes),
     'terminals.close': ({ id }) => terminals.close(id),
-    'sessions.diff': ({ id, uncommittedOnly }) => sessionService.diff(id, uncommittedOnly),
-    'sessions.diffFile': ({ id, path, uncommittedOnly }) => sessionService.diffFile(id, path, uncommittedOnly),
+    'sessions.diff': ({ id, scope }) => sessionService.diff(id, scope),
+    'sessions.diffFingerprint': ({ id }) => sessionService.diffFingerprint(id),
+    'sessions.diffFile': ({ id, path, scope }) => sessionService.diffFile(id, path, scope),
     'sessions.retry': (params) => sessionService.retry(params),
     'sessions.continue': (params) => sessionService.continue(params),
     'sessions.answer': (params) => sessionService.answer(params),
@@ -341,7 +463,9 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     api,
     close: async () => {
       await babysitter.stop();
+      await highlighter.stop();
       await terminals.closeAll();
+      sessionForge.stop();
       await sessionService.shutdown();
       await native.stop();
       await db.destroy();

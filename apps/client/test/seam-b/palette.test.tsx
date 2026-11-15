@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import type { Project, Session } from '../../src/shared/api';
+import type { ConversationMatch, Project, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -19,6 +19,7 @@ function renderApp(main = new FakeMain()) {
 const billing: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -26,6 +27,7 @@ const billing: Project = {
 const web: Project = {
   id: 2,
   name: 'web-app',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/web-app' },
   forge: { state: 'no-remote', checking: false },
@@ -80,7 +82,9 @@ describe('palette actions', () => {
     // No Session open, none waiting, no Project on a Forge.
     expect(actionNames()).toEqual([
       'New Session',
-      'Add Project from existing clone…',
+      'Add a Project…',
+      'Toggle the Inbox',
+      'Theme: Match system',
       'Theme: Midnight',
       'Theme: Paper',
       'Theme: Nord',
@@ -93,8 +97,9 @@ describe('palette actions', () => {
     ]);
     const keys = (name: string) => within(within(palette()).getByRole('option', { name })).queryByText((_, el) => el?.tagName === 'KBD')?.textContent;
     expect(keys('New Session')).toBe('Ctrl N');
-    expect(keys('Add Project from existing clone…')).toBe('Ctrl O');
+    expect(keys('Add a Project…')).toBe('Ctrl O');
     expect(keys('Open Settings')).toBe('Ctrl ,');
+    expect(keys('Toggle the Inbox')).toBe('Ctrl Shift B');
   });
 
   it('adds the open Session’s actions, next Waiting and starting from an issue when they apply', () => {
@@ -105,7 +110,7 @@ describe('palette actions', () => {
     expect(actionNames()).toEqual([
       'New Session',
       'New Session from an issue…',
-      'Add Project from existing clone…',
+      'Add a Project…',
       'Go to next Waiting Session',
       'Go to previous Waiting Session',
       'Reply to this Session',
@@ -114,12 +119,17 @@ describe('palette actions', () => {
       'Open in editor',
       'Open in terminal',
       'Toggle terminal',
-      'Toggle sidebar',
+      'Toggle the Inbox',
+      'Toggle the Side area',
       'Toggle diff',
-      'Toggle Session info',
+      'Toggle Review mode for Changes',
+      'Show Session details',
       'Mark this Session unread',
+      'Snooze this Session…',
+      'Rename this Session…',
       'Archive this Session',
       'Delete this Session…',
+      'Theme: Match system',
       'Theme: Midnight',
       'Theme: Paper',
       'Theme: Nord',
@@ -149,7 +159,8 @@ describe('palette actions', () => {
     ctrlK();
     type('theme');
     const highlighted = () => within(palette()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
-    expect(highlighted()).toBe('Theme: Midnight');
+    expect(highlighted()).toBe('Theme: Match system');
+    press('ArrowDown', search());
     press('ArrowDown', search());
     press('ArrowDown', search());
     expect(highlighted()).toBe('Theme: Nord');
@@ -203,11 +214,22 @@ describe('running palette actions', () => {
 
     runAction('Archive this Session');
     const warning = await screen.findByRole('alertdialog', { name: 'Archive with unsaved work?' });
-    fireEvent.click(within(warning).getByRole('button', { name: 'Discard' }));
+    fireEvent.click(within(warning).getByRole('button', { name: 'Discard and archive' }));
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.archive').map((i) => i.params)).toEqual([{ id: 1 }, { id: 1, discard: true }]));
   });
 
-  it('shows in the Session why an action on it failed', async () => {
+  it('reopens the open archived Session, unless its Project was removed', async () => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Done', status: 'archived', waitingReason: undefined })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    runAction('Reopen this Session');
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'sessions.unarchive').map((i) => i.params)).toEqual([{ id: 1 }]));
+    ctrlK();
+    expect(within(palette()).queryByRole('option', { name: 'Archive this Session' })).toBeNull();
+  });
+
+  it('shows in a toast why an action on the Session failed', async () => {
     renderApp(
       new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Fix login' })] }, {
         'sessions.requestMergeRequest': () => {
@@ -218,15 +240,25 @@ describe('running palette actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
 
     runAction('Create Merge request for this Session');
-    expect((await within(screen.getByRole('main', { name: 'Session' })).findByRole('alert')).textContent).toBe('The agent is not running');
+    expect(within(await screen.findByRole('group', { name: 'What went wrong' })).getByRole('alert').textContent).toBe('The agent is not running');
   });
 
-  it('opens the linked Merge request instead of asking for one', async () => {
+  it('shows the linked Merge request instead of asking for one, Ctrl+Shift+M hiding it again, and opens it on the Forge', async () => {
     const url = 'https://github.com/acme/billing-api/pull/12';
     const main = renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Fix login', mergeRequest: { number: 12, url } })] }));
     fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
 
-    runAction('Open Merge request #12 for this Session');
+    ctrlK();
+    const keys = within(within(palette()).getByRole('option', { name: 'Show Merge request #12 for this Session' })).getByText((_, el) => el?.tagName === 'KBD');
+    expect(keys.textContent).toBe('Ctrl Shift M');
+    press('Escape', search());
+    runAction('Show Merge request #12 for this Session');
+    expect(screen.getByRole('tabpanel', { name: 'Merge request' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Prompt' }), { key: 'M', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.queryByRole('tabpanel', { name: 'Merge request' })).toBeNull());
+    expect(main.invoked.map((i) => i.command)).not.toContain('sessions.requestMergeRequest');
+
+    runAction('Open Merge request #12 on GitHub');
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'links.open', params: { url } }));
   });
 
@@ -242,9 +274,9 @@ describe('running palette actions', () => {
     expect((await within(issues).findByRole('option')).textContent).toContain('Fix the login bug');
   });
 
-  it('adds a Project from an existing clone through the folder dialog', async () => {
+  it('adds a Project through the folder dialog', async () => {
     const main = renderApp(new FakeMain());
-    runAction('Add Project from existing clone…');
+    runAction('Add a Project…');
     await waitFor(() => expect(main.invoked.map((i) => i.command)).toContain('dialogs.chooseFolder'));
     expect(screen.getByRole('button', { name: 'Projects' }).getAttribute('aria-current')).toBe('page');
   });
@@ -270,10 +302,12 @@ describe('shortcuts', () => {
     press('j');
     expect(openSessionTitle()).toBe('Second');
 
-    press('d');
+    // A new Session shows Changes in the Side area.
     expect(screen.getByRole('tabpanel', { name: 'Changes' })).toBeTruthy();
     press('d');
     expect(screen.queryByRole('tabpanel', { name: 'Changes' })).toBeNull();
+    press('d');
+    expect(screen.getByRole('tabpanel', { name: 'Changes' })).toBeTruthy();
 
     press('e');
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.archive', params: { id: 2 } }));
@@ -360,6 +394,23 @@ describe('Session search', () => {
     expect(sessionNames()).toEqual(['Fix login', 'Login copy', 'Dark mode', 'Old invoice export']);
   });
 
+  it('shows the Sessions before the actions until something is typed, the first Session highlighted', () => {
+    open();
+    const groups = () => within(within(palette()).getByRole('listbox', { name: 'Results' })).getAllByRole('group').map((g) => g.getAttribute('aria-label'));
+    const highlighted = () => within(palette()).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
+    expect(groups()).toEqual(['Sessions', 'Actions']);
+    expect(highlighted()).toBe('Fix login');
+    for (let i = 0; i < 4; i++) press('ArrowDown', search());
+    expect(highlighted()).toBe('New Session');
+    press('ArrowUp', search());
+    press('Enter', search());
+    expect(openSessionTitle()).toBe('Old invoice export');
+
+    ctrlK();
+    type('o');
+    expect(groups()).toEqual(['Actions', 'Sessions']);
+  });
+
   it('finds Sessions by title, branch, Project and issue or Merge request number, archived ones too', () => {
     open();
     type('login');
@@ -433,6 +484,137 @@ describe('Session search', () => {
     type('is:waiting');
     fireEvent.click(within(palette()).getByRole('option', { name: 'Login copy' }));
     expect(openSessionTitle()).toBe('Login copy');
+  });
+});
+
+describe('searching conversations', () => {
+  const sessions = [
+    session(1, { title: 'Fix login', updatedAt: 3 }),
+    session(2, { title: 'Dark mode', updatedAt: 5 }),
+    session(3, { title: 'Old export', status: 'archived', waitingReason: undefined, updatedAt: 9 }),
+  ];
+  const open = (search: (words: string[]) => ConversationMatch[]) => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions }, { 'sessions.searchConversations': ({ words }) => search(words) }));
+    ctrlK();
+    return main;
+  };
+  const excerptOf = (name: string) => within(palette()).getByRole('option', { name }).getAttribute('aria-description') ?? undefined;
+
+  it('finds Sessions by what was said in them, showing where', async () => {
+    const main = open((words) => (words.includes('renderer') ? [{ id: 3, words: ['renderer'], excerpt: 'The PDF renderer blocks on fonts.' }] : []));
+
+    type('renderer');
+    await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
+    expect(excerptOf('Old export')).toBe('The PDF renderer blocks on fonts.');
+    expect(main.invoked.filter((i) => i.command === 'sessions.searchConversations').at(-1)?.params).toEqual({ words: ['renderer'] });
+  });
+
+  it('takes each word from the title or the conversation, the excerpt only when the conversation gave one', async () => {
+    open((words) => [
+      { id: 1, words: words.filter((w) => w === 'token'), excerpt: 'The token expires too soon.' },
+      { id: 2, words: words.filter((w) => w === 'login' || w === 'token'), excerpt: 'Dark mode broke the login token.' },
+    ].filter((m) => m.words.length));
+
+    type('login token');
+    await waitFor(() => expect(sessionNames()).toEqual(['Dark mode', 'Fix login']));
+    expect(excerptOf('Fix login')).toBe('The token expires too soon.');
+    type('login');
+    await waitFor(() => expect(excerptOf('Dark mode')).toBe('Dark mode broke the login token.'));
+    expect(excerptOf('Fix login')).toBeUndefined();
+    // Found in itself first, though Dark mode changed later: the conversations' answer adds after what was shown.
+    expect(sessionNames()).toEqual(['Fix login', 'Dark mode']);
+  });
+
+  it('keeps what the last answer found while the next is under way, for a word it holds', async () => {
+    open((words) => (words.some((w) => 'fonts'.includes(w)) ? [{ id: 3, words, excerpt: 'Blocks on fonts.' }] : []));
+    type('fonts');
+    await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
+    type('font');
+    expect(sessionNames()).toEqual(['Old export']);
+    type('fontz');
+    expect(sessionNames()).toEqual([]);
+  });
+
+  it('narrows conversation matches with filters too, and asks nothing for filters alone', async () => {
+    const main = open(() => [{ id: 3, words: ['fonts'], excerpt: 'fonts' }, { id: 1, words: ['fonts'], excerpt: 'fonts' }]);
+    type('is:archived');
+    type('is:archived fonts');
+    await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
+    expect(main.invoked.filter((i) => i.command === 'sessions.searchConversations').map((i) => i.params)).toEqual([{ words: ['fonts'] }]);
+  });
+
+  it('keeps the title matches when the conversation search fails', async () => {
+    open(() => {
+      throw new Error('database locked');
+    });
+    type('login');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sessionNames()).toEqual(['Fix login']);
+  });
+});
+
+describe('snoozed Sessions in the palette', () => {
+  const later = Date.now() + 3_600_000;
+  const sessions = [session(1, { title: 'Fix login', updatedAt: 3 }), session(2, { title: 'Later', snoozedUntil: later, updatedAt: 5 })];
+
+  it('finds them with is:snoozed, whose chip toggles it', () => {
+    renderApp(new FakeMain({ projects: [billing], sessions }));
+    ctrlK();
+    type('is:snoozed');
+    expect(sessionNames()).toEqual(['Later']);
+    type('');
+    fireEvent.click(within(palette()).getByRole('button', { name: 'is:snoozed' }));
+    expect(sessionNames()).toEqual(['Later']);
+  });
+
+  it('snoozes the open Session from the palette, and wakes a snoozed one', async () => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
+
+    runAction('Snooze this Session…');
+    const menu = screen.getByRole('menu', { name: 'Snooze' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: '1 hour' }));
+    await waitFor(() => expect(main.invoked.find((i) => i.command === 'sessions.snooze')?.params).toMatchObject({ id: 1, until: expect.any(Number) }));
+
+    ctrlK();
+    type('later');
+    press('Enter', search());
+    ctrlK();
+    expect(actionNames()).not.toContain('Snooze this Session…');
+    fireEvent.click(within(palette()).getByRole('option', { name: 'Wake this Session' }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.snooze', params: { id: 2, until: null } }));
+  });
+
+  it('offers no Snooze for a Working Session, but Rename', () => {
+    renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Busy', status: 'working', waitingReason: undefined })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Working' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Busy' }));
+    ctrlK();
+    expect(actionNames()).not.toContain('Snooze this Session…');
+    expect(actionNames()).toContain('Rename this Session…');
+  });
+});
+
+describe('renaming from the palette', () => {
+  it('renames the open Session', async () => {
+    const main = renderApp(new FakeMain({ projects: [billing], sessions: [session(1, { title: 'Fix login' })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
+
+    runAction('Rename this Session…');
+    const form = screen.getByRole('dialog', { name: 'Rename Session' });
+    const title = within(form).getByRole('textbox', { name: 'Title' });
+    expect(document.activeElement).toBe(title);
+    fireEvent.change(title, { target: { value: 'Fix the login page' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'sessions.rename', params: { id: 1, title: 'Fix the login page' } }));
+  });
+
+  it('is not offered once the Project is removed', () => {
+    renderApp(new FakeMain({ projects: [], sessions: [session(1, { title: 'Orphan', status: 'archived', waitingReason: undefined })] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Orphan' }));
+    ctrlK();
+    expect(actionNames()).not.toContain('Rename this Session…');
   });
 });
 
@@ -566,6 +748,20 @@ describe('the keyboard shortcuts list', () => {
     expect(document.activeElement).toBe(within(help()).getByRole('searchbox', { name: 'Search shortcuts' }));
     press('Escape', document.activeElement!);
     expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).toBeNull();
+  });
+
+  it("lists the composer's keys, which no longer show under it", () => {
+    renderApp();
+    ctrlQuestion();
+    const searchBox = within(help()).getByRole('searchbox', { name: 'Search shortcuts' });
+    fireEvent.change(searchBox, { target: { value: 'enter' } });
+    expect(rows()).toEqual([
+      ['Retry the last prompt', 'Ctrl Shift Enter'],
+      ['Send the message', 'Enter'],
+      ['Add a line to the message', 'Shift Enter'],
+    ]);
+    expect(within(help()).getByText('In the composer')).toBeTruthy();
+    expect(within(help()).queryByText('Outside text fields')).toBeNull();
   });
 
   it('opens from the composer too, and puts focus back there', () => {

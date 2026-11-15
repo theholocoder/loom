@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session, type TranscriptItem } from '../../src/shared/api';
+import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
 afterEach(cleanup);
@@ -10,6 +11,7 @@ afterEach(cleanup);
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -74,9 +76,17 @@ describe('Approval requests', () => {
     expect(decisions()).toEqual([{ id: 7, itemId: 1, decision: 'session' }]);
   });
 
+  it('puts the approvals first, then the message to the agent beside Deny, which it goes with', () => {
+    const { card } = openSession([forcePush]);
+    const controls = [...card().querySelectorAll('button, input')].map((c) => c.getAttribute('aria-label') ?? c.textContent);
+    expect(controls).toEqual(['Approve once', 'Approve for this Session: Force push, push another branch', 'Message to the agent if you deny it', 'Deny']);
+    // The category is said once, above; the button names it to a screen reader.
+    expect(within(card()).getByRole('button', { name: /^Approve for this Session/ }).textContent).toBe('Approve for this Session');
+  });
+
   it('Deny sends the optional message to the agent', async () => {
     const { card, click, decisions } = openSession([forcePush, { ...forcePush, id: 2 }]);
-    fireEvent.change(within(card()).getByRole('textbox', { name: 'Message to the agent' }), { target: { value: '  Rebase instead.  ' } });
+    fireEvent.change(within(card()).getByRole('textbox', { name: 'Message to the agent if you deny it' }), { target: { value: '  Rebase instead.  ' } });
     await click('Deny');
     await click('Deny', 1);
     expect(decisions()).toEqual([
@@ -125,6 +135,7 @@ describe('Approval requests', () => {
       </ApiProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Approvals');
     const toggle = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
     expect(toggle('sudo and global installs').textContent).toContain('Ask');
     expect(toggle('MCP and extension tools').textContent).toContain('Allow');
@@ -144,6 +155,7 @@ describe('Approval requests', () => {
       </ApiProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Approvals');
     const picker = () => screen.getByRole('button', { name: 'Default Approval mode' });
     expect(picker().textContent).toContain('Supervised');
     await act(async () => fireEvent.click(picker()));

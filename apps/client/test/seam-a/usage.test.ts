@@ -60,8 +60,8 @@ describe('usage per turn', () => {
     expect(dashboard.reportedCost).toBeCloseTo(0.2);
     expect(dashboard.mix).toEqual({ input: 1500, output: 300, reasoning: 50, cacheRead: 3000, cacheWrite: 400 });
     expect(dashboard.cacheHitRate).toBeCloseTo(3000 / 4900);
-    expect(dashboard.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', tokens: 5250 }]);
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 5250 }]);
+    expect(dashboard.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 5250 }]);
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', color: project.color, tokens: 5250 }]);
     expect(dashboard.perDay).toHaveLength(7);
     expect(dashboard.perDay.at(-1)).toMatchObject({ tokens: 5250, byProject: { [project.id]: 5250 } });
     expect(dashboard.perDay.slice(0, -1).every((d) => d.tokens === 0)).toBe(true);
@@ -85,7 +85,7 @@ describe('usage of cancelled turns', () => {
 });
 
 describe('where a turn is filed', () => {
-  it('under the day it ended and the model Loom set for it', async () => {
+  it('under the day it ended and the model Loom set for it, by the name the agent gave it', async () => {
     const { machine, checkout } = machineWith([
       { chunks: ['Late night.'], tokens: { inputTokens: 1000, outputTokens: 100 } },
       { chunks: ['Next morning.'], tokens: { inputTokens: 500, outputTokens: 50 } },
@@ -105,8 +105,8 @@ describe('where a turn is filed', () => {
       { day: '2026-11-05', tokens: 550, byProject: { [project.id]: 550 } },
     ]);
     expect(dashboard.perModel).toEqual([
-      { model: 'anthropic/claude-sonnet-5-5', tokens: 1100 },
-      { model: 'anthropic/claude-haiku-5-5', tokens: 550 },
+      { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1100 },
+      { model: 'anthropic/claude-haiku-5-5', name: 'Claude Haiku 5.5', tokens: 550 },
     ]);
   });
 });
@@ -237,6 +237,7 @@ describe('Session outcomes', () => {
       project: 'loom',
       mergeRequest: { number: 12, url: pr(12) },
       model: 'anthropic/claude-sonnet-5-5',
+      modelName: 'Claude Sonnet 5.5',
       tokens: 110,
       workingMs: 0,
       outcome: 'merged',
@@ -263,8 +264,8 @@ describe('usage per Project', () => {
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
     expect(dashboard.perProject).toEqual([
-      { projectId: second.id, project: 'loom', tokens: 200 },
-      { projectId: first.id, project: 'loom', tokens: 100 },
+      { projectId: second.id, project: 'loom', color: second.color, tokens: 200 },
+      { projectId: first.id, project: 'loom', color: first.color, tokens: 100 },
     ]);
     expect(dashboard.perDay.at(-1)!.byProject).toEqual({ [first.id]: 100, [second.id]: 200 });
   });
@@ -278,8 +279,21 @@ describe('usage per Project', () => {
 
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', tokens: 100, removed: true }]);
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', color: project.color, tokens: 100, removed: true }]);
     expect(dashboard.topSessions).toMatchObject([{ sessionId: id, title: 'Fix the login bug', project: 'loom', projectRemoved: true }]);
+  });
+
+  it('names and colours a Project as it is now, renamed and recoloured since its usage', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'], tokens: { inputTokens: 100, outputTokens: 0 } }]);
+    const { main, project } = await start(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(main, id);
+
+    await main.api.invoke('projects.edit', { id: project.id, name: 'Loom app', color: 'magenta' });
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'Loom app', color: 'magenta', tokens: 100 }]);
+    expect(dashboard.topSessions).toMatchObject([{ sessionId: id, project: 'Loom app' }]);
   });
 });
 
@@ -333,9 +347,9 @@ describe('reported cost after upgrading', () => {
         ],
       },
     });
-    // A database as the release before usage left it, with a Session whose conversation has cost $4.30 so far.
+    // A database as the release before usage (migration 12) left it, with a Session whose conversation has cost $4.30 so far.
     const userDataDir = tempDir('loom-usage-');
-    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, migrations.length - 1) })).destroy();
+    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, 11) })).destroy();
     const db = new Database(join(userDataDir, 'loom.db'));
     db.prepare("insert into projects (id, name, branch_prefix, created_at) values (1, 'loom', 'loom', 0)").run();
     db.prepare("insert into checkouts (project_id, environment_id, path) values (1, 'native', ?)").run(checkout);

@@ -164,3 +164,48 @@ describe('a new message to an archived Session', () => {
     expect(existsSync(path)).toBe(false);
   });
 });
+
+describe('undoing an archive', () => {
+  it('brings a worktree Session back Waiting as it was, its worktree made again, without a message', async () => {
+    const { machine, checkout } = machineWith({ turns: [{ chunks: ['Done.'] }], resumedTurns: [{ chunks: ['Back at it.'] }] });
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
+    const path = created.workingCopy.path;
+    await main.api.invoke('sessions.archive', { id: created.id });
+    expect(existsSync(path)).toBe(false);
+
+    await main.api.invoke('sessions.unarchive', { id: created.id });
+
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)).toMatchObject({ status: 'waiting', waitingReason: 'finished' });
+    expect(existsSync(path)).toBe(true);
+    expect(git(path, 'branch', '--show-current')).toBe('loom/fix-the-login-bug');
+    expect(texts(await waitFor(main.api, 'transcript', () => true, { sessionId: created.id })).filter(([kind]) => kind === 'user')).toEqual([['user', 'Fix the login bug']]);
+
+    // A reply goes on with the conversation, as to any Waiting Session.
+    await main.api.invoke('sessions.send', { id: created.id, prompt: 'One more thing' });
+    await waitFor(main.api, 'transcript', (items) => items.filter((i) => i.kind === 'agent').length === 2, { sessionId: created.id });
+  });
+
+  it('brings one archived mid-run back Stopped', async () => {
+    const { machine, checkout } = machineWith({ turns: [{ chunks: ['Working on it'], hold: 'never' }] });
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'First' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'working'));
+    await main.api.invoke('sessions.archive', { id });
+
+    await main.api.invoke('sessions.unarchive', { id });
+
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting', waitingReason: 'stopped' });
+  });
+
+  it("is turned down when the Session's Project was removed", async () => {
+    const { machine, checkout } = machineWith({ turns: [{ chunks: ['Done.'] }] });
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'First' });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    await main.api.invoke('projects.remove', { id: project.id });
+
+    await expect(main.api.invoke('sessions.unarchive', { id })).rejects.toThrow("This Session's Project was removed, so it can't be reopened.");
+  });
+});

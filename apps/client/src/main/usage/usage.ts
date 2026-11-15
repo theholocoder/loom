@@ -3,6 +3,7 @@
 // Sessions' facts. Usage is kept indefinitely; nothing here deletes any.
 import type { Kysely, Transaction } from 'kysely';
 import { TOP_SESSIONS, totalTokens, USAGE_RANGES, type MergeRequestState, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
+import { projectColorOf } from '../../shared/projects';
 import type { Schema, SessionSpansTable } from '../storage/schema';
 
 /** One turn's usage, as the Session service records it. */
@@ -12,6 +13,8 @@ export interface TurnUsage {
   projectName: string;
   /** The model Loom ran the turn with. */
   model: string;
+  /** Its name, as the agent gives it, when known. */
+  modelName?: string;
   /** Clock time the turn ended: its day is the one it is filed under. */
   endedAt: number;
   tokens: TokenCounts;
@@ -19,15 +22,20 @@ export interface TurnUsage {
   cost: number;
 }
 
-/** Adds a turn's usage to its Session × day × model bucket. */
-export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage): Promise<void> {
+/**
+ * Adds a turn's usage to its Session × day × model bucket: the Session's own
+ * (`usage_buckets`), or its Session highlights' checks' (`highlight_usage`).
+ */
+export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage, table: 'usage_buckets' | 'highlight_usage' = 'usage_buckets'): Promise<void> {
   const { tokens, cost } = turn;
-  await trx
-    .insertInto('usage_buckets')
+  // Both tables have the same columns; the builder is typed for one of them.
+  await (trx as unknown as Transaction<Pick<Schema, 'usage_buckets'>>)
+    .insertInto(table as 'usage_buckets')
     .values({
       session_id: turn.sessionId,
       day: dayOf(turn.endedAt),
       model: turn.model,
+      model_name: turn.modelName ?? null,
       project_id: turn.projectId,
       project_name: turn.projectName,
       input_tokens: tokens.input,
@@ -38,15 +46,19 @@ export async function recordTurn(trx: Transaction<Schema>, turn: TurnUsage): Pro
       cost,
     })
     .onConflict((oc) =>
-      oc.columns(['session_id', 'day', 'model']).doUpdateSet((eb) => ({
-        project_name: eb.ref('excluded.project_name'),
-        input_tokens: eb('usage_buckets.input_tokens', '+', eb.ref('excluded.input_tokens')),
-        output_tokens: eb('usage_buckets.output_tokens', '+', eb.ref('excluded.output_tokens')),
-        cache_read_tokens: eb('usage_buckets.cache_read_tokens', '+', eb.ref('excluded.cache_read_tokens')),
-        cache_write_tokens: eb('usage_buckets.cache_write_tokens', '+', eb.ref('excluded.cache_write_tokens')),
-        reasoning_tokens: eb('usage_buckets.reasoning_tokens', '+', eb.ref('excluded.reasoning_tokens')),
-        cost: eb('usage_buckets.cost', '+', eb.ref('excluded.cost')),
-      })),
+      oc.columns(['session_id', 'day', 'model']).doUpdateSet((eb) => {
+        const column = (name: 'input_tokens' | 'output_tokens' | 'cache_read_tokens' | 'cache_write_tokens' | 'reasoning_tokens' | 'cost') => eb(`${table as 'usage_buckets'}.${name}`, '+', eb.ref(`excluded.${name}`));
+        return {
+          project_name: eb.ref('excluded.project_name'),
+          model_name: eb.fn.coalesce('excluded.model_name', `${table as 'usage_buckets'}.model_name`),
+          input_tokens: column('input_tokens'),
+          output_tokens: column('output_tokens'),
+          cache_read_tokens: column('cache_read_tokens'),
+          cache_write_tokens: column('cache_write_tokens'),
+          reasoning_tokens: column('reasoning_tokens'),
+          cost: column('cost'),
+        };
+      }),
     )
     .execute();
 }
@@ -79,14 +91,20 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   const from = dayList[0]!;
   const to = dayList.at(-1)!;
 
-  const [buckets, sessions, spans, removedRows] = await Promise.all([
+  const [sessionBuckets, highlightBuckets, sessions, spans, projectRows] = await Promise.all([
     db.selectFrom('usage_buckets').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
+    db.selectFrom('highlight_usage').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('sessions').selectAll().execute(),
     db.selectFrom('session_spans').selectAll().where('ended_at', '>=', since).where('ended_at', '<=', now).execute(),
-    db.selectFrom('projects').select('id').where('removed_at', 'is not', null).execute(),
+    db.selectFrom('projects').select(['id', 'name', 'color', 'removed_at']).execute(),
   ]);
-  const removed = new Set(removedRows.map((r) => r.id));
-  const removedFlag = (projectId: number) => (removed.has(projectId) ? (true as const) : undefined);
+  // Every Project by id, removed ones too: removing a Project keeps its row.
+  const projectsById = new Map(projectRows.map((r) => [r.id, r]));
+  const removedFlag = (projectId: number) => (projectsById.get(projectId)?.removed_at != null ? (true as const) : undefined);
+  /** A Project's name: its own, renamed or not, or else as its usage last recorded it. */
+  const projectName = (projectId: number) => projectsById.get(projectId)?.name ?? projectNames.get(projectId)!.name;
+  /** A Project's colour; one with no row takes the first. */
+  const projectColor = (projectId: number) => projectColorOf(projectsById.get(projectId)?.color);
 
   const mix: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   let reportedCost = 0;
@@ -95,7 +113,11 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   /** Each Project's name, as of the latest day its usage was recorded. */
   const projectNames = new Map<number, { name: string; day: string }>();
   const perModel = new Map<string, number>();
+  /** Each model's name, as of the latest day the agent gave it. */
+  const modelNames = new Map<string, { name: string; day: string }>();
   const perSession = new Map<number, { tokens: number; projectId: number; byModel: Map<string, number> }>();
+  // Session highlights' checks count as usage like any other, but are no Session's own: left out of the top Sessions.
+  const buckets = [...sessionBuckets.map((b) => ({ ...b, own: true })), ...highlightBuckets.map((b) => ({ ...b, own: false }))];
   for (const b of buckets) {
     const tokens = b.input_tokens + b.output_tokens + b.cache_read_tokens + b.cache_write_tokens + b.reasoning_tokens;
     mix.input += b.input_tokens;
@@ -111,6 +133,9 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     const named = projectNames.get(b.project_id);
     if (!named || named.day < b.day) projectNames.set(b.project_id, { name: b.project_name, day: b.day });
     add(perModel, b.model, tokens);
+    const modelNamed = modelNames.get(b.model);
+    if (b.model_name !== null && (!modelNamed || modelNamed.day < b.day)) modelNames.set(b.model, { name: b.model_name, day: b.day });
+    if (!b.own) continue;
     let s = perSession.get(b.session_id);
     if (!s) perSession.set(b.session_id, (s = { tokens: 0, projectId: b.project_id, byModel: new Map() }));
     s.tokens += tokens;
@@ -136,16 +161,18 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     .slice(0, TOP_SESSIONS)
     .map(([sessionId, usage]) => {
       const row = byId.get(sessionId);
+      const model = byTokens(usage.byModel)[0]!.key;
       return withoutUndefined({
         sessionId,
         // Only a deleted Session has no row: its usage still counts.
         title: row?.title ?? 'Deleted Session',
         projectId: usage.projectId,
-        project: projectNames.get(usage.projectId)!.name,
+        project: projectName(usage.projectId),
         projectRemoved: removedFlag(usage.projectId),
         issue: row ? linkOf(row.issue_number, row.issue_url) : undefined,
         mergeRequest: row ? linkOf(row.merge_request_number, row.merge_request_url) : undefined,
-        model: byTokens(usage.byModel)[0]!.key,
+        model,
+        modelName: modelNames.get(model)?.name,
         tokens: usage.tokens,
         workingMs: workingMs.get(sessionId) ?? 0,
         outcome: row ? outcomeOfRow(row) : 'archived',
@@ -162,8 +189,8 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     mergeRequestsMerged: sessions.filter((s) => s.merge_request_state === 'merged' && s.archived_at !== null && s.archived_at >= since && s.archived_at <= now).length,
     medianRunMs: median(runs.map((s) => s.ended_at - s.started_at)),
     medianWaitMs: median(waits.map((s) => s.ended_at - s.started_at)),
-    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => withoutUndefined({ projectId, project: projectNames.get(projectId)!.name, tokens, removed: removedFlag(projectId) })),
-    perModel: byTokens(perModel).map(({ key: model, tokens }) => ({ model, tokens })),
+    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => withoutUndefined({ projectId, project: projectName(projectId), color: projectColor(projectId), tokens, removed: removedFlag(projectId) })),
+    perModel: byTokens(perModel).map(({ key: model, tokens }) => withoutUndefined({ model, name: modelNames.get(model)?.name, tokens })),
     mix,
     cacheHitRate: prompt > 0 ? mix.cacheRead / prompt : undefined,
     outcomes,

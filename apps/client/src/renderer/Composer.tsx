@@ -3,10 +3,12 @@
 // it, @-mentions of the working copy's files, and `/` for the agent's skills
 // and commands.
 import { ArrowUp, Box, ClipboardPaste, Copy, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, MessageSquareQuote, Paperclip, Scissors, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { diffCommentRange, isConversationComment, isImage, type AgentCommand, type Attachment, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
+import { splitDetails } from '../shared/errors';
 import { addToContextMenu, copyText } from './ContextMenu';
-import { stepIndex } from './Popover';
+import { useKeptState } from './drafts';
+import { Popover, stepIndex } from './Popover';
 
 /** The most files an @-mention suggests at once. */
 const MAX_SUGGESTED = 50;
@@ -18,27 +20,36 @@ const MAX_SUGGESTED = 50;
 export function Composer({
   agent,
   placeholder,
+  tips = false,
   disabled = false,
   tools,
   focusRequest = 0,
   onSend,
   onDraftChange,
   canSendEmpty = false,
+  held = false,
   canAttach = true,
   dock,
   clearKey,
   queueing = false,
   onStop,
   queue,
+  remarks,
   gauge,
   loadFiles,
   commands = [],
   comments = [],
   onRemoveComment,
+  onEditComment,
+  onEscape,
+  onDisabledWithFocus,
+  draftKey,
 }: {
   /** The agent Sessions run on; a label, not a picker, in v1. */
   agent: string;
   placeholder: string;
+  /** Whether the placeholder goes on to say what @ and / do: for a new message, not an answer. */
+  tips?: boolean;
   disabled?: boolean;
   tools?: ReactNode;
   /** Changing it focuses the prompt box. */
@@ -48,9 +59,11 @@ export function Composer({
   onDraftChange?: (draft: string) => void;
   /** Whether an empty prompt can be sent. */
   canSendEmpty?: boolean;
+  /** Whether sending waits for something outside the prompt box to be put right, such as a branch name; the prompt stays editable. */
+  held?: boolean;
   /** Whether files can go with the message: not with an answer to a question. */
   canAttach?: boolean;
-  /** What sits on the prompt box, part of it: the panel of a question it answers. */
+  /** What sits on the prompt box, part of it: the panel of a question it answers. With it, the prompt box gives only that answer: no toolbar, the panel's buttons going on. */
   dock?: ReactNode;
   /** Changing it empties the prompt box: what was typed was for something else, such as another question. */
   clearKey?: string;
@@ -60,6 +73,8 @@ export function Composer({
   onStop?: () => void;
   /** The Session's queue, shown above the prompt box. */
   queue?: ReactNode;
+  /** What the controls under the prompt box have to say, such as why sending failed: shown just above it. */
+  remarks?: ReactNode;
   /** How full the agent's context is, by the send button. */
   gauge?: ReactNode;
   /** Lists the working copy's files, for @-mentions; asked again each time one starts. */
@@ -69,32 +84,63 @@ export function Composer({
   /** The comments on the diff or the conversation that go with what is sent, shown as chips; whoever gives them clears them once sent. */
   comments?: MessageComment[];
   onRemoveComment?: (index: number) => void;
+  /** Given, a click on a comment's chip edits its note. */
+  onEditComment?: (index: number, note: string) => void;
+  /** Given, Escape with no menu open runs it, to take the focus out of the prompt box. */
+  onEscape?: () => void;
+  /** The prompt box is being disabled with the focus in it, which it can't keep: where the focus goes instead. */
+  onDisabledWithFocus?: () => void;
+  /** Given, what is typed and attached is kept as its draft until sent, to be there again the next time a composer has it (see `useKeptState`). */
+  draftKey?: string;
 }) {
   const id = useId();
-  const [draft, setDraftState] = useState('');
-  const [caret, setCaret] = useState(0);
+  const [draft, setDraftState] = useKeptState(draftKey, 'text', '');
+  const [caret, setCaret] = useKeptState(draftKey, 'caret', 0);
   const setDraft = (value: string, at = value.length) => {
     setDraftState(value);
     setCaret(at);
-    onDraftChange?.(value);
   };
+  // Also with a draft kept from before, which whoever listens hasn't seen.
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft]);
   const prompt = useRef<HTMLTextAreaElement>(null);
+  // A draft kept from before has its caret where it was left.
+  useLayoutEffect(() => {
+    prompt.current?.setSelectionRange(caret, caret);
+  }, []);
   useEffect(() => {
     if (focusRequest) prompt.current?.focus();
   }, [focusRequest]);
-  const clearedFor = useRef(clearKey);
+  /** Whether the prompt box has the focus, or had it until it was disabled. */
+  const focused = useRef(false);
+  // Before the browser drops the focus of the disabled field to the page, where keys typed would run shortcuts.
+  const handOnFocus = useRef(onDisabledWithFocus);
+  handOnFocus.current = onDisabledWithFocus;
+  useLayoutEffect(() => {
+    if (!disabled || !(focused.current || document.activeElement === prompt.current)) return;
+    focused.current = false;
+    handOnFocus.current?.();
+  }, [disabled]);
+  // Kept with the draft: what it was typed for may have changed while away.
+  const [clearedFor, setClearedFor] = useKeptState(draftKey, 'clearedFor', clearKey);
+  /** The `clearKey` an answer was last sent for, until it changes or the answer fails: typed since, the prompt holds what comes next. */
+  const answeredFor = useRef<string>(undefined);
+  const latestClearKey = useRef(clearKey);
+  latestClearKey.current = clearKey;
   useEffect(() => {
-    if (clearedFor.current === clearKey) return;
-    clearedFor.current = clearKey;
-    setDraft('');
+    if (clearedFor === clearKey) return;
+    setClearedFor(clearKey);
+    if (answeredFor.current !== undefined && answeredFor.current === clearedFor) answeredFor.current = undefined;
+    else setDraft('');
   }, [clearKey]);
   /** The files attached so far, each with a key of its own: the same file may be attached twice. */
-  const [files, setFiles] = useState<Array<{ key: number; file: File }>>([]);
-  const nextKey = useRef(0);
+  const [files, setFiles] = useKeptState<Array<{ key: number; file: File }>>(draftKey, 'files', []);
+  const nextKey = useRef(files.reduce((next, { key }) => Math.max(next, key + 1), 0));
   const attachable = canAttach && !disabled;
   const attached = attachable ? files : [];
   const [sending, setSending] = useState(false);
-  const canSend = !disabled && !sending && (canSendEmpty || draft.trim() !== '' || attached.length > 0 || comments.length > 0);
+  const canSend = !disabled && !held && !sending && (canSendEmpty || draft.trim() !== '' || attached.length > 0 || comments.length > 0);
   const picker = useRef<HTMLInputElement>(null);
   const attach = (added: Iterable<File>) => {
     const list = [...added];
@@ -102,19 +148,37 @@ export function Composer({
   };
 
   const menu = useMenu({ draft, caret, commands, loadFiles });
+  const fullPlaceholder = withTips(placeholder, {
+    mentions: tips && !!loadFiles,
+    commands: tips && commands.length > 0,
+    diffComments: disabled ? 0 : comments.filter((c) => !isConversationComment(c)).length,
+  });
 
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!canSend) return;
+    // Emptied at once, so that what is typed next is a message of its own; put back if it doesn't go.
+    const sent = { text: draft, files: attached, for: clearKey };
     setSending(true);
+    setDraft('');
+    setFiles([]);
+    if (sent.for !== undefined) answeredFor.current = sent.for;
+    let accepted = false;
     try {
-      const attachments = await Promise.all(attached.map(({ file }) => readAttachment(file)));
-      if (await onSend(draft, attachments)) {
-        setDraft('');
-        setFiles([]);
-      }
+      const attachments = await Promise.all(sent.files.map(({ file }) => readAttachment(file)));
+      accepted = await onSend(sent.text, attachments);
     } finally {
       setSending(false);
+      if (!accepted) {
+        if (answeredFor.current === sent.for) answeredFor.current = undefined;
+        // Not once what it answered is no longer asked; otherwise before what was typed since.
+        if (latestClearKey.current === sent.for) {
+          let restored = sent.text;
+          setDraftState((typed) => (restored = typed && sent.text ? `${sent.text}\n${typed}` : sent.text || typed));
+          setCaret(restored.length);
+          setFiles((since) => [...sent.files, ...since]);
+        }
+      }
     }
   };
   /** Puts the menu's highlighted option in the prompt: a skill or command, or the file it mentions. */
@@ -154,6 +218,11 @@ export function Composer({
     if (open && event.key === 'Escape') {
       event.preventDefault();
       menu.dismiss();
+      return;
+    }
+    // Left free for the view too: the same Esc leaves Review mode.
+    if (onEscape && event.key === 'Escape') {
+      onEscape();
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) void send(event);
@@ -221,27 +290,20 @@ export function Composer({
   return (
     <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
       {queue}
-      <div className={`composer${dock ? ' docked' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
+      {remarks && <div className="composer-remarks">{remarks}</div>}
+      <div className={`composer${dock ? ' docked' : ''}${dock ? ' answering' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
         {dock}
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
         {comments.length > 0 && (
           <ul className="attachments" aria-label="Comments">
-            {comments.map((comment, index) => {
-              const quoted = isConversationComment(comment);
-              const what = quoted ? `“${quoteSummary(comment.quote)}”` : diffCommentRange(comment);
-              const Icon = quoted ? MessageSquareQuote : MessageSquareCode;
-              return (
-                <li key={`${index}:${what}`} className="chip" title={`${quoted ? comment.quote : what}\n\n${comment.note}`}>
-                  <Icon className="sm" />
-                  <span className={`${quoted ? '' : 'tech '}ellipsis`}>{what}</span>
-                  {onRemoveComment && (
-                    <button className="icon-btn sm" type="button" aria-label={`Remove comment on ${what}`} title="Remove" onClick={() => onRemoveComment(index)}>
-                      <X className="sm" />
-                    </button>
-                  )}
-                </li>
-              );
-            })}
+            {comments.map((comment, index) => (
+              <CommentChip
+                key={`${index}:${commentTarget(comment)}`}
+                comment={comment}
+                onRemove={onRemoveComment && (() => onRemoveComment(index))}
+                onEdit={onEditComment && ((note) => onEditComment(index, note))}
+              />
+            ))}
           </ul>
         )}
         {attached.length > 0 && (
@@ -267,7 +329,7 @@ export function Composer({
           aria-controls={menu.open ? listId : undefined}
           aria-activedescendant={menu.open?.options.length ? optionId(menu.open.active) : undefined}
           rows={2}
-          placeholder={placeholder}
+          placeholder={fullPlaceholder}
           disabled={disabled}
           value={draft}
           onChange={(event) => setDraft(event.target.value, event.target.selectionStart ?? event.target.value.length)}
@@ -275,9 +337,17 @@ export function Composer({
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onContextMenu={onContextMenu}
-          onBlur={menu.dismiss}
+          onFocus={() => {
+            focused.current = true;
+          }}
+          onBlur={(event) => {
+            // Disabled, it loses the focus: still counted as having it, to hand it on (see above).
+            if (!event.currentTarget.disabled) focused.current = false;
+            menu.dismiss();
+          }}
         />
-        <div className="ctoolbar">
+        {/* An answer to the panel's question goes on with the panel's buttons, or Enter: no Send, nor a reply's tools. */}
+        {!dock && <div className="ctoolbar">
           <span className="pick" title="Agent" style={{ cursor: 'default' }}>
             <SquareTerminal className="sm" />
             <b>{agent}</b>
@@ -314,26 +384,21 @@ export function Composer({
             {queueing ? <ListPlus /> : <ArrowUp />}
             {queueing ? 'Queue' : 'Send'}
           </button>
-        </div>
-      </div>
-      <div className="hint">
-        <span>
-          <kbd>Enter</kbd> send
-        </span>
-        <span>
-          <kbd>Shift Enter</kbd> newline
-        </span>
-        <span>
-          <kbd>@</kbd> mention a file
-        </span>
-        {commands.length > 0 && (
-          <span>
-            <kbd>/</kbd> skills and commands
-          </span>
-        )}
+        </div>}
       </div>
     </form>
   );
+}
+
+/**
+ * The placeholder, then what @ and / do, if they're to say, then how many
+ * comments on the diff go with the message: "Reply to OpenCode… @ to mention
+ * a file, / for commands. Your 1 diff comment goes with it."
+ */
+function withTips(placeholder: string, { mentions, commands, diffComments }: { mentions: boolean; commands: boolean; diffComments: number }): string {
+  const keys = [mentions && '@ to mention a file', commands && '/ for commands'].filter(Boolean).join(', ');
+  const comments = diffComments && `Your ${diffComments} diff ${diffComments === 1 ? 'comment goes' : 'comments go'} with it.`;
+  return [placeholder, keys && (comments ? `${keys}.` : keys), comments].filter(Boolean).join(' ');
 }
 
 /** What the menu over the prompt offers, while open: the skills and commands `/` finds, or the files an @-mention finds. */
@@ -456,7 +521,7 @@ function MenuList({ id, open, optionId, onHover, onPick }: { id: string; open: O
       {children}
     </div>
   );
-  const empty = open.kind === 'mention' ? (open.error ?? (open.loading ? 'Listing files…' : 'No file matches.')) : 'Nothing matches.';
+  const empty = open.kind === 'mention' ? (open.error ? splitDetails(open.error).message : (open.loading ? 'Listing files…' : 'No file matches.')) : 'Nothing matches.';
   return (
     <div id={id} className="composer-menu" role="listbox" aria-label={open.kind === 'command' ? 'Skills and commands' : 'Files'}>
       {open.kind === 'command'
@@ -541,6 +606,119 @@ async function clipboardImages(): Promise<File[]> {
     return type ? [{ item, type }] : [];
   });
   return Promise.all(images.map(async ({ item, type }) => new File([await item.getType(type)], `Pasted image.${type.slice('image/'.length).split('+')[0]}`, { type })));
+}
+
+/** What a comment is on, as its chip names it: the range of the diff, or the passage quoted. */
+function commentTarget(comment: MessageComment): string {
+  return isConversationComment(comment) ? `“${quoteSummary(comment.quote)}”` : diffCommentRange(comment);
+}
+
+/** A comment going with the message: what it's on and its note, which a click edits. */
+function CommentChip({ comment, onRemove, onEdit }: { comment: MessageComment; onRemove?: () => void; onEdit?: (note: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const quoted = isConversationComment(comment);
+  const what = commentTarget(comment);
+  const Icon = quoted ? MessageSquareQuote : MessageSquareCode;
+  // On what shows it rather than the chip, so that it doesn't show over the form.
+  const title = `${quoted ? comment.quote : what}\n\n${comment.note}`;
+  const content = (
+    <>
+      <Icon className="sm" />
+      <span className={`${quoted ? '' : 'tech '}what ellipsis`}>{what}</span>
+      <span className="note ellipsis">{comment.note}</span>
+    </>
+  );
+  return (
+    <li className="chip comment-chip">
+      {onEdit ? (
+        <button ref={trigger} className="chip-edit" type="button" title={title} aria-label={`Edit comment on ${what}`} aria-haspopup="dialog" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+          {content}
+        </button>
+      ) : (
+        <span className="chip-edit" title={title}>
+          {content}
+        </span>
+      )}
+      {onRemove && (
+        <button className="icon-btn sm" type="button" aria-label={`Remove comment on ${what}`} title="Remove" onClick={onRemove}>
+          <X className="sm" />
+        </button>
+      )}
+      {editing && onEdit && (
+        <CommentNoteForm
+          anchor={trigger}
+          label={`Edit comment on ${what}`}
+          quote={quoted ? comment.quote : what}
+          initial={comment.note}
+          save="Save"
+          onClose={() => setEditing(false)}
+          onSave={(note) => {
+            setEditing(false);
+            onEdit(note);
+            trigger.current?.focus();
+          }}
+        />
+      )}
+    </li>
+  );
+}
+
+/**
+ * The note on a comment, in a popover beside `anchor`, what it is on quoted
+ * at its top: to add one, or to edit it. Ctrl+Enter saves it.
+ */
+export function CommentNoteForm({
+  anchor,
+  label,
+  quote,
+  initial = '',
+  save = 'Add comment',
+  onSave,
+  onClose,
+}: {
+  anchor: RefObject<HTMLElement | null>;
+  label: string;
+  /** What the comment is on: the passage of the conversation, or the range of the diff. */
+  quote: string;
+  initial?: string;
+  /** The save button's label. */
+  save?: string;
+  onSave: (note: string) => void;
+  onClose: () => void;
+}) {
+  const [note, setNote] = useState(initial);
+  const done = () => note.trim() && onSave(note.trim());
+  return (
+    <Popover anchor={anchor} role="dialog" label={label} className="comment-note" onClose={onClose}>
+      <blockquote className="muted ellipsis" title={quote}>
+        {quoteSummary(quote)}
+      </blockquote>
+      <textarea
+        data-autofocus
+        aria-label="Comment"
+        rows={3}
+        placeholder="Note for the agent…"
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            done();
+          }
+        }}
+      />
+      <div className="row">
+        <span className="grow" />
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="primary" type="button" disabled={!note.trim()} onClick={done}>
+          {save}
+        </button>
+      </div>
+    </Popover>
+  );
 }
 
 /** How long a quote's chip lets it get. */

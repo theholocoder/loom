@@ -4,15 +4,16 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
-import { DEFAULT_SETTINGS, type DiffFile, type DiffSummary, type Project, type Session } from '../../src/shared/api';
-import { FakeMain } from './fake-main';
+import { WATCH_INTERVAL_MS, WIDE_CHANGES_PX } from '../../src/renderer/Changes';
+import { DEFAULT_SETTINGS, type DiffFile, type DiffScope, type DiffSummary, type Project, type Session } from '../../src/shared/api';
+import { FakeMain, HIDDEN_PANELS } from './fake-main';
 
 type DiffProps = {
   patch: string;
   options: { onGutterUtilityClick?: (range: SelectedLineRange) => void } & Record<string, unknown>;
-  lineAnnotations?: Array<{ side: string; lineNumber: number }>;
+  lineAnnotations?: Array<{ side: string; lineNumber: number; metadata?: string }>;
   selectedLines?: SelectedLineRange | null;
-  renderAnnotation?: (annotation: { side: string; lineNumber: number }) => ReactNode;
+  renderAnnotation?: (annotation: { side: string; lineNumber: number; metadata?: string }) => ReactNode;
 };
 /** What each patch was last drawn with, by its text. */
 const drawn = vi.hoisted(() => new Map<string, DiffProps>());
@@ -27,7 +28,7 @@ vi.mock('@pierre/diffs/react', () => ({
         <pre data-testid="patch-diff" data-options={JSON.stringify(props.options)} data-selected={JSON.stringify(props.selectedLines ?? null)}>
           {props.patch}
         </pre>
-        {props.lineAnnotations?.map((a) => <div key={`${a.side}:${a.lineNumber}`}>{props.renderAnnotation?.(a)}</div>)}
+        {props.lineAnnotations?.map((a) => <div key={`${a.side}:${a.lineNumber}:${a.metadata}`}>{props.renderAnnotation?.(a)}</div>)}
       </div>
     );
   },
@@ -38,6 +39,7 @@ afterEach(cleanup);
 const project: Project = {
   id: 1,
   name: 'billing-api',
+  color: 'blue',
   branchPrefix: 'loom',
   checkout: { environmentId: 'native', path: '/home/dev/billing-api' },
   forge: { state: 'available', checking: false, kind: 'github', repository: 'acme/billing-api' },
@@ -67,6 +69,8 @@ const summary: DiffSummary = { available: true, readOnly: false, base: 'origin/m
 const text = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n context\n-old line\n+new line\n`;
 
 function renderOpen(main: FakeMain, s: Session = session) {
+  // Hidden, so that `d` shows it.
+  main.publish('panels', HIDDEN_PANELS, { sessionId: s.id });
   render(
     <ApiProvider api={main}>
       <App />
@@ -78,7 +82,7 @@ function renderOpen(main: FakeMain, s: Session = session) {
   return main;
 }
 
-/** Opens the sidebar's Changes view, as `d` does. */
+/** Shows the Changes Panel, as `d` does. */
 const showChanges = () => fireEvent.keyDown(document.body, { key: 'd' });
 const hideChanges = showChanges;
 
@@ -86,13 +90,19 @@ function fakeMain(result: DiffSummary = summary, s: Session = session, settings 
   return new FakeMain(
     { projects: [project], sessions: [s], settings },
     {
-      'sessions.diff': ({ uncommittedOnly }) => (uncommittedOnly && result.available ? { ...result, files: result.files.filter((f) => f.status !== 'committed') } : result),
+      'sessions.diff': ({ scope }) => (result.available ? { ...result, files: result.files.filter((f) => inScope(f, scope)) } : result),
       'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
     },
   );
 }
 
+/** Whether a file shows in a scope, as main would list it. */
+const inScope = (file: DiffFile, scope: DiffScope = 'all') => scope === 'all' || (scope === 'committed') === (file.status === 'committed');
+
 const panel = () => screen.getByRole('tabpanel', { name: 'Changes' });
+/** The head of the file tree stacked above the diffs, which folds it. */
+const treeHead = () => within(panel()).getByRole('button', { name: /^(\d+ of )?\d+ files?/ });
+const scopeButton = (name: string) => within(panel()).getByRole('radio', { name: new RegExp(`^${name}`) });
 const diffCalls = (main: FakeMain, command: string) => main.invoked.filter((c) => c.command === command);
 
 describe('the Changes view', () => {
@@ -103,7 +113,7 @@ describe('the Changes view', () => {
     fireEvent.keyDown(document.body, { key: 'i', ctrlKey: true });
     expect(diffCalls(main, 'sessions.diff')).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Changes' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Session at a glance' })).getByRole('button', { name: /^Show changes/ }));
     expect(panel()).toBeTruthy();
     expect(diffCalls(main, 'sessions.diff')).toHaveLength(1);
   });
@@ -111,14 +121,13 @@ describe('the Changes view', () => {
   it('shows a file tree and per-file sections, large, binary and lockfiles collapsed, loading a diff on expand', async () => {
     const main = renderOpen(fakeMain());
     showChanges();
-    fireEvent.click(await within(panel()).findByRole('button', { name: 'File list' }));
-    const tree = within(panel()).getByRole('navigation', { name: 'Changed files' });
-    expect(within(tree).getByRole('button', { name: 'src' }).getAttribute('aria-expanded')).toBe('true');
-    expect(within(tree).getByRole('button', { name: /login\.ts.*committed/ })).toBeTruthy();
-    expect(within(tree).getByRole('button', { name: /session\.ts.*modified/ })).toBeTruthy();
-    expect(within(tree).getByRole('button', { name: /logo\.png.*untracked/ })).toBeTruthy();
-    fireEvent.click(within(tree).getByRole('button', { name: 'src' }));
-    expect(within(tree).queryByRole('button', { name: /login\.ts/ })).toBeNull();
+    const tree = within(await within(panel()).findByRole('navigation', { name: 'Changed files' }));
+    expect(tree.getByRole('button', { name: 'src' }).getAttribute('aria-expanded')).toBe('true');
+    expect(tree.getByRole('button', { name: /committed.*login\.ts/ })).toBeTruthy();
+    expect(tree.getByRole('button', { name: /modified.*session\.ts/ })).toBeTruthy();
+    expect(tree.getByRole('button', { name: /untracked.*logo\.png/ })).toBeTruthy();
+    fireEvent.click(tree.getByRole('button', { name: 'src' }));
+    expect(tree.queryByRole('button', { name: /login\.ts/ })).toBeNull();
 
     const section = (path: string) => within(panel()).getByRole('region', { name: path });
     const toggle = (path: string) => within(section(path)).getByRole('button', { name: new RegExp(`^${path.replaceAll('.', '\\.')}`) });
@@ -136,14 +145,28 @@ describe('the Changes view', () => {
     expect(main.invoked).toContainEqual({ command: 'sessions.openInEditor', params: { id: 7, file: 'src/auth/login.ts' } });
   });
 
-  it('toggles to uncommitted changes only, and refreshes', async () => {
-    const main = renderOpen(fakeMain());
+  it('switches between all, committed and uncommitted changes, with how many files each holds, and refreshes', async () => {
+    const main = renderOpen(fakeMain({ ...summary, counts: { all: 4, committed: 2, uncommitted: 2 } }));
     showChanges();
-    const only = await within(panel()).findByRole('button', { name: 'Uncommitted only' });
-    fireEvent.click(only);
+    await within(panel()).findByRole('region', { name: 'src/auth/login.ts' });
+    const scopes = within(panel()).getByRole('radiogroup', { name: 'Which changes' });
+    expect(within(scopes).getAllByRole('radio').map((r) => [r.textContent, r.getAttribute('aria-checked')])).toEqual([
+      ['All4', 'true'],
+      ['Committed2', 'false'],
+      ['Uncommitted2', 'false'],
+    ]);
+    expect(diffCalls(main, 'sessions.diff').at(-1)?.params).toEqual({ id: 7, scope: 'all' });
+
+    fireEvent.click(scopeButton('Uncommitted'));
     await waitFor(() => expect(within(panel()).queryByRole('region', { name: 'src/auth/login.ts' })).toBeNull());
-    expect(only.getAttribute('aria-pressed')).toBe('true');
-    expect(diffCalls(main, 'sessions.diff').at(-1)?.params).toEqual({ id: 7, uncommittedOnly: true });
+    expect(scopeButton('Uncommitted').getAttribute('aria-checked')).toBe('true');
+    expect(diffCalls(main, 'sessions.diff').at(-1)?.params).toEqual({ id: 7, scope: 'uncommitted' });
+    await waitFor(() => expect(diffCalls(main, 'sessions.diffFile').at(-1)?.params).toMatchObject({ scope: 'uncommitted' }));
+
+    fireEvent.click(scopeButton('Committed'));
+    await waitFor(() => expect(within(panel()).queryByRole('region', { name: 'src/auth/session.ts' })).toBeNull());
+    expect(within(panel()).getByRole('region', { name: 'src/auth/login.ts' })).toBeTruthy();
+    expect(diffCalls(main, 'sessions.diff').at(-1)?.params).toEqual({ id: 7, scope: 'committed' });
 
     const before = diffCalls(main, 'sessions.diff').length;
     fireEvent.click(within(panel()).getByRole('button', { name: 'Refresh changes' }));
@@ -165,6 +188,16 @@ describe('the Changes view', () => {
     await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
   });
 
+  it('refreshes when the Session is archived and when it is reopened, as its working copy changed', async () => {
+    const main = renderOpen(fakeMain());
+    showChanges();
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(1));
+    act(() => main.publish('sessions', [{ ...session, status: 'archived', waitingReason: undefined }]));
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(2));
+    act(() => main.publish('sessions', [{ ...session, status: 'waiting' }]));
+    await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(3));
+  });
+
   it("shows an archived Session's branch read-only, or no diff available", async () => {
     const archived = { ...session, status: 'archived' as const };
     const renderPanel = (main: FakeMain) => {
@@ -173,7 +206,7 @@ describe('the Changes view', () => {
     };
     renderPanel(fakeMain({ ...summary, readOnly: true, files: [files[0]!] }, archived));
     await within(panel()).findByRole('region', { name: 'src/auth/login.ts' });
-    expect(within(panel()).queryByRole('button', { name: 'Uncommitted only' })).toBeNull();
+    expect(within(panel()).queryByRole('radiogroup', { name: 'Which changes' })).toBeNull();
     expect(within(panel()).queryByRole('button', { name: /in the editor/ })).toBeNull();
     cleanup();
 
@@ -181,18 +214,91 @@ describe('the Changes view', () => {
     expect(await within(panel()).findByText('No diff available')).toBeTruthy();
   });
 
-  it('shows why the diff could not be worked out', async () => {
+  it('shows why the diff could not be worked out, still offering the uncommitted changes', async () => {
     const main = new FakeMain(
       { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
       {
-        'sessions.diff': () => {
-          throw new Error("There's no local origin/main to compare with; fetch origin to see this diff.");
+        'sessions.diff': ({ scope }) => {
+          if (scope === 'uncommitted') return { available: true, readOnly: false, base: 'HEAD', files: [files[1]!] };
+          throw new Error("There's no origin/main or origin/master here, nor a local main or master, to compare with.");
         },
+        'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
       },
     );
     renderOpen(main);
     showChanges();
-    expect((await within(panel()).findByRole('alert')).textContent).toMatch(/no local origin\/main/);
+    expect((await within(panel()).findByRole('alert')).textContent).toMatch(/nor a local main/);
+    fireEvent.click(scopeButton('Uncommitted'));
+    expect(await within(panel()).findByRole('region', { name: 'src/auth/session.ts' })).toBeTruthy();
+    expect(within(panel()).getByRole('note').getAttribute('aria-label')).toMatch(/Compared with HEAD, the last commit/);
+  });
+
+  it('marks deleted and renamed files as such', async () => {
+    renderOpen(
+      fakeMain({
+        ...summary,
+        files: [
+          { path: 'src/old.ts', status: 'committed', change: 'deleted', added: 0, removed: 4, binary: false },
+          { path: 'src/new.ts', oldPath: 'src/was.ts', status: 'modified', change: 'renamed', added: 0, removed: 0, binary: false },
+        ],
+      }),
+    );
+    showChanges();
+    const tree = within(await within(panel()).findByRole('navigation', { name: 'Changed files' }));
+    expect(tree.getByRole('button', { name: /deleted.*old\.ts/ })).toBeTruthy();
+    expect(tree.getByRole('button', { name: /renamed.*new\.ts/ })).toBeTruthy();
+    const renamed = within(panel()).getByRole('region', { name: 'src/new.ts' });
+    expect(renamed.textContent).toContain('src/was.ts → src/new.ts');
+    expect(within(renamed).getByText('renamed')).toBeTruthy();
+  });
+
+  it('follows the working copy: a new fingerprint works the diff out again, an unchanged one does not', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let fingerprint = 'one';
+      const main = new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        {
+          'sessions.diff': () => summary,
+          'sessions.diffFile': ({ path }) => ({ text: text(path), truncated: false }),
+          'sessions.diffFingerprint': () => fingerprint,
+        },
+      );
+      renderOpen(main);
+      showChanges();
+      await waitFor(() => expect(diffCalls(main, 'sessions.diffFingerprint').length).toBeGreaterThan(0));
+      await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(1));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WATCH_INTERVAL_MS * 2);
+      });
+      expect(diffCalls(main, 'sessions.diff')).toHaveLength(1);
+      const loads = diffCalls(main, 'sessions.diffFile').length;
+
+      fingerprint = 'two';
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WATCH_INTERVAL_MS);
+      });
+      await waitFor(() => expect(diffCalls(main, 'sessions.diff')).toHaveLength(2));
+      // The open diffs are read again too.
+      await waitFor(() => expect(diffCalls(main, 'sessions.diffFile').length).toBeGreaterThan(loads));
+
+      hideChanges();
+      const asked = diffCalls(main, 'sessions.diffFingerprint').length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WATCH_INTERVAL_MS * 3);
+      });
+      expect(diffCalls(main, 'sessions.diffFingerprint')).toHaveLength(asked);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't watch an archived Session's branch", async () => {
+    const archived = { ...session, status: 'archived' as const };
+    const main = renderOpen(fakeMain({ ...summary, readOnly: true }, archived), archived);
+    showChanges();
+    await within(panel()).findByRole('region', { name: 'src/auth/login.ts' });
+    expect(diffCalls(main, 'sessions.diffFingerprint')).toHaveLength(0);
   });
 });
 
@@ -310,6 +416,7 @@ describe("how the diffs are laid out", () => {
 
 describe('remembering how the diffs are laid out', () => {
   const pressed = (name: string) => within(panel()).getByRole('button', { name }).getAttribute('aria-pressed');
+  const treeOpen = () => treeHead().getAttribute('aria-expanded');
   const click = (name: string) => fireEvent.click(within(panel()).getByRole('button', { name }));
   const openPanel = async () => {
     showChanges();
@@ -317,10 +424,10 @@ describe('remembering how the diffs are laid out', () => {
   };
 
   it('opens as the settings say', async () => {
-    renderOpen(fakeMain(summary, session, { ...DEFAULT_SETTINGS, diffView: { fileList: true, wrap: true, sideBySide: true } }));
+    renderOpen(fakeMain(summary, session, { ...DEFAULT_SETTINGS, diffView: { fileList: false, wrap: true, sideBySide: true } }));
     await openPanel();
-    expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy();
-    expect(pressed('File list')).toBe('true');
+    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+    expect(treeOpen()).toBe('false');
     for (const diff of within(panel()).getAllByTestId('patch-diff')) expect(JSON.parse(diff.dataset.options!)).toMatchObject({ overflow: 'wrap', diffStyle: 'split' });
   });
 
@@ -328,26 +435,27 @@ describe('remembering how the diffs are laid out', () => {
     const main = renderOpen(fakeMain());
     await openPanel();
     click('Wrap long lines');
-    click('File list');
+    fireEvent.click(treeHead());
     const saved = main.invoked.filter((c) => c.command === 'settings.setDiffView').map((c) => c.params);
     expect(saved).toEqual([
-      { fileList: false, wrap: true, sideBySide: false },
       { fileList: true, wrap: true, sideBySide: false },
+      { fileList: false, wrap: true, sideBySide: false },
     ]);
   });
 
   it('is as the user left it after closing and reopening the panel', async () => {
     renderOpen(fakeMain());
     await openPanel();
-    click('File list');
+    fireEvent.click(treeHead());
     click('Wrap long lines');
     click('Side by side');
     hideChanges();
     expect(screen.queryByRole('tabpanel', { name: 'Changes' })).toBeNull();
 
     await openPanel();
-    for (const name of ['File list', 'Wrap long lines', 'Side by side']) expect(pressed(name)).toBe('true');
-    expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy();
+    for (const name of ['Wrap long lines', 'Side by side']) expect(pressed(name)).toBe('true');
+    expect(treeOpen()).toBe('false');
+    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
   });
 
   it('goes back when the choice cannot be saved', async () => {
@@ -373,21 +481,56 @@ describe('remembering how the diffs are laid out', () => {
 });
 
 describe('the file list', () => {
-  it('starts hidden, leaving the search and the diffs, and the toggle shows and hides it', async () => {
+  it('starts open above the diffs in a narrow Panel, its head saying how much changed and folding it', async () => {
     renderOpen(fakeMain());
     showChanges();
-    const toggle = await within(panel()).findByRole('button', { name: 'File list' });
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
-    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+    await within(panel()).findByRole('navigation', { name: 'Changed files' });
+    const head = treeHead();
+    expect(head.textContent).toBe('4 files+1207 −3');
+    expect(head.getAttribute('aria-expanded')).toBe('true');
     expect(within(panel()).getByRole('searchbox', { name: 'Filter changed files' })).toBeTruthy();
+
+    fireEvent.click(head);
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
     expect(within(panel()).getByRole('region', { name: 'src/auth/login.ts' })).toBeTruthy();
 
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(head);
     expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy();
+  });
 
-    fireEvent.click(toggle);
-    expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+  it('sits beside the diffs, always shown, once the Panel is wide', async () => {
+    const observed: Array<() => void> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          observed.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    let width = WIDE_CHANGES_PX - 1;
+    const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width);
+    try {
+      renderOpen(fakeMain(summary, session, { ...DEFAULT_SETTINGS, diffView: { ...DEFAULT_SETTINGS.diffView, fileList: false } }));
+      showChanges();
+      await within(panel()).findByRole('region', { name: 'src/auth/login.ts' });
+      expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+
+      width = WIDE_CHANGES_PX;
+      act(() => observed.forEach((callback) => callback()));
+      expect(within(panel()).getByRole('navigation', { name: 'Changed files' })).toBeTruthy();
+      expect(within(panel()).queryByRole('button', { name: /^\d+ files/ })).toBeNull();
+
+      width = WIDE_CHANGES_PX - 1;
+      act(() => observed.forEach((callback) => callback()));
+      expect(within(panel()).queryByRole('navigation', { name: 'Changed files' })).toBeNull();
+    } finally {
+      clientWidth.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -400,7 +543,7 @@ describe('searching the changed files', () => {
   const open = async () => {
     renderOpen(fakeMain());
     showChanges();
-    fireEvent.click(await within(panel()).findByRole('button', { name: 'File list' }));
+    await within(panel()).findByRole('navigation', { name: 'Changed files' });
   };
 
   it('narrows the tree as you type to the paths holding the text, whatever its case, keeping their folders', async () => {
@@ -424,10 +567,11 @@ describe('searching the changed files', () => {
     for (const other of ['src/auth/session.ts', 'docs/logo.png', 'pnpm-lock.yaml']) expect(section(other)).toBeNull();
   });
 
-  it('narrows the diffs with the file list hidden too', async () => {
+  it('keeps narrowing the diffs with the file list folded, its head saying so', async () => {
     await open();
-    fireEvent.click(within(panel()).getByRole('button', { name: 'File list' }));
     type('login');
+    fireEvent.click(treeHead());
+    expect(treeHead().textContent).toMatch(/^1 of 4 files/);
     expect(section('src/auth/login.ts')).toBeTruthy();
     expect(section('src/auth/session.ts')).toBeNull();
   });
@@ -445,11 +589,11 @@ describe('searching the changed files', () => {
     expect(diffCalls(main, 'sessions.diffFile')).toHaveLength(loads);
   });
 
-  it('keeps the filter and the file list when switching to uncommitted changes only', async () => {
+  it('keeps the filter and the file list when switching to uncommitted changes', async () => {
     await open();
     type('session');
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Uncommitted only' }));
-    await waitFor(() => expect(within(panel()).getByRole('button', { name: 'Uncommitted only' }).getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(scopeButton('Uncommitted'));
+    await waitFor(() => expect(scopeButton('Uncommitted').getAttribute('aria-checked')).toBe('true'));
     expect((search() as HTMLInputElement).value).toBe('session');
     expect(within(tree()).getByRole('button', { name: /session\.ts/ })).toBeTruthy();
   });
@@ -508,7 +652,7 @@ describe('searching the changed files', () => {
 });
 
 describe("the diff's base", () => {
-  it("shows what the diff is against, says when it is only origin's default, and sets another, refreshing the diff", async () => {
+  it("shows what the diff is against, says in its tooltip when it is only origin's default, and sets another, refreshing the diff", async () => {
     let base = { base: 'origin/main', baseSource: 'default' as const };
     const main = renderOpen(
       new FakeMain(
@@ -528,16 +672,17 @@ describe("the diff's base", () => {
 
     const picker = await within(panel).findByRole('button', { name: 'Compared with' });
     expect(picker.textContent).toBe('origin/main');
-    expect(within(panel).getByText(/origin's default branch: where this branch started isn't known/)).toBeTruthy();
+    const why = () => within(panel).getByRole('note').getAttribute('title');
+    expect(why()).toMatch(/^Compared with origin\/main: .*origin's default branch: where this branch started isn't known/);
     fireEvent.click(picker);
     fireEvent.click(await screen.findByRole('option', { name: 'origin/release/1.2' }));
 
     await waitFor(() => expect(within(panel).getByRole('button', { name: 'Compared with' }).textContent).toBe('origin/release/1.2'));
     expect(main.invoked.filter((i) => i.command === 'sessions.setDiffBase')).toEqual([{ command: 'sessions.setDiffBase', params: { id: 7, base: 'origin/release/1.2' } }]);
-    expect(within(panel).queryByText(/isn't known/)).toBeNull();
+    await waitFor(() => expect(why()).toMatch(/^Compared with origin\/release\/1\.2: .*kept with the branch/));
   });
 
-  it('has no base control on an archived read-only diff, nor for uncommitted changes only', async () => {
+  it('has no base control on an archived read-only diff, nor for uncommitted changes', async () => {
     renderOpen(fakeMain({ ...summary, readOnly: true, baseSource: 'recorded' }));
     showChanges();
     const panel = await screen.findByRole('tabpanel', { name: 'Changes' });
@@ -549,8 +694,9 @@ describe("the diff's base", () => {
     showChanges();
     const live = await screen.findByRole('tabpanel', { name: 'Changes' });
     await within(live).findByRole('button', { name: 'Compared with' });
-    fireEvent.click(within(live).getByRole('button', { name: 'Uncommitted only' }));
+    fireEvent.click(within(live).getByRole('radio', { name: /^Uncommitted/ }));
     await waitFor(() => expect(within(live).queryByRole('button', { name: 'Compared with' })).toBeNull());
+    expect(within(live).getByRole('note').textContent).toBe('vs last commit');
   });
 });
 
@@ -558,6 +704,8 @@ describe('commenting on the diff', () => {
   const loginTs = 'src/auth/login.ts';
   const composer = () => within(screen.getByRole('form', { name: 'Composer' }));
   const chips = () => composer().queryByRole('list', { name: 'Comments' });
+  /** What each chip is on, in order. */
+  const chipNames = () => composer().queryAllByRole('button', { name: /^Edit comment on / }).map((b) => b.getAttribute('aria-label')!.slice('Edit comment on '.length));
   /** Opens the Changes view with login.ts's diff drawn, and hands back what the library calls on its "+". */
   const open = async (main = fakeMain()) => {
     renderOpen(main);
@@ -579,12 +727,13 @@ describe('commenting on the diff', () => {
     expect(options).toMatchObject({ enableGutterUtility: true, enableLineSelection: true });
   });
 
-  it('asks for a note under the range, keeps it selected meanwhile, and adds a chip to the composer', async () => {
+  it('asks for a note under the range, the focus in it, keeps it selected meanwhile, and adds a chip to the composer and a note on the line', async () => {
     await open();
     pressPlus({ start: 1, side: 'additions', end: 2, endSide: 'additions' });
     const note = await within(panel()).findByRole('textbox', { name: `Comment on ${loginTs}:1-2` });
+    await waitFor(() => expect(document.activeElement).toBe(note));
     expect(JSON.parse(within(within(panel()).getByRole('region', { name: loginTs })).getByTestId('patch-diff').dataset.selected!)).toEqual({ start: 1, side: 'additions', end: 2, endSide: 'additions' });
-    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([{ side: 'additions', lineNumber: 2 }]);
+    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([{ side: 'additions', lineNumber: 2, metadata: 'draft' }]);
     // No note, nothing to add.
     expect(within(panel()).getByRole('button', { name: 'Add comment' }).hasAttribute('disabled')).toBe(true);
 
@@ -592,10 +741,103 @@ describe('commenting on the diff', () => {
     fireEvent.click(within(panel()).getByRole('button', { name: 'Add comment' }));
 
     expect(within(panel()).queryByRole('textbox', { name: /^Comment on/ })).toBeNull();
-    expect(drawn.get(text(loginTs))!.lineAnnotations ?? []).toEqual([]);
+    // The comment stays on its last line, as a note, until it's sent.
+    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([{ side: 'additions', lineNumber: 2, metadata: '0' }]);
+    expect(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:1-2` }).textContent).toContain('Keep the old name.');
+    expect(JSON.parse(within(within(panel()).getByRole('region', { name: loginTs })).getByTestId('patch-diff').dataset.selected!)).toBeNull();
+    // Its chip says what it's on and its note.
     const chip = within(chips()!).getByRole('listitem');
-    expect(chip.textContent).toContain(`${loginTs}:1-2`);
-    expect(chip.getAttribute('title')).toContain('Keep the old name.');
+    expect(chip.textContent).toBe(`${loginTs}:1-2Keep the old name.`);
+    expect(composer().getByRole('button', { name: `Edit comment on ${loginTs}:1-2` }).getAttribute('title')).toContain('Keep the old name.');
+  });
+
+  it('says in the placeholder how many comments go with the next message', async () => {
+    await open();
+    const prompt = () => composer().getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+    expect(prompt().placeholder).toBe('Reply to OpenCode… @ to mention a file');
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    expect(prompt().placeholder).toBe('Reply to OpenCode… @ to mention a file. Your 1 diff comment goes with it.');
+    await comment({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' }, 'Why drop this?');
+    expect(prompt().placeholder).toBe('Reply to OpenCode… @ to mention a file. Your 2 diff comments go with it.');
+  });
+
+  it('says so while the agent works too, the message queued', async () => {
+    const main = await open();
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    act(() => main.publish('sessions', [{ ...session, status: 'working' }]));
+    expect((composer().getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).placeholder).toBe('Queue a message for when OpenCode finishes… Your 1 diff comment goes with it.');
+  });
+
+  it('keeps each comment as a note on its line until sent, removable from there too', async () => {
+    const main = await open();
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    await comment({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' }, 'Why drop this?');
+    expect(drawn.get(text(loginTs))!.lineAnnotations).toEqual([
+      { side: 'additions', lineNumber: 1, metadata: '0' },
+      { side: 'deletions', lineNumber: 2, metadata: '1' },
+    ]);
+
+    fireEvent.click(within(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:1` })).getByRole('button', { name: `Remove comment on ${loginTs}:1` }));
+    expect(within(panel()).queryByRole('note', { name: `Your comment on ${loginTs}:1` })).toBeNull();
+    expect(chipNames()).toEqual([`${loginTs}:2`]);
+
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(chips()).toBeNull());
+    expect(within(panel()).queryAllByRole('note')).toEqual([]);
+    expect(diffCalls(main, 'sessions.send')).toHaveLength(1);
+  });
+
+  it("doesn't show a note on a diff that no longer holds the lines it quotes, keeping its chip", async () => {
+    let patch = text(loginTs);
+    const main = await open(
+      new FakeMain(
+        { projects: [project], sessions: [session], settings: DEFAULT_SETTINGS },
+        { 'sessions.diff': () => ({ ...summary, files: [files[0]!] }), 'sessions.diffFile': () => ({ text: patch, truncated: false }) },
+      ),
+    );
+    await comment({ start: 2, side: 'additions', end: 2, endSide: 'additions' }, 'Rename it.');
+    expect(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:2` })).toBeTruthy();
+
+    patch = patch.replace('+new line', '+newer line');
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Refresh changes' }));
+    await waitFor(() => expect(drawn.has(patch)).toBe(true));
+    expect(within(panel()).queryByRole('note')).toBeNull();
+    expect(chipNames()).toEqual([`${loginTs}:2`]);
+    expect(diffCalls(main, 'sessions.diffFile').length).toBeGreaterThan(1);
+  });
+
+  it("edits a comment's note from its chip, in the chip, the note in the diff and what is sent", async () => {
+    const main = await open();
+    await comment({ start: 1, side: 'additions', end: 2, endSide: 'additions' }, 'Keep the old name.');
+    fireEvent.click(composer().getByRole('button', { name: `Edit comment on ${loginTs}:1-2` }));
+    const dialog = screen.getByRole('dialog', { name: `Edit comment on ${loginTs}:1-2` });
+    const field = within(dialog).getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
+    expect(field.value).toBe('Keep the old name.');
+    expect(document.activeElement).toBe(field);
+    // An empty note isn't one.
+    fireEvent.change(field, { target: { value: '  ' } });
+    expect(within(dialog).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
+
+    fireEvent.change(field, { target: { value: 'Keep the old name, it is public.' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('dialog', { name: /^Edit comment/ })).toBeNull();
+    expect(within(chips()!).getByRole('listitem').textContent).toBe(`${loginTs}:1-2Keep the old name, it is public.`);
+    expect(within(panel()).getByRole('note', { name: `Your comment on ${loginTs}:1-2` }).textContent).toContain('Keep the old name, it is public.');
+
+    fireEvent.click(composer().getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(chips()).toBeNull());
+    expect((diffCalls(main, 'sessions.send')[0]!.params as { comments: Array<{ note: string }> }).comments.map((c) => c.note)).toEqual(['Keep the old name, it is public.']);
+  });
+
+  it('leaves the note as it was when its edit is cancelled', async () => {
+    await open();
+    await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
+    fireEvent.click(composer().getByRole('button', { name: `Edit comment on ${loginTs}:1` }));
+    const dialog = screen.getByRole('dialog', { name: `Edit comment on ${loginTs}:1` });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: 'Something else' } });
+    fireEvent.keyDown(within(dialog).getByRole('textbox', { name: 'Comment' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /^Edit comment/ })).toBeNull();
+    expect(within(chips()!).getByRole('listitem').textContent).toBe(`${loginTs}:1Typo?`);
   });
 
   it('drops the note on Cancel, adding nothing', async () => {
@@ -612,7 +854,7 @@ describe('commenting on the diff', () => {
     await within(within(panel()).getByRole('region', { name: 'src/auth/session.ts' })).findByTestId('patch-diff');
     await comment({ start: 2, side: 'deletions', end: 2, endSide: 'deletions' }, 'Why drop this?', 'src/auth/session.ts');
     await comment({ start: 1, side: 'additions', end: 1, endSide: 'additions' }, 'Typo?');
-    expect(within(chips()!).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`${loginTs}:1-2`, 'src/auth/session.ts:2', `${loginTs}:1`]);
+    expect(chipNames()).toEqual([`${loginTs}:1-2`, 'src/auth/session.ts:2', `${loginTs}:1`]);
 
     fireEvent.click(composer().getByRole('button', { name: `Remove comment on ${loginTs}:1` }));
     expect(within(chips()!).getAllByRole('listitem')).toHaveLength(2);
@@ -663,7 +905,7 @@ describe('commenting on the diff', () => {
     };
     await add({ start: 50, side: 'deletions', end: 46, endSide: 'additions' }, `${loginTs}:45-46`);
     await add({ start: 50, side: 'deletions', end: 51, endSide: 'deletions' }, `${loginTs}:50-51`);
-    expect(within(chips()!).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`${loginTs}:45-46`, `${loginTs}:50-51`]);
+    expect(chipNames()).toEqual([`${loginTs}:45-46`, `${loginTs}:50-51`]);
   });
 
   it('keeps a note being written when a turn end reloads the diff with the same lines', async () => {
