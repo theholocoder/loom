@@ -11,6 +11,7 @@ import {
   ArrowRightToLine,
   ChartColumn,
   CircleDot,
+  CircleFadingArrowUp,
   CodeXml,
   ExternalLink,
   FileDiff,
@@ -328,7 +329,7 @@ function Workspace() {
               </button>
             </div>
             <InboxList sessions={sessions} projects={projects} selectedId={behind?.id} onSelect={select} onReply={reply} />
-            <PageNav className="side-foot" page={page?.name} onPage={openPage} />
+            <PageNav rail={false} page={page?.name} onPage={openPage} />
           </aside>
         ) : (
           <aside className="side rail" id="inbox" aria-label="Inbox">
@@ -354,7 +355,7 @@ function Workspace() {
               <Search />
             </button>
             <span className="grow" />
-            <PageNav className="rail-foot" page={page?.name} onPage={openPage} />
+            <PageNav rail page={page?.name} onPage={openPage} />
           </aside>
         )}
         {/* Inert under a Page, as it was; it adds no box of its own to the layout. */}
@@ -607,14 +608,41 @@ function NewMenu({ onNewSession, onAddProject }: { onNewSession: (trigger: HTMLE
 }
 
 /** The Inbox's foot: Projects, Dashboard and Settings, Settings at the end, each opening its Page over the main pane. */
-function PageNav({ className, page, onPage }: { className: string; page: Page | undefined; onPage: (page: Page) => void }) {
+/** The Inbox's footer; `rail` when the Inbox is collapsed to its rail, which has room for icons only. */
+function PageNav({ rail, page, onPage }: { rail: boolean; page: Page | undefined; onPage: (page: Page) => void }) {
   return (
-    <nav className={className}>
+    <nav className={rail ? 'rail-foot' : 'side-foot'}>
       <FootButton label="Projects" icon={FolderGit2} current={page === 'projects'} onClick={() => onPage('projects')} />
       <FootButton label="Dashboard" icon={ChartColumn} current={page === 'dashboard'} onClick={() => onPage('dashboard')} />
       <span className="grow" />
+      <RestartToUpdate labelled={!rail} />
       <FootButton label="Settings" icon={SettingsIcon} current={page === 'settings'} onClick={() => onPage('settings')} />
     </nav>
+  );
+}
+
+/**
+ * Once a newer release is downloaded: it installs on the next quit anyway,
+ * or now with this, which asks first if Sessions are Working. Loom never
+ * restarts on its own.
+ */
+function RestartToUpdate({ labelled }: { labelled: boolean }) {
+  const api = useApi();
+  const toast = useToast();
+  const update = useTopic('update');
+  if (update?.state !== 'ready') return null;
+  const restart = () => api.invoke('update.restart').catch((error: Error) => toast.show({ message: error.message, failed: true }));
+  return (
+    <button
+      className={labelled ? 'update-btn' : 'icon-btn update-btn'}
+      type="button"
+      title={`Loom ${update.version} is downloaded: restart to install it now, or it installs on the next quit`}
+      aria-label={labelled ? undefined : 'Restart to update'}
+      onClick={() => void restart()}
+    >
+      <CircleFadingArrowUp />
+      {labelled && 'Restart to update'}
+    </button>
   );
 }
 

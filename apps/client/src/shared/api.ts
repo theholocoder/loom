@@ -1412,10 +1412,14 @@ export interface UsageDashboard {
 /** How many Sessions the dashboard's Top Sessions lists. */
 export const TOP_SESSIONS = 10;
 
+/** A newer stable release Loom has downloaded, if any: it installs on the next quit, or on "Restart to update". */
+export type UpdateStatus = { state: 'none' } | { state: 'ready'; version: string };
+
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed
- * `PRAGMA quick_check` or isn't a database: main serves only this topic and
- * `database.restoreLatestSnapshot` until it is restored.
+ * `PRAGMA quick_check` or isn't a database: main serves only this topic, the
+ * `update` topic, `database.restoreLatestSnapshot` and the `update.` commands
+ * until it is restored.
  */
 export type DatabaseStatus =
   | { state: 'ok' }
@@ -1981,6 +1985,13 @@ export interface Commands {
    * Rejects when the database isn't damaged or there is no snapshot.
    */
   'database.restoreLatestSnapshot': { params: void; result: void };
+  /** The `update` topic's current value. */
+  'update.status': { params: void; result: UpdateStatus };
+  /**
+   * Installs the update downloaded and starts Loom again, asking first if
+   * Sessions are Working. Rejects when no update is downloaded.
+   */
+  'update.restart': { params: void; result: void };
 }
 
 /** Topics the renderer can subscribe to, with the value each one carries. */
@@ -2021,6 +2032,8 @@ export interface Topics {
    * until one does.
    */
   openSession: OpenSessionRequest | null;
+  /** Whether a newer release is downloaded, waiting to install on the next quit or a restart. */
+  update: UpdateStatus;
 }
 
 /** A click on a desktop notification, asking the window to open its Session. */

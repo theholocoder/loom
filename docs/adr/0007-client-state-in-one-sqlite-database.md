@@ -10,3 +10,7 @@ We considered keeping each transcript as an append-only NDJSON file, with SQLite
 - On Windows the database stays on the Windows side, even for Sessions in a WSL Environment. Nothing Loom stores lives in the distro except worktrees and the stateless bridge binary (ADR 0008).
 - Migrations are forward-only, with a `VACUUM INTO` snapshot taken first. A Client that finds a newer schema refuses to start rather than read it.
 - If better-sqlite3's prebuilt binary won't load on a supported Linux distro, the fallback is `node:sqlite` with our own Kysely dialect. Kysely keeps that swap a port, not a rewrite.
+
+## Amendment: the node:sqlite fallback is in (#76)
+
+better-sqlite3's Linux prebuild needs glibc 2.34, and Loom supports Linux back to RHEL 8 (glibc 2.28), where it doesn't load. Loom then opens the database with Node's built-in `node:sqlite`, which Electron's Node has. It isn't a Kysely dialect of its own: a small adapter gives `node:sqlite` the shape Kysely's `SqliteDialect` takes from better-sqlite3 (`apps/client/src/main/storage/sqlite.ts`). Both drivers open the same file the same way, so a database either one wrote opens in the other. better-sqlite3 stays the first choice wherever it loads. CI runs the packaged AppImage on Rocky Linux 8 to check the fallback takes over there.

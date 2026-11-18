@@ -1,0 +1,64 @@
+# Official builds: a Linux x64 AppImage and a Windows x64 per-user NSIS
+# installer, both unsigned, with the loom-bridge binary in their resources.
+# Built by .github/workflows/package.yml after `pnpm build` and
+# `pnpm bridge:build`; see docs/development.md "Releasing".
+appId: io.github.theholocoder.loom
+productName: Loom
+copyright: Copyright © Loom contributors
+
+directories:
+  output: dist
+  buildResources: resources
+
+files:
+  - out/**
+  # The window icon main loads at run time.
+  - resources/icon.*
+  - package.json
+  # better-sqlite3 loads its N-API prebuild; its sources only matter to node-gyp.
+  - '!**/node_modules/better-sqlite3/{deps,src,binding.gyp}'
+
+# better-sqlite3's prebuilds are N-API: they load in Electron as they are, so
+# nothing is rebuilt (CI runners have no node-gyp toolchain anyway). A native
+# binary can't be loaded from inside the asar.
+npmRebuild: false
+asarUnpack:
+  - '**/node_modules/better-sqlite3/prebuilds/**'
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+  # A plain name for the binary and the .desktop file the window is matched with.
+  executableName: loom
+  syncDesktopName: true
+  icon: resources/icon.png
+  extraResources:
+    - from: ../../bridge/dist/loom-bridge-linux-x64
+      to: bridge/loom-bridge-linux-x64
+appImage:
+  artifactName: Loom-${version}-x86_64.AppImage
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.ico
+  extraResources:
+    - from: ../../bridge/dist/loom-bridge-win32-x64.exe
+      to: bridge/loom-bridge-win32-x64.exe
+nsis:
+  # Installs for the current user only, under %LOCALAPPDATA%\Programs: no admin rights.
+  oneClick: true
+  perMachine: false
+  artifactName: Loom-Setup-${version}.exe
+
+# Where electron-updater looks for releases: written into the build as
+# app-update.yml. CI publishes the release itself (`gh release create`) once
+# each build has passed its self-test, so electron-builder never uploads.
+publish:
+  provider: github
+  owner: theholocoder
+  repo: loom
+  releaseType: release

@@ -339,6 +339,9 @@ button.section-head { width: 100%; background: none; border: 0; border-top: 1px 
 button.section-head:hover { background: none; }
 button.search { border: 0; width: 100%; text-align: left; }
 .side-foot .icon-btn[aria-current="page"] { color: var(--accent); }
+/* "Restart to update", once a release is downloaded: there to be seen, not urgent. */
+.update-btn { color: var(--ok); font-size: 12px; white-space: nowrap; }
+.update-btn svg { width: 15px; height: 15px; }
 /* Empty states, styled like the prototype's diff loading line. */
 .empty { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; align-items: center; }
 .empty:has(> .error-details) { flex-direction: column; }

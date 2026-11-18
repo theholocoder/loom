@@ -1,9 +1,9 @@
 import { join } from 'node:path';
-import BetterSqlite3 from 'better-sqlite3';
 import { Kysely, sql, SqliteDialect } from 'kysely';
 import { migrations as bundled, type Migration } from './migrations';
 import type { Schema } from './schema';
 import { listSnapshots, snapshotsDir, takeSnapshot } from './snapshots';
+import { openSqlite, type Sqlite, type SqliteDriver } from './sqlite';
 
 export const DATABASE_FILE = 'loom.db';
 
@@ -27,6 +27,8 @@ export interface OpenOptions {
   migrations?: Migration[];
   /** The time snapshots are named with. */
   now?: () => number;
+  /** The SQLite driver; better-sqlite3 when its binary loads, node:sqlite otherwise. */
+  driver?: SqliteDriver;
 }
 
 /**
@@ -38,13 +40,13 @@ export interface OpenOptions {
 export async function openDatabase(userDataDir: string, options: OpenOptions = {}): Promise<LoomDatabase> {
   const all = options.migrations ?? bundled;
   const path = join(userDataDir, DATABASE_FILE);
-  const sqlite = new BetterSqlite3(path);
+  const sqlite = openSqlite(path, options.driver);
   let current: number;
   try {
     current = check(sqlite, path);
     if (current > all.length) throw newerSchema(userDataDir, path, current, all.length);
-    sqlite.pragma('journal_mode = WAL');
-    sqlite.pragma('foreign_keys = ON');
+    sqlite.run('PRAGMA journal_mode = WAL');
+    sqlite.run('PRAGMA foreign_keys = ON');
     if (current > 0 && current < all.length) takeSnapshot(sqlite, userDataDir, current, (options.now ?? Date.now)());
   } catch (error) {
     // Closed before anything moves the file, which Windows wouldn't allow while open.
@@ -52,8 +54,8 @@ export async function openDatabase(userDataDir: string, options: OpenOptions = {
     throw error;
   }
   // JavaScript's case folding, which SQLite's lower() and LIKE do for ASCII letters only.
-  sqlite.function(FOLD_CASE, { deterministic: true }, (text: unknown) => (typeof text === 'string' ? text.toLowerCase() : null));
-  const db = new Kysely<Schema>({ dialect: new SqliteDialect({ database: sqlite }) });
+  sqlite.function(FOLD_CASE, (text) => (typeof text === 'string' ? text.toLowerCase() : null));
+  const db = new Kysely<Schema>({ dialect: new SqliteDialect({ database: sqlite.kysely }) });
   try {
     await migrate(db, all, current);
   } catch (error) {
@@ -64,16 +66,16 @@ export async function openDatabase(userDataDir: string, options: OpenOptions = {
 }
 
 /** Runs `PRAGMA quick_check` and returns the schema version. */
-function check(sqlite: BetterSqlite3.Database, path: string): number {
-  let result: unknown[];
+function check(sqlite: Sqlite, path: string): number {
+  let result: Record<string, unknown>[];
   try {
-    result = sqlite.pragma('quick_check', { simple: false }) as unknown[];
+    result = sqlite.all('PRAGMA quick_check');
   } catch (error) {
     throw new DatabaseDamagedError(path, (error as Error).message);
   }
-  const problems = result.map((row) => Object.values(row as object)[0]).filter((message) => message !== 'ok');
+  const problems = result.map((row) => Object.values(row)[0]).filter((message) => message !== 'ok');
   if (problems.length) throw new DatabaseDamagedError(path, problems.join('; '));
-  return sqlite.pragma('user_version', { simple: true }) as number;
+  return Number(Object.values(sqlite.all('PRAGMA user_version')[0] ?? {})[0] ?? 0);
 }
 
 function newerSchema(userDataDir: string, path: string, current: number, known: number): Error {
