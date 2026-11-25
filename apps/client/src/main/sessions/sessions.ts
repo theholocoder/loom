@@ -4,7 +4,7 @@
 import type { Transaction } from 'kysely';
 import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
-import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
+import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile, type ScriptCall } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
@@ -2113,11 +2113,7 @@ export class Sessions {
    * script it ran (OpenCode's Code Mode), which names its calls once it ends.
    */
   private noticeLinkCall(id: number, { toolCallId, title, status, scriptCalls }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
-    for (const call of scriptCalls ?? []) {
-      const tool = linkToolOf(call.name);
-      const named = tool && call.status === 'completed' ? linkToolInput(call.input) : undefined;
-      if (tool && named) this.linkNamed(id, tool, named);
-    }
+    if (scriptCalls && (status === 'completed' || status === 'failed')) this.noticeScriptLinks(id, scriptCalls);
     let calls = this.linkCalls.get(id);
     const tool = title === undefined ? undefined : linkToolOf(title);
     if (tool) {
@@ -2132,6 +2128,15 @@ export class Sessions {
     const card = this.transcript(id).value.findLast((i) => i.kind === 'tool' && i.toolCallId === toolCallId);
     const named = card?.kind === 'tool' ? linkToolInput(card.input) : undefined;
     if (named) this.linkNamed(id, linking, named);
+  }
+
+  /** Links what each of a script's completed calls of Loom's link tools named, once the script has ended: whatever became of the script. */
+  private noticeScriptLinks(id: number, scriptCalls: ScriptCall[]): void {
+    for (const call of scriptCalls) {
+      const tool = linkToolOf(call.name);
+      const named = tool && call.status === 'completed' ? linkToolInput(call.input) : undefined;
+      if (tool && named) this.linkNamed(id, tool, named);
+    }
   }
 
   /** Links what a call of Loom's link tool `tool` named; the user sees why when it can't be. */

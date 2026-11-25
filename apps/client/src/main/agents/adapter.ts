@@ -72,8 +72,9 @@ export interface ToolCall {
   /** The files it changed, given whole; their paths in the working copy when they are in there. */
   diffs?: FileChange[];
   /**
-   * The tools a script it ran called, each in its own name (`loom.link_merge_request`),
-   * once the script has ended: OpenCode's Code Mode reports no tool call of its own for them.
+   * The tools a script it ran called, named as the script called them
+   * (`loom.link_merge_request`), once the script has ended: OpenCode's Code
+   * Mode reports no tool call of its own for them.
    */
   scriptCalls?: ScriptCall[];
 }
