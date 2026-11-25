@@ -32,14 +32,15 @@ function useCheckoutListing<L extends CheckoutListing>(listing: L, projectId: nu
 
 /**
  * The models the agent offers in the Project's checkout, asked again on
- * `refresh` after a failure; nothing while `projectId` is undefined.
+ * `refresh` after a failure or when it listed none; nothing while `projectId`
+ * is undefined.
  */
 export function useCheckoutModels(projectId: number | undefined): { listed: Loaded<ModelChoice[]>; refresh: () => void } {
   const [generation, setGeneration] = useState(0);
   const listed = useCheckoutListing('projects.models', projectId, generation);
-  // Listed, they stay so until the agent is checked again; only a failure is worth asking again.
-  const failed = !!listed && 'error' in listed;
-  const refresh = useCallback(() => failed && setGeneration((n) => n + 1), [failed]);
+  // Listed, they stay so until the agent is checked again; only a failure, or none listed (the agent may not have loaded them yet), is worth asking again.
+  const askAgain = !!listed && ('error' in listed || listed.value.length === 0);
+  const refresh = useCallback(() => askAgain && setGeneration((n) => n + 1), [askAgain]);
   return { listed, refresh };
 }
 
