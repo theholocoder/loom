@@ -47,7 +47,7 @@ describe('the window', () => {
     expect(screen.queryByRole('region', { name: 'Changes' })).toBeNull();
 
     const footer = within(inbox).getByRole('navigation');
-    expect(within(footer).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Projects', 'Dashboard', 'Settings']);
+    expect(within(footer).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Projects', 'Dashboard', 'Send feedback', 'Settings']);
   });
 });
 

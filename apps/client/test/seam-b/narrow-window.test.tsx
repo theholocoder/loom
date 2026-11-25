@@ -190,7 +190,7 @@ describe('the Inbox', () => {
     expect(within(inbox()).queryByRole('button', { name: 'Fix login' })).toBeNull();
     expect(inboxWidth()).toBe('48px');
     // Its actions stay at hand.
-    expect(within(inbox()).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Show the Inbox', 'New', 'Search Sessions and actions', 'Projects', 'Dashboard', 'Settings']);
+    expect(within(inbox()).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Show the Inbox', 'New', 'Search Sessions and actions', 'Projects', 'Dashboard', 'Send feedback', 'Settings']);
     expect(within(inbox()).getByRole('button', { name: 'Show the Inbox' }).getAttribute('aria-description')).toBe('2 Waiting');
 
     fireEvent.click(within(inbox()).getByRole('button', { name: 'Show the Inbox' }));

@@ -399,6 +399,15 @@ input.prefix[aria-invalid] { border-color: var(--err); }
 .merge-dialog input { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
 .merge-dialog .warnings { margin-top: 10px; }
 .merge-dialog .warnline { color: var(--wait); font-size: 12.5px; display: flex; gap: 6px; align-items: center; margin: 4px 0 0; }
+/* The feedback form: what it's about, then what the user writes. */
+.feedback-dialog { display: flex; flex-direction: column; gap: 10px; }
+.feedback-dialog .card-head { margin-bottom: 0; }
+.feedback-dialog .seg { align-self: flex-start; }
+.feedback-dialog .seg button { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; }
+.feedback-dialog textarea, .feedback-dialog input { width: 100%; box-sizing: border-box; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; outline: none; }
+.feedback-dialog textarea { resize: vertical; min-height: 96px; }
+.feedback-dialog p { margin: 0; font-size: 12px; }
+.feedback-dialog .modal-actions { margin-top: 0; }
 .danger { background: var(--err); color: var(--bg); border-color: var(--err); }
 .warn-icon, .flag-missing { color: var(--err); }
 

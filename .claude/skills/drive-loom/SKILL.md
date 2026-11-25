@@ -12,7 +12,7 @@ description: Drive the real Loom app headless in a sandbox (seeded repos, script
    ```bash
    cd apps/client && LOOM_DRIVE_PORT=7788 LOOM_DRIVE_OUT=<your scratch folder> node e2e/drive.ts > <your scratch folder>/drive.log 2>&1 &
    ```
-   The `drive ready` line prints `state`: the repo paths, the profile and the sandbox folder. `LOOM_DRIVE_HEADED=1` shows the window instead.
+   The `drive ready` line prints `state`: the repo paths, the profile and the sandbox folder. `LOOM_DRIVE_HEADED=1` shows the window instead. `LOOM_SENTRY=1` makes the app report to Sentry, to check what a change sends.
 3. **Drive** it by posting the body of an async function:
    ```bash
    curl -s --data-binary @- http://127.0.0.1:7788/run <<'JS'

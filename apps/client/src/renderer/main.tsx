@@ -1,3 +1,4 @@
+import { startTelemetry } from './telemetry';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { LoomApi } from '../shared/api';
@@ -35,6 +36,9 @@ declare global {
     loom: LoomApi;
   }
 }
+
+// Before anything else runs, so its errors are reported too.
+startTelemetry();
 
 let rendered = false;
 const render = (systemLocale?: string) => {

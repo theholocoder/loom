@@ -12,6 +12,7 @@ import type { DesktopNotification } from './notifications';
 import { isWebLink } from '../shared/links';
 import { guardQuit, quitQuestion } from './quit';
 import { selfTest } from './self-test';
+import { startTelemetry } from './telemetry';
 import type { SqliteDriver } from './storage/sqlite';
 import type { Updater } from './updates';
 import type { Session } from '../shared/api';
@@ -33,6 +34,8 @@ let quitConfirmed = false;
  */
 const selfTesting = !!process.env.LOOM_SELF_TEST;
 const SELF_TEST_TIMEOUT_MS = 60_000;
+// As early as can be, with userData settled: Sentry keeps what it couldn't send yet there.
+const telemetry = startTelemetry({ selfTesting });
 
 function createWindow(look: WindowLook): BrowserWindow {
   const win = new BrowserWindow({
@@ -46,7 +49,14 @@ function createWindow(look: WindowLook): BrowserWindow {
     icon: join(import.meta.dirname, '../../resources', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     // The saved theme's background, so the window never shows another first.
     backgroundColor: look.background,
-    webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), sandbox: true, contextIsolation: true, zoomFactor: look.zoom },
+    webPreferences: {
+      preload: join(import.meta.dirname, '../preload/index.cjs'),
+      sandbox: true,
+      contextIsolation: true,
+      zoomFactor: look.zoom,
+      // Whether the renderer reports errors too (telemetry.ts).
+      additionalArguments: telemetry.rendererArguments,
+    },
   });
   // The window only ever shows Loom: a link that slips past the renderer's own
   // handling opens in the system browser, if it's a web link, never in here.
@@ -225,6 +235,7 @@ if (!app.requestSingleInstanceLock()) {
         systemLocale: app.getSystemLocale(),
         updater: releaseUpdater(),
         sqliteDriver: sqliteDriverOverride(),
+        sendFeedback: telemetry.sendFeedback,
       });
     } catch (error) {
       console.error('Loom could not start:', error);
@@ -233,6 +244,7 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     serveApi(loom.api);
+    telemetry.watch(loom.api);
     if (selfTesting) {
       void runSelfTest(loom);
       return;

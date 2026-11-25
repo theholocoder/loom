@@ -1,4 +1,5 @@
 // Exposes the LoomApi to the renderer as `window.loom`, carried over IPC.
+import { hookupIpc } from '@sentry/electron/preload-namespaced';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { LoomApi } from '../shared/api';
 import { IPC } from '../shared/ipc-channels';
@@ -28,3 +29,12 @@ const api: LoomApi = {
 };
 
 contextBridge.exposeInMainWorld('loom', api);
+
+// When main reports errors (main/telemetry.ts), it says so on the command
+// line with the trace sample rate: the renderer then reports through main,
+// over Sentry's own IPC.
+const telemetry = process.argv.find((arg) => arg.startsWith('--loom-telemetry='));
+if (telemetry) {
+  hookupIpc();
+  contextBridge.exposeInMainWorld('loomTelemetry', { tracesSampleRate: Number(telemetry.slice('--loom-telemetry='.length)) || 0 });
+}

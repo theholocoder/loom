@@ -94,6 +94,7 @@ describe('palette actions', () => {
       'Open Dashboard',
       'Open Settings',
       'Show keyboard shortcuts',
+      'Send feedback…',
     ]);
     const keys = (name: string) => within(within(palette()).getByRole('option', { name })).queryByText((_, el) => el?.tagName === 'KBD')?.textContent;
     expect(keys('New Session')).toBe('Ctrl N');
@@ -139,6 +140,7 @@ describe('palette actions', () => {
       'Open Dashboard',
       'Open Settings',
       'Show keyboard shortcuts',
+      'Send feedback…',
     ]);
   });
 

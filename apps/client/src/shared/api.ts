@@ -1415,6 +1415,18 @@ export const TOP_SESSIONS = 10;
 /** A newer stable release Loom has downloaded, if any: it installs on the next quit, or on "Restart to update". */
 export type UpdateStatus = { state: 'none' } | { state: 'ready'; version: string };
 
+/** What feedback is about: something that went wrong, or something to make better. */
+export type FeedbackKind = 'bug' | 'idea';
+
+/** Feedback the user sends Loom's makers, from the feedback form. */
+export interface Feedback {
+  kind: FeedbackKind;
+  /** What the user wrote, sent as written. */
+  message: string;
+  /** Where to answer, if the user wants an answer. */
+  email?: string;
+}
+
 /**
  * Whether the Client's database could be opened. When `damaged`, it failed
  * `PRAGMA quick_check` or isn't a database: main serves only this topic, the
@@ -1992,6 +2004,12 @@ export interface Commands {
    * Sessions are Working. Rejects when no update is downloaded.
    */
   'update.restart': { params: void; result: void };
+  /**
+   * Sends the user's feedback to Loom's makers, with Loom's version and the
+   * system's name and nothing else. Rejects in a build that sends none, such
+   * as in development, or when the message is empty.
+   */
+  'feedback.send': { params: Feedback; result: void };
 }
 
 /** Topics the renderer can subscribe to, with the value each one carries. */
