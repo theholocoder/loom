@@ -96,6 +96,28 @@ describe("the agent's commands and skills before a Session exists", () => {
     expect(machine.opencodeRequests().filter((r) => r.path === '/api/skill')).toHaveLength(2);
   });
 
+  it('asks OpenCode again when asked for them fresh, listing the skills added since', async () => {
+    const { machine, checkout } = machineWith();
+    const { main, project } = await withProject(machine, checkout);
+    await main.api.invoke('projects.commands', { id: project.id });
+
+    const added = { id: 'release', name: 'release' };
+    machine.installOpencode({
+      version: 'opencode v2.1.4',
+      integrations: signedIn,
+      models: [{ providerID: 'opencode', id: 'pulse-free', name: 'Pulse Free' }],
+      commands,
+      skills: [...skills, added],
+      acp: { turns: [] },
+    });
+    const listed = await main.api.invoke('projects.commands', { id: project.id, fresh: true });
+
+    expect(listed.map((c) => c.name)).toEqual(['review', 'hello', 'tdd', 'grill-me', 'release']);
+    // What was asked fresh is kept: asked again without `fresh`, it lists the same.
+    expect((await main.api.invoke('projects.commands', { id: project.id })).map((c) => c.name)).toContain('release');
+    expect(machine.opencodeRequests().filter((r) => r.path === '/api/skill')).toHaveLength(2);
+  });
+
   it('still lists the models, and no commands, when OpenCode lists no commands or skills', async () => {
     const { machine, checkout } = machineWith({ commands: undefined, skills: undefined, noCatalog: true });
     const { main, project } = await withProject(machine, checkout);

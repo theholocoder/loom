@@ -42,6 +42,8 @@ export class Environment {
   private waiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   /** What the agent offers, by checkout, until the agent is checked again. */
   private offers = new Map<string, Promise<CheckoutOffer>>();
+  /** Asks of the agent running, by checkout. */
+  private asking = new Map<string, Promise<CheckoutOffer>>();
 
   constructor(private readonly options: EnvironmentOptions) {
     this.current = { id: options.id, label: options.label, state: 'starting' };
@@ -159,6 +161,7 @@ export class Environment {
     if (!connection) return Promise.resolve();
     // Checked again, the agent may offer other models (the user signed in to a provider, or out), commands and skills.
     this.offers.clear();
+    this.asking.clear();
     this.detecting ??= (async () => {
       const previous = this.current.agent ?? { name: OPENCODE_NAME, state: 'unknown' as const };
       this.update({ agent: { ...previous, checking: true } });
@@ -186,27 +189,38 @@ export class Environment {
     return (await this.offer(path)).models;
   }
 
-  /** The commands and skills the agent offers in the checkout at `path` (see `offer`). */
-  async listCommands(path: string): Promise<AgentCommand[]> {
-    return (await this.offer(path)).commands;
+  /**
+   * The commands and skills the agent offers in the checkout at `path` (see
+   * `offer`); asked of it again when `fresh`, as skills may have been added.
+   */
+  async listCommands(path: string, fresh = false): Promise<AgentCommand[]> {
+    return (await this.offer(path, fresh)).commands;
   }
 
   /**
    * What the agent offers in the checkout at `path`, asked once per checkout
-   * until the agent is checked again; a failed ask is asked again, and so is
-   * one that listed no models, as the agent may not have loaded them yet.
+   * until the agent is checked again, or until asked `fresh`; a failed ask is
+   * asked again, and so is one that listed no models, as the agent may not
+   * have loaded them yet. An ask already running is joined rather than
+   * repeated; a fresh one that fails answers what was kept.
    */
-  private offer(path: string): Promise<CheckoutOffer> {
-    let offered = this.offers.get(path);
-    if (!offered) {
-      offered = probeOpenCodeCheckout((method, timeoutMs, params) => this.request(method, timeoutMs, params), path);
-      this.offers.set(path, offered);
-      const forget = () => {
-        if (this.offers.get(path) === offered) this.offers.delete(path);
+  private offer(path: string, fresh = false): Promise<CheckoutOffer> {
+    const kept = this.offers.get(path);
+    if (kept && !fresh) return kept;
+    let asked = this.asking.get(path);
+    if (!asked) {
+      const probe = probeOpenCodeCheckout((method, timeoutMs, params) => this.request(method, timeoutMs, params), path);
+      this.asking.set(path, probe);
+      asked = probe;
+      const settled = (keep: boolean) => {
+        // Asked before the agent was checked again, it isn't kept.
+        if (this.asking.get(path) !== probe) return;
+        this.asking.delete(path);
+        if (keep) this.offers.set(path, probe);
       };
-      offered.then(({ models }) => models.length === 0 && forget(), forget);
+      probe.then(({ models }) => settled(models.length > 0), () => settled(false));
     }
-    return offered;
+    return kept ? asked.catch(() => kept) : asked;
   }
 
   /** Sends one request to the bridge; rejects unless the Environment is connected. */

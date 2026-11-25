@@ -204,7 +204,7 @@ export function NewSession({
   const defaultEffort = pickedModel === undefined ? chosen?.defaultModel?.effort : undefined;
   const effort = pickedEffort ?? defaultEffort;
   const efforts = effortsOf(models.listed, model);
-  const commands = useAgentCommands(chosen?.id);
+  const { commands, refresh: refreshCommands } = useAgentCommands(chosen?.id);
   // The Approval mode picked; until then, the default from Settings.
   const approvalModeDefault = useTopic('settings')?.approvalModeDefault ?? 'supervised';
   const [pickedMode, setApprovalMode] = useState<ApprovalMode>();
@@ -279,6 +279,7 @@ export function NewSession({
           draftKey={NEW_SESSION_DRAFT}
           loadFiles={() => api.invoke('projects.files', { id: chosen.id, ...filesRef(workingCopy, { existing, base }) })}
           commands={commands}
+          refreshCommands={refreshCommands}
           canSendEmpty={!!issue}
           disabled={needsWorktree}
           held={!!branchError}
@@ -498,7 +499,7 @@ export function SessionView({
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
-  const commands = useAgentCommands(project?.id, session.agentCommands);
+  const { commands, refresh: refreshCommands } = useAgentCommands(project?.id, session.agentCommands);
   const removedProject = useRemovedProject(session.projectId);
   // An archived Session takes a message, which reopens it, while its Project is there.
   const readOnly = session.status === 'archived' && !project;
@@ -882,6 +883,7 @@ export function SessionView({
             canAttach={!freeAnswer}
             loadFiles={readOnly || session.worktreeMissing ? undefined : () => api.invoke('sessions.files', { id: session.id })}
             commands={commands}
+            refreshCommands={refreshCommands}
             // Not with an answer to a question: they wait for the next message.
             comments={freeAnswer ? undefined : comments}
             onRemoveComment={removeComment}

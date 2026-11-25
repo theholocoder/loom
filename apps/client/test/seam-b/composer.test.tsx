@@ -219,6 +219,42 @@ describe('/ skills and commands', () => {
     expect(composer.getByRole('option', { name: '/tdd' }).textContent).toContain('Test-driven development.');
   });
 
+  it('asks for them fresh each time / is typed, listing the skills added since', async () => {
+    let listed = checkoutCommands;
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, { 'projects.commands': () => listed });
+    const { composer, prompt } = openSession(main);
+    await waitFor(() => expect(prompt.placeholder).toContain('/ for commands'));
+
+    listed = [...checkoutCommands, { kind: 'skill', name: 'release' }];
+    type(prompt, '/');
+
+    await waitFor(() => expect(options(composer)).toEqual(['/init', '/tdd', '/grill-me', '/release']));
+    expect(main.invoked.filter((i) => i.command === 'projects.commands').map((i) => i.params)).toEqual([{ id: project.id }, { id: project.id, fresh: true }]);
+    // Typing on after `/` doesn't ask again.
+    type(prompt, '/re');
+    type(prompt, '');
+    type(prompt, '/');
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.commands')).toHaveLength(3));
+  });
+
+  it('keeps listing what it had when asking for them fresh fails', async () => {
+    let fail = false;
+    const main = new FakeMain({ projects: [project], sessions: [finished] }, {
+      'projects.commands': () => {
+        if (fail) throw new Error('OpenCode is not connected');
+        return checkoutCommands;
+      },
+    });
+    const { composer, prompt } = openSession(main);
+    await waitFor(() => expect(prompt.placeholder).toContain('/ for commands'));
+
+    fail = true;
+    type(prompt, '/');
+
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.commands')).toHaveLength(2));
+    expect(options(composer)).toEqual(['/init', '/tdd', '/grill-me']);
+  });
+
   it("says where a skill comes from, when the agent says", async () => {
     const listed: AgentCommand[] = [
       { kind: 'command', name: 'init' },

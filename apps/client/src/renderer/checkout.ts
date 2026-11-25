@@ -1,32 +1,30 @@
 // What the agent offers in a Project's checkout, as main lists it (asking the
-// agent once per checkout): its models, and its commands and skills.
+// agent once per checkout, and its commands and skills again on `/`): its
+// models, and its commands and skills.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AgentCommand, Commands, ModelChoice, Session } from '../shared/api';
+import type { AgentCommand, ModelChoice, Session } from '../shared/api';
 import { useApi } from './api';
 import type { Loaded } from './SearchPicker';
 
-/** What main lists of a Project's checkout. */
-type CheckoutListing = 'projects.models' | 'projects.commands';
-
 /**
- * What main answers `listing` for the Project, asked again when `projectId`
- * or `generation` changes; nothing while `projectId` is undefined, or while
- * it is being asked.
+ * The models main lists of the Project's checkout, asked again when
+ * `projectId` or `generation` changes; nothing while `projectId` is
+ * undefined, or while they are being asked.
  */
-function useCheckoutListing<L extends CheckoutListing>(listing: L, projectId: number | undefined, generation = 0): Loaded<Commands[L]['result']> {
+function useCheckoutModelListing(projectId: number | undefined, generation: number): Loaded<ModelChoice[]> {
   const api = useApi();
-  const [listed, setListed] = useState<{ projectId: number; result: NonNullable<Loaded<Commands[L]['result']>> }>();
+  const [listed, setListed] = useState<{ projectId: number; result: NonNullable<Loaded<ModelChoice[]>> }>();
   useEffect(() => {
     if (projectId === undefined) return;
     let current = true;
-    // Both listings take the Project's id; TypeScript can't tell for a listing it only knows as one of them.
-    (api.invoke(listing as 'projects.models', { id: projectId }) as Promise<Commands[L]['result']>)
+    api
+      .invoke('projects.models', { id: projectId })
       .then((value) => current && setListed({ projectId, result: { value } }))
       .catch((e: unknown) => current && setListed({ projectId, result: { error: (e as Error).message } }));
     return () => {
       current = false;
     };
-  }, [api, listing, projectId, generation]);
+  }, [api, projectId, generation]);
   return listed && listed.projectId === projectId ? listed.result : undefined;
 }
 
@@ -37,7 +35,7 @@ function useCheckoutListing<L extends CheckoutListing>(listing: L, projectId: nu
  */
 export function useCheckoutModels(projectId: number | undefined): { listed: Loaded<ModelChoice[]>; refresh: () => void } {
   const [generation, setGeneration] = useState(0);
-  const listed = useCheckoutListing('projects.models', projectId, generation);
+  const listed = useCheckoutModelListing(projectId, generation);
   // Listed, they stay so until the agent is checked again; only a failure, or none listed (the agent may not have loaded them yet), is worth asking again.
   const askAgain = !!listed && ('error' in listed || listed.value.length === 0);
   const refresh = useCallback(() => askAgain && setGeneration((n) => n + 1), [askAgain]);
@@ -65,14 +63,33 @@ const NO_COMMANDS: AgentCommand[] = [];
  * with `announced`, the commands a Session's agent announced, in place of the
  * checkout's commands when given; each name once, a command before a skill of
  * the same name, as the agent runs it. None while they aren't listed, or when
- * they can't be.
+ * they can't be. `refresh` asks the agent for them again, as the user may
+ * have added a skill since; what was listed stays until it answers, and if it
+ * can't.
  */
-export function useAgentCommands(projectId: number | undefined, announced?: AgentCommand[]): AgentCommand[] {
-  const listed = useCheckoutListing('projects.commands', projectId);
-  const checkout = listed && 'value' in listed ? listed.value : NO_COMMANDS;
-  return useMemo(() => {
+export function useAgentCommands(projectId: number | undefined, announced?: AgentCommand[]): { commands: AgentCommand[]; refresh: () => void } {
+  const api = useApi();
+  const [listed, setListed] = useState<{ projectId: number; commands: AgentCommand[] }>();
+  /** How many times the commands were asked for again, and for which Project: another's are asked as main keeps them. */
+  const [refreshed, setRefreshed] = useState<{ projectId: number | undefined; times: number }>({ projectId, times: 0 });
+  const times = refreshed.projectId === projectId ? refreshed.times : 0;
+  useEffect(() => {
+    if (projectId === undefined) return;
+    let current = true;
+    api
+      .invoke('projects.commands', times ? { id: projectId, fresh: true } : { id: projectId })
+      .then((commands) => current && setListed({ projectId, commands }))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [api, projectId, times]);
+  const checkout = listed && listed.projectId === projectId ? listed.commands : NO_COMMANDS;
+  const commands = useMemo(() => {
     const all = announced ? [...announced, ...checkout.filter((c) => c.kind === 'skill')] : checkout;
     const names = new Set<string>();
     return all.filter(({ name }) => !names.has(name) && !!names.add(name));
   }, [announced, checkout]);
+  const refresh = useCallback(() => setRefreshed((was) => ({ projectId, times: was.projectId === projectId ? was.times + 1 : 1 })), [projectId]);
+  return { commands, refresh };
 }

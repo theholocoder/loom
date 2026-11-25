@@ -38,6 +38,7 @@ export function Composer({
   gauge,
   loadFiles,
   commands = [],
+  refreshCommands,
   comments = [],
   onRemoveComment,
   onEditComment,
@@ -81,6 +82,8 @@ export function Composer({
   loadFiles?: () => Promise<string[]>;
   /** What `/` offers: the agent's skills and commands (see `useAgentCommands`). */
   commands?: AgentCommand[];
+  /** Given, it is called each time a `/` starts the prompt, to ask for `commands` again: the user may have added a skill. */
+  refreshCommands?: () => void;
   /** The comments on the diff or the conversation that go with what is sent, shown as chips; whoever gives them clears them once sent. */
   comments?: MessageComment[];
   onRemoveComment?: (index: number) => void;
@@ -148,6 +151,11 @@ export function Composer({
   };
 
   const menu = useMenu({ draft, caret, commands, loadFiles });
+  // A new `/` lists the skills and commands again, as a new @-mention lists the files.
+  const typingCommand = /^\/\S*$/.test(draft);
+  useEffect(() => {
+    if (typingCommand) refreshCommands?.();
+  }, [typingCommand]);
   const fullPlaceholder = withTips(placeholder, {
     mentions: tips && !!loadFiles,
     commands: tips && commands.length > 0,
