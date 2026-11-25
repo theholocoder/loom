@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type DiffSummary, type Project, type Session } from '../../src/shared/api';
-import { DEFAULT_SESSION_PANELS, type LayoutSettings, type SessionPanels } from '../../src/shared/panels';
-import { FakeMain, HIDDEN_PANELS } from './fake-main';
+import { type LayoutSettings, type SessionPanels } from '../../src/shared/panels';
+import { FakeMain, HIDDEN_PANELS, SHOWN_PANELS } from './fake-main';
 
 type DiffProps = { patch: string; options: { onGutterUtilityClick?: (range: SelectedLineRange) => void } };
 const drawn = vi.hoisted(() => new Map<string, DiffProps>());
@@ -58,7 +58,7 @@ const summary: DiffSummary = {
 };
 const patch = `diff --git a/${loginTs} b/${loginTs}\n--- a/${loginTs}\n+++ b/${loginTs}\n@@ -1,2 +1,2 @@\n context\n-old line\n+new line\n`;
 
-function renderApp({ panels = DEFAULT_SESSION_PANELS, layout = DEFAULT_SETTINGS.layout }: { panels?: SessionPanels; layout?: LayoutSettings } = {}) {
+function renderApp({ panels = SHOWN_PANELS, layout = DEFAULT_SETTINGS.layout }: { panels?: SessionPanels; layout?: LayoutSettings } = {}) {
   const main = new FakeMain(
     { projects: [project], sessions: [session, other], settings: { ...DEFAULT_SETTINGS, layout } },
     { 'sessions.diff': () => summary, 'sessions.diffFile': () => ({ text: patch, truncated: false }) },
@@ -103,8 +103,7 @@ describe('Review mode', () => {
   });
 
   it('leaves on Esc, or its ⤡, bringing the Side area back as it was', async () => {
-    const panels: SessionPanels = { ...DEFAULT_SESSION_PANELS, side: { panels: ['changes'], shown: 'changes', open: true } };
-    const main = renderApp({ panels });
+    const main = renderApp();
     enter();
     press('Escape');
     expect(review()).toBeNull();

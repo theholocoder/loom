@@ -3,7 +3,7 @@
 import { ownLocale } from '../../src/shared/dates';
 import { DEFAULT_KEYBINDINGS, remap } from '../../src/shared/shortcuts';
 import { DEFAULT_SETTINGS, type CommandName, Commands, LoomApi, TopicArgs, TopicName, Topics, type UsageDashboard, type UsageRange } from '../../src/shared/api';
-import { clampPanelSize, DEFAULT_SESSION_PANELS, servedPanels, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
+import { clampPanelSize, servedPanels, withPanelPlace, type SessionPanels } from '../../src/shared/panels';
 import { clampInboxWidth } from '../../src/shared/window';
 
 /** A dashboard with nothing recorded, over `days` days ending 5 November 2026. */
@@ -27,7 +27,14 @@ export function emptyDashboard(days: UsageRange): UsageDashboard {
   };
 }
 
-/** A Session's Panels with both areas hidden: Changes open in the Side area, but not shown. */
+/**
+ * A Session's Panels with the Side area shown on Changes, as a user who opened
+ * it left them. The fake serves these for a Session it wasn't given any for, as
+ * most tests start there; a new Session's are DEFAULT_SESSION_PANELS, hidden.
+ */
+export const SHOWN_PANELS: SessionPanels = { side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } };
+
+/** A Session's Panels with both areas hidden: Changes open in the Side area, but not shown, as in a new Session. */
 export const HIDDEN_PANELS: SessionPanels = { side: { panels: ['changes'], shown: 'changes', open: false }, dock: { panels: [], shown: null, open: false } };
 
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
@@ -42,7 +49,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   settings: DEFAULT_SETTINGS,
   sessions: [],
   transcript: [],
-  panels: DEFAULT_SESSION_PANELS,
+  panels: SHOWN_PANELS,
   highlights: { highlights: [], seenThrough: 0, pending: false, checking: false },
   reviewThreads: [],
   terminals: [],
