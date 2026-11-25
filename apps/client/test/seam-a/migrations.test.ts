@@ -30,6 +30,7 @@ const shipped = [
   '2406678bbaca2fb7', // 15
   '376c44730959ff4d', // 16
   'd611401cece25ec9', // 17
+  '95e64efa2c108fe0', // 18
 ];
 
 const hash = (migration: (typeof migrations)[number]) =>

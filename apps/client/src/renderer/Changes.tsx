@@ -235,6 +235,7 @@ export function comparedText(base: string, source: DiffBaseSource | undefined, s
   const why: Record<DiffBaseSource, string> = {
     recorded: 'This base is kept with the branch: Loom made the branch from it, or it was picked here.',
     'created-from': "The branch's git history says it was created from it.",
+    project: "It's the Project's default branch, set in Projects: where this branch started isn't known, so pick its base if it isn't this one.",
     default: "It's origin's default branch: where this branch started isn't known, so pick its base if it isn't this one.",
     local: `It's your local ${base}, which may be behind origin's: there's no origin branch to compare with here.`,
   };

@@ -236,4 +236,8 @@ export const migrations: Migration[] = [
     await db.schema.alterTable('projects').addColumn('default_effort', 'text').execute();
     await sql`update projects set color = case id % 3 when 0 then 'blue' when 1 then 'orange' else 'aqua' end`.execute(db);
   },
+  async (db) => {
+    // The branch the user set as a Project's default, over git's: null for git's own.
+    await db.schema.alterTable('projects').addColumn('default_branch', 'text').execute();
+  },
 ];

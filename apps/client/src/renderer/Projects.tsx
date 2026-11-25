@@ -1,7 +1,7 @@
 import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, MessageSquarePlus, Pencil, TriangleAlert, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { FORGE_CLI, FORGE_NAMES, OPENCODE_NAME, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
-import { branchPrefixError, branchPrefixOf } from '../shared/branches';
+import { branchPrefixError, branchPrefixOf, defaultBranchError, defaultBranchOf } from '../shared/branches';
 import { AVATAR_MAX, avatarError, avatarText, PROJECT_COLOR_NAMES, PROJECT_COLORS, projectNameError, type ProjectColor } from '../shared/projects';
 import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
@@ -266,7 +266,7 @@ function DefaultModel({ pick }: { pick: ModelPick }) {
   );
 }
 
-/** The Edit dialog: the Project's name, colour, avatar and default model, saved together. */
+/** The Edit dialog: the Project's name, colour, avatar, default model and default branch, saved together. */
 function EditProject({ project, onClose }: { project: Project; onClose: () => void }) {
   const api = useApi();
   const [name, setName] = useState(project.name);
@@ -274,6 +274,7 @@ function EditProject({ project, onClose }: { project: Project; onClose: () => vo
   const [avatar, setAvatar] = useState(project.avatar ?? '');
   const [model, setModel] = useState(project.defaultModel?.model);
   const [effort, setEffort] = useState(project.defaultModel?.effort);
+  const [defaultBranch, setDefaultBranch] = useState(project.defaultBranch ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const models = useCheckoutModels(project.id);
@@ -283,10 +284,11 @@ function EditProject({ project, onClose }: { project: Project; onClose: () => vo
   const id = useId();
   const nameError = projectNameError(name);
   const avatarProblem = avatarError(avatar);
+  const branchProblem = defaultBranchError(defaultBranch);
 
   const save = (event: FormEvent) => {
     event.preventDefault();
-    if (nameError || avatarProblem) return;
+    if (nameError || avatarProblem || branchProblem) return;
     const edit: ProjectEdit = { id: project.id };
     if (name.trim() !== project.name) edit.name = name;
     if (color !== project.color) edit.color = color;
@@ -294,6 +296,8 @@ function EditProject({ project, onClose }: { project: Project; onClose: () => vo
     if (typed !== (project.avatar ?? '')) edit.avatar = typed || null;
     const kept = effortTaken(models.listed, model, effort);
     if (model !== project.defaultModel?.model || kept !== project.defaultModel?.effort) edit.defaultModel = model === undefined ? null : { model, ...(kept !== undefined && { effort: kept }) };
+    const branch = defaultBranchOf(defaultBranch);
+    if (branch !== (project.defaultBranch ?? '')) edit.defaultBranch = branch || null;
     if (Object.keys(edit).length === 1) return onClose();
     setError(undefined);
     setBusy(true);
@@ -376,6 +380,21 @@ function EditProject({ project, onClose }: { project: Project; onClose: () => vo
           </div>
         </div>
         <div className="muted project-hint">New Sessions in {project.name} start on it, until another is picked.</div>
+        <label className="project-field">
+          <span>Default branch</span>
+          <input
+            className="tech"
+            value={defaultBranch}
+            placeholder="git's own"
+            spellCheck={false}
+            aria-invalid={branchProblem ? true : undefined}
+            aria-describedby={`${id}-branch-hint`}
+            onChange={(e) => setDefaultBranch(e.target.value)}
+          />
+        </label>
+        <div id={`${id}-branch-hint`} className={branchProblem ? 'err' : 'muted project-hint'} role={branchProblem ? 'alert' : undefined}>
+          {branchProblem ?? "What new worktree Sessions branch from, on origin or else local, and what Changes compares with when where a branch started isn't known. Empty, origin's default branch."}
+        </div>
         {error && (
           <div className="err" role="alert">
             <ErrorText text={error} />
@@ -385,7 +404,7 @@ function EditProject({ project, onClose }: { project: Project; onClose: () => vo
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={busy || !!nameError || !!avatarProblem}>
+          <button type="submit" className="primary" disabled={busy || !!nameError || !!avatarProblem || !!branchProblem}>
             Save
           </button>
         </div>

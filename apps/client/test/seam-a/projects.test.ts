@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { authState } from '../../src/main/projects/forge';
 import { openDatabase } from '../../src/main/storage/database';
 import { migrations } from '../../src/main/storage/migrations';
-import { startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
+import { git, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus } from '../../src/shared/api';
 import { splitDetails } from '../../src/shared/errors';
 
@@ -381,7 +381,7 @@ describe("a Project's Forge on GitLab, as glab reports it", () => {
   });
 });
 
-describe("a Project's name, colour, avatar and default model", () => {
+describe("a Project's name, colour, avatar, default model and default branch", () => {
   it('can be changed together, and are kept when main starts again', async () => {
     const machine = tempMachine();
     const userDataDir = tempDir('loom-projects-');
@@ -437,6 +437,48 @@ describe("a Project's name, colour, avatar and default model", () => {
 
     await expect(main.api.invoke('projects.edit', { id: project.id, ...edit })).rejects.toThrow(error);
     expect((await main.api.invoke('projects.list'))[0]).toEqual(expect.objectContaining({ name: 'loom', color: project.color }));
+  });
+
+  it("keeps a default branch overriding git's, kept when main starts again, and cleared with null or an empty one", async () => {
+    const machine = tempMachine();
+    const userDataDir = tempDir('loom-projects-');
+    const first = await started(machine, userDataDir);
+    const checkout = machine.gitRepo('loom');
+    machine.commit(checkout, 'README.md', '# loom\n');
+    git(checkout, 'branch', 'develop');
+    git(checkout, 'branch', 'release/2.0');
+    const { id } = await first.api.invoke('projects.link', { path: checkout });
+    expect((await first.api.invoke('projects.list'))[0]?.defaultBranch).toBeUndefined();
+
+    // As origin's, the branch is named without it.
+    expect((await first.api.invoke('projects.edit', { id, defaultBranch: '  origin/develop ' })).defaultBranch).toBe('develop');
+    await first.close();
+    const second = await started(machine, userDataDir);
+    expect((await second.api.invoke('projects.list'))[0]?.defaultBranch).toBe('develop');
+
+    expect((await second.api.invoke('projects.edit', { id, defaultBranch: null })).defaultBranch).toBeUndefined();
+    await second.api.invoke('projects.edit', { id, defaultBranch: 'release/2.0' });
+    expect((await second.api.invoke('projects.edit', { id, defaultBranch: '  ' })).defaultBranch).toBeUndefined();
+  });
+
+  it.each(['feat..x', 'release/', '-dev', 'a b'])("refuses %j as a default branch, and changes nothing", async (defaultBranch) => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const { id } = await main.api.invoke('projects.link', { path: machine.gitRepo('loom') });
+
+    await expect(main.api.invoke('projects.edit', { id, defaultBranch })).rejects.toThrow(/can't be a default branch/);
+    expect((await main.api.invoke('projects.list'))[0]?.defaultBranch).toBeUndefined();
+  });
+
+  it("refuses a default branch the checkout has neither on origin nor locally, which would go unused", async () => {
+    const machine = tempMachine();
+    const main = await started(machine);
+    const checkout = machine.gitRepo('loom');
+    machine.commit(checkout, 'README.md', '# loom\n');
+    const { id } = await main.api.invoke('projects.link', { path: checkout });
+
+    await expect(main.api.invoke('projects.edit', { id, defaultBranch: 'develop' })).rejects.toThrow('The checkout has no branch "develop", on origin or local: fetch origin if it is new.');
+    expect((await main.api.invoke('projects.list'))[0]?.defaultBranch).toBeUndefined();
   });
 
   it('takes an emoji with its modifiers as one character of an avatar', async () => {

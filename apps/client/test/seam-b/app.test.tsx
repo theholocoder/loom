@@ -512,6 +512,28 @@ describe('Projects', () => {
       expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
     });
 
+    it("sets a default branch over git's, says why one is refused, and goes back to git's when emptied", async () => {
+      const main = new FakeMain({ projects: [project('loom')] });
+      let dialog = openEdit(main);
+      const field = () => within(dialog).getByRole('textbox', { name: 'Default branch' });
+      expect((field() as HTMLInputElement).placeholder).toBe("git's own");
+
+      fireEvent.change(field(), { target: { value: 'feat..x' } });
+      expect(within(dialog).getByRole('alert').textContent).toMatch("can't be a default branch");
+      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.change(field(), { target: { value: ' origin/develop ' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.edit', params: { id: 1, defaultBranch: 'develop' } }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull());
+      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
+      dialog = editDialog();
+      expect((field() as HTMLInputElement).value).toBe('develop');
+      fireEvent.change(field(), { target: { value: '' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.edit', params: { id: 1, defaultBranch: null } }));
+    });
+
     it("shows main's error and stays open", async () => {
       const dialog = openEdit(
         new FakeMain(

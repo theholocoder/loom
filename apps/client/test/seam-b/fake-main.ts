@@ -83,13 +83,21 @@ export class FakeMain implements LoomApi {
       'projects.remove': () => ({ removed: true }),
       'projects.setBranchPrefix': ({ id }) => this.value('projects').find((p) => p.id === id)!,
       // Applies the edit, as main does once it has checked it.
-      'projects.edit': ({ id, name, color, avatar, defaultModel }) => {
+      'projects.edit': ({ id, name, color, avatar, defaultModel, defaultBranch }) => {
         const projects = this.value('projects').map((p) => {
           if (p.id !== id) return p;
-          const { avatar: _avatar, defaultModel: _model, ...rest } = p;
+          const { avatar: _avatar, defaultModel: _model, defaultBranch: _branch, ...rest } = p;
           const nextAvatar = avatar === undefined ? p.avatar : (avatar ?? undefined);
           const nextModel = defaultModel === undefined ? p.defaultModel : (defaultModel ?? undefined);
-          return { ...rest, ...(name !== undefined && { name: name.trim() }), ...(color && { color }), ...(nextAvatar && { avatar: nextAvatar }), ...(nextModel && { defaultModel: nextModel }) };
+          const nextBranch = defaultBranch === undefined ? p.defaultBranch : defaultBranch?.trim() || undefined;
+          return {
+            ...rest,
+            ...(name !== undefined && { name: name.trim() }),
+            ...(color && { color }),
+            ...(nextAvatar && { avatar: nextAvatar }),
+            ...(nextModel && { defaultModel: nextModel }),
+            ...(nextBranch && { defaultBranch: nextBranch }),
+          };
         });
         this.publish('projects', projects);
         return projects.find((p) => p.id === id)!;

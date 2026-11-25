@@ -230,6 +230,12 @@ export interface Project {
   defaultModel?: ModelPick;
   /** What Loom's branch names start with: `<prefix>/<slug>`. */
   branchPrefix: string;
+  /**
+   * The branch the user set as its default, over git's (`origin/HEAD`): what
+   * a new worktree Session branches from and the Changes Panel compares
+   * with, unless another is picked or known. Git's own while absent.
+   */
+  defaultBranch?: string;
   checkout: Checkout;
   forge: ForgeStatus;
 }
@@ -241,6 +247,8 @@ export interface ProjectEdit {
   color?: ProjectColor;
   avatar?: string | null;
   defaultModel?: ModelPick | null;
+  /** Null or empty for git's own. */
+  defaultBranch?: string | null;
 }
 
 /** A Project the user removed: hidden, its Sessions archived, its history kept. */
@@ -502,10 +510,11 @@ export interface IssueDetails extends ForgeLink {
  */
 export interface Branches {
   /**
-   * What a new branch starts from unless another base is picked: `origin`'s
-   * default branch, as `origin` says or else as the checkout last heard; or,
-   * with no `origin` branch here, the local default branch. Absent in a
-   * repository with no commit.
+   * What a new branch starts from unless another base is picked: the
+   * Project's own default branch, if the user set one and the checkout has
+   * it; else `origin`'s default branch, as `origin` says or else as the
+   * checkout last heard; or, with no `origin` branch here, the local default
+   * branch. Absent in a repository with no commit.
    */
   defaultBase?: ExistingBranch;
   /** What a new branch can start from: `origin`'s branches, then the local ones, each by name. */
@@ -965,11 +974,13 @@ export type DiffSummary =
  * - `recorded`: Loom recorded it when it made the branch, or the user set it
  *   (`sessions.setDiffBase`), in the repository's local git config;
  * - `created-from`: the branch's reflog says it was created from it;
+ * - `project`: neither says, so it is the default branch the user set for
+ *   the Project, on `origin` or else local;
  * - `default`: neither says, so it is `origin`'s default branch, a guess;
  * - `local`: there's no `origin` branch to compare with, so it is the local
  *   default branch, which may be behind `origin`'s.
  */
-export type DiffBaseSource = 'recorded' | 'created-from' | 'default' | 'local';
+export type DiffBaseSource = 'recorded' | 'created-from' | 'project' | 'default' | 'local';
 
 /** One file's unified diff text, cut short past a size limit. */
 export interface FileDiff {
