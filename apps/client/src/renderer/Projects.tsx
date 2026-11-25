@@ -167,24 +167,26 @@ export function Projects({ adder, onStartSession }: { adder: ProjectAdder; onSta
         {projects.length === 0 ? (
           <div className="empty">No Projects yet. Add a git checkout on this machine with "{SHORTCUTS.addProject.label}".</div>
         ) : (
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Checkout</th>
-                <th>Environment</th>
-                <th>Forge</th>
-                <th>Branch prefix</th>
-                <th>Default model</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {projects.map((project) => (
-                <ProjectRow key={project.id} project={project} environmentLabel={environmentLabel(project.checkout.environmentId)} />
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Checkout</th>
+                  <th>Environment</th>
+                  <th>Forge</th>
+                  <th>Branch prefix</th>
+                  <th>Default model</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {projects.map((project) => (
+                  <ProjectRow key={project.id} project={project} environmentLabel={environmentLabel(project.checkout.environmentId)} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
