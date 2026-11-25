@@ -75,6 +75,22 @@ export function branchPrefixProblem(prefix: string): string | undefined {
 }
 
 /**
+ * The default branch the user meant by `branch`: trimmed, without an
+ * `origin/` in front, as Loom looks for it on `origin` itself. Empty for
+ * git's own.
+ */
+export function defaultBranchOf(branch: string): string {
+  return branch.trim().replace(/^origin\//, '');
+}
+
+/** Why `branch`, as the user typed it, can't be a Project's default branch, as a sentence; undefined if it can, or is empty (git's own). */
+export function defaultBranchError(branch: string): string | undefined {
+  const name = defaultBranchOf(branch);
+  const problem = name ? branchNameProblem(name) : undefined;
+  return problem && `"${branch.trim()}" can't be a default branch: ${problem}`;
+}
+
+/**
  * Why git would refuse `name` as a branch name, following
  * `git check-ref-format --branch`; undefined if it wouldn't.
  */

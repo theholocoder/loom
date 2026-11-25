@@ -346,6 +346,27 @@ describe("a Session's diff base", () => {
     expect(git(path, 'status', '--porcelain')).toBe('');
   });
 
+  it("is the Project's own default branch, over origin's, when neither Loom nor the reflog can say", async () => {
+    const { checkout, main, id } = await inHandMadeWorktree((checkout, path) => {
+      git(checkout, 'switch', '--quiet', '--detach', 'origin/release');
+      git(checkout, 'worktree', 'add', '--quiet', '-b', 'feat', path);
+      git(checkout, 'switch', '--quiet', 'main');
+    });
+    const [project] = await main.api.invoke('projects.list');
+    await main.api.invoke('projects.edit', { id: project!.id, defaultBranch: 'release' });
+
+    const summary = await main.api.invoke('sessions.diff', { id });
+    expect(summary).toMatchObject({ base: 'origin/release', baseSource: 'project' });
+    expect(files(summary).map((f) => f.path)).toEqual(['work.txt']);
+
+    // With no origin branch of it, the local one; with neither, git's own default.
+    git(checkout, 'branch', '--quiet', 'release', 'origin/release');
+    git(checkout, 'remote', 'remove', 'origin');
+    expect(await main.api.invoke('sessions.diff', { id })).toMatchObject({ base: 'release', baseSource: 'project' });
+    git(checkout, 'branch', '--quiet', '-D', 'release');
+    expect(await main.api.invoke('sessions.diff', { id })).toMatchObject({ base: 'main', baseSource: 'local' });
+  });
+
   it("doesn't take its own origin branch as the base of a branch made to track it", async () => {
     const { main, id } = await inHandMadeWorktree((checkout, path) => git(checkout, 'worktree', 'add', '--quiet', '--track', '-b', 'release', path, 'origin/release'));
 

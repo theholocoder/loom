@@ -20,6 +20,8 @@ export interface ProjectsTable {
   default_model: string | null;
   /** The Effort level a new Session starts on with `default_model`; null for the model's own. */
   default_effort: string | null;
+  /** The branch the user set as its default, over git's; null for git's own. */
+  default_branch: string | null;
   /** Whether the agent may trust the checkout's local files, as the user said once: 1 or 0, null until asked. */
   trusted: number | null;
   /** Clock time the Project was added. */

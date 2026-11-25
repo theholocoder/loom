@@ -37,6 +37,8 @@ export interface NewWorktree extends WorktreePlace {
    * defaultBase); or an existing branch to check out as-is.
    */
   branch: { new: string; base?: ExistingBranch } | { existing: ExistingBranch };
+  /** The Project's own default branch, over git's, for a new branch with no `base` (see defaultBase). */
+  defaultBranch?: string;
   /** Where to make it, for an existing branch, instead of a free folder under the root: a reopened Session's old place. */
   at?: string;
 }
@@ -72,7 +74,7 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
   if ('new' in worktree.branch) {
     await checkBranchName(environment, worktree.branch.new);
     const fetched = await tryFetchOrigin(environment, checkout);
-    const picked = worktree.branch.base ?? (await defaultBase(environment, checkout, fetched));
+    const picked = worktree.branch.base ?? (await defaultBase(environment, checkout, fetched, worktree.defaultBranch));
     if (!picked) throw new Error("There's no branch to start the worktree from: commit on a branch first");
     if (!(await hasRef(environment, checkout, refOf(picked)))) throw missingBranch(picked, fetched);
     const base = branchName(picked);
@@ -118,11 +120,12 @@ export async function createWorktree(environment: GitEnvironment, worktree: NewW
  * the branches git can still check out in a new worktree: local ones not
  * checked out in the checkout or any of its worktrees, and `origin`'s with no
  * local namesake (which would be reused, so is listed instead); and the
- * worktrees a Session can work in (see workable).
+ * worktrees a Session can work in (see workable). `defaultBranch` is the
+ * Project's own default branch, over git's.
  */
-export async function listBranches(environment: GitRunner, checkout: string): Promise<Branches> {
+export async function listBranches(environment: GitRunner, checkout: string, defaultBranch?: string): Promise<Branches> {
   const fetched = await tryFetchOrigin(environment, checkout);
-  const base = await defaultBase(environment, checkout, fetched);
+  const base = await defaultBase(environment, checkout, fetched, defaultBranch);
   const { local, remote } = await branchesOf(environment, checkout);
   const all = await worktreesOf(environment, checkout);
   const head = await git(environment, ['-C', checkout, 'symbolic-ref', '--quiet', '--short', 'HEAD']);
@@ -293,14 +296,20 @@ async function checkBranchName(environment: GitEnvironment, branch: string): Pro
 }
 
 /**
- * What a new branch starts from unless another base is picked: `origin`'s
- * default branch, as `origin` itself says once fetched, else as the checkout
- * last heard (`origin/HEAD`); else the local default branch: `origin/HEAD`'s
- * namesake, `init.defaultBranch`, `main` or `master`, or the checkout's own
+ * What a new branch starts from unless another base is picked: the Project's
+ * own default branch, if the user set one, on `origin` or else local; else,
+ * with neither here, `origin`'s default branch, as `origin` itself says once
+ * fetched, else as the checkout last heard (`origin/HEAD`); else the local
+ * default branch: `origin/HEAD`'s namesake, `init.defaultBranch`, `main` or `master`, or the checkout's own
  * branch, the first the checkout has. Undefined with none of them, as in a
  * repository with no commit.
  */
-async function defaultBase(environment: GitRunner, checkout: string, fetched: Fetched): Promise<ExistingBranch | undefined> {
+async function defaultBase(environment: GitRunner, checkout: string, fetched: Fetched, preferred?: string): Promise<ExistingBranch | undefined> {
+  if (preferred) {
+    for (const branch of [{ name: preferred, remote: true }, { name: preferred, remote: false }]) {
+      if (await hasRef(environment, checkout, refOf(branch))) return branch;
+    }
+  }
   const remote: string[] = [];
   if (fetched.state === 'fetched') {
     const said = await git(environment, ['-C', checkout, 'ls-remote', '--symref', 'origin', 'HEAD'], FETCH_TIMEOUT_MS);

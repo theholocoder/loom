@@ -22,6 +22,8 @@ export interface DiffTarget {
   repo: string;
   /** The branch an archived worktree Session left, compared without a working tree. */
   branch?: string;
+  /** The Project's own default branch, over git's, for a base neither Loom nor the reflog knows. */
+  defaultBranch?: string;
 }
 
 /** Whatever the user's git config says (diff.mnemonicPrefix, diff.noprefix), a diff's paths start `a/` and `b/`, as its parser expects. */
@@ -154,22 +156,27 @@ export class WorkingCopyDiff {
   /**
    * The start base, and where it came from: the one recorded for the branch
    * (by `createWorktree` or setBase), else the `origin` branch its reflog
-   * says it was created from, else `origin/HEAD`'s branch as the local ref
-   * names it, else `origin/main` or `origin/master`; and with none of those
-   * here (no `origin`, or never fetched), the local default branch.
+   * says it was created from, else the Project's own default branch, if the
+   * user set one, on `origin` or else local, else `origin/HEAD`'s branch as
+   * the local ref names it, else `origin/main` or `origin/master`; and with
+   * none of those here (no `origin`, or never fetched), the local default
+   * branch.
    */
   private async base(): Promise<{ ref: string; source: DiffBaseSource }> {
     const branch = await this.branch();
     const recorded = branch ? await this.git(['config', '--get', `branch.${branch}.loomBase`]) : undefined;
     const head = await this.originHead();
-    const candidates: Array<{ ref: string; source: DiffBaseSource }> = [
-      ...(recorded?.exitCode === 0 && recorded.stdout.trim() ? [{ ref: recorded.stdout.trim(), source: 'recorded' as const }] : []),
+    // Where each candidate's branch may be: on `origin` unless it says otherwise.
+    const own = this.target.defaultBranch;
+    const candidates: Array<{ ref: string; source: DiffBaseSource; where?: 'origin-or-local' | 'local' }> = [
+      // A recorded base may be a local branch: one Loom made the branch from.
+      ...(recorded?.exitCode === 0 && recorded.stdout.trim() ? [{ ref: recorded.stdout.trim(), source: 'recorded' as const, where: 'origin-or-local' as const }] : []),
       ...(branch ? (await this.createdFrom(branch, head)).map((ref) => ({ ref, source: 'created-from' as const })) : []),
+      ...(own ? [{ ref: `origin/${own}`, source: 'project' as const }, { ref: own, source: 'project' as const, where: 'local' as const }] : []),
       ...[head, 'origin/main', 'origin/master'].flatMap((ref) => (ref ? [{ ref, source: 'default' as const }] : [])),
     ];
-    for (const candidate of candidates) {
-      // A recorded base may be a local branch: one Loom made the branch from.
-      if ((await this.hasRemoteRef(candidate.ref)) || (candidate.source === 'recorded' && (await this.hasLocalBranch(candidate.ref)))) return candidate;
+    for (const { ref, source, where } of candidates) {
+      if ((where !== 'local' && (await this.hasRemoteRef(ref))) || (where && (await this.hasLocalBranch(ref)))) return { ref, source };
     }
     const local = await this.localDefault(head);
     if (local) return { ref: local, source: 'local' };

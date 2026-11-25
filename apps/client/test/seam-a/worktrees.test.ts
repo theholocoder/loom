@@ -247,6 +247,40 @@ describe('the branches a worktree Session can start from', () => {
   });
 });
 
+describe("a Project's own default branch", () => {
+  it("is the default base of a new worktree Session over origin's, which it branches from fresh and diffs against", async () => {
+    const { machine, origin, checkout } = machineWithClone();
+    const other = machine.gitClone(origin, 'other');
+    machine.commit(other, 'CHANGELOG.md', 'Started\n');
+    git(other, 'push', '--quiet', 'origin', 'HEAD:develop');
+    git(checkout, 'fetch', '--quiet', 'origin');
+    // Pushed since: the new Session's branch starts from origin's newest.
+    const newest = machine.commit(other, 'CHANGELOG.md', 'Newer\n');
+    git(other, 'push', '--quiet', 'origin', 'HEAD:develop');
+    const { main, project } = await withProject(machine, checkout);
+    await main.api.invoke('projects.edit', { id: project.id, defaultBranch: 'develop' });
+
+    expect((await main.api.invoke('projects.branches', { id: project.id })).defaultBase).toEqual({ name: 'develop', remote: true });
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix it' });
+
+    expect(git(created.workingCopy.path, 'rev-parse', 'HEAD')).toBe(newest);
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting'));
+    expect(await main.api.invoke('sessions.diff', { id: created.id })).toMatchObject({ available: true, base: 'origin/develop', baseSource: 'recorded' });
+  });
+
+  it("is a local branch when origin hasn't one, and gives way to git's once the checkout has neither", async () => {
+    const { machine, checkout } = machineWithClone();
+    git(checkout, 'branch', 'staging');
+    const { main, project } = await withProject(machine, checkout);
+
+    await main.api.invoke('projects.edit', { id: project.id, defaultBranch: 'staging' });
+    expect((await main.api.invoke('projects.branches', { id: project.id })).defaultBase).toEqual({ name: 'staging', remote: false });
+
+    git(checkout, 'branch', '--quiet', '-D', 'staging');
+    expect((await main.api.invoke('projects.branches', { id: project.id })).defaultBase).toEqual({ name: 'main', remote: true });
+  });
+});
+
 describe('a worktree Session on an existing branch', () => {
   it("checks out an origin branch as-is, on a new same-named local branch tracking it, with .worktreeinclude's files", async () => {
     const { machine, origin, checkout } = machineWithClone();

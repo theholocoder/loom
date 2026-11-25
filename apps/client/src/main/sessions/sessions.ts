@@ -316,7 +316,7 @@ export class Sessions {
     if (!project) throw new Error(`unknown Project ${projectId}`);
     const environment = this.environmentOf({ projectId });
     await environment.ready();
-    const branches = await listBranches(environment, project.checkout.path);
+    const branches = await listBranches(environment, project.checkout.path, project.defaultBranch);
     return branches;
   }
 
@@ -404,6 +404,7 @@ export class Sessions {
           checkout: project.checkout.path,
           projectName: project.name,
           branchPrefix: project.branchPrefix,
+          ...this.projectDefaultBranch({ projectId }),
           branch: existing
             ? { existing: existing.branch }
             : {
@@ -2023,12 +2024,18 @@ export class Sessions {
     // A removed Project's Sessions have no checkout left to diff in.
     if (session.status === 'archived' && !this.options.project(session.projectId)) return undefined;
     const environment = this.environmentOf(session);
-    if (session.status !== 'archived') return session.worktreeMissing ? undefined : new WorkingCopyDiff(environment, { repo: session.workingCopy.path }, this.options.maxUntrackedCounted);
+    if (session.status !== 'archived') return session.worktreeMissing ? undefined : new WorkingCopyDiff(environment, { repo: session.workingCopy.path, ...this.projectDefaultBranch(session) }, this.options.maxUntrackedCounted);
     if (session.workingCopy.kind !== 'worktree' || !session.branch) return undefined;
     const checkout = this.options.project(session.projectId)?.checkout.path;
     if (!checkout) return undefined;
     const found = await exec(environment.request, 'git', ['-C', checkout, 'rev-parse', '--verify', '--quiet', `refs/heads/${session.branch}`], GIT_TIMEOUT_MS);
-    return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch }, this.options.maxUntrackedCounted) : undefined;
+    return found.exitCode === 0 ? new WorkingCopyDiff(environment, { repo: checkout, branch: session.branch, ...this.projectDefaultBranch(session) }, this.options.maxUntrackedCounted) : undefined;
+  }
+
+  /** The Project's own default branch, if the user set one: for a new branch's base, and a diff's. */
+  private projectDefaultBranch({ projectId }: { projectId: number }): { defaultBranch?: string } {
+    const defaultBranch = this.options.project(projectId)?.defaultBranch;
+    return defaultBranch ? { defaultBranch } : {};
   }
 
   /** Records the Glance strip's diff stat; keeps the last one known if git can't say. */
@@ -2036,7 +2043,7 @@ export class Sessions {
     try {
       const session = this.get(id);
       if (session.status === 'archived' || session.worktreeMissing) return;
-      const diff = new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path }, this.options.maxUntrackedCounted);
+      const diff = new WorkingCopyDiff(this.environmentOf(session), { repo: session.workingCopy.path, ...this.projectDefaultBranch(session) }, this.options.maxUntrackedCounted);
       const summary = await diff.summary();
       this.diffSummaries.set(summaryKey(id, 'all'), summary);
       this.recordDiffStat(id, WorkingCopyDiff.stat(filesOf(summary)));

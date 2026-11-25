@@ -1,7 +1,7 @@
 // The Projects service: the git checkouts the user has added to Loom, kept in
 // the database, and what each one's Environment reports about them.
 import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type ModelPick, type Project, type ProjectEdit, type RemovedProject, type RestorableProject } from '../../shared/api';
-import { branchPrefixError, branchPrefixOf } from '../../shared/branches';
+import { branchPrefixError, branchPrefixOf, defaultBranchError, defaultBranchOf } from '../../shared/branches';
 import { avatarError, isProjectColor, nextProjectColor, projectColorOf, projectNameError } from '../../shared/projects';
 import { splitDetails, withDetails } from '../../shared/errors';
 import type { Clock } from '../clock';
@@ -29,7 +29,7 @@ export interface ProjectsOptions {
 const UNCHECKED: ForgeStatus = { state: 'unknown', checking: false };
 
 /** The columns a Project is read from. */
-const PROJECT_COLUMNS = ['id', 'name', 'color', 'avatar', 'default_model', 'default_effort', 'branch_prefix', 'trusted'] as const;
+const PROJECT_COLUMNS = ['id', 'name', 'color', 'avatar', 'default_model', 'default_effort', 'default_branch', 'branch_prefix', 'trusted'] as const;
 
 interface ProjectRow {
   id: number;
@@ -38,6 +38,7 @@ interface ProjectRow {
   avatar: string | null;
   default_model: string | null;
   default_effort: string | null;
+  default_branch: string | null;
   branch_prefix: string;
 }
 
@@ -50,6 +51,7 @@ function projectOf(row: ProjectRow, checkout: Project['checkout'], forge: ForgeS
     ...(row.avatar !== null && { avatar: row.avatar }),
     ...(defaultModel && { defaultModel }),
     branchPrefix: row.branch_prefix,
+    ...(row.default_branch !== null && { defaultBranch: row.default_branch }),
     checkout,
     forge,
   };
@@ -202,8 +204,8 @@ export class Projects {
     return this.projects.get(id)!;
   }
 
-  /** Changes the Project's name, colour, avatar or default model: what `edit` gives, the rest as it is. */
-  async edit({ id, name, color, avatar, defaultModel }: ProjectEdit): Promise<Project> {
+  /** Changes the Project's name, colour, avatar, default model or default branch: what `edit` gives, the rest as it is. */
+  async edit({ id, name, color, avatar, defaultModel, defaultBranch }: ProjectEdit): Promise<Project> {
     if (!this.projects.has(id)) throw new Error(`unknown Project ${id}`);
     const change: Partial<ProjectRow> = {};
     if (name !== undefined) {
@@ -229,6 +231,14 @@ export class Projects {
       change.default_model = model ?? null;
       change.default_effort = model ? (effort ?? null) : null;
     }
+    if (defaultBranch !== undefined) {
+      const error = defaultBranchError(defaultBranch ?? '');
+      if (error) throw new Error(error);
+      const branch = defaultBranchOf(defaultBranch ?? '');
+      if (branch) await this.checkHasBranch(id, branch);
+      // An empty default branch is git's own again.
+      change.default_branch = branch || null;
+    }
     if (Object.keys(change).length > 0) await this.options.db.updateTable('projects').set(change).where('id', '=', id).execute();
     const row = await this.options.db.selectFrom('projects').select(PROJECT_COLUMNS).where('id', '=', id).executeTakeFirstOrThrow();
     // Read again for the Forge, which a check may have changed meanwhile.
@@ -237,6 +247,22 @@ export class Projects {
     this.projects.set(id, projectOf(row, current.checkout, current.forge));
     this.publish();
     return this.projects.get(id)!;
+  }
+
+  /**
+   * Rejects a default branch the Project's checkout has neither on `origin`
+   * nor locally, which would be passed over for git's own unnoticed. Offline,
+   * it can't be told, so it is taken.
+   */
+  private async checkHasBranch(id: number, branch: string): Promise<void> {
+    const { environmentId, path } = this.projects.get(id)!.checkout;
+    const environment = this.options.environment(environmentId);
+    if (!environment?.connected()) return;
+    for (const ref of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`]) {
+      const found = await exec(environment.request, 'git', ['-C', path, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], GIT_TIMEOUT_MS);
+      if (found.exitCode === 0) return;
+    }
+    throw new Error(`The checkout has no branch "${branch}", on origin or local: fetch origin if it is new.`);
   }
 
   /** Whether the agent may trust the Project's local files, as the user said; undefined until asked. */
