@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/theholocoder/loom/bridge/proc"
+	"github.com/theholocoder/loom/bridge/report"
 	"github.com/theholocoder/loom/bridge/shellenv"
 )
 
@@ -178,6 +179,7 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 
 	urls := make(chan string, 1)
 	go func() {
+		defer report.Recover()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			var line struct {

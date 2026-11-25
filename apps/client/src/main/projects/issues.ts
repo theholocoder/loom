@@ -10,6 +10,7 @@ import { exec, type BridgeCall } from '../environments/exec';
 import { describeFailure } from '../environments/failures';
 import { forgeItemNamed, isPageOf, isWebLink, type ForgeItemName } from './merge-requests';
 import { runJson, timeOf } from './merge-request-activity';
+import { withDetails } from '../../shared/errors';
 
 const ISSUE_LIST_TIMEOUT_MS = 20_000;
 
@@ -90,7 +91,7 @@ export async function listIssues(call: BridgeCall, status: ForgeStatus, checkout
   try {
     listed = JSON.parse(result.stdout || '[]');
   } catch {
-    throw new Error(`${cli} issue list printed something other than JSON: ${result.stdout.slice(0, 200)}`);
+    throw new Error(withDetails(`${cli} issue list printed something other than JSON`, result.stdout.slice(0, 200)));
   }
   if (!Array.isArray(listed)) throw new Error(`${cli} issue list printed something other than a list.`);
   return listed

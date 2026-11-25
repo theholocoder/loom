@@ -26,6 +26,7 @@ import {
   Mail,
   Maximize2,
   MessageSquarePlus,
+  MessageSquareText,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
@@ -40,7 +41,7 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { forgeName, mergeRequestRef, type Project, type Session } from '../shared/api';
 import { MATCH_SYSTEM_LABEL, THEMES, type Theme, type ThemeChoice } from '../shared/appearance';
 import { useApi, useTopic } from './api';
@@ -48,6 +49,7 @@ import { useAppearance } from './appearance';
 import { DatesProvider } from './dates';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { DatabaseProblem } from './DatabaseProblem';
+import { FeedbackDialog } from './Feedback';
 import { inboxOrder, InboxList } from './Inbox';
 import { Logo } from './Logo';
 import { Popover } from './Popover';
@@ -140,6 +142,8 @@ function Workspace() {
   const [palette, setPalette] = useState<{ returnFocus: HTMLElement | null }>();
   /** The shortcuts list, while open, and where focus was before it. */
   const [help, setHelp] = useState<{ returnFocus: HTMLElement | null }>();
+  const [feedback, setFeedback] = useState<{ returnFocus: HTMLElement | null }>();
+  const openFeedback = (returnFocus: HTMLElement | null) => setFeedback({ returnFocus });
   const selected = sessions.find((s) => s.id === selectedId);
   /** The Session in the main pane, under any Page. */
   const behind = view === 'session' ? selected : undefined;
@@ -206,6 +210,7 @@ function Workspace() {
     },
     openPage,
     showHelp: (returnFocus) => setHelp({ returnFocus }),
+    sendFeedback: openFeedback,
     toggleInbox: inbox.toggle,
   });
 
@@ -329,7 +334,7 @@ function Workspace() {
               </button>
             </div>
             <InboxList sessions={sessions} projects={projects} selectedId={behind?.id} onSelect={select} onReply={reply} />
-            <PageNav rail={false} page={page?.name} onPage={openPage} />
+            <PageNav rail={false} page={page?.name} onPage={openPage} onFeedback={openFeedback} />
           </aside>
         ) : (
           <aside className="side rail" id="inbox" aria-label="Inbox">
@@ -355,7 +360,7 @@ function Workspace() {
               <Search />
             </button>
             <span className="grow" />
-            <PageNav rail page={page?.name} onPage={openPage} />
+            <PageNav rail page={page?.name} onPage={openPage} onFeedback={openFeedback} />
           </aside>
         )}
         {/* Inert under a Page, as it was; it adds no box of its own to the layout. */}
@@ -420,6 +425,14 @@ function Workspace() {
           />
         )}
         {help && <ShortcutHelp onClose={closeHelp} />}
+        {feedback && (
+          <FeedbackDialog
+            onClose={() => {
+              feedback.returnFocus?.focus();
+              setFeedback(undefined);
+            }}
+          />
+        )}
         {palette && (
           <CommandPalette
             actions={actions}
@@ -489,6 +502,7 @@ function paletteActions(app: {
   setTheme: (theme: ThemeChoice) => void;
   openPage: (page: Page) => void;
   showHelp: (returnFocus: HTMLElement | null) => void;
+  sendFeedback: (returnFocus: HTMLElement | null) => void;
   toggleInbox: () => void;
 }): PaletteAction[] {
   const { session, nextWaiting, previousWaiting } = app;
@@ -553,6 +567,7 @@ function paletteActions(app: {
     { label: 'Open Dashboard', icon: ChartColumn, run: () => app.openPage('dashboard') },
     shortcutAction('settings', SettingsIcon, () => app.openPage('settings')),
     shortcutAction('help', Keyboard, app.showHelp),
+    { label: 'Send feedback…', icon: MessageSquareText, run: app.sendFeedback },
   ];
   return actions.filter((action): action is PaletteAction => !!action);
 }
@@ -609,13 +624,14 @@ function NewMenu({ onNewSession, onAddProject }: { onNewSession: (trigger: HTMLE
 
 /** The Inbox's foot: Projects, Dashboard and Settings, Settings at the end, each opening its Page over the main pane. */
 /** The Inbox's footer; `rail` when the Inbox is collapsed to its rail, which has room for icons only. */
-function PageNav({ rail, page, onPage }: { rail: boolean; page: Page | undefined; onPage: (page: Page) => void }) {
+function PageNav({ rail, page, onPage, onFeedback }: { rail: boolean; page: Page | undefined; onPage: (page: Page) => void; onFeedback: (returnFocus: HTMLElement) => void }) {
   return (
     <nav className={rail ? 'rail-foot' : 'side-foot'}>
       <FootButton label="Projects" icon={FolderGit2} current={page === 'projects'} onClick={() => onPage('projects')} />
       <FootButton label="Dashboard" icon={ChartColumn} current={page === 'dashboard'} onClick={() => onPage('dashboard')} />
       <span className="grow" />
       <RestartToUpdate labelled={!rail} />
+      <FootButton label="Send feedback" icon={MessageSquareText} current={false} onClick={(event) => onFeedback(event.currentTarget)} />
       <FootButton label="Settings" icon={SettingsIcon} current={page === 'settings'} onClick={() => onPage('settings')} />
     </nav>
   );
@@ -646,7 +662,7 @@ function RestartToUpdate({ labelled }: { labelled: boolean }) {
   );
 }
 
-function FootButton({ label, icon: Icon, current, onClick }: { label: string; icon: LucideIcon; current: boolean; onClick: () => void }) {
+function FootButton({ label, icon: Icon, current, onClick }: { label: string; icon: LucideIcon; current: boolean; onClick: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
     <button className="icon-btn" type="button" title={label} aria-label={label} aria-haspopup="dialog" aria-current={current ? 'page' : undefined} onClick={onClick}>
       <Icon />

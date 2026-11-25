@@ -11,6 +11,10 @@ on:
         description: Upload the builds and their update metadata as workflow artifacts.
         type: boolean
         default: false
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        description: A Sentry token that can upload source maps to the loom project; a release's build uploads them.
+        required: false
 
 jobs:
   package:
@@ -43,8 +47,13 @@ jobs:
       - name: Build the bridge
         run: pnpm bridge:build
 
+      # A release's build uploads its source maps to Sentry, so the errors
+      # Loom reports read against the sources (electron.vite.config.ts), and
+      # ships none. Other builds have no token and make no source maps.
       - name: Build the installer
         working-directory: apps/client
+        env:
+          SENTRY_AUTH_TOKEN: ${{ inputs.upload && secrets.SENTRY_AUTH_TOKEN || '' }}
         run: pnpm package ${{ matrix.target }}
 
       - name: Self-test (better-sqlite3)

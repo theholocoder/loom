@@ -4,6 +4,7 @@
 import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState, type ReviewCount, type ReviewThread } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 import { describeFailure } from '../environments/failures';
+import { withDetails } from '../../shared/errors';
 
 const ACTIVITY_TIMEOUT_MS = 30_000;
 /** How much of a comment Loom quotes: the agent gets a link to the rest. */
@@ -342,6 +343,6 @@ export async function runJson(call: BridgeCall, kind: keyof typeof FORGE_CLI, ar
   try {
     return JSON.parse(result.stdout);
   } catch {
-    throw new Error(`${what} printed something other than JSON: ${result.stdout.slice(0, 200)}`);
+    throw new Error(withDetails(`${what} printed something other than JSON`, result.stdout.slice(0, 200)));
   }
 }

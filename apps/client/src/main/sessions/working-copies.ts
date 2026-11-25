@@ -150,7 +150,7 @@ export async function listBranches(environment: GitRunner, checkout: string): Pr
  */
 export async function findWorktree(environment: GitRunner, checkout: string, path: string, projectName: string): Promise<ExistingWorktree> {
   const found = workable(await worktreesOf(environment, checkout), checkout).find((worktree) => worktree.path === path);
-  if (!found) throw new Error(`${path} isn't a worktree of ${projectName}`);
+  if (!found) throw new Error(`${path} isn't a worktree of "${projectName}"`);
   if (found.locked) throw new Error(`${path} is locked; unlock it with \`git worktree unlock\` to work in it`);
   return found.branch ? { path, branch: found.branch } : { path };
 }

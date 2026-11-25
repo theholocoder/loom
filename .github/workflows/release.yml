@@ -31,6 +31,8 @@ jobs:
     uses: ./.github/workflows/package.yml
     with:
       upload: true
+    secrets:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
   publish:
     name: Publish

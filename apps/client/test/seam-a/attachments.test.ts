@@ -184,7 +184,7 @@ describe('attachments', () => {
       main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: attachments as never });
 
     await expect(create(Array.from({ length: 11 }, (_, i) => ({ name: `${i}.txt`, data: bytes('x') })))).rejects.toThrow('at most 10 attachments');
-    await expect(create([{ name: 'huge.bin', data: new Uint8Array(10 * 1024 * 1024 + 1) }])).rejects.toThrow('huge.bin is over 10 MB');
+    await expect(create([{ name: 'huge.bin', data: new Uint8Array(10 * 1024 * 1024 + 1) }])).rejects.toThrow('"huge.bin" is over 10 MB');
     await expect(create([{ name: '', data: bytes('x') }])).rejects.toThrow('needs a file name');
     await expect(create([{ name: 'empty.txt' }])).rejects.toThrow('no content');
     expect(await main.api.invoke('sessions.list')).toEqual([]);

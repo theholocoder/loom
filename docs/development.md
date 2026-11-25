@@ -65,6 +65,12 @@ better-sqlite3's Linux prebuild needs glibc 2.34 (Ubuntu 22.04, Debian 12, RHEL 
 
 Packaged builds update themselves with electron-updater from this repository's GitHub Releases, stable releases only (`apps/client/src/main/updates.ts`). Loom looks for an update at startup and every 4 hours, and downloads it in the background. It installs on the next quit, or when the user clicks **Restart to update** in the sidebar footer, which asks first if Sessions are Working. Loom never restarts on its own. There are no updates in development, in the self-test, with `LOOM_NO_UPDATES=1`, or on Linux outside the AppImage.
 
+### Error reporting
+
+Release builds report errors, native crashes, warnings and the user's feedback to Sentry (ADR 0011): main, the preload and the renderer to the `loom` project (`apps/client/src/main/telemetry.ts`, `src/renderer/telemetry.ts`), the bridge to `loom-bridge` (`bridge/report`), which main turns on through the bridge's environment. Everything is scrubbed first (`src/shared/scrub.ts`, `bridge/report/scrub.go`): change those, and their tests, before sending anything new. Development, the tests and the self-test report nothing; `LOOM_SENTRY=1` turns reporting on, to see what a change sends (`just dev-report` runs the app with it, and the drive-loom driver passes it on); such reports are in the `development` environment, a packaged build's in `production`, and `LOOM_SENTRY=0` turns a release build's off.
+
+The Release workflow uploads the source maps of each build to Sentry and leaves them out of the installer. It needs a `SENTRY_AUTH_TOKEN` repository secret: an organization token of TheHolocoder's Sentry organization. Without it, releases still build, with no source maps.
+
 ### Releasing
 
 1. Set the version in `apps/client/package.json` (the bridge and the app are both stamped with it), and merge that to `main`.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/theholocoder/loom/bridge/report"
 	"github.com/theholocoder/loom/bridge/shellenv"
 )
 
@@ -32,6 +33,7 @@ func newEnvironment(ctx context.Context, machine Machine) *environment {
 	}
 	e := &environment{ctx: ctx, machine: machine, ready: make(chan struct{})}
 	go func() {
+		defer report.Recover()
 		e.set(e.resolve())
 		close(e.ready)
 	}()

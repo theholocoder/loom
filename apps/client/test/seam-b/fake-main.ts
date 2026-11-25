@@ -268,6 +268,7 @@ export class FakeMain implements LoomApi {
       'database.restoreLatestSnapshot': () => {},
       'update.status': () => this.value('update'),
       'update.restart': () => {},
+      'feedback.send': () => {},
       ...handlers,
     };
   }

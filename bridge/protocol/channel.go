@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/theholocoder/loom/bridge/proc"
+	"github.com/theholocoder/loom/bridge/report"
 	"github.com/theholocoder/loom/bridge/shellenv"
 )
 
@@ -213,6 +214,7 @@ func (cs *channels) start(env shellenv.Env, params openParams) (*openResult, *Er
 	cs.running.Add(1)
 	go func() {
 		defer cs.running.Done()
+		defer report.Recover()
 		stop := context.AfterFunc(cs.ctx, c.stop)
 		// The group is waited for alongside the pump: once the process has
 		// exited, Wait stops what it left running, which may hold stdout.

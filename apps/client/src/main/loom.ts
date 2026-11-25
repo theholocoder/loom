@@ -2,7 +2,7 @@
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import type { Commands, DatabaseStatus, EnvironmentStatus, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import type { Commands, DatabaseStatus, EnvironmentStatus, Feedback, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
@@ -54,6 +54,8 @@ export interface LoomOptions {
   updater?: Updater;
   /** The SQLite driver; better-sqlite3 when its binary loads, node:sqlite otherwise. */
   sqliteDriver?: SqliteDriver;
+  /** Sends the user's feedback to Loom's makers; there's none to send without it, as in development. */
+  sendFeedback?: (feedback: Feedback) => void;
 }
 
 export interface Loom {
@@ -100,6 +102,7 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
         if (started) return started.api.invoke(command, ...params);
         if (command === 'update.status') return updates.status.value as never;
         if (command === 'update.restart') return updates.restart() as never;
+        if (command === 'feedback.send') return sendFeedback(options, params[0] as Feedback) as never;
         if (command !== 'database.restoreLatestSnapshot') throw notStarted();
         restoring ??= restore().finally(() => (restoring = undefined));
         return restoring as never;
@@ -117,6 +120,18 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
       await started?.close();
     },
   };
+}
+
+/** The longest feedback message sent, which is plenty for one. */
+const MAX_FEEDBACK = 10_000;
+
+/** Sends the user's feedback, as far as this build sends any; rejects an empty one. */
+async function sendFeedback(options: LoomOptions, { kind, message, email }: Feedback): Promise<void> {
+  if (!options.sendFeedback) throw new Error('this build of Loom sends no feedback');
+  const text = message.trim();
+  if (!text) throw new Error('the feedback is empty');
+  if (text.length > MAX_FEEDBACK) throw new Error(`the feedback is longer than ${MAX_FEEDBACK} characters`);
+  options.sendFeedback({ kind: kind === 'idea' ? 'idea' : 'bug', message: text, email: email?.trim() || undefined });
 }
 
 function damaged(userDataDir: string, error: DatabaseDamagedError): DatabaseStatus {
@@ -455,6 +470,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     },
     'update.status': () => updates.status.value,
     'update.restart': () => updates.restart(),
+    'feedback.send': (feedback) => sendFeedback(options, feedback),
     'database.restoreLatestSnapshot': () => {
       throw new Error('the database is not damaged');
     },

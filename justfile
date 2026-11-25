@@ -33,6 +33,10 @@ dev:
 
 alias start := dev
 
+# Run the app in dev mode reporting to Sentry (environment "development"), to see what a change sends
+dev-report:
+    LOOM_SENTRY=1 just dev
+
 # Build this machine's installer (Linux AppImage or Windows NSIS) into apps/client/dist
 package:
     pnpm bridge:build

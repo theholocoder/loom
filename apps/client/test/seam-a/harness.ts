@@ -13,7 +13,7 @@ import type { Clock, TimerHandle } from '../../src/main/clock';
 import type { AgentAdapter } from '../../src/main/agents/adapter';
 import type { Updater } from '../../src/main/updates';
 import type { SqliteDriver } from '../../src/main/storage/sqlite';
-import type { LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
+import type { Feedback, LoomApi, TopicArgs, TopicName, Topics } from '../../src/shared/api';
 import { bridgeBinaryPath } from '../../src/main/environments/bridge-path';
 import { PING_INTERVAL_MS } from '../../src/main/environments/environment';
 import clientPackage from '../../package.json';
@@ -138,6 +138,8 @@ export async function startMain(
     updater?: Updater;
     /** The SQLite driver the database is opened with; better-sqlite3 when it loads, as in the app. */
     sqliteDriver?: SqliteDriver;
+    /** Where the user's feedback goes; main sends none without it. */
+    sendFeedback?: (feedback: Feedback) => void;
   } = {},
 ): Promise<MainHarness> {
   const ownDir = !options.userDataDir;
@@ -159,6 +161,7 @@ export async function startMain(
     systemLocale: options.systemLocale,
     updater: options.updater,
     sqliteDriver: options.sqliteDriver,
+    sendFeedback: options.sendFeedback,
     bridgePath: options.bridgePath ?? realBridgePath,
     spawnBridge: (command, args) => {
       bridgeStarts++;

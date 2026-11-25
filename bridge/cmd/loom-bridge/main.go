@@ -11,6 +11,7 @@ import (
 
 	"github.com/theholocoder/loom/bridge/mcp"
 	"github.com/theholocoder/loom/bridge/protocol"
+	"github.com/theholocoder/loom/bridge/report"
 )
 
 // version is the Client's version, set at build time with
@@ -18,6 +19,9 @@ import (
 var version = "dev"
 
 func main() {
+	// Before anything reads the environment: it takes main's Sentry settings out of it.
+	report.Init()
+	defer report.Recover()
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		if err := mcp.Serve(os.Stdin, os.Stdout, version); err != nil {
 			fmt.Fprintln(os.Stderr, "loom-bridge mcp:", err)
@@ -36,6 +40,7 @@ func main() {
 	// Without its own path, agents get no Loom tools.
 	executable, _ := os.Executable()
 	if err := protocol.Serve(os.Stdin, os.Stdout, protocol.Info{Version: version, Executable: executable}, machine); err != nil {
+		report.Error(err)
 		fmt.Fprintln(os.Stderr, "loom-bridge:", err)
 		os.Exit(1)
 	}

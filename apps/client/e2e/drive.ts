@@ -208,7 +208,8 @@ const write = (path: string, content: string) => {
 const headless = !process.env.LOOM_DRIVE_HEADED;
 const app: ElectronApplication = await electron.launch({
   args: [...(headless ? ['--ozone-platform=headless'] : []), appDir],
-  env: { ...machine.bridgeEnv(), LOOM_USER_DATA_DIR: userDataDir },
+  // LOOM_SENTRY=1 makes the app report to Sentry, to see what it sends (src/main/telemetry.ts).
+  env: { ...machine.bridgeEnv(), LOOM_USER_DATA_DIR: userDataDir, ...(process.env.LOOM_SENTRY ? { LOOM_SENTRY: process.env.LOOM_SENTRY } : {}) },
 });
 const logs: string[] = [];
 app.process().stdout?.on('data', (chunk) => logs.push(String(chunk)));

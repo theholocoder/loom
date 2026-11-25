@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/theholocoder/loom/bridge/report"
 )
 
 // ProtocolVersion is bumped whenever the frames or messages change in a way
@@ -111,6 +113,7 @@ func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 		inFlight.Add(1)
 		go func() {
 			defer inFlight.Done()
+			defer report.Recover()
 			// A reply that can't be written means main has gone; the read
 			// loop sees the same and ends Serve.
 			_ = out.write(s.handle(ctx, req))

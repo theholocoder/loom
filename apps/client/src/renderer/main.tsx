@@ -4,6 +4,7 @@ import type { LoomApi } from '../shared/api';
 import { ApiProvider } from './api';
 import { applyAppearance } from './appearance';
 import { App } from './App';
+import { startTelemetry } from './telemetry';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
@@ -35,6 +36,9 @@ declare global {
     loom: LoomApi;
   }
 }
+
+// Before anything else runs, so its errors are reported too.
+startTelemetry();
 
 let rendered = false;
 const render = (systemLocale?: string) => {
