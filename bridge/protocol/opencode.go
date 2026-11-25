@@ -23,6 +23,14 @@ import (
 // probeTimeout bounds the whole OpenCode probe.
 const probeTimeout = 15 * time.Second
 
+// probeSettleTimeout bounds how long the probe waits for OpenCode's plugins to
+// settle in the location it asks about; it asks anyway after that, within
+// probeTimeout. A variable for tests.
+var probeSettleTimeout = 10 * time.Second
+
+// probeSettlePoll is how often the probe asks whether they have.
+const probeSettlePoll = 100 * time.Millisecond
+
 // probeGrace is how long the probe server gets to exit once its stdin is
 // closed before it is killed.
 const probeGrace = 5 * time.Second
@@ -128,7 +136,9 @@ func resolved(path string) string {
 // probeOpencode starts a short-lived, private `opencode serve --stdio` and
 // asks it for its integrations, which is how main tells whether OpenCode is
 // signed in, and, given a directory, the models, commands and skills it
-// offers there. It never runs `opencode auth list` or `opencode models`,
+// offers there. It asks all of them in that directory (or, without one, in
+// the server's own), once OpenCode's plugins have settled there: until then
+// OpenCode answers with what it has loaded so far, often nothing. It never runs `opencode auth list` or `opencode models`,
 // which start the user's shared background service.
 //
 // The server prints {"url": ...} on stdout, guards its API with HTTP Basic
@@ -204,7 +214,8 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 	}
 
 	base := strings.TrimRight(url, "/")
-	integrations, failure := probeGet(ctx, base, password, "/api/integration", "", maxOutput)
+	awaitSettled(ctx, base, password, params.Directory)
+	integrations, failure := probeGet(ctx, base, password, "/api/integration", params.Directory, maxOutput)
 	if failure != nil {
 		return nil, failure
 	}
@@ -222,8 +233,7 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 				result.DefaultModel = &ref
 			}
 		}
-		// After the models, which wait for OpenCode to load the checkout: until
-		// then it lists no skills. Without them the models are still worth having.
+		// Without commands and skills the models are still worth having.
 		if commands, failure := probeGet(ctx, base, password, "/api/command", params.Directory, maxOutput); failure == nil {
 			result.Commands = commands
 		}
@@ -237,6 +247,31 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 		}
 	}
 	return result, nil
+}
+
+// awaitSettled waits, within probeSettleTimeout, until OpenCode's plugins have
+// settled in directory ("" for the server's own): until then `GET /api/plugin`
+// lists none (OpenCode has built-in ones), and its other lists are only what
+// it has loaded so far. It doesn't wait for an OpenCode that can't list its
+// plugins.
+func awaitSettled(ctx context.Context, base, password, directory string) {
+	ctx, cancel := context.WithTimeout(ctx, probeSettleTimeout)
+	defer cancel()
+	for {
+		plugins, failure := probeGet(ctx, base, password, "/api/plugin", directory, maxOutput)
+		if failure != nil {
+			return
+		}
+		var listed []json.RawMessage
+		if json.Unmarshal(plugins, &listed) != nil || len(listed) > 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(probeSettlePoll):
+		}
+	}
 }
 
 // probeGet asks the probe server for `path` and returns its data. A directory
