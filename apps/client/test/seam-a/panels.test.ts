@@ -87,7 +87,8 @@ describe("a Session's Panels", () => {
     db.prepare("insert into sessions (id, project_id, title, working_copy_kind, working_copy_path, agent, status, created_at, updated_at, archived_at) values (9, 1, 'New', 'checkout', ?, 'OpenCode', 'archived', 1, 1, 1)").run(userDataDir);
     db.close();
     const main = await startMain({ userDataDir });
-    expect(await panelsOf(main, 9)).toEqual(DEFAULT_SESSION_PANELS);
+    // Changes is there, but the Side area stays hidden until the user asks for it.
+    expect(await panelsOf(main, 9)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: false }, dock: { panels: [], shown: null, open: false } });
 
     const panels: SessionPanels = {
       side: { panels: ['changes'], shown: 'changes', open: false },
@@ -174,7 +175,8 @@ describe("each Session's Panels, as main serves them", () => {
     const db = new Database(join(userDataDir, 'loom.db'));
     db.prepare("insert into sessions (id, project_id, title, working_copy_kind, working_copy_path, agent, status, created_at, updated_at, archived_at) values (9, 1, 'New', 'checkout', ?, 'OpenCode', 'archived', 1, 1, 1)").run(userDataDir);
     db.close();
-    expect(await panelsOf(main, 9)).toEqual({ side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: true } });
+    // A new one's Changes sits in the Dock, which stays hidden like its Side area would.
+    expect(await panelsOf(main, 9)).toEqual({ side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: false } });
   });
 
   it('move for those watching them as the Layout changes, and are kept as it has them', async () => {

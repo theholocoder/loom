@@ -4,7 +4,7 @@ import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session } from '../../src/shared/api';
 import { DEFAULT_SESSION_PANELS, type LayoutSettings, type PanelAreaState, type SessionPanels } from '../../src/shared/panels';
-import { FakeMain, HIDDEN_PANELS } from './fake-main';
+import { CHANGES_SHOWN, FakeMain, HIDDEN_PANELS } from './fake-main';
 
 afterEach(cleanup);
 
@@ -34,7 +34,7 @@ const other: Session = { ...session, id: 8, title: 'Fix billing', workingCopy: {
 /** A main where Session 7's Side area is `side` (a new Session's until given), and the Layout `layout`. */
 function fakeMain({ side, layout, sessions = [session] }: { side?: Partial<PanelAreaState>; layout?: Partial<LayoutSettings>; sessions?: Session[] } = {}) {
   const main = new FakeMain({ projects: [project], sessions, settings: { ...DEFAULT_SETTINGS, layout: { ...DEFAULT_SETTINGS.layout, ...layout } } });
-  if (side) main.publish('panels', { ...DEFAULT_SESSION_PANELS, side: { ...DEFAULT_SESSION_PANELS.side, ...side } }, { sessionId: session.id });
+  if (side) main.publish('panels', { ...CHANGES_SHOWN, side: { ...CHANGES_SHOWN.side, ...side } }, { sessionId: session.id });
   return main;
 }
 
@@ -62,7 +62,22 @@ const viewName = () => document.getElementById(view().getAttribute('aria-labelle
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
 
 describe('the Side area', () => {
-  it('shows Changes on a new Session, its tab labelled, with the count of files changed as its badge', () => {
+  it('stays hidden on a new Session until the user asks for it, Changes then shown', () => {
+    const main = new FakeMain({ projects: [project], sessions: [session] });
+    main.publish('panels', DEFAULT_SESSION_PANELS, { sessionId: session.id });
+    renderApp(main);
+    openSession();
+    expect(sideArea()).toBeNull();
+    expect(within(header()).getByRole('button', { name: 'Show the Side area' }).getAttribute('aria-expanded')).toBe('false');
+    expect(kept(main)).toEqual([]);
+
+    fireEvent.click(within(header()).getByRole('button', { name: 'Show the Side area' }));
+    expect(tabNames()).toEqual(['Changes']);
+    expect(viewName()).toBe('Changes');
+    expect(kept(main)).toEqual([{ panels: ['changes'], shown: 'changes', open: true }]);
+  });
+
+  it('shows Changes, its tab labelled, with the count of files changed as its badge', () => {
     renderApp(fakeMain({ sessions: [{ ...session, diffStat: { files: 4, added: 12, removed: 3 } }] }));
     openSession();
     expect(tabNames()).toEqual(['Changes']);
