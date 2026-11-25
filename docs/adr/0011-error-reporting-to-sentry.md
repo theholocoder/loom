@@ -14,5 +14,5 @@ Reporting is always on in a release: there is no setting to turn it off. Issue #
 - An error's message is often less than it said on screen. Its type and stack trace, with source maps uploaded by the Release workflow, are what to go by.
 - A native crash's minidump holds the crashed process's stack memory, which the scrubber can't read. It could hold a fragment of what the process was working on.
 - Loom depends on Sentry being reachable for this. An event that can't be sent is kept in `userData` and sent later, and never holds anything up.
-- The bridge reports its panics and the error that ends it, and no logs or traces. `loom-bridge mcp`, which the agents start, reports nothing.
+- The bridge reports its panics, the error that ends it, and an answer too big for a frame (by method and size, which it then answers with a `too_large` error), and no logs or traces. `loom-bridge mcp`, which the agents start, reports nothing.
 - An agent's own error text, which Loom quotes after its own sentence, is sent once scrubbed: it is what the agent says went wrong, not the conversation.

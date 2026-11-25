@@ -2,26 +2,23 @@ package protocol
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"strings"
 	"testing"
 )
 
-// frames splits what a writer wrote into its frames' payloads.
+// frames reads back what a writer wrote, frame by frame, as the bridge
+// reads main's: each one within MaxFrameSize.
 func frames(t *testing.T, written []byte) [][]byte {
 	t.Helper()
+	r := bytes.NewReader(written)
 	var payloads [][]byte
-	for len(written) > 0 {
-		if len(written) < 4 {
-			t.Fatalf("%d bytes left over, short of a frame header", len(written))
+	for r.Len() > 0 {
+		payload, err := readFrame(r)
+		if err != nil {
+			t.Fatalf("frame %d: %v", len(payloads)+1, err)
 		}
-		size := int(binary.BigEndian.Uint32(written))
-		if len(written) < 4+size {
-			t.Fatalf("a frame says %d bytes, but only %d follow", size, len(written)-4)
-		}
-		payloads = append(payloads, written[4:4+size])
-		written = written[4+size:]
+		payloads = append(payloads, payload)
 	}
 	return payloads
 }
@@ -34,30 +31,30 @@ func TestAnswerTooBigForAFrameIsAnError(t *testing.T) {
 	out := &writer{w: &written}
 	big := strings.Repeat("x", MaxFrameSize)
 	req := request{ID: json.RawMessage("7"), Method: "exec"}
-	if err := out.respond(req, response{ID: req.ID, Result: execResult{Stdout: big}}); err != nil {
-		t.Fatalf("respond: %v", err)
+	if err := answer(out, req, response{ID: req.ID, Result: execResult{Stdout: big}}); err != nil {
+		t.Fatalf("answer: %v", err)
 	}
-	if err := out.respond(request{ID: json.RawMessage("8"), Method: "ping"}, response{ID: json.RawMessage("8"), Result: struct{}{}}); err != nil {
-		t.Fatalf("respond after: %v", err)
+	if err := answer(out, request{ID: json.RawMessage("8"), Method: "ping"}, response{ID: json.RawMessage("8"), Result: struct{}{}}); err != nil {
+		t.Fatalf("answer after: %v", err)
 	}
 
 	payloads := frames(t, written.Bytes())
 	if len(payloads) != 2 {
 		t.Fatalf("wrote %d frames, want 2", len(payloads))
 	}
-	var answer struct {
+	var got struct {
 		ID     int             `json:"id"`
 		Result json.RawMessage `json:"result"`
 		Error  *Error          `json:"error"`
 	}
-	if err := json.Unmarshal(payloads[0], &answer); err != nil {
+	if err := json.Unmarshal(payloads[0], &got); err != nil {
 		t.Fatal(err)
 	}
-	if answer.ID != 7 || answer.Result != nil || answer.Error == nil || answer.Error.Code != "too_large" {
+	if got.ID != 7 || got.Result != nil || got.Error == nil || got.Error.Code != "too_large" {
 		t.Fatalf("answer = %s, want a too_large error for request 7", payloads[0])
 	}
-	if !strings.Contains(answer.Error.Message, "exec") {
-		t.Errorf("message %q doesn't say which method's answer it was", answer.Error.Message)
+	if !strings.Contains(got.Error.Message, "exec") {
+		t.Errorf("message %q doesn't say which method's answer it was", got.Error.Message)
 	}
 	if string(payloads[1]) != `{"id":8,"result":{}}` {
 		t.Errorf("next answer = %s", payloads[1])
