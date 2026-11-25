@@ -13,14 +13,12 @@ import * as Sentry from '@sentry/electron/main';
 import { app } from 'electron';
 import type { Feedback, LoomApi } from '../shared/api';
 import { scrubBreadcrumb, scrubEvent, scrubLog, scrubMessage, type Machine } from '../shared/scrub';
+import { rendererTelemetryArgument } from '../shared/telemetry';
 
 /** The `loom` project, which main, the preload and the renderer report to. Public by design: a DSN only lets one send. */
 const CLIENT_DSN = 'https://2aaa8ae3b659d349a3c01855068c148f@o4512493613613056.ingest.de.sentry.io/4512493682884688';
 /** The `loom-bridge` project, which the bridge reports to (bridge/report). */
 const BRIDGE_DSN = 'https://25d24005fab079cf86c4e9ca086a4b1d@o4512493613613056.ingest.de.sentry.io/4512493682950224';
-
-/** The renderer's switch, passed in its command line: present when it reports, with the trace sample rate. */
-export const RENDERER_SWITCH = '--loom-telemetry';
 
 /** The default integrations Loom does without: they gather what the user did, said or had in memory. */
 const DROPPED_INTEGRATIONS = new Set([
@@ -35,11 +33,9 @@ const DROPPED_INTEGRATIONS = new Set([
 ]);
 
 export interface Telemetry {
-  /** Whether this build reports at all. */
-  enabled: boolean;
   /** Arguments for each window's renderer, telling it whether and how to report. */
   rendererArguments: string[];
-  /** Sends the user's feedback; absent when this build doesn't report. */
+  /** Sends the user's feedback, with Loom's version and the system's details; absent when this build doesn't report. */
   sendFeedback?: (feedback: Feedback) => void;
   /** Logs what Loom's state says about its health: its bridge, its database, its updates. */
   watch(api: LoomApi): () => void;
@@ -68,7 +64,7 @@ function wanted(selfTesting: boolean): boolean {
  * in main's own environment, which the bridge inherits.
  */
 export function startTelemetry({ selfTesting }: { selfTesting: boolean }): Telemetry {
-  if (!wanted(selfTesting)) return { enabled: false, rendererArguments: [], watch: () => () => {} };
+  if (!wanted(selfTesting)) return { rendererArguments: [], watch: () => () => {} };
   const names = machine();
   const release = `loom@${app.getVersion()}`;
   const environment = app.isPackaged ? 'production' : 'development';
@@ -110,8 +106,7 @@ export function startTelemetry({ selfTesting }: { selfTesting: boolean }): Telem
   process.env.LOOM_SENTRY_RELEASE = release;
   process.env.LOOM_SENTRY_ENVIRONMENT = environment;
   return {
-    enabled: true,
-    rendererArguments: [`${RENDERER_SWITCH}=${tracesSampleRate}`],
+    rendererArguments: [rendererTelemetryArgument({ tracesSampleRate, machine: names })],
     sendFeedback: ({ kind, message, email }) => {
       Sentry.captureFeedback({ message, email, source: 'loom-feedback-form' }, { captureContext: { tags: { feedback_kind: kind } } });
     },
@@ -124,11 +119,6 @@ function watchHealth(api: LoomApi): () => void {
   const stops: (() => void)[] = [];
   const environments = new Map<string, string>();
   stops.push(
-    api.subscribe('database', (database) => {
-      if (database.state === 'damaged') Sentry.logger.error('database damaged', { problem: database.problem });
-    }),
-  );
-  stops.push(
     api.subscribe('update', (update) => {
       if (update.state === 'ready') Sentry.logger.info('update downloaded', { version: update.version });
     }),
@@ -136,6 +126,8 @@ function watchHealth(api: LoomApi): () => void {
   let watchingEnvironments = false;
   stops.push(
     api.subscribe('database', (database) => {
+      if (database.state === 'damaged') Sentry.logger.error('database damaged', { problem: database.problem });
+      // The Environments are served once the database is open.
       if (database.state !== 'ok' || watchingEnvironments) return;
       watchingEnvironments = true;
       stops.push(

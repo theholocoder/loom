@@ -20,12 +20,11 @@ export interface Machine {
 /** The longest message kept, after its first line is taken. */
 export const MAX_MESSAGE = 300;
 
-const DETAILS = '\n\nDetails:\n';
-
 /** URLs Loom's own code lives at, which stack frames point to and source maps are found by. */
 const APP_URL = /\bapp:\/\/\/[^\s'"`<>()]*/g;
 const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s'"`<>()]*/gi;
-const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+// An address ends in a top-level domain, so `loom@0.1.0` stays.
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/gi;
 const WINDOWS_PATH = /(?:\b[a-z]:|\\\\[^\s\\'"`]+)\\[^\s'"`<>|:]*/gi;
 // An absolute or `~` path: a slash that starts a word.
 const UNIX_PATH = /(^|[\s(=:,[{])~?\/[^\s'"`<>)\]},;:]+/g;
@@ -58,13 +57,12 @@ export function scrubText(text: string, machine: Machine = {}): string {
 }
 
 /**
- * A message as it may be sent: its first line, with no Details, quoted text
- * or paths, and no longer than MAX_MESSAGE.
+ * A message as it may be sent: its first line, so never its Details or what
+ * a command printed, with no quoted text or paths, and no longer than
+ * MAX_MESSAGE.
  */
 export function scrubMessage(text: string, machine: Machine = {}): string {
-  const at = text.indexOf(DETAILS);
-  const sentence = (at < 0 ? text : text.slice(0, at)).trim();
-  const firstLine = sentence.split(/\r?\n/, 1)[0] ?? '';
+  const firstLine = text.trim().split(/\r?\n/, 1)[0] ?? '';
   const out = scrubText(firstLine, machine).replace(RELATIVE_PATH, '<path>').replace(HOST, '<host>');
   return out.length > MAX_MESSAGE ? `${out.slice(0, MAX_MESSAGE - 1)}…` : out;
 }
@@ -160,15 +158,20 @@ interface Log {
   attributes?: Record<string, unknown>;
 }
 
-/** A log line as it may be sent: its message scrubbed, and the values it was formatted from dropped. */
+/**
+ * A log line as it may be sent: its message and attributes scrubbed as
+ * messages, but for the SDK's own (`sentry.*`), and the values it was
+ * formatted from dropped.
+ */
 export function scrubLog<T extends Log>(log: T, machine: Machine = {}): T {
   const out = { ...log } as Log & Record<string, unknown>;
   for (const key of ['message', 'body'] as const) if (typeof out[key] === 'string') out[key] = scrubMessage(out[key], machine);
   if (out.attributes) {
     const attributes: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(out.attributes)) {
-      if (key.startsWith('sentry.message.parameter') || key === 'sentry.message.template') continue;
-      attributes[key] = scrubValue(value, key, machine);
+      if (key.startsWith('sentry.message.')) continue;
+      if (key.startsWith('sentry.')) attributes[key] = value;
+      else attributes[key] = typeof value === 'string' ? scrubMessage(value, machine) : scrubValue(value, key, machine);
     }
     out.attributes = attributes;
   }

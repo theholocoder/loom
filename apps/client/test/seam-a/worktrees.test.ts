@@ -372,8 +372,8 @@ describe('a worktree Session in an existing worktree', () => {
     const { main, project } = await withProject(machine, checkout);
     const create = (worktree: string) => main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', existing: { worktree }, prompt: 'Go' });
 
-    await expect(create(machine.folder('not-a-worktree'))).rejects.toThrow("isn't a worktree of billing-api");
-    await expect(create(checkout)).rejects.toThrow("isn't a worktree of billing-api");
+    await expect(create(machine.folder('not-a-worktree'))).rejects.toThrow("isn't a worktree of \"billing-api\"");
+    await expect(create(checkout)).rejects.toThrow("isn't a worktree of \"billing-api\"");
     const locked = machine.folder('locked-wt');
     git(checkout, 'worktree', 'add', '--quiet', '--lock', '-b', 'locked', locked);
     await expect(create(locked)).rejects.toThrow(`${locked} is locked; unlock it with \`git worktree unlock\` to work in it`);

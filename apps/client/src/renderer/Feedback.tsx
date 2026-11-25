@@ -1,7 +1,7 @@
 // The feedback form (issue #126): a bug or an idea, in the user's own words,
 // sent to Loom's makers through main (`feedback.send`), with an email address
-// to answer at if they want one. Nothing else goes with it but Loom's version
-// and the system's name; the form says so, and asks for nothing private.
+// to answer at if they want one. Only Loom's version and the system's
+// details go with it; the form says so, and asks for nothing private.
 import { Bug, Lightbulb, MessageSquareText, Send } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -87,7 +87,7 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
           }}
         />
         <input type="email" aria-label="Your email address, to get an answer (optional)" placeholder="Email, to get an answer (optional)" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} />
-        <p id={`${ids}-text`}>Only what you write here is sent, with Loom's version and your system's name. Leave out code and anything private.</p>
+        <p id={`${ids}-text`}>Only what you write here is sent, with Loom's version and your system's details. Leave out code and anything private.</p>
         {error && (
           <div className="err" role="alert">
             <ErrorText text={error} />

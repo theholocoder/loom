@@ -4,11 +4,12 @@
 // when main says so, through the preload.
 import * as Sentry from '@sentry/electron/renderer';
 import { scrubBreadcrumb, scrubEvent, scrubLog } from '../shared/scrub';
+import type { RendererTelemetry } from '../shared/telemetry';
 
 declare global {
   interface Window {
     /** Set by the preload when this renderer reports errors. */
-    loomTelemetry?: { tracesSampleRate: number };
+    loomTelemetry?: RendererTelemetry;
   }
 }
 
@@ -19,6 +20,7 @@ const DROPPED_INTEGRATIONS = new Set(['Breadcrumbs', 'HttpContext']);
 export function startTelemetry(): void {
   const options = window.loomTelemetry;
   if (!options) return;
+  const { machine } = options;
   Sentry.init({
     tracesSampleRate: options.tracesSampleRate,
     dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false, stackFrameVariables: false },
@@ -30,9 +32,9 @@ export function startTelemetry(): void {
       Sentry.captureConsoleIntegration({ levels: ['error'] }),
       Sentry.consoleLoggingIntegration({ levels: ['warn', 'error'] }),
     ],
-    beforeSend: (event) => scrubEvent(event),
-    beforeSendSpan: (span) => scrubEvent(span),
-    beforeBreadcrumb: (crumb) => scrubBreadcrumb(crumb),
-    beforeSendLog: (log) => scrubLog(log),
+    beforeSend: (event) => scrubEvent(event, machine),
+    beforeSendSpan: (span) => scrubEvent(span, machine),
+    beforeBreadcrumb: (crumb) => scrubBreadcrumb(crumb, machine),
+    beforeSendLog: (log) => scrubLog(log, machine),
   });
 }

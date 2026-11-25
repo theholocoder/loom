@@ -29,8 +29,8 @@ const flushTimeout = 2 * time.Second
 
 var enabled bool
 
-// Init starts reporting if main asked for it, and reports whether it did.
-func Init() bool {
+// Init starts reporting if main asked for it.
+func Init() {
 	dsn := os.Getenv(dsnVariable)
 	release := os.Getenv(releaseVariable)
 	environment := os.Getenv(environmentVariable)
@@ -38,7 +38,7 @@ func Init() bool {
 		_ = os.Unsetenv(name)
 	}
 	if dsn == "" {
-		return false
+		return
 	}
 	machine := thisMachine()
 	err := sentry.Init(sentry.ClientOptions{
@@ -64,7 +64,6 @@ func Init() bool {
 		},
 	})
 	enabled = err == nil
-	return enabled
 }
 
 func thisMachine() Machine {

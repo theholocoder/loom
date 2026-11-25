@@ -15,6 +15,7 @@ describe('what Loom sends Sentry, made safe to send', () => {
     ['a bare Windows path', 'could not remove C:\\Users\\Erin\\code\\x', 'could not remove <path>'],
     ['a URL', 'could not fetch https://gitlab.acme.example/team/repo/-/merge_requests/3', 'could not fetch <url>'],
     ['an email address', 'commit by erin@acme.example failed', 'commit by <email> failed'],
+    ['nothing in a version', 'loom@0.1.0 crashed', 'loom@0.1.0 crashed'],
     ['quoted text', 'there\'s already a branch named "feat/new-pricing"', 'there\'s already a branch named "<redacted>"'],
     ['single-quoted text, leaving contractions', "couldn't open 'Secret plan' as it isn't there", 'couldn\'t open "<redacted>" as it isn\'t there'],
     ['curly-quoted text', 'Delete “Rewrite the billing flow”?', 'Delete "<redacted>"?'],
@@ -120,7 +121,7 @@ describe('what Loom sends Sentry, made safe to send', () => {
   });
 
   it('scrubs a log line, dropping the values it was formatted from', () => {
-    const log = { level: 'warn', message: 'Loom could not check for updates: fetch https://x failed', attributes: { 'sentry.message.template': '%s %s', 'sentry.message.parameter.0': 'private', 'os.name': 'Linux', where: '/home/erin/x' } };
-    expect(scrubLog(log, machine)).toEqual({ level: 'warn', message: 'Loom could not check for updates: fetch <url> failed', attributes: { 'os.name': 'Linux', where: '<path>' } });
+    const log = { level: 'warn', message: 'Loom could not check for updates: fetch https://x failed', attributes: { 'sentry.message.template': '%s %s', 'sentry.message.parameter.0': 'private', 'sentry.release': 'loom@0.1.0', 'os.name': 'Linux', where: '/home/erin/x', environment: 'erin', problem: 'file is not a database\nraw output', count: 2 } };
+    expect(scrubLog(log, machine)).toEqual({ level: 'warn', message: 'Loom could not check for updates: fetch <url> failed', attributes: { 'sentry.release': 'loom@0.1.0', 'os.name': 'Linux', where: '<path>', environment: '<user>', problem: 'file is not a database', count: 2 } });
   });
 });

@@ -19,15 +19,16 @@ type Machine struct {
 const MaxMessage = 300
 
 var (
-	url         = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s'"` + "`" + `<>()]*`)
-	email       = regexp.MustCompile(`[\w.+-]+@[\w-]+(?:\.[\w-]+)+`)
+	url = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s'"` + "`" + `<>()]*`)
+	// An address ends in a top-level domain, so `loom@0.1.0` stays.
+	email       = regexp.MustCompile(`(?i)[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b`)
 	windowsPath = regexp.MustCompile(`(?i)(?:\b[a-z]:|\\\\[^\s\\'"` + "`" + `]+)\\[^\s'"` + "`" + `<>|:]*`)
 	// An absolute or `~` path: a slash that starts a word.
 	unixPath = regexp.MustCompile(`(^|[\s(=:,\[{])~?/[^\s'"` + "`" + `<>)\]},;:]+`)
 	// Something with slashes in it, which in a message is a path or a branch.
 	relativePath = regexp.MustCompile(`\b[\w.@+-]+(?:/[\w.@+-]+)+/?`)
 	// Quoted text. A single quote counts only away from letters, so "isn't" stays.
-	quoted       = regexp.MustCompile(`"[^"\n]*"|` + "`[^`\\n]*`" + `|“[^”\n]*”|‘[^’\n]*’`)
+	quoted       = regexp.MustCompile(`"[^"\n]*"|` + "`[^`\\n]*`" + `|“[^”\n]*”|‘[^’\n]*’|«[^»\n]*»`)
 	singleQuoted = regexp.MustCompile(`(^|[^\w])'[^'\n]*'([^\w]|$)`)
 	// A host name, such as a self-hosted Forge's, under the common top-level domains.
 	host = regexp.MustCompile(`(?i)\b(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|app|ai|co|me|sh|cloud|tech|site|xyz|info|biz|local|lan|internal|intranet|corp|home|example|test|localdomain|eu|de|fr|uk|nl|ch|be|es|it|pt|ca|us|jp|cn|ru|br|in|au|nz|se|no|fi|dk|pl|cz|at|ie|il|kr|tw|sg)\b`)
@@ -83,13 +84,8 @@ func Scrub(event *sentry.Event, machine Machine) *sentry.Event {
 	for key, value := range event.Tags {
 		event.Tags[key] = ScrubText(value, machine)
 	}
-	for name, context := range event.Contexts {
-		for key, value := range context {
-			if s, ok := value.(string); ok {
-				context[key] = ScrubText(s, machine)
-			}
-		}
-		event.Contexts[name] = context
+	for _, context := range event.Contexts {
+		scrubMap(context, machine)
 	}
 	for i := range event.Exception {
 		exception := &event.Exception[i]
@@ -100,6 +96,27 @@ func Scrub(event *sentry.Event, machine Machine) *sentry.Event {
 		scrubStacktrace(event.Threads[i].Stacktrace, machine)
 	}
 	return event
+}
+
+// scrubMap scrubs every string in m, however deep.
+func scrubMap(m map[string]any, machine Machine) {
+	for key, value := range m {
+		m[key] = scrubAny(value, machine)
+	}
+}
+
+func scrubAny(value any, machine Machine) any {
+	switch v := value.(type) {
+	case string:
+		return ScrubText(v, machine)
+	case map[string]any:
+		scrubMap(v, machine)
+	case []any:
+		for i := range v {
+			v[i] = scrubAny(v[i], machine)
+		}
+	}
+	return value
 }
 
 // A frame keeps where in the bridge it is, never its variables, and its

@@ -107,10 +107,10 @@ export function checkAttachments(attachments: unknown): NewAttachment[] {
   if (attachments.length > MAX_ATTACHMENTS) throw new Error(`A message can have at most ${MAX_ATTACHMENTS} attachments.`);
   for (const attachment of attachments as Array<Partial<NewAttachment> | null>) {
     if (typeof attachment?.name !== 'string' || !fileName(attachment.name)) throw new Error('An attachment needs a file name.');
-    if (!(attachment.data instanceof Uint8Array)) throw new Error(`${attachment.name} has no content to attach.`);
-    if (attachment.mimeType !== undefined && typeof attachment.mimeType !== 'string') throw new Error(`${attachment.name}'s media type must be text.`);
+    if (!(attachment.data instanceof Uint8Array)) throw new Error(`"${attachment.name}" has no content to attach.`);
+    if (attachment.mimeType !== undefined && typeof attachment.mimeType !== 'string') throw new Error(`The media type of "${attachment.name}" must be text.`);
     if (attachment.data.byteLength > MAX_ATTACHMENT_BYTES) {
-      throw new Error(`${attachment.name} is over ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB, too big to attach.`);
+      throw new Error(`"${attachment.name}" is over ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB, too big to attach.`);
     }
   }
   return attachments as NewAttachment[];

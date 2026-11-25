@@ -2,7 +2,7 @@
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import type { Commands, DatabaseStatus, Feedback, EnvironmentStatus, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import type { Commands, DatabaseStatus, EnvironmentStatus, Feedback, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
 import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';

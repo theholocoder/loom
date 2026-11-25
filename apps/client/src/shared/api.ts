@@ -2006,7 +2006,8 @@ export interface Commands {
   'update.restart': { params: void; result: void };
   /**
    * Sends the user's feedback to Loom's makers, with Loom's version and the
-   * system's name and nothing else. Rejects in a build that sends none, such
+   * system's details (its OS and hardware), and nothing of what the user
+   * works on. Rejects in a build that sends none, such
    * as in development, or when the message is empty.
    */
   'feedback.send': { params: Feedback; result: void };

@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { FORGE_CLI, type ForgeKind, type ForgeLink, type ForgeStatus, type MergeRequestState } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 import { describeFailure } from '../environments/failures';
+import { withDetails } from '../../shared/errors';
 
 const MERGE_REQUEST_TIMEOUT_MS = 20_000;
 /** Merging waits on the Forge, which may take a while over a big Merge request. */
@@ -130,7 +131,7 @@ async function run(call: BridgeCall, kind: ForgeKind, args: string[], workingCop
   try {
     return JSON.parse(stdout || 'null');
   } catch {
-    throw new Error(`${FORGE_CLI[kind]} ${args[0]} ${args[1]} printed something other than JSON: ${stdout.slice(0, 200)}`);
+    throw new Error(withDetails(`${FORGE_CLI[kind]} ${args[0]} ${args[1]} printed something other than JSON`, stdout.slice(0, 200)));
   }
 }
 

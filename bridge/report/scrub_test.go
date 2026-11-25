@@ -17,6 +17,8 @@ func TestScrubMessage(t *testing.T) {
 		{"a URL", "fetch https://gitlab.acme.example/team/repo failed", "fetch <url> failed"},
 		{"an email address", "commit by erin@acme.example failed", "commit by <email> failed"},
 		{"quoted text", `unknown method "secret.method"`, `unknown method "<redacted>"`},
+		{"guillemets", "ouvre «Projet secret»", `ouvre "<redacted>"`},
+		{"nothing in a version", "loom@0.1.0 crashed", "loom@0.1.0 crashed"},
 		{"single-quoted text, leaving contractions", "couldn't run 'my secret script' as it isn't there", `couldn't run "<redacted>" as it isn't there`},
 		{"an unquoted branch", "could not push loom/fix-login", "could not push <path>"},
 		{"a host name", "dial tcp: lookup gitlab.acme.internal: no such host", "dial tcp: lookup <host>: no such host"},
@@ -56,7 +58,7 @@ func TestScrubDropsWhoAndWhereTheUserIs(t *testing.T) {
 		Breadcrumbs: []*sentry.Breadcrumb{{Message: "private"}},
 		Message:     "could not read /home/erin/x",
 		Tags:        map[string]string{"where": "/home/erin/x"},
-		Contexts:    map[string]sentry.Context{"os": {"name": "linux"}, "device": {"hostname": "erins-laptop"}},
+		Contexts:    map[string]sentry.Context{"os": {"name": "linux"}, "device": {"hostname": "erins-laptop", "nested": map[string]any{"at": "/home/erin/x"}}},
 		Exception: []sentry.Exception{{
 			Type:  "*fs.PathError",
 			Value: "open /home/erin/x: denied",
@@ -72,6 +74,9 @@ func TestScrubDropsWhoAndWhereTheUserIs(t *testing.T) {
 	}
 	if got.Message != "could not read <path>" || got.Tags["where"] != "<path>" || got.Contexts["device"]["hostname"] != "<host>" || got.Contexts["os"]["name"] != "linux" {
 		t.Errorf("message %q, tags %v, contexts %v", got.Message, got.Tags, got.Contexts)
+	}
+	if nested := got.Contexts["device"]["nested"].(map[string]any); nested["at"] != "<path>" {
+		t.Errorf("nested context %v", nested)
 	}
 	exception := got.Exception[0]
 	if exception.Value != "open <path>: denied" {

@@ -1,10 +1,10 @@
-import { startTelemetry } from './telemetry';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { LoomApi } from '../shared/api';
 import { ApiProvider } from './api';
 import { applyAppearance } from './appearance';
 import { App } from './App';
+import { startTelemetry } from './telemetry';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';

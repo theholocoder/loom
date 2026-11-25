@@ -2,6 +2,7 @@
 import { hookupIpc } from '@sentry/electron/preload-namespaced';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { LoomApi } from '../shared/api';
+import { rendererTelemetryOf } from '../shared/telemetry';
 import { IPC } from '../shared/ipc-channels';
 
 const listeners = new Map<number, (value: unknown) => void>();
@@ -31,10 +32,9 @@ const api: LoomApi = {
 contextBridge.exposeInMainWorld('loom', api);
 
 // When main reports errors (main/telemetry.ts), it says so on the command
-// line with the trace sample rate: the renderer then reports through main,
-// over Sentry's own IPC.
-const telemetry = process.argv.find((arg) => arg.startsWith('--loom-telemetry='));
+// line: the renderer then reports through main, over Sentry's own IPC.
+const telemetry = rendererTelemetryOf(process.argv);
 if (telemetry) {
   hookupIpc();
-  contextBridge.exposeInMainWorld('loomTelemetry', { tracesSampleRate: Number(telemetry.slice('--loom-telemetry='.length)) || 0 });
+  contextBridge.exposeInMainWorld('loomTelemetry', telemetry);
 }
