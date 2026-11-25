@@ -510,6 +510,35 @@ describe("the agent's Link merge request tool", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)!.mergeRequest).toEqual({ number: 40, url: pr(40) });
   });
+
+  it('links the Merge request a script the agent ran named with the tool, as OpenCode reports Code Mode calls', async () => {
+    const script = { toolCallId: 'call_script', name: 'execute', title: 'execute', kind: 'other' };
+    const { machine, checkout } = machineOn('gh', GITHUB, {
+      mergeRequests: [{ number: 40, url: pr(40), branch: 'someone/fork-branch' }],
+      turns: [
+        {
+          chunks: [
+            { update: { sessionUpdate: 'tool_call', ...script, status: 'pending', rawInput: {} } },
+            { update: { sessionUpdate: 'tool_call_update', toolCallId: 'call_script', status: 'in_progress', rawInput: { code: 'await tools.loom.link_merge_request({ number: 40 })' } } },
+            {
+              update: {
+                sessionUpdate: 'tool_call_update',
+                toolCallId: 'call_script',
+                status: 'completed',
+                content: [{ type: 'content', content: { type: 'text', text: 'null' } }],
+                rawOutput: { metadata: { toolCalls: [{ tool: 'loom.link_merge_request', status: 'completed', input: { number: 40 } }], truncated: false } },
+              },
+            },
+            'Linked it.',
+          ],
+        },
+      ],
+    });
+    const { main, id } = await withSession(machine, checkout);
+
+    const linked = await waitFor(main.api, 'sessions', session(id, (s) => !!s.mergeRequest));
+    expect(linked.find((s) => s.id === id)!.mergeRequest).toEqual({ number: 40, url: pr(40) });
+  });
 });
 
 describe('the Merge request action', () => {

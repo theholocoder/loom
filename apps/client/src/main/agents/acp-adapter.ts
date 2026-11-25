@@ -2,7 +2,7 @@
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
 import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type PlanEntry, type PlanStatus, type QuestionField, type QuestionOption, type TokenCounts, type ToolStatus } from '../../shared/api';
-import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions, type ToolCall } from './adapter';
+import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions, type ScriptCall, type ToolCall } from './adapter';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection, AcpError } from './acp';
 import { agentCommandsOf } from './commands';
@@ -328,6 +328,7 @@ function translate(update: SessionUpdate, { calls, workingCopy, planTool }: Upda
         input: call.rawInput === undefined ? undefined : stringOf(call.rawInput),
         output: outputOf(call),
         diffs: diffsOf(call, workingCopy),
+        scriptCalls: scriptCallsOf(call),
       };
       const title = typeof call.title === 'string' && call.title.trim() ? call.title : undefined;
       // ACP leaves out what didn't change; so does the event.
@@ -430,6 +431,24 @@ interface AcpToolCall {
 }
 
 const STATUSES: Record<string, ToolStatus> = { pending: 'running', in_progress: 'running', completed: 'completed', failed: 'failed' };
+
+/** OpenCode's Code Mode script statuses, as Loom's. */
+const SCRIPT_STATUSES: Record<string, ToolStatus> = { running: 'running', completed: 'completed', error: 'failed' };
+
+/**
+ * The tools an OpenCode Code Mode script (its `execute` tool) called, as its
+ * ended call's `rawOutput.metadata.toolCalls` lists them; undefined without.
+ */
+function scriptCallsOf({ rawOutput }: AcpToolCall): ScriptCall[] | undefined {
+  const listed = (rawOutput as { metadata?: { toolCalls?: unknown } } | undefined)?.metadata?.toolCalls;
+  if (!Array.isArray(listed)) return undefined;
+  return listed.flatMap((entry): ScriptCall[] => {
+    const { tool, status, input } = (entry ?? {}) as { tool?: unknown; status?: unknown; input?: unknown };
+    const known = typeof status === 'string' ? SCRIPT_STATUSES[status] : undefined;
+    if (typeof tool !== 'string' || !tool || !known) return [];
+    return [{ name: tool, status: known, ...(input === undefined ? {} : { input: stringOf(input) }) }];
+  });
+}
 
 /** The tool's output as text: its content blocks but its diffs, or else its raw output. */
 function outputOf({ content, rawOutput }: AcpToolCall): string | undefined {

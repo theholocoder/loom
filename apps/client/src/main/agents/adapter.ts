@@ -71,6 +71,18 @@ export interface ToolCall {
   output?: string;
   /** The files it changed, given whole; their paths in the working copy when they are in there. */
   diffs?: FileChange[];
+  /**
+   * The tools a script it ran called, each in its own name (`loom.link_merge_request`),
+   * once the script has ended: OpenCode's Code Mode reports no tool call of its own for them.
+   */
+  scriptCalls?: ScriptCall[];
+}
+
+/** A tool a script called, as the agent reports it: its name, how it went, and its input. */
+export interface ScriptCall {
+  name: string;
+  status: ToolStatus;
+  input?: string;
 }
 
 /** What an agent asks approval for, as it reports it. */
