@@ -98,3 +98,12 @@ func Error(err error) {
 	sentry.CaptureException(err)
 	sentry.Flush(flushTimeout)
 }
+
+// Capture reports err, which the bridge carries on after, without waiting
+// for it to go out.
+func Capture(err error) {
+	if !enabled || err == nil {
+		return
+	}
+	sentry.CaptureException(err)
+}
