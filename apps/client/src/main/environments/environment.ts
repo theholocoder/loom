@@ -209,15 +209,16 @@ export class Environment {
     if (kept && !fresh) return kept;
     let asked = this.asking.get(path);
     if (!asked) {
-      const asking = probeOpenCodeCheckout((method, timeoutMs, params) => this.request(method, timeoutMs, params), path);
-      this.asking.set(path, (asked = asking));
+      const probe = probeOpenCodeCheckout((method, timeoutMs, params) => this.request(method, timeoutMs, params), path);
+      this.asking.set(path, probe);
+      asked = probe;
       const settled = (keep: boolean) => {
         // Asked before the agent was checked again, it isn't kept.
-        if (this.asking.get(path) !== asking) return;
+        if (this.asking.get(path) !== probe) return;
         this.asking.delete(path);
-        if (keep) this.offers.set(path, asking);
+        if (keep) this.offers.set(path, probe);
       };
-      asking.then(({ models }) => settled(models.length > 0), () => settled(false));
+      probe.then(({ models }) => settled(models.length > 0), () => settled(false));
     }
     return kept ? asked.catch(() => kept) : asked;
   }

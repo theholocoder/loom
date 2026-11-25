@@ -1552,8 +1552,9 @@ export interface Commands {
    * the composer's `/`: commands first, then skills, as the agent lists them.
    * Asked of the same agent probe as `projects.models`, and kept as long;
    * with `fresh`, the agent is asked again (the user may have added a skill
-   * since), and what it answers is kept instead, models too. Empty when the
-   * agent can't list them.
+   * since), and what it answers is kept instead, models too, as a first ask
+   * is; what was kept answers if it can't be asked. Empty when the agent
+   * can't list them.
    */
   'projects.commands': { params: { id: number; fresh?: boolean }; result: AgentCommand[] };
   /**

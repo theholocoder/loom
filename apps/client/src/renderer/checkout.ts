@@ -70,25 +70,26 @@ const NO_COMMANDS: AgentCommand[] = [];
 export function useAgentCommands(projectId: number | undefined, announced?: AgentCommand[]): { commands: AgentCommand[]; refresh: () => void } {
   const api = useApi();
   const [listed, setListed] = useState<{ projectId: number; commands: AgentCommand[] }>();
-  /** How many times the commands were asked for again. */
-  const [generation, setGeneration] = useState(0);
+  /** How many times the commands were asked for again, and for which Project: another's are asked as main keeps them. */
+  const [refreshed, setRefreshed] = useState<{ projectId: number | undefined; times: number }>({ projectId, times: 0 });
+  const times = refreshed.projectId === projectId ? refreshed.times : 0;
   useEffect(() => {
     if (projectId === undefined) return;
     let current = true;
     api
-      .invoke('projects.commands', generation ? { id: projectId, fresh: true } : { id: projectId })
+      .invoke('projects.commands', times ? { id: projectId, fresh: true } : { id: projectId })
       .then((commands) => current && setListed({ projectId, commands }))
       .catch(() => undefined);
     return () => {
       current = false;
     };
-  }, [api, projectId, generation]);
+  }, [api, projectId, times]);
   const checkout = listed && listed.projectId === projectId ? listed.commands : NO_COMMANDS;
   const commands = useMemo(() => {
     const all = announced ? [...announced, ...checkout.filter((c) => c.kind === 'skill')] : checkout;
     const names = new Set<string>();
     return all.filter(({ name }) => !names.has(name) && !!names.add(name));
   }, [announced, checkout]);
-  const refresh = useCallback(() => setGeneration((n) => n + 1), []);
+  const refresh = useCallback(() => setRefreshed((was) => ({ projectId, times: was.projectId === projectId ? was.times + 1 : 1 })), [projectId]);
   return { commands, refresh };
 }
