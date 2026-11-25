@@ -5,7 +5,7 @@ import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session } from '../../src/shared/api';
 import { type PanelAreaState, type SessionPanels } from '../../src/shared/panels';
 import type { InboxSettings } from '../../src/shared/window';
-import { CHANGES_SHOWN, FakeMain } from './fake-main';
+import { FakeMain, SHOWN_PANELS } from './fake-main';
 
 /** Makes the window `width` wide, as a user resizing it would. */
 function resizeWindow(width: number) {
@@ -45,7 +45,7 @@ const other: Session = { ...session, id: 8, title: 'Fix billing', workingCopy: {
 
 function renderApp({ side, inbox }: { side?: Partial<PanelAreaState>; inbox?: InboxSettings } = {}) {
   const main = new FakeMain({ projects: [project], sessions: [session, other], settings: { ...DEFAULT_SETTINGS, ...(inbox && { inbox }) } });
-  if (side) main.publish('panels', { ...CHANGES_SHOWN, side: { ...CHANGES_SHOWN.side, ...side } }, { sessionId: session.id });
+  if (side) main.publish('panels', { ...SHOWN_PANELS, side: { ...SHOWN_PANELS.side, ...side } }, { sessionId: session.id });
   render(
     <ApiProvider api={main}>
       <App />

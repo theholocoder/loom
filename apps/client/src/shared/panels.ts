@@ -211,10 +211,7 @@ export interface PanelAreaState extends PanelStackState {
 /** A Session's Panels, in each area. */
 export type SessionPanels = Record<PanelArea, PanelAreaState>;
 
-/**
- * A new Session's Panels: Changes, in the Side area, which stays hidden until
- * the user asks for it (#252).
- */
+/** A new Session's Panels: Changes, in the Side area, which stays hidden until the user asks for it. */
 export const DEFAULT_SESSION_PANELS: SessionPanels = {
   side: { panels: ['changes'], shown: 'changes', open: false },
   dock: { panels: [], shown: null, open: false },

@@ -28,13 +28,13 @@ export function emptyDashboard(days: UsageRange): UsageDashboard {
 }
 
 /**
- * A Session's Panels with the Side area shown on Changes, as the user left it:
- * what the fake serves for a Session it was given none for, as most tests
- * start from it. A new Session's are main's DEFAULT_SESSION_PANELS.
+ * A Session's Panels with the Side area shown on Changes, as a user who opened
+ * it left them. The fake serves these for a Session it wasn't given any for, as
+ * most tests start there; a new Session's are DEFAULT_SESSION_PANELS, hidden.
  */
-export const CHANGES_SHOWN: SessionPanels = { side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } };
+export const SHOWN_PANELS: SessionPanels = { side: { panels: ['changes'], shown: 'changes', open: true }, dock: { panels: [], shown: null, open: false } };
 
-/** A Session's Panels with both areas hidden: Changes open in the Side area, but not shown. */
+/** A Session's Panels with both areas hidden: Changes open in the Side area, but not shown, as in a new Session. */
 export const HIDDEN_PANELS: SessionPanels = { side: { panels: ['changes'], shown: 'changes', open: false }, dock: { panels: [], shown: null, open: false } };
 
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
@@ -49,7 +49,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   settings: DEFAULT_SETTINGS,
   sessions: [],
   transcript: [],
-  panels: CHANGES_SHOWN,
+  panels: SHOWN_PANELS,
   highlights: { highlights: [], seenThrough: 0, pending: false, checking: false },
   reviewThreads: [],
   terminals: [],

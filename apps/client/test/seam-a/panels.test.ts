@@ -91,7 +91,7 @@ describe("a Session's Panels", () => {
     expect(await panelsOf(main, 9)).toEqual({ side: { panels: ['changes'], shown: 'changes', open: false }, dock: { panels: [], shown: null, open: false } });
 
     const panels: SessionPanels = {
-      side: { panels: ['changes'], shown: 'changes', open: false },
+      side: { panels: ['changes'], shown: 'changes', open: true },
       dock: { panels: ['terminal:3', 'terminal:4'], shown: 'terminal:4', open: true },
     };
     await main.api.invoke('sessions.setPanels', { id: 7, panels });
@@ -175,7 +175,7 @@ describe("each Session's Panels, as main serves them", () => {
     const db = new Database(join(userDataDir, 'loom.db'));
     db.prepare("insert into sessions (id, project_id, title, working_copy_kind, working_copy_path, agent, status, created_at, updated_at, archived_at) values (9, 1, 'New', 'checkout', ?, 'OpenCode', 'archived', 1, 1, 1)").run(userDataDir);
     db.close();
-    // A new one's Changes sits in the Dock, which stays hidden like its Side area would.
+    // A new one has Changes in the Dock, hidden, as it would have been in the Side area.
     expect(await panelsOf(main, 9)).toEqual({ side: { panels: [], shown: null, open: false }, dock: { panels: ['changes'], shown: 'changes', open: false } });
   });
 
