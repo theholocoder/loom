@@ -7,6 +7,7 @@
 package protocol
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -116,7 +117,7 @@ func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 			defer report.Recover()
 			// A reply that can't be written means main has gone; the read
 			// loop sees the same and ends Serve.
-			_ = out.write(s.handle(ctx, req))
+			_ = answer(out, req, s.handle(ctx, req))
 		}()
 	}
 }
@@ -269,22 +270,49 @@ func readFrame(r io.Reader) ([]byte, error) {
 	return payload, nil
 }
 
+// answer writes req's answer, or, when that is too big for a frame, a
+// too_large error in its place: main fails that one request rather than
+// dropping the bridge, and every Session of its Environment with it (issue
+// #260).
+func answer(out *writer, req request, res response) error {
+	err := out.write(res)
+	if !errors.Is(err, errTooLarge) {
+		return err
+	}
+	// Which method answered too much, and how much, says nothing private.
+	report.Capture(fmt.Errorf("%s answered %w", req.Method, err))
+	return out.write(response{ID: req.ID, Error: &Error{Code: "too_large", Message: fmt.Sprintf("the bridge's answer to %s was %v", req.Method, err)}})
+}
+
+// errTooLarge is a message too big for a frame, which main would refuse,
+// dropping the bridge with it.
+var errTooLarge = errors.New("too large for a frame")
+
 // writer serializes frames so concurrent writers never interleave bytes.
 type writer struct {
 	mu sync.Mutex
 	w  io.Writer
 }
 
+// write sends msg as one frame, or nothing and errTooLarge when it would be
+// over MaxFrameSize.
 func (w *writer) write(msg any) error {
-	payload, err := json.Marshal(msg)
-	if err != nil {
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	// Main reads JSON, not HTML: `<`, `>` and `&` needn't take six bytes each.
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(msg); err != nil {
 		return err
+	}
+	payload := bytes.TrimSuffix(encoded.Bytes(), []byte("\n"))
+	if len(payload) > MaxFrameSize {
+		return fmt.Errorf("%d bytes, over the %d byte limit: %w", len(payload), MaxFrameSize, errTooLarge)
 	}
 	frame := make([]byte, 4+len(payload))
 	binary.BigEndian.PutUint32(frame, uint32(len(payload)))
 	copy(frame[4:], payload)
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, err = w.w.Write(frame)
+	_, err := w.w.Write(frame)
 	return err
 }
