@@ -48,6 +48,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
     </div>
   );
   const holdsViewed = (list: Session[]) => list.some((s) => s.id === selectedId);
+  const viewedArchived = archived.filter((s) => s.id === selectedId);
   return (
     <>
       {/* The Inbox scrolls in the space between the search box and the sections below. */}
@@ -60,13 +61,14 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
         <ProjectGroups groups={groups} {...cards} />
       </div>
       <div className="side-bottom">
-        <Section label="Snoozed" icon={AlarmClock} sessions={snoozed} holdsSelected={holdsViewed(snoozed)}>
+        <Section label="Snoozed" icon={AlarmClock} sessions={snoozed} opensOn={holdsViewed(snoozed)}>
           {sectionCards('Snoozed', snoozed)}
         </Section>
-        <Section label="Working" icon={LoaderCircle} sessions={working} holdsSelected={holdsViewed(working)}>
+        <Section label="Working" icon={LoaderCircle} sessions={working} opensOn={holdsViewed(working)}>
           {sectionCards('Working', working)}
         </Section>
-        <Section label="Archived" icon={Archive} sessions={archived} holdsSelected={holdsViewed(archived)}>
+        {/* Archived Sessions pile up, so viewing one leaves the section collapsed, showing just its card. */}
+        <Section label="Archived" icon={Archive} sessions={archived} opensOn={false} collapsed={viewedArchived.length > 0 && sectionCards('Archived', viewedArchived)}>
           {sectionCards('Archived', archived)}
         </Section>
       </div>
@@ -317,13 +319,16 @@ function UnreadDot() {
   return <span className="unread-dot" role="img" aria-label="Unread" />;
 }
 
-/** A collapsible sidebar section (Snoozed, Working, Archived) below the Inbox, showing `children` when open. */
-function Section({ label, icon: Icon, sessions, holdsSelected, children }: { label: string; icon: LucideIcon; sessions: Session[]; holdsSelected: boolean; children: ReactNode }) {
+/**
+ * A collapsible sidebar section (Snoozed, Working, Archived) below the Inbox,
+ * showing `children` when open and `collapsed`, if any, when not. It opens
+ * when `opensOn` turns true: when the Session being viewed moves in.
+ */
+function Section({ label, icon: Icon, sessions, opensOn, collapsed, children }: { label: string; icon: LucideIcon; sessions: Session[]; opensOn: boolean; collapsed?: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  // The Session being viewed stays visible: its section opens when its card moves in.
   useEffect(() => {
-    if (holdsSelected) setOpen(true);
-  }, [holdsSelected]);
+    if (opensOn) setOpen(true);
+  }, [opensOn]);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <>
@@ -335,7 +340,7 @@ function Section({ label, icon: Icon, sessions, holdsSelected, children }: { lab
         {sessions.some((s) => s.unread) && <UnreadDot />}
         {sessions.length}
       </button>
-      {open && children}
+      {open ? children : collapsed}
     </>
   );
 }

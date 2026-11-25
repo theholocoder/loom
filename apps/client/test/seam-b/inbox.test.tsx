@@ -252,6 +252,38 @@ describe('the Inbox', () => {
     expect(within(inbox()).getByRole('button', { name: 'Mine' }).getAttribute('aria-current')).toBe('true');
   });
 
+  it('keeps Archived collapsed when the viewed Session is archived, showing only its card under it', () => {
+    const viewed = session({ title: 'Mine' });
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [viewed, session({ title: 'Archived before', status: 'archived', waitingReason: undefined })] }));
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Mine' }));
+
+    act(() => main.publish('sessions', [{ ...viewed, status: 'archived', waitingReason: undefined, updatedAt: viewed.updatedAt + 1 }, main.value('sessions')[1]!]));
+
+    const head = within(inbox()).getByRole('button', { name: 'Archived' });
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.textContent).toContain('2');
+    const shown = within(within(inbox()).getByRole('list', { name: 'Archived' })).getAllByRole('listitem');
+    expect(shown.map((card) => card.getAttribute('aria-label'))).toEqual(['Mine']);
+    expect(within(inbox()).getByRole('button', { name: 'Mine' }).getAttribute('aria-current')).toBe('true');
+
+    // Opening the section shows them all; closing it again keeps the viewed one.
+    fireEvent.click(head);
+    expect(within(inbox()).getByRole('button', { name: 'Archived before' })).toBeTruthy();
+    fireEvent.click(head);
+    expect(within(inbox()).queryByRole('button', { name: 'Archived before' })).toBeNull();
+    expect(within(inbox()).getByRole('button', { name: 'Mine' })).toBeTruthy();
+  });
+
+  it('keeps Archived collapsed when an archived Session is opened from the palette, showing only its card', () => {
+    renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Old one', status: 'archived', waitingReason: undefined }), session({ title: 'Older one', status: 'archived', waitingReason: undefined })] }));
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('option', { name: /Old one/ }));
+
+    expect(within(inbox()).getByRole('button', { name: 'Archived' }).getAttribute('aria-expanded')).toBe('false');
+    expect(within(within(inbox()).getByRole('list', { name: 'Archived' })).getAllByRole('listitem').map((card) => card.getAttribute('aria-label'))).toEqual(['Old one']);
+  });
+
   it("reserves room for a card's hover actions, one per action", () => {
     renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'Waiting' }), session({ title: 'Busy', status: 'working', waitingReason: undefined })] }));
     fireEvent.click(within(inbox()).getByRole('button', { name: 'Working' }));
