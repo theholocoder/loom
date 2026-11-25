@@ -55,6 +55,16 @@ describe('the models before a Session exists', () => {
     expect(modelListings(machine)).toHaveLength(2);
   });
 
+  it('asks OpenCode again for a checkout it listed no models in, as when it had yet to load them', async () => {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, models: [] });
+    const { main, project } = await withProject(machine, machine.gitRepo('billing-api'));
+
+    expect(await main.api.invoke('projects.models', { id: project.id })).toEqual([]);
+    await main.api.invoke('projects.models', { id: project.id });
+    expect(modelListings(machine)).toHaveLength(2);
+  });
+
   it('never runs `opencode models`', async () => {
     const { machine, checkout } = machineWith();
     const { main, project } = await withProject(machine, checkout);

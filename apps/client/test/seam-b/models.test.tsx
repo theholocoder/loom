@@ -149,6 +149,17 @@ describe('the model and Effort pickers before a Session exists', () => {
     expect(model.title).toBe("OpenCode's default model: opencode/pulse-free");
   });
 
+  it('asks again on opening the model list when OpenCode listed none', async () => {
+    let asked = 0;
+    const main = renderApp(new FakeMain({ projects: [project] }, { 'projects.models': () => (asked++ === 0 ? [] : probed) }));
+    const pane = startNewSession();
+    await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.models')).toHaveLength(1));
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Model' }));
+    await waitFor(() => expect(listed('Models')).toEqual(['Pulse Freeopencode/pulse-free', 'Claude Sonnet 5.5anthropic/claude-sonnet-5-5']));
+    expect(main.invoked.filter((i) => i.command === 'projects.models')).toHaveLength(2);
+  });
+
   it("says why the models couldn't be listed", async () => {
     renderApp(
       new FakeMain(

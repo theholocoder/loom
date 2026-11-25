@@ -138,8 +138,9 @@ func resolved(path string) string {
 // signed in, and, given a directory, the models, commands and skills it
 // offers there. It asks all of them in that directory (or, without one, in
 // the server's own), once OpenCode's plugins have settled there: until then
-// OpenCode answers with what it has loaded so far, often nothing. It never runs `opencode auth list` or `opencode models`,
-// which start the user's shared background service.
+// OpenCode answers with what it has loaded so far, often nothing. It never
+// runs `opencode auth list` or `opencode models`, which start the user's
+// shared background service.
 //
 // The server prints {"url": ...} on stdout, guards its API with HTTP Basic
 // auth using OPENCODE_SERVER_PASSWORD, and exits when its stdin closes.
@@ -253,7 +254,7 @@ func probeOpencode(ctx context.Context, env shellenv.Env, params probeParams) (*
 // settled in directory ("" for the server's own): until then `GET /api/plugin`
 // lists none (OpenCode has built-in ones), and its other lists are only what
 // it has loaded so far. It doesn't wait for an OpenCode that can't list its
-// plugins.
+// plugins: one answering an error, or something other than a list.
 func awaitSettled(ctx context.Context, base, password, directory string) {
 	ctx, cancel := context.WithTimeout(ctx, probeSettleTimeout)
 	defer cancel()

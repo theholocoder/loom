@@ -25,13 +25,13 @@ const fakeOpencodeVar = "LOOM_FAKE_OPENCODE"
 
 // fakeOpencode is what the stand-in answers, by path; a path it has no answer
 // for gets a 404. Each request's path is appended to Log, one per line. Until
-// Settle (a duration) has passed since it started, as OpenCode does before its
+// Settle has passed since it started, as OpenCode does before its
 // plugins have settled, it answers each path it has an answer for with an
 // empty list.
 type fakeOpencode struct {
 	Answers map[string]fakeAnswer `json:"answers"`
 	Log     string                `json:"log"`
-	Settle  string                `json:"settle,omitempty"`
+	Settle  time.Duration         `json:"settle,omitempty"`
 }
 
 // fakeAnswer is one path's answer: Body is sent as is, with Status (200 when 0).
@@ -50,11 +50,7 @@ func serveFakeOpencode(script string) {
 		fmt.Fprintln(os.Stderr, "fake opencode: unscripted command", os.Args[1:])
 		os.Exit(2)
 	}
-	var settle time.Duration
-	if fake.Settle != "" {
-		settle, _ = time.ParseDuration(fake.Settle)
-	}
-	settled := time.Now().Add(settle)
+	settled := time.Now().Add(fake.Settle)
 	expected := "Basic " + base64.StdEncoding.EncodeToString([]byte("opencode:"+os.Getenv("OPENCODE_SERVER_PASSWORD")))
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -92,12 +88,12 @@ func serveFakeOpencode(script string) {
 // as given, and returns it with the file the fake logs requests to.
 func probeWith(t *testing.T, answers map[string]fakeAnswer) (*peer, string) {
 	t.Helper()
-	return probeSettlingWith(t, answers, "")
+	return probeSettlingWith(t, answers, 0)
 }
 
 // probeSettlingWith is probeWith, with a fake that answers empty lists until
-// settle (a duration) has passed.
-func probeSettlingWith(t *testing.T, answers map[string]fakeAnswer, settle string) (*peer, string) {
+// settle has passed.
+func probeSettlingWith(t *testing.T, answers map[string]fakeAnswer, settle time.Duration) (*peer, string) {
 	t.Helper()
 	bin := t.TempDir()
 	self, err := os.Executable()
@@ -195,28 +191,32 @@ func TestProbeListsTheCheckoutsModelsCommandsAndSkillsWithoutTheirContent(t *tes
 	}
 }
 
-// plugins is a plugin list as OpenCode gives it once its plugins have settled.
-var plugins = data(`[{"id":"opencode.config.mcp","source":{"type":"builtin"},"state":{"status":"active"}}]`)
+// settledPlugins is a plugin list as OpenCode gives it once its plugins have settled.
+var settledPlugins = data(`[{"id":"opencode.config.mcp","source":{"type":"builtin"},"state":{"status":"active"}}]`)
 
-// connected is an integration list as OpenCode gives it for a user signed in to one provider.
-var connected = data(`[{"id":"anthropic","connections":[{"type":"key"}]}]`)
+// signedIn is an integration list as OpenCode gives it for a user signed in
+// to one provider; wantSignedIn is how the probe passes it on.
+const (
+	signedIn     = `[{"id":"anthropic","connections":[{"type":"key"}]}]`
+	wantSignedIn = `[{"connections":[{"type":"key"}],"id":"anthropic"}]`
+)
 
 func TestProbeWaitsForOpenCodesPluginsToSettleInTheCheckoutBeforeAskingIt(t *testing.T) {
 	checkout := t.TempDir()
 	p, log := probeSettlingWith(t, map[string]fakeAnswer{
-		"/api/plugin":      plugins,
-		"/api/integration": connected,
+		"/api/plugin":      settledPlugins,
+		"/api/integration": data(signedIn),
 		"/api/model":       data(models),
 		"/api/command":     data(`[{"name":"review"}]`),
 		"/api/skill":       data(`[{"id":"tdd","name":"tdd"}]`),
-	}, "600ms")
+	}, 600*time.Millisecond)
 
 	result := p.call(1, "opencode.probe", map[string]any{"directory": checkout})
 
 	if got := asJSON(t, result["models"]); got != models {
 		t.Errorf("models = %s, want %s", got, models)
 	}
-	if got, want := asJSON(t, result["integrations"]), `[{"connections":[{"type":"key"}],"id":"anthropic"}]`; got != want {
+	if got, want := asJSON(t, result["integrations"]), wantSignedIn; got != want {
 		t.Errorf("integrations = %s, want %s", got, want)
 	}
 	if got, want := asJSON(t, result["commands"]), `[{"name":"review"}]`; got != want {
@@ -226,21 +226,21 @@ func TestProbeWaitsForOpenCodesPluginsToSettleInTheCheckoutBeforeAskingIt(t *tes
 		t.Errorf("skills = %s, want %s", got, want)
 	}
 	asked := requests(t, log)
-	settling := 0
-	for settling < len(asked) && asked[settling] == "/api/plugin "+checkout {
-		settling++
+	pluginListings := 0
+	for pluginListings < len(asked) && asked[pluginListings] == "/api/plugin "+checkout {
+		pluginListings++
 	}
-	if settling < 2 || asked[settling] != "/api/integration "+checkout {
+	if pluginListings < 2 || asked[pluginListings] != "/api/integration "+checkout {
 		t.Errorf("asked %q, want /api/plugin until it listed one, then the rest", asked)
 	}
 }
 
 func TestProbeWaitsForOpenCodesPluginsToSettleBeforeSayingWhetherItIsSignedIn(t *testing.T) {
-	p, log := probeSettlingWith(t, map[string]fakeAnswer{"/api/plugin": plugins, "/api/integration": connected}, "600ms")
+	p, log := probeSettlingWith(t, map[string]fakeAnswer{"/api/plugin": settledPlugins, "/api/integration": data(signedIn)}, 600*time.Millisecond)
 
 	result := p.call(1, "opencode.probe", nil)
 
-	if got, want := asJSON(t, result["integrations"]), `[{"connections":[{"type":"key"}],"id":"anthropic"}]`; got != want {
+	if got, want := asJSON(t, result["integrations"]), wantSignedIn; got != want {
 		t.Errorf("integrations = %s, want %s", got, want)
 	}
 	if asked := requests(t, log); len(asked) < 2 || asked[0] != "/api/plugin " || asked[len(asked)-1] != "/api/integration" {
@@ -250,7 +250,7 @@ func TestProbeWaitsForOpenCodesPluginsToSettleBeforeSayingWhetherItIsSignedIn(t 
 
 func TestProbeAsksAnywayWhenOpenCodesPluginsDontSettleInTime(t *testing.T) {
 	defer protocol.SetProbeSettleTimeout(300 * time.Millisecond)()
-	p, _ := probeSettlingWith(t, map[string]fakeAnswer{"/api/plugin": plugins, "/api/integration": connected, "/api/model": data(models)}, "1h")
+	p, _ := probeSettlingWith(t, map[string]fakeAnswer{"/api/plugin": settledPlugins, "/api/integration": data(signedIn), "/api/model": data(models)}, time.Hour)
 
 	result := p.call(1, "opencode.probe", map[string]any{"directory": t.TempDir()})
 

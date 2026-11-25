@@ -193,16 +193,18 @@ export class Environment {
 
   /**
    * What the agent offers in the checkout at `path`, asked once per checkout
-   * until the agent is checked again; a failed ask is asked again.
+   * until the agent is checked again; a failed ask is asked again, and so is
+   * one that listed no models, as the agent may not have loaded them yet.
    */
   private offer(path: string): Promise<CheckoutOffer> {
     let offered = this.offers.get(path);
     if (!offered) {
       offered = probeOpenCodeCheckout((method, timeoutMs, params) => this.request(method, timeoutMs, params), path);
       this.offers.set(path, offered);
-      offered.catch(() => {
+      const forget = () => {
         if (this.offers.get(path) === offered) this.offers.delete(path);
-      });
+      };
+      offered.then(({ models }) => models.length === 0 && forget(), forget);
     }
     return offered;
   }
