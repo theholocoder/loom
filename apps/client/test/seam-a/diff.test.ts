@@ -39,7 +39,7 @@ function files(summary: DiffSummary): Partial<DiffFile>[] {
 }
 
 describe("a Session's diff", () => {
-  it('shows committed, modified and untracked files against the merge-base with origin/<default>, never ignored ones, and never fetches', async () => {
+  it('shows committed, modified and untracked files against the merge-base with origin/<default>, never ignored ones nor other repositories inside it, and never fetches', async () => {
     const { machine, origin, checkout, main, id, path } = await started();
     machine.commit(path, 'committed file.txt', 'a\nb\n');
     machine.commit(path, 'app.js', 'one\n2\nthree\n');
@@ -49,6 +49,11 @@ describe("a Session's diff", () => {
     writeFileSync(join(path, '.gitignore'), 'build/\n');
     mkdirSync(join(path, 'build'));
     writeFileSync(join(path, 'build', 'out.js'), 'ignored\n');
+    // A repository inside the working copy, such as an agent's worktree, is git's to list as one folder, not a change of this one.
+    const nested = join(path, '.claude', 'worktrees', 'agent');
+    mkdirSync(nested, { recursive: true });
+    git(nested, 'init', '--quiet');
+    writeFileSync(join(nested, 'theirs.txt'), 'theirs\n');
     writeFileSync(join(path, 'new file.txt'), 'x\ny\nz\n');
     writeFileSync(join(path, 'logo.png'), Buffer.from([0, 1, 2, 0, 255]));
     // The base moves on after branching; its changes aren't the Session's.
@@ -61,7 +66,7 @@ describe("a Session's diff", () => {
 
     const summary = await main.api.invoke('sessions.diff', { id });
 
-    expect(summary).toMatchObject({ available: true, readOnly: false, base: 'origin/main' });
+    expect(summary).toMatchObject({ available: true, readOnly: false, base: 'origin/main', counts: { all: 6, uncommitted: 4 } });
     expect(files(summary)).toEqual([
       { path: '.gitignore', status: 'untracked', added: 1, removed: 0, binary: false },
       { path: 'READ ME.md', oldPath: 'README.md', status: 'committed', added: 0, removed: 0, binary: false },

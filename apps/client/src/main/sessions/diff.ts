@@ -246,9 +246,13 @@ export class WorkingCopyDiff {
     return splitZ((await this.gitOrThrow(['diff', '--name-only', '-z', '-M', ...BASE_FLAGS, 'HEAD'])).stdout);
   }
 
-  /** The untracked files git doesn't ignore, by path. */
+  /**
+   * The untracked files git doesn't ignore, by path. A repository inside the
+   * working copy (an agent's worktree, a clone) is git's to list as one
+   * folder, `path/`: its files are that repository's, so it is left out.
+   */
   private async untrackedPaths(): Promise<string[]> {
-    return splitZ((await this.gitOrThrow(['ls-files', '-z', '--others', '--exclude-standard'])).stdout);
+    return splitZ((await this.gitOrThrow(['ls-files', '-z', '--others', '--exclude-standard'])).stdout).filter((path) => !path.endsWith('/'));
   }
 
   /** Untracked files git doesn't ignore, as additions. */
