@@ -4,7 +4,7 @@
 import type { Transaction } from 'kysely';
 import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
-import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile } from '../agents/adapter';
+import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile, type ScriptCall } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import { exec, type ExecResult } from '../environments/exec';
 import { GIT_TIMEOUT_MS } from '../projects/forge';
@@ -2109,9 +2109,11 @@ export class Sessions {
   /**
    * Links the Merge request or issue the agent named with Loom's
    * `link_merge_request` or `link_issue` tool, once the call has completed:
-   * Loom's MCP server only answers it.
+   * Loom's MCP server only answers it. The agent calls it itself, or from a
+   * script it ran (OpenCode's Code Mode), which names its calls once it ends.
    */
-  private noticeLinkCall(id: number, { toolCallId, title, status }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
+  private noticeLinkCall(id: number, { toolCallId, title, status, scriptCalls }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
+    if (scriptCalls && (status === 'completed' || status === 'failed')) this.noticeScriptLinks(id, scriptCalls);
     let calls = this.linkCalls.get(id);
     const tool = title === undefined ? undefined : linkToolOf(title);
     if (tool) {
@@ -2125,9 +2127,22 @@ export class Sessions {
     if (status === 'failed') return;
     const card = this.transcript(id).value.findLast((i) => i.kind === 'tool' && i.toolCallId === toolCallId);
     const named = card?.kind === 'tool' ? linkToolInput(card.input) : undefined;
-    if (!named) return;
+    if (named) this.linkNamed(id, linking, named);
+  }
+
+  /** Links what each of a script's completed calls of Loom's link tools named, once the script has ended: whatever became of the script. */
+  private noticeScriptLinks(id: number, scriptCalls: ScriptCall[]): void {
+    for (const call of scriptCalls) {
+      const tool = linkToolOf(call.name);
+      const named = tool && call.status === 'completed' ? linkToolInput(call.input) : undefined;
+      if (tool && named) this.linkNamed(id, tool, named);
+    }
+  }
+
+  /** Links what a call of Loom's link tool `tool` named; the user sees why when it can't be. */
+  private linkNamed(id: number, tool: LinkTool, named: string): void {
     const [linked, refusal] =
-      linking === 'merge-request'
+      tool === 'merge-request'
         ? [this.linkMergeRequest({ id, mergeRequest: named }), (reason: string): NewItem => ({ kind: 'merge-request-refused', mergeRequest: named, reason })]
         : [this.options.linkNamedIssue(id, named), (reason: string): NewItem => ({ kind: 'issue-refused', issue: named, reason })];
     // The agent was only told Loom checks it; the user sees why it wasn't linked.
@@ -2268,7 +2283,7 @@ export class Sessions {
    * Adds a tool call's card, or updates the one with its id wherever it is in
    * the transcript, writing it at once. Its input, output and diffs are capped.
    */
-  private recordTool(id: number, { type: _type, ...call }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
+  private recordTool(id: number, { type: _type, scriptCalls: _scriptCalls, ...call }: Extract<AgentEvent, { type: 'tool-started' | 'tool-updated' }>): void {
     const input = call.input === undefined ? undefined : capToolOutput(call.input);
     const output = call.output === undefined ? undefined : capToolOutput(call.output);
     const diffs = call.diffs === undefined ? undefined : capToolDiffs(call.diffs);
@@ -2586,7 +2601,8 @@ type LinkTool = 'merge-request' | 'issue';
 
 /**
  * Which of Loom's link tools `title` names, as agents name them: prefixed
- * with its server's name, `loom_` for OpenCode, `mcp__loom__` for some others.
+ * with its server's name, `loom_` for OpenCode (`loom.` in its Code Mode
+ * scripts), `mcp__loom__` for some others.
  */
 function linkToolOf(title: string): LinkTool | undefined {
   const tool = /^(?:mcp__)?loom(?:__|[_.:-])link_(merge_request|issue)$/i.exec(title.trim())?.[1]?.toLowerCase();

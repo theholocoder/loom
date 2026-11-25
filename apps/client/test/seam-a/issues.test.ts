@@ -233,6 +233,25 @@ describe("the agent's Link issue tool", () => {
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)!.issue).toEqual({ number: 31, url: loginBug.url });
   });
 
+  it('links the issue a script the agent ran named with the tool, not one whose call failed', async () => {
+    const toolCalls = [
+      { tool: 'loom.link_issue', status: 'completed', input: { number: 7 } },
+      { tool: 'loom.link_issue', status: 'error', input: { number: 31 } },
+    ];
+    const chunks: AcpTurn['chunks'] = [
+      { update: { sessionUpdate: 'tool_call', toolCallId: 'call_script', name: 'execute', title: 'execute', kind: 'other', status: 'pending', rawInput: {} } },
+      { update: { sessionUpdate: 'tool_call_update', toolCallId: 'call_script', status: 'failed', rawOutput: { metadata: { toolCalls }, error: 'The second call failed' } } },
+      'Done.',
+    ];
+    const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git', [{ chunks }]);
+    const { main, project } = await withProject(machine, checkout);
+    const created = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix SSO' });
+
+    await waitFor(main.api, 'sessions', session(created.id, (s) => s.issue?.number === 7 && s.status === 'waiting'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)!.issue).toEqual({ number: 7, url: darkMode.url });
+  });
+
   it("shows why Loom couldn't link what the agent's tool named, and keeps the issue it had", async () => {
     const elsewhere = 'https://github.com/someone/else/issues/31';
     const { machine, checkout } = machineOn('gh', 'https://github.com/theholocoder/loom.git', [{ chunks: toolCall('loom_link_issue', { url: elsewhere }) }]);
