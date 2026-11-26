@@ -177,7 +177,6 @@ export function ErrorAlert({ error }: { error?: string }) {
 export function useQuestionPanel(
   item: Question | undefined,
   onAnswer: (itemId: number, answer: Answer | null) => Promise<void>,
-  /** Whether something is typed in the composer: given an answer of one's own, Next and Answer take it, as Enter does. */
   hasTyped = false,
 ): { panel?: ReactNode; freeAnswer?: FreeAnswer; stepKey?: string } {
   const [flowState, setFlowState] = useState<Flow>(() => freshFlow(item));

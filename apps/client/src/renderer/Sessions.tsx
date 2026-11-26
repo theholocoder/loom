@@ -28,7 +28,7 @@ import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { PlanCard, ThinkingBlock, ToolCard, ToolRunCard, withRuns } from './WorkCards';
-import { lastTurns, TURNS_SHOWN, turnsReaching } from './conversation-tail';
+import { useConversationTail } from './conversation-tail';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed } from './Snooze';
 import { MessageTime, withDays } from './MessageTimes';
@@ -489,12 +489,14 @@ export type SessionCommand =
 export function SessionView({
   session,
   replyRequest = 0,
+  turnRequest,
   command,
   onCommandDone,
   onRetryableChange,
 }: {
   session: Session;
   replyRequest?: number;
+  turnRequest?: { itemId: number };
   command?: SessionCommand;
   onCommandDone?: () => void;
   onRetryableChange?: (retryable: boolean) => void;
@@ -568,7 +570,6 @@ export function SessionView({
   const offeredModels = listedModels(sessionModels.listed);
   const shownModel = session.model ?? agentConfig?.model;
   const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(sessionModels.listed, shownModel);
-  /** Whether something is typed in the composer, which the question's Next and Answer take as an answer of one's own. */
   const [hasTyped, setHasTyped] = useState(false);
   const { panel, freeAnswer, stepKey } = useQuestionPanel(
     firstAsked?.kind === 'question' ? firstAsked : undefined,
@@ -623,22 +624,13 @@ export function SessionView({
   }, [items]);
   /** Whether the user had the conversation scrolled to its foot, as of its last scroll. */
   const atFoot = useRef(true);
-  const [turnsShown, setTurnsShown] = useState(TURNS_SHOWN);
-  const tail = lastTurns(items, turnsShown);
-  const afterShowingTurns = useRef<() => void>(undefined);
-  useLayoutEffect(() => {
-    afterShowingTurns.current?.();
-    afterShowingTurns.current = undefined;
-  }, [turnsShown]);
-  const showEarlierTurns = () => {
-    const firstShown = conversation.current?.querySelector('[data-item-id]');
-    const top = firstShown?.getBoundingClientRect().top;
-    afterShowingTurns.current = () => {
-      const chat = conversation.current;
-      if (chat && firstShown && top !== undefined) chat.scrollTop += firstShown.getBoundingClientRect().top - top;
-    };
-    setTurnsShown((turns) => turns + TURNS_SHOWN);
-  };
+  const tail = useConversationTail(items, conversation);
+  const shownTurnRequest = useRef<{ itemId: number }>(undefined);
+  useEffect(() => {
+    if (!turnRequest || turnRequest === shownTurnRequest.current || !items.length) return;
+    shownTurnRequest.current = turnRequest;
+    tail.showTurn(turnRequest.itemId);
+  }, [turnRequest, items]);
   const scrolled = () => {
     const chat = conversation.current;
     // Following the agent scrolls to the end of what was said, which leaves the bottom padding below.
@@ -666,6 +658,7 @@ export function SessionView({
       if (freeAnswer) return await freeAnswer.send(prompt);
       await api.invoke('sessions.send', { id: session.id, prompt, ...(attachments.length ? { attachments } : {}), ...(comments.length ? { comments } : {}) });
       setPending([]);
+      tail.followFoot();
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -768,22 +761,9 @@ export function SessionView({
       }
     : undefined;
 
-  /**
-   * Scrolls the conversation to the turn `itemId` is in: to the user's
-   * message it starts with, the last at or before it (the first, for an item
-   * before any). A drawer over the conversation closes to show it.
-   */
   const showTurn = (itemId: number) => {
     if (panels.drawer) panels.closeDrawer();
-    const reaching = turnsReaching(items, itemId);
-    if (reaching <= turnsShown) return scrollToTurn(itemId);
-    afterShowingTurns.current = () => scrollToTurn(itemId);
-    setTurnsShown(reaching);
-  };
-  const scrollToTurn = (itemId: number) => {
-    const messages = [...document.querySelectorAll<HTMLElement>('[data-item-id]')];
-    const target = messages.filter((m) => Number(m.dataset.itemId) <= itemId).at(-1) ?? messages[0];
-    target?.scrollIntoView?.({ block: 'start' });
+    tail.showTurn(itemId);
   };
   /** Ask the agent, on a Highlight: it goes to the composer as a comment quoting it, its note to edit. */
   const askAboutHighlight = (highlight: Highlight) =>
@@ -841,7 +821,7 @@ export function SessionView({
           ) : (
           <>
           <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnConversation}>
-            {tail.hasEarlier && <EarlierTurns key={turnsShown} conversation={conversation} onShow={showEarlierTurns} />}
+            {tail.hasEarlier && <EarlierTurns conversation={conversation} showingFrom={tail.shown[0]?.id} onShow={tail.showEarlier} />}
             {withDays(conversationParts, saidAt, (item, at, parts) =>
               'run' in item ? (
                 <ToolRunCard key={item.run[0]!.id} run={item.run} live={working && at === parts.length - 1} />
@@ -1007,16 +987,16 @@ export function SessionView({
   );
 }
 
-function EarlierTurns({ conversation, onShow }: { conversation: RefObject<HTMLDivElement | null>; onShow: () => void }) {
+function EarlierTurns({ conversation, showingFrom, onShow }: { conversation: RefObject<HTMLDivElement | null>; showingFrom: number | undefined; onShow: () => void }) {
   const marker = useRef<HTMLButtonElement>(null);
   const show = useRef(onShow);
   show.current = onShow;
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined' || !marker.current) return;
-    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && show.current(), { root: conversation.current, rootMargin: '400px 0px 0px 0px' });
+    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && show.current(), { root: conversation.current });
     observer.observe(marker.current);
     return () => observer.disconnect();
-  }, []);
+  }, [showingFrom]);
   return (
     <button ref={marker} type="button" className="earlier-turns" onClick={onShow}>
       Show earlier messages

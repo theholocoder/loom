@@ -603,6 +603,7 @@ export type DeleteResult = { deleted: true } | { deleted: false; unsavedWork: Un
 /** A Session whose conversation holds some of the words searched for (see `sessions.searchConversations`). */
 export interface ConversationMatch {
   id: number;
+  itemId: number;
   /** The words searched for that it holds, as given. */
   words: string[];
   /** The message holding the most of them, cut down to around the first found, on one line. */

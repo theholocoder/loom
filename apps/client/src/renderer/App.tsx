@@ -127,6 +127,7 @@ function Workspace() {
   const [selectedId, setSelectedId] = useState<number>();
   /** Bumped to focus the open Session's composer. */
   const [replyRequest, setReplyRequest] = useState(0);
+  const [turnRequest, setTurnRequest] = useState<{ itemId: number }>();
   /** What the open Session is asked to do next, until it has. */
   const [command, setCommand] = useState<SessionCommand>();
   /** Whether the open Session's last prompt failed, so it can be sent again. */
@@ -158,6 +159,7 @@ function Workspace() {
   };
   const select = (session: Session) => {
     setSelectedId(session.id);
+    setTurnRequest(undefined);
     setCommand(undefined);
     setView('session');
     setPage(undefined);
@@ -384,6 +386,7 @@ function Workspace() {
             key={selected.id}
             session={selected}
             replyRequest={replyRequest}
+            turnRequest={turnRequest}
             command={command}
             onCommandDone={() => setCommand(undefined)}
             onRetryableChange={setRetryable}
@@ -439,9 +442,10 @@ function Workspace() {
             sessions={sessions}
             projects={projects}
             onClose={closePalette}
-            onOpenSession={(session) => {
+            onOpenSession={(session, itemId) => {
               setPalette(undefined);
               select(session);
+              if (itemId !== undefined) setTurnRequest({ itemId });
             }}
             onRun={(action) => {
               // Back where it was, unless the action opens something taking it.

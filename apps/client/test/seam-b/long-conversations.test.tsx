@@ -1,12 +1,23 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement, type ComponentProps } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import { DEFAULT_SETTINGS, type Project, type Session, type SessionHighlights, type TranscriptItem } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
 
 const markdownRenders = vi.hoisted(() => ({ count: 0 }));
+const conversationRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock('../../src/renderer/MessageTimes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/MessageTimes')>();
+  return {
+    ...actual,
+    withDays: (...args: Parameters<typeof actual.withDays>) => {
+      conversationRenders.count++;
+      return actual.withDays(...args);
+    },
+  };
+});
 vi.mock('react-markdown', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-markdown')>();
   const Counted = (props: ComponentProps<typeof actual.default>) => {
@@ -16,7 +27,17 @@ vi.mock('react-markdown', async (importOriginal) => {
   return { ...actual, default: Counted };
 });
 
-afterEach(cleanup);
+const scrolled: Element[] = [];
+beforeEach(() => {
+  scrolled.length = 0;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this);
+  };
+});
+afterEach(() => {
+  cleanup();
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
+});
 
 const project: Project = {
   id: 1,
@@ -46,8 +67,10 @@ function conversationOf(turns: number): TranscriptItem[] {
   ]).flat();
 }
 
-function openSession(transcript: TranscriptItem[], highlights?: SessionHighlights) {
-  const main = new FakeMain({ projects: [project], sessions: [session], settings: { ...DEFAULT_SETTINGS, highlights: { on: !!highlights, model: 'anthropic/claude-haiku-5-5' } } });
+type Handlers = NonNullable<ConstructorParameters<typeof FakeMain>[1]>;
+
+function renderLoom(transcript: TranscriptItem[], { highlights, handlers }: { highlights?: SessionHighlights; handlers?: Handlers } = {}) {
+  const main = new FakeMain({ projects: [project], sessions: [session], settings: { ...DEFAULT_SETTINGS, highlights: { on: !!highlights, model: 'anthropic/claude-haiku-5-5' } } }, handlers);
   main.publish('transcript', transcript, { sessionId: session.id });
   if (highlights) {
     main.publish('panels', { side: { panels: ['highlights'], shown: 'highlights', open: true }, dock: { panels: [], shown: null, open: false } }, { sessionId: session.id });
@@ -58,21 +81,47 @@ function openSession(transcript: TranscriptItem[], highlights?: SessionHighlight
       <App />
     </ApiProvider>,
   );
-  fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: session.title }));
+  return main;
 }
 
+function openSession(transcript: TranscriptItem[], options?: Parameters<typeof renderLoom>[1]) {
+  const main = renderLoom(transcript, options);
+  fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: session.title }));
+  return main;
+}
+
+
 const conversation = () => within(screen.getByRole('log', { name: 'Conversation' }));
+const prompt = () => within(screen.getByRole('form', { name: 'Composer' })).getByRole('textbox', { name: 'Prompt' });
+const showEarlier = () => fireEvent.click(conversation().getByRole('button', { name: 'Show earlier messages' }));
+const showFromHighlight = () => fireEvent.click(within(screen.getByRole('tabpanel', { name: /Highlights/ })).getByRole('button', { name: 'From this turn' }));
+const highlightOnTurn2: SessionHighlights = {
+  highlights: [{ id: 1, kind: 'for-you', text: 'Set REDIS_URL before deploying.', itemId: 5, createdAt: 1 }],
+  seenThrough: 1,
+  pending: false,
+  checking: false,
+};
 const questionsShown = () => conversation().queryAllByText(/^Question \d+$/).map((el) => el.textContent);
 
 describe('a long conversation', () => {
-  it("doesn't render its messages again while typing in the composer", () => {
+  it("doesn't render the Session again while typing in the composer", () => {
     openSession(conversationOf(3));
-    const prompt = within(screen.getByRole('form', { name: 'Composer' })).getByRole('textbox', { name: 'Prompt' });
-    const before = markdownRenders.count;
+    fireEvent.change(prompt(), { target: { value: 'h' } });
+    const renders = conversationRenders.count;
 
-    for (const text of ['h', 'he', 'hel', 'hell', 'hello']) fireEvent.change(prompt, { target: { value: text } });
+    for (const text of ['he', 'hel', 'hell', 'hello']) fireEvent.change(prompt(), { target: { value: text } });
 
-    expect(markdownRenders.count).toBe(before);
+    expect(conversationRenders.count).toBe(renders);
+  });
+
+  it("doesn't parse its messages again when the Session changes around them", async () => {
+    const main = openSession(conversationOf(3));
+    const renders = markdownRenders.count;
+
+    main.publish('sessions', [{ ...session, title: 'Fix the export timeout' }]);
+
+    await waitFor(() => expect(screen.getAllByText('Fix the export timeout').length).toBeGreaterThan(0));
+    expect(markdownRenders.count).toBe(renders);
   });
 
   it('shows its last turns, and earlier ones when asked', () => {
@@ -95,25 +144,48 @@ describe('a long conversation', () => {
   });
 
   it('shows a turn no longer shown when a Highlight takes the conversation to it', () => {
-    const scrolled: Element[] = [];
-    Element.prototype.scrollIntoView = function (this: Element) {
-      scrolled.push(this);
-    };
-    try {
-      openSession(conversationOf(25), {
-        highlights: [{ id: 1, kind: 'for-you', text: 'Set REDIS_URL before deploying.', itemId: 5, createdAt: 1 }],
-        seenThrough: 1,
-        pending: false,
-        checking: false,
-      });
-      expect(questionsShown()).not.toContain('Question 2');
+    openSession(conversationOf(25), { highlights: highlightOnTurn2 });
+    expect(questionsShown()).not.toContain('Question 2');
 
-      fireEvent.click(within(screen.getByRole('tabpanel', { name: /Highlights/ })).getByRole('button', { name: 'From this turn' }));
+    showFromHighlight();
 
-      expect(questionsShown()[0]).toBe('Question 2');
-      expect(scrolled.at(-1)?.getAttribute('data-item-id')).toBe('4');
-    } finally {
-      delete (Element.prototype as Partial<Element>).scrollIntoView;
-    }
+    expect(questionsShown()[0]).toBe('Question 2');
+    expect(scrolled.at(-1)?.getAttribute('data-item-id')).toBe('4');
+  });
+
+  it('keeps a turn it was taken to as the agent goes on', async () => {
+    const main = openSession(conversationOf(25), { highlights: highlightOnTurn2 });
+    showFromHighlight();
+
+    main.publish('transcript', conversationOf(27), { sessionId: session.id });
+
+    await waitFor(() => expect(questionsShown().at(-1)).toBe('Question 26'));
+    expect(questionsShown()[0]).toBe('Question 2');
+  });
+
+  it('goes back to its last turns once the user sends a message', async () => {
+    const main = openSession(conversationOf(25));
+    showEarlier();
+    expect(questionsShown()).toHaveLength(20);
+
+    fireEvent.change(prompt(), { target: { value: 'One more thing' } });
+    fireEvent.click(within(screen.getByRole('form', { name: 'Composer' })).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(main.invoked.some((c) => c.command === 'sessions.send')).toBe(true));
+    await waitFor(() => expect(questionsShown()).toHaveLength(10));
+  });
+
+  it('shows the turn a conversation search found in it, from the palette', async () => {
+    renderLoom(conversationOf(25), {
+      handlers: { 'sessions.searchConversations': () => [{ id: session.id, itemId: 5, words: ['redis'], excerpt: 'Answer 2' }] },
+    });
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true });
+    const palette = within(screen.getByRole('dialog', { name: 'Command palette' }));
+    fireEvent.change(palette.getByRole('combobox', { name: 'Search Sessions and actions' }), { target: { value: 'redis' } });
+
+    fireEvent.click(await palette.findByRole('option', { name: session.title }));
+
+    await waitFor(() => expect(questionsShown()[0]).toBe('Question 2'));
+    expect(scrolled.at(-1)?.getAttribute('data-item-id')).toBe('4');
   });
 });

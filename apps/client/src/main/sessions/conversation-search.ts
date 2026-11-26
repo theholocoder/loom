@@ -28,9 +28,9 @@ export async function searchConversations(db: LoomDatabase, sessionIds: Readonly
   const holds = wanted.map((word, i) => sql`(instr(${folded}, ${word.toLowerCase()}) > 0) as ${sql.ref(`h${i}`)}`);
   const anyHolds = wanted.map((_, i) => sql`max(${sql.ref(`h${i}`)}) over (partition by session_id) as ${sql.ref(`a${i}`)}`);
   const score = sql.join(wanted.map((_, i) => sql.ref(`h${i}`)), sql` + `);
-  const { rows } = await sql<Record<string, number> & { session_id: number; text: string; rank: number }>`
+  const { rows } = await sql<Record<string, number> & { session_id: number; seq: number; text: string; rank: number }>`
     select * from (
-      select session_id, text, ${sql.join(anyHolds)}, row_number() over (partition by session_id order by ${score} desc, seq) as rank
+      select session_id, seq, text, ${sql.join(anyHolds)}, row_number() over (partition by session_id order by ${score} desc, seq) as rank
       from (
         select session_id, seq, json_extract(data, '$.text') as text, ${sql.join(holds)}
         from events
@@ -43,7 +43,7 @@ export async function searchConversations(db: LoomDatabase, sessionIds: Readonly
   `.execute(db);
   return rows.filter((row) => sessionIds.has(row.session_id)).map((row) => {
     const held = wanted.filter((_, i) => row[`a${i}`] === 1);
-    return { id: row.session_id, words: held, excerpt: excerpt(plainText(row.text), held) };
+    return { id: row.session_id, itemId: row.seq, words: held, excerpt: excerpt(plainText(row.text), held) };
   });
 }
 
