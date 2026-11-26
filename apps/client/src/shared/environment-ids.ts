@@ -9,3 +9,4 @@ export function wslEnvironmentId(distro: string): string {
 export function distroOf(environmentId: string): string | undefined {
   return environmentId.startsWith(WSL_PREFIX) ? environmentId.slice(WSL_PREFIX.length) : undefined;
 }
+

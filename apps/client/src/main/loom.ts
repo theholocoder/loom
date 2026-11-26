@@ -8,6 +8,7 @@ import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
 import { distroOf, NATIVE_ENVIRONMENT_ID, wslEnvironmentId } from '../shared/environment-ids';
+import { windowsPath } from '../shared/environment-paths';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { BridgeNotInstalled, Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
@@ -41,8 +42,8 @@ export interface LoomOptions {
   /** How many untracked files a diff counts lines for (default: the diff service's). */
   maxUntrackedCounted?: number;
   spawnBridge?: SpawnBridge;
-  /** Shows the folder picker; resolves to null if the user cancels. */
-  chooseFolder?: () => Promise<string | null>;
+  /** Shows the folder picker, opened in `defaultPath` if given; resolves to null if the user cancels. */
+  chooseFolder?: (defaultPath?: string) => Promise<string | null>;
   /** Opens a URL in the user's browser. */
   openExternal: (url: string) => Promise<void>;
   /** The agent Sessions run on; OpenCode over ACP unless a test gives another. */
@@ -451,13 +452,24 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   void native.start();
   for (const { checkout } of projectService.list()) environmentById(checkout.environmentId)?.ready().catch(() => {});
 
+  /** Where the folder picker opens for a checkout in the Environment: a WSL distro's home, as Windows shows it, once it has started. */
+  const folderToChooseIn = async (environmentId: string | undefined) => {
+    const environment = environmentById(environmentId);
+    const distro = environment?.status.distro;
+    if (!environment || !distro) return undefined;
+    await environment.ready().catch(() => {});
+    return windowsPath(distro, environment.status.bridge?.home || '/');
+  };
+
   /** Opens a Session's working copy in the user's editor or terminal, in its Environment. */
   const openInSession = (id: number, opener: Opener, file?: string) => {
     const session = sessionOf(id);
     if (!session) throw new Error(`unknown Session ${id}`);
     const environment = knownEnvironment(environmentIdOf(session.projectId));
     const { editorCommand, terminalCommand } = settingsService.value;
-    return openIn(forSessions(environment), {
+    const { distro } = environment.status;
+    const opening = forSessions(environment);
+    return openIn(distro ? { ...opening, wsl: { distro, windows: forSessions(native) } } : opening, {
       opener,
       command: opener === 'editor' ? editorCommand : terminalCommand,
       workingCopy: session.workingCopy.path,
@@ -496,7 +508,10 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       if (!isWebLink(url)) throw new Error('Loom only opens web links.');
       await options.openExternal(url);
     },
-    'dialogs.chooseFolder': () => (options.chooseFolder ? options.chooseFolder() : null),
+    'dialogs.chooseFolder': async (params) => {
+      if (!options.chooseFolder) return null;
+      return options.chooseFolder(await folderToChooseIn(params?.environmentId));
+    },
     'projects.list': () => projects.value,
     'projects.link': async (params) => {
       await startIfIdle(params.environmentId);

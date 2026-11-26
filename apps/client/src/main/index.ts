@@ -227,8 +227,8 @@ if (!app.requestSingleInstanceLock()) {
         appVersion: app.getVersion(),
         bridgePath: bridgeBinaryPath(bridgeDir()),
         clock: systemClock,
-        chooseFolder: async () => {
-          const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] };
+        chooseFolder: async (defaultPath) => {
+          const options: Electron.OpenDialogOptions = { properties: ['openDirectory'], ...(defaultPath && { defaultPath }) };
           const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
           return result.canceled ? null : (result.filePaths[0] ?? null);
         },

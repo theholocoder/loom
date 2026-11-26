@@ -153,7 +153,7 @@ describe('adding a checkout of a removed Project', () => {
 
     fireEvent.click(within(offer).getByRole('button', { name: 'Restore' }));
 
-    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen, restore: 1 } }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen, environmentId: 'native', restore: 1 } }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   });
 
@@ -177,7 +177,7 @@ describe('adding a checkout of a removed Project', () => {
     fireEvent.click(addProjectButton());
     fireEvent.click(await screen.findByRole('button', { name: 'New Project' }));
 
-    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen } }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen, environmentId: 'native' } }));
   });
 
   it('links straight away when nothing matches', async () => {
@@ -185,7 +185,7 @@ describe('adding a checkout of a removed Project', () => {
 
     fireEvent.click(addProjectButton());
 
-    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen } }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: chosen, environmentId: 'native' } }));
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 });

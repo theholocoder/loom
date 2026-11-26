@@ -1590,8 +1590,11 @@ export interface Commands {
   'environments.reload': { params: { id: string }; result: void };
   /** Opens an http(s) URL in the user's browser; rejects anything else. */
   'links.open': { params: { url: string }; result: void };
-  /** Asks the user to choose a folder; null if they cancel. */
-  'dialogs.chooseFolder': { params: void; result: string | null };
+  /**
+   * Asks the user to choose a folder; null if they cancel. For a WSL
+   * Environment, the picker opens in the distro's home, as Windows shows it.
+   */
+  'dialogs.chooseFolder': { params: { environmentId?: string } | void; result: string | null };
   'projects.list': { params: void; result: Project[] };
   /**
    * Adds the git checkout containing `path` as a Project, in the given

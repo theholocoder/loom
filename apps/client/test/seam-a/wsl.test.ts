@@ -1,13 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appVersion, realBridgePath, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
-import type { EnvironmentStatus } from '../../src/shared/api';
+import { appVersion, launched, realBridgePath, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
+import type { EnvironmentStatus, Session } from '../../src/shared/api';
 
 const unix = describe.skipIf(process.platform === 'win32');
 
 const env = (envs: EnvironmentStatus[], id: string) => envs.find((e) => e.id === id);
 const state = (id: string, wanted: EnvironmentStatus['state']) => (envs: EnvironmentStatus[]) => env(envs, id)?.state === wanted;
+
+const asWindowsShows = (distro: string, path: string) => `\\\\wsl.localhost\\${distro}${path.replaceAll('/', '\\')}`;
 
 const installedBridge = (machine: Machine, distro: string) => join(machine.distroHome(distro), '.local/share/loom/bridge', appVersion, 'loom-bridge');
 
@@ -142,6 +144,85 @@ unix('a Project checked out in a WSL distro', () => {
     const main = await startMain({ machine, userDataDir });
     const envs = await waitFor(main.api, 'environments', state('wsl:Ubuntu', 'connected'));
     expect(env(envs, 'wsl:Debian')?.state).toBe('idle');
+  });
+
+  it("is linked from the folder Windows shows for it, as the distro's own path", async () => {
+    const machine = tempMachine();
+    machine.installWsl(['Ubuntu']);
+    const path = machine.gitRepo('billing-api');
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', state('wsl:Ubuntu', 'idle'));
+
+    const project = await main.api.invoke('projects.link', { path: asWindowsShows('Ubuntu', path), environmentId: 'wsl:Ubuntu' });
+
+    expect(project.checkout).toEqual({ environmentId: 'wsl:Ubuntu', path });
+    await expect(main.api.invoke('projects.link', { path: asWindowsShows('Debian', path).replace('wsl.localhost', 'wsl$'), environmentId: 'wsl:Ubuntu' })).rejects.toThrow('is in Debian, not Ubuntu');
+  });
+
+  it("is picked in a folder picker that opens in the distro's home", async () => {
+    const machine = tempMachine();
+    machine.installWsl(['Ubuntu']);
+    const opened: Array<string | undefined> = [];
+    const main = await startMain({ machine, chooseFolder: async (defaultPath) => (opened.push(defaultPath), null) });
+    await waitFor(main.api, 'environments', state('wsl:Ubuntu', 'idle'));
+
+    await main.api.invoke('dialogs.chooseFolder', { environmentId: 'wsl:Ubuntu' });
+    await main.api.invoke('dialogs.chooseFolder');
+
+    expect(opened).toEqual([asWindowsShows('Ubuntu', machine.distroHome('Ubuntu')), undefined]);
+  });
+
+  it('is linked from a Windows drive as the distro sees it, under /mnt', async () => {
+    const machine = tempMachine();
+    machine.installWsl(['Ubuntu']);
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', state('wsl:Ubuntu', 'idle'));
+
+    await expect(main.api.invoke('projects.link', { path: 'C:\\Users\\dev\\billing-api', environmentId: 'wsl:Ubuntu' })).rejects.toThrow('/mnt/c/Users/dev/billing-api');
+  });
+
+  it("has its worktree Sessions work in the distro's ~/loom/worktrees and /tmp, with nothing else of Loom's in the distro", async () => {
+    const machine = tempMachine();
+    machine.installWsl(['Ubuntu']);
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }], acp: { turns: [{ chunks: ['Done.'] }] } });
+    const checkout = machine.gitClone(machine.gitOrigin('billing-api', 'main'), 'billing-api');
+    const userDataDir = tempDir('loom-wsl-');
+    const main = await startMain({ machine, userDataDir });
+    await waitFor(main.api, 'environments', state('wsl:Ubuntu', 'idle'));
+    const project = await main.api.invoke('projects.link', { path: checkout, environmentId: 'wsl:Ubuntu' });
+
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'worktree', prompt: 'Fix the login bug' });
+    const sessions = await waitFor(main.api, 'sessions', (list: Session[]) => list.some((s) => s.id === id && s.status === 'waiting'));
+
+    const home = machine.distroHome('Ubuntu');
+    const worktree = `${home}/loom/worktrees/billing-api/fix-the-login-bug`;
+    expect(sessions.find((s) => s.id === id)?.workingCopy).toEqual({ kind: 'worktree', path: worktree });
+    const config = machine.acpMessages().find((m) => m.config)?.config;
+    expect((JSON.parse(config!) as { permission: { external_directory: unknown } }).permission.external_directory).toEqual({ '*': 'ask', [`${worktree}/*`]: 'allow', '/tmp/*': 'allow' });
+    expect(readdirSync(join(home, 'loom'))).toEqual(['worktrees']);
+    expect(readdirSync(join(home, '.local/share/loom'))).toEqual(['bridge']);
+    expect(readdirSync(userDataDir)).toContain('loom.db');
+  });
+
+  it('opens in the editor run in the distro, or in a Windows-only one with the path Windows shows for it', async () => {
+    const machine = tempMachine();
+    machine.installWsl(['Ubuntu']);
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: [{ id: 'anthropic', name: 'Anthropic', connections: [{ type: 'api' }] }], acp: { turns: [{ chunks: ['Done.'] }] } });
+    machine.installEditor('code');
+    machine.installEditor('notepad.exe');
+    const checkout = machine.gitRepo('billing-api');
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', state('wsl:Ubuntu', 'idle'));
+    const project = await main.api.invoke('projects.link', { path: checkout, environmentId: 'wsl:Ubuntu' });
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix it' });
+    await waitFor(main.api, 'sessions', (list: Session[]) => list.some((s) => s.id === id && s.status === 'waiting'));
+
+    await main.api.invoke('sessions.openInEditor', { id, file: 'src/app.ts' });
+    await main.api.invoke('settings.setEditorCommand', { editorCommand: 'notepad.exe' });
+    await main.api.invoke('sessions.openInEditor', { id, file: 'src/app.ts' });
+
+    expect(await launched(machine, 'code')).toEqual([{ args: [`${checkout}/src/app.ts`], cwd: checkout }]);
+    expect((await launched(machine, 'notepad.exe')).map((run) => run.args)).toEqual([[asWindowsShows('Ubuntu', `${checkout}/src/app.ts`)]]);
   });
 
   it('has its Environment failed when its distro is gone', async () => {

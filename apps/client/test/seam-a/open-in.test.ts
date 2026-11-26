@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { startMain, tempDir, tempMachine, waitFor, type EditorInvocation, type Machine } from './harness';
+import { launched, startMain, tempDir, tempMachine, waitFor } from './harness';
 import type { EnvironmentStatus, Session } from '../../src/shared/api';
 
 const ready = (envs: EnvironmentStatus[]) => envs.find((e) => e.id === 'native')?.agent?.state === 'ready';
@@ -17,17 +17,6 @@ async function withSession(userDataDir?: string) {
   const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix it' });
   await waitFor(main.api, 'sessions', (list: Session[]) => list.some((s) => s.id === id && s.status === 'waiting'));
   return { machine, main, checkout, id };
-}
-
-/** Waits for the stub `name` to have been run `count` times, and returns its runs. */
-async function launched(machine: Machine, name: string, count = 1): Promise<EditorInvocation[]> {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    const runs = machine.editorInvocations(name);
-    if (runs.length >= count) return runs;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`${name} was run ${machine.editorInvocations(name).length} times, want ${count}`);
 }
 
 describe('open in editor and terminal', () => {
