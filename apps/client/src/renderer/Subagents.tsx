@@ -10,7 +10,7 @@ import { formatDuration } from './Dashboard';
 import { Markdown } from './Markdown';
 import { ModelName } from './ModelPicker';
 import { Popover } from './Popover';
-import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
+import { PlanCard, ThinkingBlock, ToolCard, ToolRunCard, withRuns } from './WorkCards';
 
 type Tool = Extract<TranscriptItem, { kind: 'tool' }>;
 
@@ -150,8 +150,14 @@ export function SubagentView({
   return (
     <>
       <div className="chat subagent-chat" role="log" aria-label={`Subagent ${subagent.description}`} tabIndex={-1}>
-        {items.map((item) =>
-          item.kind === 'agent' ? (
+        {withRuns(
+          items,
+          (item) => (item.kind === 'tool' && !startsSubagent(item, subagents) ? item : undefined),
+          (item) => (item.kind === 'thinking' ? [item] : undefined),
+        ).map((item, at, parts) =>
+          'run' in item ? (
+            <ToolRunCard key={item.run[0]!.id} run={item.run} live={subagent.status === 'running' && at === parts.length - 1} />
+          ) : item.kind === 'agent' ? (
             <div key={item.id} className="msg agent">
               <div className="who">
                 <Bot />

@@ -132,10 +132,13 @@ describe("how a Session's agent worked", () => {
   it('shows each tool call on one line: its tool in mono, what it worked on, then its status', () => {
     const { show } = openSession();
 
+    // Words between them: each call alone, not a run.
     show(
       { kind: 'tool', id: 1, toolCallId: 'call_1', title: 'read', name: 'read', toolKind: 'read', subject: 'src/app.ts', status: 'completed' },
-      { kind: 'tool', id: 2, toolCallId: 'call_2', title: 'pnpm test', toolKind: 'execute', command: 'pnpm test', status: 'running' },
-      { kind: 'tool', id: 3, toolCallId: 'call_3', title: 'Look it up', status: 'completed' },
+      { kind: 'agent', id: 2, text: 'Now the tests.', streaming: false },
+      { kind: 'tool', id: 3, toolCallId: 'call_2', title: 'pnpm test', toolKind: 'execute', command: 'pnpm test', status: 'running' },
+      { kind: 'agent', id: 4, text: 'And the docs.', streaming: false },
+      { kind: 'tool', id: 5, toolCallId: 'call_3', title: 'Look it up', status: 'completed' },
     );
 
     const read = header(/read/);
@@ -235,5 +238,84 @@ describe("how a Session's agent worked", () => {
 
     expect(within(chat()).getByText('truncated')).toBeTruthy();
     expect(within(chat()).getByText((_, el) => el?.tagName === 'PRE' && el.textContent === output)).toBeTruthy();
+  });
+  describe('a run of tool calls in a row', () => {
+    type Tool = Extract<TranscriptItem, { kind: 'tool' }>;
+    const call = (id: number, fields: Partial<Tool>): Tool => ({ kind: 'tool', id, toolCallId: `call_${id}`, title: fields.name ?? 'tool', status: 'completed', ...fields });
+    const read = (id: number, path: string) => call(id, { name: 'read', toolKind: 'read', subject: path, output: `contents of ${path}` });
+    const grep = (id: number, pattern: string, status: Tool['status'] = 'completed') => call(id, { name: 'grep', toolKind: 'search', subject: pattern, status });
+    const bash = (id: number, command: string, status: Tool['status'] = 'completed') => call(id, { name: 'bash', toolKind: 'execute', command, status, output: `ran ${command}` });
+    const edit = (id: number, path: string) => call(id, { name: 'edit', toolKind: 'edit', subject: path, diffs: [{ path, oldText: 'a\n', newText: 'b\n' }] });
+    const run = () => screen.getByRole('button', { expanded: false, name: /calls/ });
+
+    it('folds into one line saying what it did, files counted once, opening to a row per call', () => {
+      const { chat, show } = openSession({ ...working, status: 'waiting' });
+
+      show(read(1, 'src/app.ts'), read(2, 'src/app.ts'), read(3, 'src/b.ts'), grep(4, 'TODO'), grep(5, 'FIXME'), bash(6, 'pnpm test'), edit(7, 'src/app.ts'), edit(8, 'src/app.ts'), { kind: 'agent', id: 9, text: 'Done.', streaming: false });
+
+      expect(run().textContent).toContain('Read 2 files, searched 2 times, ran 1 command, edited 1 file');
+      expect(within(run()).getByText('8 calls')).toBeTruthy();
+      expect(within(run()).getByRole('img', { name: 'Completed' })).toBeTruthy();
+      expect(within(chat()).queryByText('src/b.ts')).toBeNull();
+
+      fireEvent.click(run());
+      const rows = within(chat()).getAllByRole('button', { name: /^(read|grep|bash|edit)/ });
+      expect(rows.map((r) => r.textContent)).toEqual(['readsrc/app.ts', 'readsrc/app.ts', 'readsrc/b.ts', 'grepTODO', 'grepFIXME', 'bashpnpm test', 'editsrc/app.ts', 'editsrc/app.ts']);
+      expect(rows.every((r) => !r.closest('.tool-call'))).toBe(true);
+
+      fireEvent.click(rows[5]!);
+      expect(within(chat()).getByText('$ pnpm test')).toBeTruthy();
+      expect(within(chat()).getByText('ran pnpm test')).toBeTruthy();
+    });
+
+    it('counts its failed calls, and ends failed only when its last call failed', () => {
+      const { show } = openSession({ ...working, status: 'waiting' });
+
+      show(bash(1, 'pnpm test', 'failed'), read(2, 'src/app.ts'), { kind: 'agent', id: 3, text: 'Hm.', streaming: false }, read(4, 'a.ts'), bash(5, 'pnpm lint', 'failed'));
+
+      const [first, second] = screen.getAllByRole('button', { name: /calls/ });
+      expect(within(first!).getByText('1 failed')).toBeTruthy();
+      expect(within(first!).getByRole('img', { name: 'Completed' })).toBeTruthy();
+      expect(first!.closest('.tool')?.className).toContain('failed-calls');
+      expect(within(second!).getByRole('img', { name: 'Failed' })).toBeTruthy();
+    });
+
+    it('stays folded while the agent works in it, saying which call runs now', () => {
+      const { show } = openSession();
+
+      show(read(1, 'src/app.ts'), grep(2, 'artifacts:expire', 'running'));
+
+      expect(run().textContent).toContain('· grep artifacts:expire');
+      expect(within(run()).getByRole('img', { name: 'Running' })).toBeTruthy();
+      expect(run().closest('.tool')?.className).toContain('live');
+    });
+
+    it("takes in the thinking between its calls, as a row; thinking before it stays under the agent's name", () => {
+      const { chat, show } = openSession({ ...working, status: 'waiting' });
+
+      show(
+        { kind: 'thinking', id: 1, text: 'Find the config.', streaming: false },
+        read(2, 'ci.yml'),
+        { kind: 'thinking', id: 3, text: 'Set in two places.\nCheck the scripts.', streaming: false },
+        read(4, 'cleanup.sh'),
+        { kind: 'agent', id: 5, text: 'Found it.', streaming: false },
+      );
+
+      expect(header(/Thought/).closest('.msg.agent')).toBeTruthy();
+      expect(run().textContent).toContain('Read 2 files');
+      fireEvent.click(run());
+      const thought = within(chat()).getByRole('button', { name: 'Set in two places.' });
+      fireEvent.click(thought);
+      expect(within(chat()).getByText(/Check the scripts\./)).toBeTruthy();
+    });
+
+    it('is no run with a single call, nor across a Subagent, a question or a plan', () => {
+      const { chat, show } = openSession({ ...working, status: 'waiting' });
+
+      show(read(1, 'a.ts'), { kind: 'plan', id: 2, entries: [{ content: 'Fix it', status: 'pending' }] }, read(3, 'b.ts'));
+
+      expect(screen.queryByRole('button', { name: /calls/ })).toBeNull();
+      expect(chat().querySelectorAll('.tool-call')).toHaveLength(2);
+    });
   });
 });
