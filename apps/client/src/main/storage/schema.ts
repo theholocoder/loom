@@ -221,6 +221,91 @@ export interface HighlightChecksTable {
   error: string | null;
 }
 
+/** Whose usage one of an agent's conversations is: a Session's (its own, or its Subagents'), its Session highlights checks', or the user's own, outside Loom. */
+export type ConversationOwner = 'session' | 'highlights' | 'outside';
+
+/** How far Loom has counted one of an agent's conversations, step by step (ADR 0012), and whose it is. */
+export interface AgentConversationsTable {
+  /** The agent's name, e.g. `OpenCode`. */
+  agent: string;
+  environment_id: string;
+  /** The agent's own id for it. */
+  id: string;
+  owner: ConversationOwner;
+  /** The Session it counts for, unless `outside`; null for a Session highlights check of a Session Loom doesn't know. */
+  session_id: number | null;
+  /** When it had last changed (the agent's clock) as Loom last read its steps: it is read again only once it changes. */
+  seen_through: number;
+  /** Its steps counted so far: every one completed before `counted_through`, and at it, every one up to `counted_step` (by id). */
+  counted_through: number;
+  counted_step: string;
+  /** Its steps up to this time, completed before Loom first read the agent's records, are yet to be counted into the past; null once they have been. */
+  backfill_through: number | null;
+  /** The model its latest step counted ran with, `provider/model`: what it used outside its steps is filed under it. */
+  model: string | null;
+  /** All it had used when Loom first read the agent's records ({tokens, cost}, JSON), while its past is yet to be counted; null without a total. */
+  past_total: string | null;
+  /**
+   * All Loom has accounted for of it: its steps counted, what it used outside
+   * them, and, until counted, its past (all it had used when Loom first read
+   * the agent's records).
+   */
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  cost: number;
+}
+
+/** How far an agent's records have been read in an Environment: what changed before `synced_through` (clock time) has been counted. */
+export interface UsageSyncsTable {
+  agent: string;
+  environment_id: string;
+  synced_through: number;
+}
+
+/**
+ * What Loom had recorded of a Session's runs on one day with one model when
+ * it first read the agent's records in an Environment: the Session's steps
+ * from before then count beyond it.
+ */
+export interface UsageBaselineTable {
+  agent: string;
+  environment_id: string;
+  session_id: number;
+  day: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  cost: number;
+}
+
+/** A step Loom has counted, by when it completed, its model and what it used: a copy of it (in a forked conversation) isn't counted again. */
+export interface UsageStepsTable {
+  agent: string;
+  environment_id: string;
+  /** `at:model:input:output:reasoning:cacheRead:cacheWrite`. */
+  print: string;
+}
+
+/** What an agent used outside Loom on one day with one model, as its own records count it. */
+export interface OutsideUsageTable {
+  agent: string;
+  /** The day Loom found it, `YYYY-MM-DD` in local time. */
+  day: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  cost: number;
+}
+
 export interface Schema {
   settings: SettingsTable;
   projects: ProjectsTable;
@@ -238,4 +323,9 @@ export interface Schema {
   highlight_checks: HighlightChecksTable;
   /** Session highlights' checks' usage, by Session × day × model: as usage_buckets, but no Session's own. */
   highlight_usage: UsageBucketsTable;
+  agent_conversations: AgentConversationsTable;
+  usage_syncs: UsageSyncsTable;
+  outside_usage: OutsideUsageTable;
+  usage_baseline: UsageBaselineTable;
+  usage_steps: UsageStepsTable;
 }

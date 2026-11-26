@@ -91,9 +91,10 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   const from = dayList[0]!;
   const to = dayList.at(-1)!;
 
-  const [sessionBuckets, highlightBuckets, sessions, spans, projectRows] = await Promise.all([
+  const [sessionBuckets, highlightBuckets, outsideBuckets, sessions, spans, projectRows] = await Promise.all([
     db.selectFrom('usage_buckets').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('highlight_usage').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
+    db.selectFrom('outside_usage').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('sessions').selectAll().execute(),
     db.selectFrom('session_spans').selectAll().where('ended_at', '>=', since).where('ended_at', '<=', now).execute(),
     db.selectFrom('projects').select(['id', 'name', 'color', 'removed_at']).execute(),
@@ -179,6 +180,22 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
       });
     });
 
+  // What the agents used outside Loom, apart from Loom's own figures.
+  const outsideByModel = new Map<string, { agent: string; model: string; tokens: number }>();
+  let outsideCost = 0;
+  for (const b of outsideBuckets) {
+    const tokens = b.input_tokens + b.output_tokens + b.cache_read_tokens + b.cache_write_tokens + b.reasoning_tokens;
+    outsideCost += b.cost;
+    const key = `${b.agent}\0${b.model}`;
+    const entry = outsideByModel.get(key) ?? { agent: b.agent, model: b.model, tokens: 0 };
+    entry.tokens += tokens;
+    outsideByModel.set(key, entry);
+  }
+  const outsidePerModel = [...outsideByModel.values()]
+    .filter((m) => m.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent) || a.model.localeCompare(b.model))
+    .map((m) => withoutUndefined({ ...m, name: modelNames.get(m.model)?.name }));
+
   const prompt = mix.input + mix.cacheRead + mix.cacheWrite;
   return withoutUndefined({
     days,
@@ -195,6 +212,7 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     cacheHitRate: prompt > 0 ? mix.cacheRead / prompt : undefined,
     outcomes,
     topSessions,
+    outside: { tokens: outsidePerModel.reduce((sum, m) => sum + m.tokens, 0), reportedCost: outsideCost, perModel: outsidePerModel },
   });
 }
 

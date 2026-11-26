@@ -1489,6 +1489,24 @@ export interface UsageDashboard {
   outcomes: Record<SessionOutcome, number> & { stuck: number };
   /** The Sessions that used the most tokens in the range, most first, at most TOP_SESSIONS. */
   topSessions: TopSession[];
+  /**
+   * What the agents used outside Loom in the range (the user's own runs of
+   * them), as their own records count it, apart from every figure above:
+   * only for an agent whose records Loom reads, and from when Loom first
+   * read them.
+   */
+  outside: OutsideUsage;
+  /** While Loom still counts the usage the agents' records hold from before it first read them (ADR 0012): the figures grow until it has. */
+  countingPast?: true;
+}
+
+/** An agent's use outside Loom (UsageDashboard.outside). */
+export interface OutsideUsage {
+  tokens: number;
+  /** In USD, as the agents reported it. */
+  reportedCost: number;
+  /** By tokens, most first: `model` as `provider/model`, `name` as the agent gave it in Loom (absent when it never did). */
+  perModel: Array<{ agent: string; model: string; name?: string; tokens: number }>;
 }
 
 /** How many Sessions the dashboard's Top Sessions lists. */

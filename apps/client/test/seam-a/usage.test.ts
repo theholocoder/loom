@@ -416,3 +416,208 @@ describe("a Session's own usage", () => {
     expect(dashboard.topSessions).toMatchObject([{ sessionId: id, title: 'Deleted Session', tokens: 100 }]);
   });
 });
+
+describe("usage from OpenCode's own records", () => {
+  const SONNET = { providerID: 'anthropic', id: 'claude-sonnet-5-5' };
+  const HAIKU = { providerID: 'anthropic', id: 'claude-haiku-5-5' };
+
+  /** A machine whose OpenCode lists its sessions and their steps, as OpenCode 2.4.2 does. */
+  function recordsMachine(turns: AcpTurn[], highlightTurns: AcpTurn[] = [], sessionList = true): { machine: Machine; checkout: string } {
+    const machine = tempMachine();
+    machine.installOpencode({ version: 'opencode v2.4.2', integrations: signedIn, models, sessionList, acp: { turns, highlightTurns } });
+    const { checkout } = machine.setUp('loom', (m) => {
+      const checkout = m.gitRepo('loom');
+      m.commit(checkout, 'README.md', '# loom\n');
+      return { checkout };
+    });
+    return { machine, checkout };
+  }
+
+  /** Starts Loom now, in real time, as OpenCode stamps its steps. */
+  const startNow = (machine: Machine, checkout: string, options: { userDataDir?: string } = {}) => start(machine, checkout, { now: Date.now(), ...options });
+
+  /** The dashboard once Loom has counted the past. */
+  async function settled(main: MainHarness, days: 7 | 30 | 90 = 7) {
+    for (const deadline = Date.now() + 5_000; ; ) {
+      const dashboard = await main.api.invoke('usage.dashboard', { days });
+      if (!dashboard.countingPast) return dashboard;
+      if (Date.now() > deadline) throw new Error('still counting the past');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  it('counts the Session’s Subagents and the runs its agent starts on its own, once, as the Session’s', async () => {
+    const { machine, checkout } = recordsMachine([
+      {
+        chunks: ['Done.'],
+        tokens: { inputTokens: 1000, outputTokens: 200 },
+        cost: 0.1,
+        // What ACP never reports: a Subagent's usage, and the run on its result.
+        records: [
+          { id: 'ses_child', parentId: '$ROOT', tokens: { inputTokens: 500, outputTokens: 50 }, cost: 0.05, model: HAIKU },
+          { id: 'ses_grandchild', parentId: 'ses_child', tokens: { inputTokens: 20, outputTokens: 2 } },
+          { id: '$ROOT', tokens: { inputTokens: 300, outputTokens: 30 }, cost: 0.15 },
+        ],
+      },
+    ]);
+    const { main, project } = await startNow(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(main, id);
+
+    const dashboard = await settled(main);
+    const again = await settled(main);
+
+    expect(dashboard.tokens).toBe(1200 + 550 + 22 + 330);
+    expect(dashboard.reportedCost).toBeCloseTo(0.2);
+    expect(dashboard.perModel).toEqual([
+      { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1552 },
+      { model: 'anthropic/claude-haiku-5-5', name: 'Claude Haiku 5.5', tokens: 550 },
+    ]);
+    expect(dashboard.topSessions).toMatchObject([{ sessionId: id, tokens: 2102 }]);
+    expect(dashboard.perDay.at(-1)!.tokens).toBe(2102);
+    expect(dashboard.outside).toEqual({ tokens: 0, reportedCost: 0, perModel: [] });
+    expect(again).toEqual(dashboard);
+    const session = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!;
+    expect(session.usage).toMatchObject({ tokens: 2102, reportedCost: expect.closeTo(0.2) as number });
+  });
+
+  it('counts use outside Loom apart, from before Loom first read the records too, each step on the day it completed', async () => {
+    const { machine, checkout } = recordsMachine([]);
+    const now = Date.now();
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 9000, outputTokens: 900 }, SONNET, { at: now - 40 * DAY_MS, title: { inputTokens: 400, outputTokens: 5 } });
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 3000, outputTokens: 300 }, SONNET, { at: now - 3 * DAY_MS, cost: 0.5 });
+    const { main } = await startNow(machine, checkout);
+
+    const week = await settled(main, 7);
+    expect(week.tokens).toBe(0);
+    expect(week.outside).toEqual({ tokens: 3300, reportedCost: expect.closeTo(0.5) as number, perModel: [{ agent: 'OpenCode', model: 'anthropic/claude-sonnet-5-5', tokens: 3300 }] });
+    // The session's title, which OpenCode counts in its total but in no step, goes with its first step.
+    expect((await settled(main, 90)).outside.tokens).toBe(9900 + 405 + 3300);
+
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 100, outputTokens: 10 }, SONNET, { cost: 0.52 });
+    machine.useOpencodeOutsideLoom('ses_other', { inputTokens: 40, outputTokens: 4 }, HAIKU, { title: { inputTokens: 6, outputTokens: 1 } });
+    const later = await settled(main, 7);
+
+    expect(later.outside).toEqual({
+      tokens: 3300 + 110 + 51,
+      reportedCost: expect.closeTo(0.52) as number,
+      perModel: [
+        { agent: 'OpenCode', model: 'anthropic/claude-sonnet-5-5', tokens: 3410 },
+        { agent: 'OpenCode', model: 'anthropic/claude-haiku-5-5', tokens: 51 },
+      ],
+    });
+    expect(later.perDay.at(-4)!.tokens).toBe(0);
+  });
+
+  it('counts the past of Sessions Loom counted from their runs only what the runs missed, and leaves out its own folders', async () => {
+    const turns: AcpTurn[] = [
+      {
+        chunks: ['Done.'],
+        tokens: { inputTokens: 1000, outputTokens: 200 },
+        records: [
+          { id: 'ses_child', parentId: '$ROOT', tokens: { inputTokens: 500, outputTokens: 50 } },
+          { id: '$ROOT', tokens: { inputTokens: 300, outputTokens: 30 } },
+        ],
+      },
+    ];
+    // An OpenCode that can't list its sessions: Loom counts what the runs report.
+    const { machine, checkout } = recordsMachine(turns, [], false);
+    const userDataDir = tempDir('loom-usage-');
+    const first = await startNow(machine, checkout, { userDataDir });
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(first.main, id);
+    expect((await first.main.api.invoke('usage.dashboard', { days: 7 })).tokens).toBe(1200);
+    await first.main.close();
+    // A Session highlights check that ran then, its usage reported by its run.
+    machine.useOpencodeOutsideLoom('ses_check', { inputTokens: 70, outputTokens: 7 }, HAIKU, { directory: '/tmp/loom-highlights' });
+
+    // OpenCode is upgraded to one that lists them.
+    machine.installOpencode({ version: 'opencode v2.4.2', integrations: signedIn, models, sessionList: true, acp: { turns } });
+    const later = await startMain({ machine, userDataDir, now: Date.now() });
+    await waitFor(later.api, 'environments', ready);
+    const dashboard = await settled(later);
+
+    expect(dashboard.tokens).toBe(1200 + 550 + 330);
+    expect(dashboard.topSessions).toMatchObject([{ sessionId: id, tokens: 2080 }]);
+    expect(dashboard.outside.tokens).toBe(0);
+    const session = (await later.api.invoke('sessions.list')).find((s) => s.id === id)!;
+    expect(session.usage?.tokens).toBe(2080);
+    expect(await settled(later)).toEqual(dashboard);
+  });
+
+  it('counts a conversation whose steps are too big to list from its total, as of its last change', async () => {
+    const { machine, checkout } = recordsMachine([]);
+    const now = Date.now();
+    machine.useOpencodeOutsideLoom('ses_huge', { inputTokens: 5000, outputTokens: 500 }, SONNET, { at: now - 2 * DAY_MS, tooBig: true });
+    const { main } = await startNow(machine, checkout);
+    expect((await settled(main)).outside.tokens).toBe(5500);
+
+    machine.useOpencodeOutsideLoom('ses_huge', { inputTokens: 100, outputTokens: 10 }, SONNET, { tooBig: true });
+    const dashboard = await settled(main);
+
+    expect(dashboard.outside.tokens).toBe(5610);
+  });
+
+  it('counts the steps a forked session copied from its parent once', async () => {
+    const { machine, checkout } = recordsMachine([]);
+    const now = Date.now();
+    machine.useOpencodeOutsideLoom('ses_original', { inputTokens: 1000, outputTokens: 100 }, SONNET, { at: now - 2 * DAY_MS });
+    machine.forkOpencodeSession('ses_original', 'ses_early_fork');
+    const { main } = await startNow(machine, checkout);
+    expect((await settled(main)).outside.tokens).toBe(1100);
+
+    machine.forkOpencodeSession('ses_original', 'ses_fork');
+    machine.useOpencodeOutsideLoom('ses_fork', { inputTokens: 40, outputTokens: 4 }, SONNET);
+    const dashboard = await settled(main);
+
+    expect(dashboard.outside.tokens).toBe(1144);
+  });
+
+  it("counts Session highlights' checks as theirs, not as use outside Loom", async () => {
+    const { machine, checkout } = recordsMachine(
+      [{ chunks: ['Done.'], tokens: { inputTokens: 1000, outputTokens: 200 } }],
+      [{ chunks: ['{"add":[{"kind":"risk","text":"Watch the cache."}],"resolve":[]}'], tokens: { inputTokens: 300, outputTokens: 50 } }],
+    );
+    const { main, project } = await startNow(machine, checkout);
+    await main.api.invoke('settings.setHighlights', { on: true, model: 'anthropic/claude-haiku-5-5' });
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waitFor(main.api, 'highlights', (h) => !h.checking && h.highlights.length === 1, { sessionId: id });
+
+    const dashboard = await settled(main);
+
+    expect(dashboard.tokens).toBe(1550);
+    expect(dashboard.topSessions.map((s) => s.tokens)).toEqual([1200]);
+    expect(dashboard.outside.tokens).toBe(0);
+  });
+
+  it('counts nothing again after a restart', async () => {
+    const { machine, checkout } = recordsMachine([{ chunks: ['Done.'], tokens: { inputTokens: 1000, outputTokens: 200 } }]);
+    const userDataDir = tempDir('loom-usage-');
+    const first = await startNow(machine, checkout, { userDataDir });
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(first.main, id);
+    expect((await settled(first.main)).tokens).toBe(1200);
+    await first.main.close();
+
+    const later = await startMain({ machine, userDataDir, now: Date.now() });
+    await waitFor(later.api, 'environments', ready);
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 10, outputTokens: 1 }, SONNET);
+    const dashboard = await settled(later);
+
+    expect(dashboard.tokens).toBe(1200);
+    expect(dashboard.outside.tokens).toBe(11);
+  });
+
+  it('counts what the runs report when OpenCode can’t list its sessions', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Done.'], tokens: { inputTokens: 1000, outputTokens: 200 } }]);
+    const { main, project } = await start(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(main, id);
+
+    const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
+
+    expect(dashboard.tokens).toBe(1200);
+    expect(dashboard.outside.tokens).toBe(0);
+    expect(dashboard.countingPast).toBeUndefined();
+  });
+});

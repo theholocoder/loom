@@ -128,6 +128,33 @@ describe('the dashboard', () => {
     expect(within(outcomes).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['Merged2', 'Closed0', 'Archived, no Merge request1', 'Open2', 'Stuck at least once1']);
   });
 
+  it('shows a share of the token mix under 1% as <1%, not as 0%', async () => {
+    const tiny = { ...dashboard(), tokens: 1_000_000, mix: { input: 150_000, output: 4_000, cacheRead: 830_000, cacheWrite: 15_000, reasoning: 1_000 } };
+    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': () => tiny });
+    const view = openDashboard(main);
+    await within(view).findByRole('group', { name: 'Tokens' });
+
+    const mix = within(view).getByRole('region', { name: 'Token mix' });
+    expect(mix.textContent).toContain('output <1%');
+    expect(mix.textContent).toContain('reasoning <1%');
+    expect(within(mix).getByText('output <1%').title).toBe(`${(4000).toLocaleString()} tokens`);
+  });
+
+  it('shows use outside Loom apart, by agent and model, or says there was none', async () => {
+    const outside = { ...dashboard(), outside: { tokens: 154_000, reportedCost: 0.02, perModel: [{ agent: 'OpenCode', model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 110_000 }, { agent: 'OpenCode', model: 'opencode/big-pickle', tokens: 44_000 }] } };
+    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': ({ days }) => (days === 7 ? outside : dashboard(days)) });
+    const view = openDashboard(main);
+    await within(view).findByRole('group', { name: 'Tokens' });
+
+    const card = within(view).getByRole('region', { name: 'Outside Loom' });
+    expect(card.textContent).toContain('154k tokens');
+    const perModel = within(card).getByRole('list', { name: 'Tokens outside Loom per model' });
+    expect(within(perModel).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['OpenCode · Claude Sonnet 5.5' + '110k', 'OpenCode · opencode/big-pickle' + '44k']);
+
+    fireEvent.click(within(view).getByRole('radio', { name: '30 days' }));
+    await waitFor(() => expect(within(view).getByRole('region', { name: 'Outside Loom' }).textContent).toContain('No use outside Loom in the last 30 days.'));
+  });
+
   it('lists the Top Sessions, opening one that is still on this machine', async () => {
     const main = new FakeMain({ projects: [project], sessions: [session] }, { 'usage.dashboard': ({ days }) => dashboard(days) });
     const view = openDashboard(main);

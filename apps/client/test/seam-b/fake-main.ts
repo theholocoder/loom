@@ -24,6 +24,7 @@ export function emptyDashboard(days: UsageRange): UsageDashboard {
     mix: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
     outcomes: { merged: 0, closed: 0, archived: 0, open: 0, stuck: 0 },
     topSessions: [],
+    outside: { tokens: 0, reportedCost: 0, perModel: [] },
   };
 }
 

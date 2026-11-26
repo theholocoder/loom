@@ -2,7 +2,7 @@
 // Session (ADR 0005). A profile says how to start a given agent; ACP itself
 // stays inside this module, translated into Loom's AgentEvents.
 import { isImage, type AgentConfig, type Answer, type ModelChoice, type ModelPick, type PlanEntry, type PlanStatus, type QuestionField, type QuestionOption, type SubagentStatus, type TokenCounts, type ToolStatus } from '../../shared/api';
-import { ResumeRefused, type AgentAdapter, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions, type ScriptCall, type SubagentEvent, type SubagentReport, type ToolCall } from './adapter';
+import { ResumeRefused, type AgentAdapter, type AgentUsageSource, type AgentEvent, type AgentPrompt, type AgentResponse, type AgentSession, type ApprovalAction, type OpenOptions, type ScriptCall, type SubagentEvent, type SubagentReport, type ToolCall } from './adapter';
 import { systemClock, type Clock, type TimerHandle } from '../clock';
 import { isNotFound } from '../environments/exec';
 import { AcpConnection, AcpError } from './acp';
@@ -27,6 +27,8 @@ export interface AcpProfile {
    * OpenCode does (`opencode/session/child_update`, which Loom opts into).
    */
   subagentTool?: string;
+  /** Where the agent keeps its conversations' usage, if Loom can read it (AgentAdapter.usage). */
+  usage?: AgentUsageSource;
 }
 
 const PROTOCOL_VERSION = 1;
@@ -66,6 +68,10 @@ export class AcpAdapter implements AgentAdapter {
 
   get name(): string {
     return this.profile.name;
+  }
+
+  get usage(): AgentUsageSource | undefined {
+    return this.profile.usage;
   }
 
   async open({ environment, workingCopy, tempDir, approvals, toolsOff, loomTools, resume, onEvent }: OpenOptions): Promise<AgentSession> {
