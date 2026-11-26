@@ -1,6 +1,6 @@
 // What Babysit found on the Session's Merge request, in its transcript: a card
 // of feedback the agent may need to act on, and quiet notes of progress.
-import { CircleCheckBig, CircleX, Eye, GitMerge, GitPullRequestClosed, MessageSquare, type LucideIcon } from 'lucide-react';
+import { CircleCheckBig, CircleX, Eye, GitBranch, GitMerge, GitPullRequestClosed, MessageSquare, type LucideIcon } from 'lucide-react';
 import { codePlace, forgeName, MAX_AUTO_PROMPTS, mergeRequestRef, type BabysitCi, type EndedMergeRequestState, type FeedbackItem, type ForgeKind, type TranscriptItem } from '../shared/api';
 import { ErrorAlert, useAction } from './Questions';
 import { unsavedWorkSummary } from './Archive';
@@ -148,7 +148,21 @@ function FeedbackLine({ entry, onOpen, onShowPlace }: { entry: FeedbackItem; onO
       return (
         <li>
           <GitMerge className="sm tone-failed" />
-          <span className="feedback-line">Conflicts with its target branch</span>
+          <span className="feedback-line">
+            {'Conflicts with '}
+            {/* One reported before Loom kept its target branch doesn't name it. */}
+            {entry.target ? <span className="tech">{entry.target}</span> : 'its target branch'}
+          </span>
+        </li>
+      );
+    case 'behind':
+      return (
+        <li>
+          <GitBranch className="sm tone-pending" />
+          <span className="feedback-line">
+            {'Needs a rebase onto '}
+            <span className="tech">{entry.target}</span>
+          </span>
         </li>
       );
   }

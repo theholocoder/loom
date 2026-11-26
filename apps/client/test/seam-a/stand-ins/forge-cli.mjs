@@ -199,10 +199,18 @@ function fieldValue(name) {
 }
 
 /** A scripted Merge request as `gh` or `glab` prints it in JSON. */
-function asCli({ number, url, branch, state = 'open', conflicts, pipeline, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', description = '', reviewers = [], oid = 'commit-1' }) {
+function asCli({ number, url, branch, state = 'open', conflicts, behind, pipeline, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', description = '', reviewers = [], oid = 'commit-1' }) {
   return basename(scriptPath, '.json') === 'glab'
-    ? { id: 5000 + number, iid: number, web_url: url, sha: oid, title, description, draft, author: { username: author }, reviewers: reviewers.map((username) => ({ username })), source_branch: branch, target_branch: target, state: state === 'open' ? 'opened' : state, has_conflicts: conflicts ?? false, head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null }
+    ? { id: 5000 + number, iid: number, web_url: url, sha: oid, title, description, draft, author: { username: author }, reviewers: reviewers.map((username) => ({ username })), source_branch: branch, target_branch: target, state: state === 'open' ? 'opened' : state, has_conflicts: conflicts ?? false, detailed_merge_status: mergeStatusOf(conflicts, behind, { conflicts: 'conflict', behind: 'need_rebase', hidden: 'not_approved', unknown: 'unchecked', clean: 'mergeable' }), head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null }
     : { number, url, headRefName: branch, state: state.toUpperCase() };
+}
+
+/** What the Forge sums up whether a scripted Merge request can be merged as, in its `names`: a conflict comes first. */
+function mergeStatusOf(conflicts, behind, names) {
+  if (conflicts) return names.conflicts;
+  if (behind === 'hidden') return names.hidden;
+  if (behind) return names.behind;
+  return conflicts === undefined && behind === undefined ? names.unknown : names.clean;
 }
 
 /** The Merge request a `glab api …/merge_requests/<n>/…` path names. */
@@ -248,7 +256,7 @@ function rollupOf(checks) {
 }
 
 /** A scripted Merge request as Loom's GraphQL query gets it from GitHub. */
-function asPullRequest({ number, url, branch, state = 'open', reviews = [], comments = [], threads = [], checks = [], conflicts, oid = 'commit-1', rollupState, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', commits = 1, additions = 0, deletions = 0, changedFiles = 0, description = '', reviewers = [] }) {
+function asPullRequest({ number, url, branch, state = 'open', reviews = [], comments = [], threads = [], checks = [], conflicts, behind, oid = 'commit-1', rollupState, title = `Merge request ${number}`, draft = false, author = 'octocat', target = 'main', commits = 1, additions = 0, deletions = 0, changedFiles = 0, description = '', reviewers = [] }) {
   return {
     number,
     url,
@@ -265,6 +273,7 @@ function asPullRequest({ number, url, branch, state = 'open', reviews = [], comm
     totalCommits: { totalCount: commits },
     state: state.toUpperCase(),
     mergeable: conflicts === undefined ? 'UNKNOWN' : conflicts ? 'CONFLICTING' : 'MERGEABLE',
+    mergeStateStatus: mergeStatusOf(conflicts, behind, { conflicts: 'DIRTY', behind: 'BEHIND', hidden: 'BLOCKED', unknown: 'UNKNOWN', clean: 'CLEAN' }),
     reviews: {
       nodes: reviews.map((r) => ({
         databaseId: r.id,
