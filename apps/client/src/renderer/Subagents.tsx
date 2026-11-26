@@ -8,6 +8,7 @@ import { modelNameIn, type ModelChoice, type Session, type Subagent, type Subage
 import { useTopic } from './api';
 import { formatDuration } from './Dashboard';
 import { Markdown } from './Markdown';
+import { MessageTime, withDays } from './MessageTimes';
 import { ModelName } from './ModelPicker';
 import { Popover } from './Popover';
 import { PlanCard, ThinkingBlock, ToolCard, ToolRunCard, withRuns } from './WorkCards';
@@ -143,6 +144,11 @@ export function SubagentView({
   const model = subagent.model ?? sessionModel;
   const now = useNow(subagent.status === 'running');
   const end = useRef<HTMLDivElement>(null);
+  const conversationParts = withRuns(
+    items,
+    (item) => (item.kind === 'tool' && !startsSubagent(item, subagents) ? item : undefined),
+    (item) => (item.kind === 'thinking' ? [item] : undefined),
+  );
   // A block body: Chromium's scrollIntoView returns a promise, which React would take for a cleanup.
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: 'end' });
@@ -150,11 +156,7 @@ export function SubagentView({
   return (
     <>
       <div className="chat subagent-chat" role="log" aria-label={`Subagent ${subagent.description}`} tabIndex={-1}>
-        {withRuns(
-          items,
-          (item) => (item.kind === 'tool' && !startsSubagent(item, subagents) ? item : undefined),
-          (item) => (item.kind === 'thinking' ? [item] : undefined),
-        ).map((item, at, parts) =>
+        {withDays(conversationParts, (item) => ('run' in item ? undefined : item.kind === 'agent' || item.kind === 'thinking' ? item.at : undefined), (item, at, parts) =>
           'run' in item ? (
             <ToolRunCard key={item.run[0]!.id} run={item.run} live={subagent.status === 'running' && at === parts.length - 1} />
           ) : item.kind === 'agent' ? (
@@ -166,6 +168,7 @@ export function SubagentView({
                 <div className="bubble">
                   <Markdown text={item.text} />
                 </div>
+                <MessageTime at={item.at} />
               </div>
             </div>
           ) : item.kind === 'thinking' ? (

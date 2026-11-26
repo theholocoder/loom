@@ -40,6 +40,10 @@ const agentText = (items: TranscriptItem[]) =>
     .map((i) => i.text)
     .join('');
 
+/** Each item's kind, and when it was said for one that keeps it. */
+const timesOf = (items: TranscriptItem[]) => items.map((i) => ('at' in i ? [i.kind, i.at] : [i.kind]));
+const settled = (items: TranscriptItem[]) => items.some((i) => i.kind === 'agent' && !i.streaming);
+
 describe('a checkout Session', () => {
   it("streams the agent's reply while Working, then waits as finished", async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Hello', ', world'], hold: 'reply' }]);
@@ -50,8 +54,8 @@ describe('a checkout Session', () => {
     expect(created).toMatchObject({ projectId: project.id, title: 'Say hello', agent: 'OpenCode', workingCopy: { kind: 'checkout', path: checkout }, status: 'working' });
     const streaming = await waitFor(main.api, 'transcript', (items) => agentText(items) === 'Hello, world', { sessionId: created.id });
     expect(streaming).toEqual([
-      { kind: 'user', id: expect.any(Number), text: 'Say hello' },
-      { kind: 'agent', id: expect.any(Number), text: 'Hello, world', streaming: true },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Say hello' },
+      { kind: 'agent', at: expect.any(Number), id: expect.any(Number), text: 'Hello, world', streaming: true },
     ]);
     expect((await main.api.invoke('sessions.list')).find((s) => s.id === created.id)?.status).toBe('working');
 
@@ -59,9 +63,34 @@ describe('a checkout Session', () => {
 
     await waitFor(main.api, 'sessions', session(created.id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
     expect(await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && !i.streaming), { sessionId: created.id })).toEqual([
-      { kind: 'user', id: expect.any(Number), text: 'Say hello' },
-      { kind: 'agent', id: expect.any(Number), text: 'Hello, world', streaming: false },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Say hello' },
+      { kind: 'agent', at: expect.any(Number), id: expect.any(Number), text: 'Hello, world', streaming: false },
     ]);
+  });
+
+  it('keeps when each message was said: the user sending it, the agent starting it', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Hello'], hold: 'reply' }]);
+    const userDataDir = tempDir('loom-sessions-');
+    const main = await startMain({ machine, userDataDir, now: 5_000_000 });
+    await waitFor(main.api, 'environments', ready);
+    const project = await main.api.invoke('projects.link', { path: checkout });
+
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Say hello' });
+    const sentAt = main.clock.now();
+    await waitFor(main.api, 'transcript', (items) => agentText(items) === 'Hello', { sessionId: id });
+    machine.release('reply');
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    const said = timesOf(await waitFor(main.api, 'transcript', settled, { sessionId: id }));
+
+    expect(said).toEqual([
+      ['user', sentAt],
+      ['agent', expect.any(Number)],
+    ]);
+    expect(said[1]![1]).toBeGreaterThanOrEqual(sentAt);
+
+    await main.close();
+    const again = await started(machine, userDataDir);
+    expect(timesOf(await waitFor(again.api, 'transcript', settled, { sessionId: id }))).toEqual(said);
   });
 
   it('waits on an error, showing the provider error, when the run fails', async () => {
@@ -73,8 +102,8 @@ describe('a checkout Session', () => {
     const [failed] = (await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'))).filter((s) => s.id === id);
     expect(failed).toMatchObject({ waitingReason: 'error', error: 'Insufficient credits: add more at https://example.com/billing' });
     expect(await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'error'), { sessionId: id })).toEqual([
-      { kind: 'user', id: expect.any(Number), text: 'Fix it' },
-      { kind: 'agent', id: expect.any(Number), text: 'Let me', streaming: false },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Fix it' },
+      { kind: 'agent', at: expect.any(Number), id: expect.any(Number), text: 'Let me', streaming: false },
       { kind: 'error', id: expect.any(Number), message: 'Insufficient credits: add more at https://example.com/billing' },
     ]);
   });
@@ -434,8 +463,8 @@ describe("a Session's transcript", () => {
     const again = await started(machine, killed);
 
     expect(await waitFor(again.api, 'transcript', (items) => items.length > 0, { sessionId: id })).toEqual([
-      { kind: 'user', id: expect.any(Number), text: 'Say hello' },
-      { kind: 'agent', id: expect.any(Number), text: 'Hello, wor', streaming: false },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Say hello' },
+      { kind: 'agent', at: expect.any(Number), id: expect.any(Number), text: 'Hello, wor', streaming: false },
       { kind: 'interruption', id: expect.any(Number), by: 'quit' },
     ]);
     expect((await again.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting', waitingReason: 'interrupted' });
@@ -454,9 +483,9 @@ describe("a Session's transcript", () => {
     const again = await started(machine, userDataDir);
 
     expect(await waitFor(again.api, 'transcript', (items) => items.length > 0, { sessionId: id })).toEqual([
-      { kind: 'user', id: expect.any(Number), text: 'Say hello' },
-      { kind: 'agent', id: expect.any(Number), text: 'Hello, world', streaming: false },
-      { kind: 'user', id: expect.any(Number), text: 'Again' },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Say hello' },
+      { kind: 'agent', at: expect.any(Number), id: expect.any(Number), text: 'Hello, world', streaming: false },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Again' },
       { kind: 'error', id: expect.any(Number), message: 'provider overloaded' },
     ]);
   });

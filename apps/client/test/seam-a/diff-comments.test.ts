@@ -59,7 +59,7 @@ describe('diff comments sent with a prompt', () => {
     await waitFor(main.api, 'sessions', (sessions) => waiting(id)(sessions) && promptTexts(machine).length === 2);
     expect(promptTexts(machine)[1]).toBe(`A few things:\n\n${blocks}`);
     const items = await waitFor(main.api, 'transcript', (list) => list.length === 4, { sessionId: id });
-    expect(items[2]).toEqual({ kind: 'user', id: 2, text: `A few things:\n\n${blocks}` });
+    expect(items[2]).toEqual({ kind: 'user', at: expect.any(Number), id: 2, text: `A few things:\n\n${blocks}` });
   });
 
   it('can be the whole prompt', async () => {

@@ -68,13 +68,13 @@ describe("how a Session's agent worked", () => {
     ]);
 
     const expected = [
-      { kind: 'user', id: 0, text: 'Fix the tests' },
-      { kind: 'thinking', id: 1, text: 'The tests fail on a typo.', streaming: false },
-      { kind: 'agent', id: 2, text: 'Let me look.', streaming: false },
+      { kind: 'user', at: expect.any(Number), id: 0, text: 'Fix the tests' },
+      { kind: 'thinking', at: expect.any(Number), id: 1, text: 'The tests fail on a typo.', streaming: false },
+      { kind: 'agent', at: expect.any(Number), id: 2, text: 'Let me look.', streaming: false },
       { kind: 'tool', id: 3, toolCallId: 'call_1', title: 'Read src/app.ts', toolKind: 'read', status: 'completed', input: '{\n  "filePath": "src/app.ts"\n}', output: 'export const app = 1;' },
       { kind: 'tool', id: 4, toolCallId: 'call_2', title: 'bash', toolKind: 'execute', status: 'failed', output: 'command not found: pnpx' },
       { kind: 'tool', id: 5, toolCallId: 'call_3', title: 'Tool call', status: 'completed', diffs: [{ path: 'src/app.ts', oldText: 'a', newText: 'b' }] },
-      { kind: 'agent', id: 6, text: 'Fixed.', streaming: false },
+      { kind: 'agent', at: expect.any(Number), id: 6, text: 'Fixed.', streaming: false },
     ];
     expect(live).toEqual(expected);
     expect(await replayed(machine, userDataDir, id)).toEqual(expected);
@@ -140,10 +140,10 @@ describe("how a Session's agent worked", () => {
 
     expect(items.slice(1)).toEqual([
       { kind: 'plan', id: 1, entries: [{ content: 'Find the typo', status: 'completed' }, { content: 'Fix it', status: 'in_progress' }] },
-      { kind: 'agent', id: 2, text: 'On it.', streaming: false },
-      { kind: 'user', id: 3, text: 'And a test' },
+      { kind: 'agent', at: expect.any(Number), id: 2, text: 'On it.', streaming: false },
+      { kind: 'user', at: expect.any(Number), id: 3, text: 'And a test' },
       { kind: 'plan', id: 4, entries: [{ content: 'Add a test', status: 'cancelled' }] },
-      { kind: 'agent', id: 5, text: 'Done.', streaming: false },
+      { kind: 'agent', at: expect.any(Number), id: 5, text: 'Done.', streaming: false },
     ]);
   });
 
@@ -210,7 +210,7 @@ describe("how a Session's agent worked", () => {
 
     expect(live.slice(1)).toEqual([
       { kind: 'tool', id: 1, toolCallId: 'call_1', title: 'webfetch', status: 'failed' },
-      { kind: 'thinking', id: 2, text: 'Still waiting', streaming: false },
+      { kind: 'thinking', at: expect.any(Number), id: 2, text: 'Still waiting', streaming: false },
       { kind: 'error', id: 3, message: 'provider overloaded' },
     ]);
   });

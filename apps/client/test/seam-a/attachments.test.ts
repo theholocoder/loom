@@ -54,7 +54,7 @@ describe('attachments', () => {
 
     const items = await waitFor(main.api, 'transcript', (list) => list.some((i) => i.kind === 'agent'), { sessionId: id });
     const attachment = { name: 'config.yaml', mimeType: 'application/yaml', size: content.length, hash: sha256(content) };
-    expect(items[0]).toEqual({ kind: 'user', id: 0, text: 'Why does this time out?', attachments: [attachment] });
+    expect(items[0]).toEqual({ kind: 'user', at: expect.any(Number), id: 0, text: 'Why does this time out?', attachments: [attachment] });
     expect(readFileSync(join(userDataDir, 'attachments', String(id), `${attachment.hash}.yaml`), 'utf8')).toBe(content);
 
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
@@ -101,7 +101,7 @@ describe('attachments', () => {
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && prompts(machine).length === 2));
     expect(prompts(machine)[1]).toEqual([{ type: 'resource_link', name: 'crash.log', uri: expect.any(String), mimeType: 'text/plain', size: 6 }]);
     const items = await waitFor(main.api, 'transcript', (list) => list.length === 4, { sessionId: id });
-    expect(items[2]).toEqual({ kind: 'user', id: 2, text: '', attachments: [{ name: 'crash.log', mimeType: 'text/plain', size: 6, hash: sha256('panic\n') }] });
+    expect(items[2]).toEqual({ kind: 'user', at: expect.any(Number), id: 2, text: '', attachments: [{ name: 'crash.log', mimeType: 'text/plain', size: 6, hash: sha256('panic\n') }] });
   });
 
   it('keeps the attachments of a queued message, across a restart, and sends them with it', async () => {
@@ -129,7 +129,7 @@ describe('attachments', () => {
     const [restarted] = (await again.api.invoke('sessions.list')).filter((s) => s.id === id);
     expect(restarted!.queue).toEqual([{ id: expect.any(Number), text: 'Follow this', attachments: [attachment] }]);
     const [sent] = await waitFor(again.api, 'transcript', (list) => list.length > 0, { sessionId: id });
-    expect(sent).toEqual({ kind: 'user', id: 0, text: 'Refactor billing', attachments: [first] });
+    expect(sent).toEqual({ kind: 'user', at: expect.any(Number), id: 0, text: 'Refactor billing', attachments: [first] });
     expect(readFileSync(join(userDataDir, 'attachments', String(id), `${attachment.hash}.md`), 'utf8')).toBe('# Plan\n');
   });
 

@@ -152,13 +152,13 @@ describe('a Session with Subagents', () => {
 
     const child = await transcriptOf(main, id, 'ses_child1', (items) => items.some((i) => i.kind === 'tool' && i.toolCallId === 'call_inner' && i.status === 'completed'));
     expect(child.map(({ id: _id, ...rest }) => rest)).toEqual([
-      { kind: 'thinking', text: 'Where to look?', streaming: false },
-      { kind: 'agent', text: 'Looking in src/.', streaming: false },
+      { kind: 'thinking', at: expect.any(Number), text: 'Where to look?', streaming: false },
+      { kind: 'agent', at: expect.any(Number), text: 'Looking in src/.', streaming: false },
       expect.objectContaining({ kind: 'tool', toolCallId: 'call_grep', title: 'grep', name: 'grep', status: 'completed', subject: 'checkSession', output: 'src/auth.ts:12' }),
       expect.objectContaining({ kind: 'tool', toolCallId: 'call_inner', name: 'subagent', status: 'completed', subagentId: 'ses_child2' }),
     ]);
     // Ended, its text is finished.
-    expect(await transcriptOf(main, id, 'ses_child2', (items) => items.length > 0)).toEqual([{ id: 0, kind: 'agent', text: 'The tests cover it.', streaming: false }]);
+    expect(await transcriptOf(main, id, 'ses_child2', (items) => items.length > 0)).toEqual([{ id: 0, kind: 'agent', at: expect.any(Number), text: 'The tests cover it.', streaming: false }]);
 
     // The Session's own transcript has its card for the Subagent, and none of the Subagents' words.
     const own = await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent'), { sessionId: id });
@@ -184,7 +184,7 @@ describe('a Session with Subagents', () => {
     const [subagent] = await subagentsOf(again, id, (list) => list.length === 1);
     expect(subagent).toMatchObject({ id: 'ses_child1', status: 'interrupted', toolCallId: 'call_sub', description: 'Explore auth' });
     expect(subagent!.endedAt).toBeGreaterThanOrEqual(subagent!.startedAt);
-    expect(await transcriptOf(again, id, 'ses_child1', (items) => items.length === 1)).toEqual([{ id: 0, kind: 'agent', text: 'Half way.', streaming: true }]);
+    expect(await transcriptOf(again, id, 'ses_child1', (items) => items.length === 1)).toEqual([{ id: 0, kind: 'agent', at: expect.any(Number), text: 'Half way.', streaming: true }]);
     const [session] = (await again.api.invoke('sessions.list')).filter((s) => s.id === id);
     expect(session!.runningSubagents).toBeUndefined();
   });
