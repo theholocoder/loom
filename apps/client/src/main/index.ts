@@ -11,6 +11,7 @@ import { createLoom, type Loom } from './loom';
 import type { DesktopNotification } from './notifications';
 import { isWebLink } from '../shared/links';
 import { guardQuit, quitQuestion } from './quit';
+import { restartAppImage } from './appimage-restart';
 import { selfTest } from './self-test';
 import { startTelemetry } from './telemetry';
 import type { SqliteDriver } from './storage/sqlite';
@@ -152,11 +153,12 @@ function releaseUpdater(): Updater | undefined {
         // electron-updater would start the new AppImage at once, while this
         // Loom still holds the single-instance lock as it shuts down, so it
         // would quit straight away. Instead, the update installs as on any
-        // quit, and the new AppImage starts once this Loom has exited.
+        // quit, and the new AppImage starts once this Loom has exited: not
+        // through app.relaunch, which can't start an AppImage (appimage-restart.ts).
         let appImage = process.env.APPIMAGE!;
         autoUpdater.once('appimage-filename-updated', (path: string) => (appImage = path));
         // After electron-updater's own quit handler, which installs.
-        app.once('quit', () => app.relaunch({ execPath: appImage, args: process.argv.slice(1) }));
+        app.once('quit', () => restartAppImage({ pid: process.pid, appImage, args: process.argv.slice(1), env: process.env }));
         app.quit();
         return;
       }
