@@ -6,6 +6,7 @@ import { ACCENTS, accentColours, DENSITIES, FONT_SIZES, isDarkTheme, isLightThem
 import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useSystemLocale } from './dates';
+import { NATIVE_ENVIRONMENT_ID } from '../shared/environment-ids';
 import { DATE_FORMATS, dateSettingsOf, Dates, HOUR_CYCLES, type DateSettings } from '../shared/dates';
 import { useTheme } from './appearance';
 import { useCheckoutModels } from './checkout';
@@ -575,7 +576,7 @@ const TERMINAL_EXAMPLES: Record<string, string> = { windows: 'wt -d {path}', dar
 /** How Loom runs the user's terminal, in each Session's Environment. */
 function TerminalCommand({ label }: { label: string }) {
   const stored = useTopic('settings')?.terminalCommand ?? '';
-  const os = useTopic('environments')?.find((e) => e.id === 'native')?.bridge?.os;
+  const os = useTopic('environments')?.find((e) => e.id === NATIVE_ENVIRONMENT_ID)?.bridge?.os;
   return (
     <TextSetting
       label={label}
@@ -871,7 +872,6 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
     setReloadError(undefined);
     api.invoke('environments.start', { id: env.id }).catch((error: unknown) => setReloadError((error as Error).message));
   };
-  // A distro not started yet, or one that failed to, is started from here; a connected one reloaded.
   const startable = env.state === 'idle' || env.state === 'failed';
   return (
     <tr>
@@ -1025,7 +1025,6 @@ function shellWarning(env: EnvironmentStatus): string | undefined {
   return "Loom couldn't read your login shell's environment, so tools set up in your shell profile (mise, asdf, ~/.local/bin) may not be found.";
 }
 
-/** What the Environment is doing, in words: a WSL distro's start says which, as it may be slow. */
 function stateLabel(env: EnvironmentStatus): string {
   if (env.state === 'idle') return 'not started';
   if (env.state === 'starting' && env.installing) return `Starting ${env.label}… (installing loom-bridge)`;

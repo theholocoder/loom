@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { AgentStatus, EnvironmentStatus, ForgeStatus, Project } from '../../src/shared/api';
+import { wslEnvironmentId } from '../../src/shared/environment-ids';
 import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
@@ -186,7 +187,7 @@ describe('Settings: the agent in each Environment', () => {
 });
 
 describe('Settings: WSL distros', () => {
-  const distro = (name: string, env: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({ id: `wsl:${name}`, label: name, distro: name, state: 'idle', ...env });
+  const distro = (name: string, env: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({ id: wslEnvironmentId(name), label: name, distro: name, state: 'idle', ...env });
 
   function openSettings(...environments: EnvironmentStatus[]) {
     const main = renderApp(new FakeMain({ environments: [connectedNative, ...environments] }));
@@ -213,7 +214,7 @@ describe('Settings: WSL distros', () => {
 
     fireEvent.click(within(row('Debian')).getByRole('button', { name: 'Start' }));
 
-    expect(main.invoked).toContainEqual({ command: 'environments.start', params: { id: 'wsl:Debian' } });
+    expect(main.invoked).toContainEqual({ command: 'environments.start', params: { id: wslEnvironmentId('Debian') } });
   });
 
   it('retries a distro that failed to start', () => {
@@ -221,7 +222,7 @@ describe('Settings: WSL distros', () => {
 
     fireEvent.click(within(row('Debian')).getByRole('button', { name: 'Retry' }));
 
-    expect(main.invoked).toContainEqual({ command: 'environments.start', params: { id: 'wsl:Debian' } });
+    expect(main.invoked).toContainEqual({ command: 'environments.start', params: { id: wslEnvironmentId('Debian') } });
   });
 
   it('says the distro is starting, and when Loom installs its bridge there', () => {
@@ -236,7 +237,7 @@ describe('Settings: WSL distros', () => {
 
     fireEvent.click(within(row('Ubuntu')).getByRole('button', { name: 'Reload' }));
 
-    expect(main.invoked).toContainEqual({ command: 'environments.reload', params: { id: 'wsl:Ubuntu' } });
+    expect(main.invoked).toContainEqual({ command: 'environments.reload', params: { id: wslEnvironmentId('Ubuntu') } });
   });
 });
 

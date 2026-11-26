@@ -48,7 +48,6 @@ win:
   extraResources:
     - from: ../../bridge/dist/loom-bridge-win32-x64.exe
       to: bridge/loom-bridge-win32-x64.exe
-    # Installed into each WSL distro Loom works in (ADR 0008).
     - from: ../../bridge/dist/loom-bridge-linux-x64
       to: bridge/loom-bridge-linux-x64
 nsis:

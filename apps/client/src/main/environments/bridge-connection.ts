@@ -14,9 +14,7 @@ type BridgeEvent =
   | { event: 'channel.data'; params: { channel: number; data: string } }
   | { event: 'channel.exit'; params: { channel: number; exitCode: number; stderr: string } };
 
-/** How much of the end of the bridge's stderr is kept, to say why it exited. */
 const STDERR_KEPT = 500;
-/** How long an exited bridge's stderr is waited for, in real time. */
 const STDERR_WAIT_MS = 200;
 
 /** The bridge answers channel.open once the process has started. */
@@ -48,7 +46,6 @@ export class BridgeConnection {
    */
   private unclaimed = new Map<number, BridgeEvent[]>();
   private closedReason: Error | undefined;
-  /** The end of what the bridge, or what started it (wsl.exe), last wrote to stderr. */
   private stderrTail = '';
   private closeListeners: Array<(reason: Error) => void> = [];
 
@@ -75,14 +72,12 @@ export class BridgeConnection {
     child.on('error', (error) => this.fail(error));
     child.stderr?.on('data', (chunk: Buffer) => (this.stderrTail = (this.stderrTail + chunk.toString('utf8')).slice(-STDERR_KEPT)));
     child.on('exit', (code, signal) => {
-      // Said with what it printed last, such as wsl.exe's word on a distro that is gone.
       const exited = () => {
-        const said = this.stderrTail.replaceAll('\0', '').replace(/\s+/g, ' ').trim();
-        this.fail(new Error(`bridge exited (${signal ?? `code ${code}`})${said ? `: ${said}` : ''}`));
+        const lastWords = this.stderrTail.replaceAll('\0', '').replace(/\s+/g, ' ').trim();
+        this.fail(new Error(`bridge exited (${signal ?? `code ${code}`})${lastWords ? `: ${lastWords}` : ''}`));
       };
       const stderr = child.stderr;
       if (!stderr || stderr.readableEnded) return exited();
-      // What it printed may still be on its way; a process it left holding stderr doesn't hold this up.
       const timer = setTimeout(exited, STDERR_WAIT_MS);
       stderr.once('end', () => {
         clearTimeout(timer);

@@ -152,10 +152,8 @@ export interface ContextUsage {
 export interface EnvironmentStatus {
   id: string;
   label: string;
-  /** The WSL distro the Environment is, on Windows; absent for the native one. */
   distro?: string;
   state: EnvironmentState;
-  /** Set while Loom installs its bridge into the Environment, as it starts. */
   installing?: boolean;
   /** Present once the handshake has succeeded. */
   bridge?: BridgeInfo;
@@ -1583,10 +1581,6 @@ export interface Commands {
    * connected Environment, and resolves once done.
    */
   'environments.detect': { params: void; result: void };
-  /**
-   * Starts an Environment not started yet (a WSL distro's) or failed, as
-   * Retry does, and resolves once it is connected and its agent checked.
-   */
   'environments.start': { params: { id: string }; result: void };
   /**
    * Re-reads an Environment's shell environment, for processes started from

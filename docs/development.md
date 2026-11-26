@@ -30,7 +30,7 @@ With no display, run the smoke tests headless: `LOOM_SMOKE_HEADLESS=1 just test`
 - **Seam B** (`apps/client/test/seam-b`, `apps/client/e2e`): the renderer against a fake main, plus Electron smoke tests of the whole app.
 - **Seam C** (`bridge/protocol`): Go tests at the bridge protocol boundary.
 
-Seam A never runs the real `gh` or `glab`: it puts scripted stand-ins on the Environment's PATH (`apps/client/test/seam-a/stand-ins`). On Unix it also stands in for WSL (`Machine.installWsl`): a `wsl.exe` script, which the native bridge is pointed at with `LOOM_WSL`, runs each distro's commands on the test machine under a home of its own.
+Seam A never runs the real `gh` or `glab`: it puts scripted stand-ins on the Environment's PATH (`apps/client/test/seam-a/stand-ins`). On Unix it also stands in for WSL (`Machine.installWsl`): a `wsl.exe` script, which the native bridge is pointed at with `LOOM_TEST_WSL`, runs each distro's commands on the test machine under a home of its own.
 
 ### Forge contract suite
 

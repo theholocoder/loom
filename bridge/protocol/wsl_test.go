@@ -12,10 +12,6 @@ import (
 	"github.com/theholocoder/loom/bridge/protocol"
 )
 
-// fakeWSL writes a stand-in for wsl.exe on Linux: `-l -q` prints listing, and
-// `-d <distro> --exec <command…>` runs the command for the distro `distro`
-// with home as its HOME, its stdin first piped through filter (`cat` to pass
-// it as it is). It refuses any other command line, as a wsl.exe would fail it.
 func fakeWSL(t *testing.T, distro, home, filter string, listing []byte) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -32,7 +28,6 @@ export HOME="` + home + `"
 	return path
 }
 
-// utf16LE is s as wsl.exe writes its own output without WSL_UTF8.
 func utf16LE(s string) []byte {
 	var out []byte
 	for _, u := range utf16.Encode([]rune(s)) {
@@ -41,7 +36,6 @@ func utf16LE(s string) []byte {
 	return out
 }
 
-// distroNames is the names of the distros a wsl.list result lists.
 func distroNames(t *testing.T, result map[string]any) []string {
 	t.Helper()
 	var names []string
@@ -113,7 +107,6 @@ func TestWSLInstallRefusesABinaryThatArrivedChangedAndKeepsTheInstalledOne(t *te
 	write(t, binary, "a binary", 0o644)
 	bridges := filepath.Join(home, ".local", "share", "loom", "bridge")
 	write(t, filepath.Join(bridges, "1.0.0", "loom-bridge"), "old", 0o755)
-	// The stream is damaged on its way into the distro.
 	p := startBridgeOn(t, protocol.Machine{WSL: fakeWSL(t, "Ubuntu", home, "tr a b", nil)})
 
 	p.send(map[string]any{"id": 1, "method": "wsl.install", "params": map[string]any{"distro": "Ubuntu", "version": "1.2.3", "binary": binary}})
@@ -141,5 +134,59 @@ func TestWSLInstallRefusesAVersionThatIsNotOne(t *testing.T) {
 
 	if e, _ := reply["error"].(map[string]any); e == nil || e["code"] != "bad_params" {
 		t.Fatalf("wsl.install = %v, want bad_params", reply)
+	}
+}
+
+func linuxBridgeIn(t *testing.T, content string) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "loom-bridge-linux-x64")
+	write(t, binary, content, 0o644)
+	return binary
+}
+
+func TestWSLBridgeIsWhereItWouldBeInstalledAndNotCurrentBeforeItIs(t *testing.T) {
+	home := t.TempDir()
+	p := startBridgeOn(t, protocol.Machine{WSL: fakeWSL(t, "Ubuntu", home, "cat", nil)})
+
+	result := p.call(1, "wsl.bridge", map[string]any{"distro": "Ubuntu", "version": "1.2.3", "binary": linuxBridgeIn(t, "a binary")})
+
+	if result["path"] != filepath.Join(home, ".local", "share", "loom", "bridge", "1.2.3", "loom-bridge") || result["current"] != false {
+		t.Fatalf("wsl.bridge = %v, want the version's path, not current", result)
+	}
+}
+
+func TestWSLBridgeIsCurrentOnceInstalled(t *testing.T) {
+	wsl := fakeWSL(t, "Ubuntu", t.TempDir(), "cat", nil)
+	p := startBridgeOn(t, protocol.Machine{WSL: wsl})
+	params := map[string]any{"distro": "Ubuntu", "version": "1.2.3", "binary": linuxBridgeIn(t, "a binary")}
+
+	installed := p.call(1, "wsl.install", params)
+	found := p.call(2, "wsl.bridge", params)
+
+	if found["current"] != true || found["path"] != installed["path"] || found["wsl"] != wsl {
+		t.Fatalf("wsl.bridge = %v after wsl.install = %v, want it current, at the same path", found, installed)
+	}
+}
+
+func TestWSLBridgeIsNotCurrentWhenAnotherBinaryIsInItsPlace(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".local", "share", "loom", "bridge", "1.2.3", "loom-bridge"), "another binary", 0o755)
+	p := startBridgeOn(t, protocol.Machine{WSL: fakeWSL(t, "Ubuntu", home, "cat", nil)})
+
+	result := p.call(1, "wsl.bridge", map[string]any{"distro": "Ubuntu", "version": "1.2.3", "binary": linuxBridgeIn(t, "a binary")})
+
+	if result["current"] != false {
+		t.Fatalf("wsl.bridge = %v, want not current", result)
+	}
+}
+
+func TestWSLBridgeFailsWithWhatWSLSaidForADistroItCannotStart(t *testing.T) {
+	p := startBridgeOn(t, protocol.Machine{WSL: fakeWSL(t, "Ubuntu", t.TempDir(), "cat", nil)})
+
+	p.send(map[string]any{"id": 1, "method": "wsl.bridge", "params": map[string]any{"distro": "Debian", "version": "1.2.3", "binary": linuxBridgeIn(t, "a binary")}})
+	reply := p.response(1)
+
+	if e, _ := reply["error"].(map[string]any); e == nil || e["code"] != "wsl_failed" || !strings.Contains(e["message"].(string), "bad command line") {
+		t.Fatalf("wsl.bridge = %v, want wsl_failed with what wsl.exe said", reply)
 	}
 }

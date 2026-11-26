@@ -7,8 +7,9 @@ import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
+import { distroOf, NATIVE_ENVIRONMENT_ID, wslEnvironmentId } from '../shared/environment-ids';
 import { bridgeBinaryPath } from './environments/bridge-path';
-import { Environment, type SpawnBridge } from './environments/environment';
+import { BridgeNotInstalled, Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
 import { Attachments } from './sessions/attachments';
 import { Babysit } from './sessions/babysit';
@@ -148,13 +149,10 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
 
   const environments = new Topic<EnvironmentStatus[]>([]);
   let babysit: Babysit | undefined;
-  /** Every Environment Loom has, by id: the native one first, then WSL distros'. */
-  const envs = new Map<string, Environment>();
-  /** Each Environment's agents' records' latest reading since it connected. */
+  const environmentsById = new Map<string, Environment>();
+  const environmentById = (id: string | undefined) => (id === undefined ? undefined : environmentsById.get(id));
   const usageReads = new Map<string, Promise<void>>();
-  /** Tells the renderer every Environment's status. */
-  const publishEnvironments = () => environments.set([...envs.values()].map((e) => e.status));
-  /** What an Environment's changes set off; each Environment has its own. */
+  const publishEnvironments = () => environments.set([...environmentsById.values()].map((e) => e.status));
   const watchEnvironment = () => {
     let wasConnected = false;
     let lastState: EnvironmentStatus['state'] | undefined;
@@ -170,8 +168,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
         void sessionService.lookUpBranches(status.id);
         // So may the agent's usage, in Loom and outside it.
         usageReads.set(status.id, usageSync.sync(status.id));
-        // The native bridge is how Loom finds WSL distros.
-        if (status.id === NATIVE) void listDistros();
+        if (status.id === NATIVE_ENVIRONMENT_ID) void listDistros();
       }
       wasConnected = isConnected;
       // A bridge that was up and died took its agents with it.
@@ -180,60 +177,53 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     };
   };
   const native = new Environment({
-    id: NATIVE,
+    id: NATIVE_ENVIRONMENT_ID,
     label: 'Native',
-    launch: () => ({ command: options.bridgePath, args: [] }),
+    launch: async () => ({ command: options.bridgePath, args: [] }),
     appVersion: options.appVersion,
     clock: options.clock,
     spawnBridge,
     onChange: watchEnvironment(),
   });
-  envs.set(NATIVE, native);
+  environmentsById.set(NATIVE_ENVIRONMENT_ID, native);
 
-  // WSL distros, which the native bridge on Windows lists, and installs each one's bridge into (ADR 0008).
-  /** wsl.exe's path, as the native bridge last found it. */
-  let wslPath: string | undefined;
-  /** The Linux bridge, which is copied into each distro. */
   const linuxBridgePath = bridgeBinaryPath(dirname(options.bridgePath), 'linux', 'x64');
-  /** The Environment of WSL distro `distro`, made the first time it is asked for: it starts once used. */
   const wslEnvironment = (distro: string): Environment => {
     const id = wslEnvironmentId(distro);
-    const known = envs.get(id);
+    const known = environmentsById.get(id);
     if (known) return known;
+    const distroBridge = async (method: 'wsl.bridge' | 'wsl.install') => {
+      await native.ready();
+      return native.request<{ wsl: string; path: string; current: boolean }>(method, WSL_DISTRO_TIMEOUT_MS, { distro, version: options.appVersion, binary: linuxBridgePath });
+    };
     const environment = new Environment({
       id,
       label: distro,
       distro,
       waitsForUse: true,
-      // Started from the distro's own filesystem, never /mnt/c, which may be unmounted or moved.
       launch: async () => {
-        if (!wslPath) await listDistros();
-        if (!wslPath) throw new Error('WSL is not installed');
-        return { command: wslPath, args: ['-d', distro, '--exec', '/bin/sh', '-c', 'exec "$HOME/.local/share/loom/bridge/$1/loom-bridge"', 'sh', options.appVersion], env: wslEnv() };
+        const { wsl, path, current } = await distroBridge('wsl.bridge');
+        if (!current) throw new BridgeNotInstalled(`loom-bridge ${options.appVersion} is not installed in ${distro}`);
+        return { command: wsl, args: ['-d', distro, '--exec', path], env: wslEnv() };
       },
       install: async () => {
-        await native.ready();
-        await native.request('wsl.install', WSL_INSTALL_TIMEOUT_MS + 10_000, { distro, version: options.appVersion, binary: linuxBridgePath, timeoutMs: WSL_INSTALL_TIMEOUT_MS });
+        await distroBridge('wsl.install');
       },
       appVersion: options.appVersion,
       clock: options.clock,
       spawnBridge,
       onChange: watchEnvironment(),
     });
-    envs.set(id, environment);
+    environmentsById.set(id, environment);
     publishEnvironments();
     return environment;
   };
-  /** Looks for WSL distros through the native bridge, and adds an Environment for each new one. */
   const listDistros = async () => {
-    try {
-      await native.ready();
-      const { wsl, distros } = await native.request<{ wsl?: string; distros: Array<{ name: string }> }>('wsl.list', WSL_LIST_TIMEOUT_MS);
-      wslPath = wsl || undefined;
-      for (const { name } of distros) wslEnvironment(name);
-    } catch {
-      // No WSL to list, or none now: the distros known stay.
-    }
+    const distros = await native
+      .ready()
+      .then(() => native.request<{ distros: Array<{ name: string }> }>('wsl.list', WSL_LIST_TIMEOUT_MS))
+      .then(({ distros }) => distros, () => []);
+    for (const { name } of distros) wslEnvironment(name);
   };
   publishEnvironments();
 
@@ -243,15 +233,14 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     db,
     clock: options.clock,
     environment: (id) => {
-      const environment = envs.get(id);
-      return environment && { label: environment.status.label, connected: () => environment.status.state === 'connected', request: (...args) => environment.request(...args) };
+      const environment = environmentById(id);
+      return environment && { label: environment.status.label, connected: () => environment.status.state === 'connected', request: environment.request };
     },
     onChange: (list) => projects.set(list),
     onRemovedChange: (list) => removedProjects.set(list),
   });
   projects.set(projectService.list());
   removedProjects.set(projectService.listRemoved());
-  // The distros the Projects' checkouts are in, whether or not WSL lists them now.
   for (const { checkout } of projectService.list()) {
     const distro = distroOf(checkout.environmentId);
     if (distro) wslEnvironment(distro);
@@ -272,19 +261,17 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   );
   const settings = new Topic<SettingsValues>(settingsService.value);
 
-  /** Each Environment as the Session services take it, made once. */
   const sessionEnvironments = new Map<Environment, SessionEnvironment>();
   const forSessions = (environment: Environment): SessionEnvironment => {
     const known = sessionEnvironments.get(environment);
     if (known) return known;
     const made: SessionEnvironment = {
       label: environment.status.label,
-      request: (...args) => environment.request(...args),
+      request: environment.request,
       home: () => environment.status.bridge?.home || undefined,
       openChannel: (params) => environment.openChannel(params),
       ready: async () => {
         await environment.ready();
-        // The agent's records are first read before its first run, which they then count (ADR 0012).
         if (adapter.usage && !usageSync.covers(adapter.name, environment.status.id)) await usageReads.get(environment.status.id);
       },
       restart: () => environment.restart(),
@@ -294,20 +281,19 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     sessionEnvironments.set(environment, made);
     return made;
   };
-  /** The Environment with this id, if Loom has it. */
-  const environmentById = (id: string | undefined) => (id === undefined ? undefined : envs.get(id));
-  /** The Environment with this id; throws if Loom has none. */
+  const sessionEnvironmentById = (id: string | undefined) => {
+    const environment = environmentById(id);
+    return environment && forSessions(environment);
+  };
   const knownEnvironment = (id: string | undefined) => {
     const environment = environmentById(id);
     if (!environment) throw new Error(`unknown Environment "${id}"`);
     return environment;
   };
-  /** Starts Environment `id` to link a checkout in it, if it waits to be used. */
-  const startedToLink = async (id = NATIVE) => {
-    const environment = envs.get(id);
+  const startIfIdle = async (id = NATIVE_ENVIRONMENT_ID) => {
+    const environment = environmentById(id);
     if (environment?.status.state === 'idle') await environment.ready();
   };
-  /** The Project's checkout, and its Environment once it is up. */
   const readyCheckout = async (projectId: number) => {
     const checkout = projectService.list().find((p) => p.id === projectId)?.checkout;
     if (!checkout) throw new Error(`unknown Project ${projectId}`);
@@ -343,10 +329,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   /** The id of the Environment the Project's checkout is in. */
   const environmentIdOf = (projectId: number) => projectService.list().find((p) => p.id === projectId)?.checkout.environmentId;
   /** The Environment a Session's agent and git run in, as the Session services take it, if Loom has it. */
-  const environmentForSession = (session: Session) => {
-    const environment = sessionEnvironment(session);
-    return environment && forSessions(environment);
-  };
+  const environmentForSession = (session: Session) => sessionEnvironmentById(environmentIdOf(session.projectId));
   /** The Environment a Session runs in, if Loom has it. */
   const sessionEnvironment = (session: Session) => environmentById(environmentIdOf(session.projectId));
   const terminals = new Terminals({
@@ -372,7 +355,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     agents: adapter.usage ? [{ name: adapter.name, usage: adapter.usage }] : [],
     environment: (id) => {
       const environment = environmentById(id);
-      return environment?.status.state === 'connected' ? (...args) => environment.request(...args) : undefined;
+      return environment?.status.state === 'connected' ? environment.request : undefined;
     },
     loomFolder: (environmentId, directory) => {
       const environment = environmentById(environmentId);
@@ -400,10 +383,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     clock: options.clock,
     adapter,
     project: (id) => projectService.list().find((p) => p.id === id),
-    environment: (id) => {
-      const environment = environmentById(id);
-      return environment && forSessions(environment);
-    },
+    environment: sessionEnvironmentById,
     worktreeRoot: () => settingsService.value.worktreeRoot,
     onChange: (list) => {
       sessions.set(list);
@@ -464,15 +444,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     clock: options.clock,
     sessions: sessionService,
     project: (id) => projectService.list().find((p) => p.id === id),
-    call: (id) => {
-      const environment = environmentById(id);
-      return environment && ((...args) => environment.request(...args));
-    },
+    call: (id) => environmentById(id)?.request,
   });
   const babysitter = babysit;
 
   void native.start();
-  // A distro a Project's checkout is in is in use: its Environment starts now.
   for (const { checkout } of projectService.list()) environmentById(checkout.environmentId)?.ready().catch(() => {});
 
   /** Opens a Session's working copy in the user's editor or terminal, in its Environment. */
@@ -504,7 +480,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'environments.list': () => environments.value,
     'environments.detect': async () => {
       await listDistros();
-      await Promise.all([...envs.values()].map((e) => e.detectAgent()));
+      await Promise.all([...environmentsById.values()].map((e) => e.detectAgent()));
     },
     'environments.start': async ({ id }) => {
       const environment = knownEnvironment(id);
@@ -523,11 +499,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'dialogs.chooseFolder': () => (options.chooseFolder ? options.chooseFolder() : null),
     'projects.list': () => projects.value,
     'projects.link': async (params) => {
-      await startedToLink(params.environmentId);
+      await startIfIdle(params.environmentId);
       return projectService.link(params);
     },
     'projects.restorable': async (params) => {
-      await startedToLink(params.environmentId);
+      await startIfIdle(params.environmentId);
       return projectService.restorable(params);
     },
     'projects.remove': async ({ id, discard }) => {
@@ -646,7 +622,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'usage.dashboard': async ({ days }) => {
       // What the agents' records hold now counts, as far as they can be read in a moment.
       let timer: unknown;
-      await Promise.race([Promise.all([...envs.keys()].map((id) => usageSync.sync(id))), new Promise<void>((resolve) => (timer = options.clock.setTimeout(resolve, DASHBOARD_SYNC_MS)))]);
+      await Promise.race([Promise.all([...environmentsById.keys()].map((id) => usageSync.sync(id))), new Promise<void>((resolve) => (timer = options.clock.setTimeout(resolve, DASHBOARD_SYNC_MS)))]);
       options.clock.clearTimeout(timer);
       // What the Sessions have recorded so far counts.
       await sessionService.flush();
@@ -686,36 +662,15 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       sessionForge.stop();
       await sessionService.shutdown();
       await usageSync.stop();
-      await Promise.all([...envs.values()].map((e) => e.stop()));
+      await Promise.all([...environmentsById.values()].map((e) => e.stop()));
       await db.destroy();
     },
   };
 }
 
-/** The native Environment's id. */
-const NATIVE = 'native';
-/** What a WSL distro's Environment's id starts with, before the distro's name. */
-const WSL_PREFIX = 'wsl:';
-
-/** The id of WSL distro `distro`'s Environment. */
-function wslEnvironmentId(distro: string): string {
-  return `${WSL_PREFIX}${distro}`;
-}
-
-/** The WSL distro Environment `id` is, if it is one. */
-function distroOf(id: string): string | undefined {
-  return id.startsWith(WSL_PREFIX) ? id.slice(WSL_PREFIX.length) : undefined;
-}
-/** Listing WSL's distros; wsl.exe hangs when WSL is wedged, which the bridge bounds at 20 s. */
 const WSL_LIST_TIMEOUT_MS = 30_000;
-/** Installing a distro's bridge, which may have to boot the distro first. */
-const WSL_INSTALL_TIMEOUT_MS = 120_000;
+const WSL_DISTRO_TIMEOUT_MS = 130_000;
 
-/**
- * What a WSL distro's bridge, started through wsl.exe, runs with: wsl.exe's
- * own messages in UTF-8, and the bridge's error reporting settings passed
- * into the distro, where Windows' environment isn't.
- */
 function wslEnv(): Record<string, string> {
   const shared = ['LOOM_BRIDGE_SENTRY_DSN', 'LOOM_SENTRY_RELEASE', 'LOOM_SENTRY_ENVIRONMENT'].filter((name) => process.env[name]).map((name) => `${name}/u`);
   return { WSL_UTF8: '1', WSLENV: [process.env.WSLENV, ...shared].filter(Boolean).join(':') };

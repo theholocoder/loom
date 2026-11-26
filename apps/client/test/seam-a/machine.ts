@@ -302,7 +302,6 @@ export class Machine {
   /** The origins `gitOrigin` copied from a template, and their refs then. */
   private pristineOrigins = new Map<string, { key: string; refs: string }>();
   private scripts: string[] = [];
-  /** The stand-in wsl.exe, once `installWsl` made one. */
   private wsl: string | undefined;
 
   constructor() {
@@ -336,16 +335,9 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
       { mode: 0o755 },
     );
     this.writeShellPath();
-    return { ...process.env, ...home, SHELL: shell, ...(this.wsl && { LOOM_WSL: this.wsl }) };
+    return { ...process.env, ...home, SHELL: shell, ...(this.wsl && { LOOM_TEST_WSL: this.wsl }) };
   }
 
-  /**
-   * Installs WSL with these distros (Unix only), for bridges started from now
-   * on: a stand-in wsl.exe the native bridge reaches it through. `-l -q` lists
-   * the distros, in UTF-16LE as wsl.exe writes; `-d <distro> --exec <command…>`
-   * runs the command on this machine with the distro's home (`distroHome`) as
-   * HOME, as the distro would; an unknown distro fails as wsl.exe does.
-   */
   installWsl(distros: string[]): void {
     const dir = this.binDir('wsl');
     const listing = join(dir, 'listing');
@@ -369,7 +361,6 @@ exec "$@"
     );
   }
 
-  /** The home of the user in WSL distro `distro` (see `installWsl`). */
   distroHome(distro: string): string {
     const dir = join(this.dir, 'distros', distro, 'home');
     mkdirSync(dir, { recursive: true });

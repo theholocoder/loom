@@ -37,16 +37,13 @@ func main() {
 	// something like Git Bash and isn't the Environment's.
 	if runtime.GOOS == "windows" {
 		machine.Shell = ""
-		// Main reaches WSL distros through the native bridge (ADR 0008).
 		if wsl, err := exec.LookPath("wsl.exe"); err == nil {
 			machine.WSL = wsl
 		}
 	}
-	// A stand-in for wsl.exe, for Loom's own tests on any OS; kept from what
-	// the bridge starts.
-	if wsl := os.Getenv("LOOM_WSL"); wsl != "" {
+	if wsl := os.Getenv("LOOM_TEST_WSL"); wsl != "" {
 		machine.WSL = wsl
-		os.Unsetenv("LOOM_WSL")
+		os.Unsetenv("LOOM_TEST_WSL")
 		machine.Environ = os.Environ()
 	}
 	// Without its own path, agents get no Loom tools.

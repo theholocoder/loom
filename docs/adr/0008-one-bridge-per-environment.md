@@ -8,6 +8,6 @@ Most desktop tools (VS Code, Zed, JetBrains) use a helper like this only for an 
 
 - A second language (Go) in the repo, built for linux-x64 and windows-x64 in v1.
 - In WSL the binary is streamed over stdin into `~/.local/share/loom/bridge/<version>/`, checked by SHA-256, older versions pruned. It holds no state; worktrees and the bridge binary are all Loom keeps in a distro.
-- The bridge's version is the Client's; its handshake reports protocol version, OS and architecture, and a mismatch reinstalls it.
+- The bridge's version is the Client's; its handshake reports protocol version, OS and architecture. In WSL, a bridge whose SHA-256 isn't the Client's is reinstalled before it starts, so a mismatch at the handshake can only mean a broken Client, and fails the Environment.
 - A crashed bridge takes down every Session of its Environment at once; they go to Waiting (error) and resume on the next prompt.
 - The protocol assumes only a byte stream, and how a disconnect is handled is a launch option (v1: kill everything). So a future remote Environment can be `ssh host loom-bridge`, with a bridge that survives disconnects.

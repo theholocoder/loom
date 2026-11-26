@@ -15,79 +15,70 @@ import (
 	"unicode/utf16"
 )
 
-// On native Windows, the bridge is also how main reaches WSL: it lists the
-// distros, and installs the Linux bridge into one, so that the distro's own
-// bridge can then be started with `wsl.exe -d <distro> --exec` (ADR 0008).
-
-// wslListTimeout bounds `wsl.exe -l -q`, which hangs when the LXSS service
-// is wedged (a distro's first run, a pending Windows update).
 const wslListTimeout = 20 * time.Second
 
-// defaultWSLInstallTimeout bounds an install whose request doesn't say
-// otherwise: it may have to start the distro first.
-const defaultWSLInstallTimeout = 2 * time.Minute
+const wslDistroTimeout = 2 * time.Minute
 
-// dockerDistro matches the distros Docker Desktop keeps for itself, which
-// hold no one's checkouts.
 var dockerDistro = regexp.MustCompile(`^docker-desktop(-data)?$`)
 
-// bridgeVersion is what a version must look like to name a folder.
 var bridgeVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]*$`)
 
-// installScript runs inside the distro as `sh -c installScript sh <version>
-// <sha256>`, the binary on its stdin. It writes the binary beside its place,
-// checks it, moves it in, prunes every other version and prints where it is.
-// A binary that doesn't check out is removed, and the versions kept.
-const installScript = `set -e
-root="$HOME/.local/share/loom/bridge"
+const distroBridgePlace = `root="$HOME/.local/share/loom/bridge"
 dir="$root/$1"
+bridge="$dir/loom-bridge"
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then set -- $(sha256sum "$1")
+  elif command -v shasum >/dev/null 2>&1; then set -- $(shasum -a 256 "$1")
+  else echo "loom-bridge can't be checked: the distro has neither sha256sum nor shasum" >&2; return 1; fi
+  printf '%s\n' "$1"
+}
+`
+
+const findScript = distroBridgePlace + `printf '%s\n' "$bridge"
+if [ -x "$bridge" ]; then sha256_of "$bridge"; fi
+`
+
+const installScript = distroBridgePlace + `set -e
 mkdir -p "$dir"
-tmp="$dir/loom-bridge.$$.tmp"
+tmp="$bridge.$$.tmp"
 trap 'rm -f "$tmp"' EXIT
 cat > "$tmp"
-if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$tmp")
-elif command -v shasum >/dev/null 2>&1; then sum=$(shasum -a 256 "$tmp")
-else echo "loom-bridge can't be checked: the distro has neither sha256sum nor shasum" >&2; exit 1; fi
-sum=${sum%% *}
+sum=$(sha256_of "$tmp")
 if [ "$sum" != "$2" ]; then echo "loom-bridge arrived changed (SHA-256 $sum, want $2)" >&2; exit 1; fi
 chmod 755 "$tmp"
-mv -f "$tmp" "$dir/loom-bridge"
+mv -f "$tmp" "$bridge"
 for old in "$root"/*; do
   if [ "$old" != "$dir" ] && [ -e "$old" ]; then rm -rf "$old"; fi
 done
-printf '%s\n' "$dir/loom-bridge"
+printf '%s\n' "$bridge"
 `
 
-// wslDistro is one distro, as `wsl.exe -l` names it.
 type wslDistro struct {
 	Name string `json:"name"`
 }
 
 type wslListResult struct {
-	// WSL is wsl.exe's path, which main starts distros' bridges with; empty
-	// where there is no WSL.
 	WSL     string      `json:"wsl,omitempty"`
 	Distros []wslDistro `json:"distros"`
 }
 
-type wslInstallParams struct {
-	// Distro is the distro to install the bridge into, as `wsl.exe -l` names it.
-	Distro string `json:"distro"`
-	// Version names the folder the bridge goes in: the Client's.
+type wslBridgeParams struct {
+	Distro  string `json:"distro"`
 	Version string `json:"version"`
-	// Binary is the Linux bridge's path on this machine.
-	Binary string `json:"binary"`
-	// TimeoutMs bounds the install; zero means defaultWSLInstallTimeout.
-	TimeoutMs int `json:"timeoutMs"`
+	Binary  string `json:"binary"`
 }
 
-type wslInstallResult struct {
-	// Path is where the bridge is in the distro.
-	Path string `json:"path"`
+type wslBridgeResult struct {
+	WSL     string `json:"wsl"`
+	Path    string `json:"path"`
+	Current bool   `json:"current"`
 }
 
-// wslCommand is wsl.exe run with args, its own messages in UTF-8 where it
-// knows WSL_UTF8.
+type linuxBridge struct {
+	data   []byte
+	sha256 string
+}
+
 func (s *server) wslCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, s.wsl, args...)
 	cmd.Env = append(append([]string{}, s.environ...), "WSL_UTF8=1")
@@ -95,8 +86,6 @@ func (s *server) wslCommand(ctx context.Context, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// listWSL lists the WSL distros installed, but Docker Desktop's own; none
-// where there is no WSL.
 func (s *server) listWSL(ctx context.Context) (*wslListResult, *Error) {
 	result := &wslListResult{Distros: []wslDistro{}}
 	if s.wsl == "" {
@@ -105,16 +94,11 @@ func (s *server) listWSL(ctx context.Context) (*wslListResult, *Error) {
 	result.WSL = s.wsl
 	ctx, cancel := context.WithTimeout(ctx, wslListTimeout)
 	defer cancel()
-	cmd := s.wslCommand(ctx, "-l", "-q")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, err := s.wslCommand(ctx, "-l", "-q").Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, &Error{Code: "timeout", Message: fmt.Sprintf("wsl.exe did not list its distros within %v", wslListTimeout)}
 	}
 	if err != nil {
-		// With no distro installed, wsl.exe -l fails; with no wsl.exe, WSL
-		// isn't installed: either way, there is none to list.
 		return result, nil
 	}
 	for _, line := range strings.Split(decodeWSLOutput(out), "\n") {
@@ -126,15 +110,9 @@ func (s *server) listWSL(ctx context.Context) (*wslListResult, *Error) {
 	return result, nil
 }
 
-// decodeWSLOutput is what wsl.exe printed of its own, as text: UTF-16LE,
-// unless it took WSL_UTF8 and wrote UTF-8.
 func decodeWSLOutput(out []byte) string {
 	out = bytes.TrimPrefix(out, []byte{0xef, 0xbb, 0xbf})
-	utf16le := bytes.HasPrefix(out, []byte{0xff, 0xfe})
-	// Text in UTF-16LE has a NUL as every other byte, which UTF-8 text never has.
-	if !utf16le && len(out) >= 2 && out[1] == 0 {
-		utf16le = true
-	}
+	utf16le := bytes.HasPrefix(out, []byte{0xff, 0xfe}) || (len(out) >= 2 && out[1] == 0)
 	if !utf16le {
 		return string(out)
 	}
@@ -146,41 +124,64 @@ func decodeWSLOutput(out []byte) string {
 	return string(utf16.Decode(units))
 }
 
-// installWSL streams the Linux bridge at params.Binary into the distro's
-// ~/.local/share/loom/bridge/<version>/, checked there by SHA-256, and prunes
-// every other version.
-func (s *server) installWSL(ctx context.Context, params wslInstallParams) (*wslInstallResult, *Error) {
+func (s *server) readLinuxBridge(params wslBridgeParams) (*linuxBridge, *Error) {
 	if s.wsl == "" {
 		return nil, &Error{Code: "not_found", Message: "WSL is not installed"}
 	}
 	if params.Distro == "" || params.Binary == "" || !bridgeVersion.MatchString(params.Version) {
-		return nil, &Error{Code: "bad_params", Message: "wsl.install needs a distro, a binary and a version"}
+		return nil, &Error{Code: "bad_params", Message: "a distro, a binary and a version are needed"}
 	}
 	data, err := os.ReadFile(params.Binary)
 	if err != nil {
 		return nil, &Error{Code: "not_found", Message: fmt.Sprintf("the Linux bridge can't be read: %v", err)}
 	}
 	sum := sha256.Sum256(data)
-	timeout := defaultWSLInstallTimeout
-	if params.TimeoutMs > 0 {
-		timeout = time.Duration(params.TimeoutMs) * time.Millisecond
+	return &linuxBridge{data: data, sha256: hex.EncodeToString(sum[:])}, nil
+}
+
+func (s *server) findWSLBridge(ctx context.Context, params wslBridgeParams) (*wslBridgeResult, *Error) {
+	linux, e := s.readLinuxBridge(params)
+	if e != nil {
+		return nil, e
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	out, e := s.runInDistro(ctx, "finding loom-bridge", params.Distro, findScript, nil, params.Version)
+	if e != nil {
+		return nil, e
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	current := len(lines) == 2 && strings.TrimSpace(lines[1]) == linux.sha256
+	return &wslBridgeResult{WSL: s.wsl, Path: strings.TrimSpace(lines[0]), Current: current}, nil
+}
+
+func (s *server) installWSLBridge(ctx context.Context, params wslBridgeParams) (*wslBridgeResult, *Error) {
+	linux, e := s.readLinuxBridge(params)
+	if e != nil {
+		return nil, e
+	}
+	out, e := s.runInDistro(ctx, "installing loom-bridge", params.Distro, installScript, linux.data, params.Version, linux.sha256)
+	if e != nil {
+		return nil, e
+	}
+	return &wslBridgeResult{WSL: s.wsl, Path: strings.TrimSpace(out), Current: true}, nil
+}
+
+func (s *server) runInDistro(ctx context.Context, doing, distro, script string, stdin []byte, args ...string) (string, *Error) {
+	ctx, cancel := context.WithTimeout(ctx, wslDistroTimeout)
 	defer cancel()
-	cmd := s.wslCommand(ctx, "-d", params.Distro, "--exec", "/bin/sh", "-c", installScript, "sh", params.Version, hex.EncodeToString(sum[:]))
-	cmd.Stdin = bytes.NewReader(data)
+	cmd := s.wslCommand(ctx, append([]string{"-d", distro, "--exec", "/bin/sh", "-c", script, "sh"}, args...)...)
+	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout, stderr cappedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, &Error{Code: "timeout", Message: fmt.Sprintf("installing loom-bridge in %s did not finish within %v", params.Distro, timeout)}
+		return "", &Error{Code: "timeout", Message: fmt.Sprintf("%s in %s did not finish within %v", doing, distro, wslDistroTimeout)}
 	}
 	if err != nil {
-		said := strings.TrimSpace(decodeWSLOutput(stderr.Bytes()))
-		if said == "" {
-			said = err.Error()
+		stderrText := strings.TrimSpace(decodeWSLOutput(stderr.Bytes()))
+		if stderrText == "" {
+			stderrText = err.Error()
 		}
-		return nil, &Error{Code: "install_failed", Message: fmt.Sprintf("installing loom-bridge in %s failed: %s", params.Distro, said)}
+		return "", &Error{Code: "wsl_failed", Message: fmt.Sprintf("%s in %s failed: %s", doing, distro, stderrText)}
 	}
-	return &wslInstallResult{Path: strings.TrimSpace(stdout.String())}, nil
+	return stdout.String(), nil
 }

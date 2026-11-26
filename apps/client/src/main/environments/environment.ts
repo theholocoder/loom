@@ -5,16 +5,17 @@ import type { Clock, TimerHandle } from '../clock';
 import { BridgeConnection } from './bridge-connection';
 import type { Channel, ChannelParams } from './channel';
 
-/** Starts a bridge process: `command` with `args`, its environment the Client's plus `env`. */
 export type SpawnBridge = (command: string, args: string[], env?: Record<string, string>) => ChildProcess;
 
-/** How an Environment's bridge is started. */
 export interface BridgeLaunch {
   command: string;
   args: string[];
-  /** Added to the Client's environment. */
   env?: Record<string, string>;
 }
+
+export class BridgeNotInstalled extends Error {}
+
+type Handshake = { kind: 'connected'; connection: BridgeConnection } | { kind: 'not-installed' | 'failed'; error: string };
 
 export const HANDSHAKE_TIMEOUT_MS = 20_000;
 export const PING_INTERVAL_MS = 30_000;
@@ -29,16 +30,9 @@ export const PROTOCOL_VERSION = 4;
 export interface EnvironmentOptions {
   id: string;
   label: string;
-  /** The WSL distro the Environment is, if it is one. */
   distro?: string;
-  /** How its bridge is started, worked out as it starts. */
-  launch: () => BridgeLaunch | Promise<BridgeLaunch>;
-  /**
-   * Installs the bridge where it is started from, when it didn't start or is
-   * another Client's: a WSL distro's, which Loom copies there.
-   */
+  launch: () => Promise<BridgeLaunch>;
   install?: () => Promise<void>;
-  /** Waits to be used before starting, rather than at `start` (a WSL distro's, which would boot). */
   waitsForUse?: boolean;
   /** The Client's version, which the bridge must have been built with. */
   appVersion: string;
@@ -72,30 +66,17 @@ export class Environment {
     return this.current;
   }
 
-  /**
-   * Starts the bridge, unless it waits to be used; a bridge that fails to
-   * start leaves the Environment failed.
-   */
   start(): Promise<void> {
     if (this.current.state === 'idle') return Promise.resolve();
     return this.connect();
   }
 
-  /**
-   * Starts a failed Environment's bridge again, as Retry does, or one not
-   * started yet; nothing happens otherwise.
-   */
   async restart(): Promise<void> {
     if ((this.current.state !== 'failed' && this.current.state !== 'idle') || this.stopped) return;
     this.restarts = 0;
     await this.connect();
   }
 
-  /**
-   * Resolves once the Environment is connected, starting it if it waited to
-   * be used, and waiting while its bridge starts or restarts; rejects if it
-   * fails to start.
-   */
   ready(): Promise<void> {
     if (this.current.state === 'connected') return Promise.resolve();
     if (this.current.state === 'idle' && !this.stopped) void this.connect();
@@ -105,27 +86,15 @@ export class Environment {
 
   private async connect(): Promise<void> {
     if (this.current.state !== 'starting') this.update({ state: 'starting' });
-    let connection = await this.handshake();
-    if (typeof connection === 'object' && 'reinstall' in connection && this.options.install && !this.stopped) {
-      // A bridge missing where it is started from, or another Client's, is installed again.
-      this.update({ installing: true });
-      try {
-        await this.options.install();
-      } catch (error) {
-        this.update({ installing: undefined });
-        this.startFailed((error as Error).message);
-        return;
-      }
-      this.update({ installing: undefined });
-      connection = await this.handshake();
-    }
-    if (!(connection instanceof BridgeConnection)) {
-      this.startFailed(typeof connection === 'string' ? connection : connection.error);
+    let started = await this.handshake();
+    if (started.kind === 'not-installed') started = await this.installThenHandshake(started.error);
+    if (started.kind !== 'connected') {
+      this.startFailed(started.error);
       return;
     }
     if (this.stopped) return;
     try {
-      await this.readShellEnvironment(connection, 'environment.get');
+      await this.readShellEnvironment(started.connection, 'environment.get');
     } catch {
       // Either the bridge went away, which its close listener has reported,
       // or it was slow; detecting below covers both.
@@ -133,22 +102,28 @@ export class Environment {
     await this.detectAgent();
   }
 
-  /**
-   * Starts the bridge and shakes hands with it: its connection, once that is
-   * done and the Environment is connected, or why it didn't start, and
-   * whether installing it again would help: it wasn't there to run, or it is
-   * another Client's.
-   */
-  private async handshake(): Promise<BridgeConnection | string | { error: string; reinstall: true }> {
+  private async installThenHandshake(notInstalled: string): Promise<Handshake> {
+    const { install } = this.options;
+    if (!install || this.stopped) return { kind: 'failed', error: notInstalled };
+    this.update({ installing: true });
+    try {
+      await install();
+    } catch (error) {
+      return { kind: 'failed', error: (error as Error).message };
+    } finally {
+      this.update({ installing: undefined });
+    }
+    return this.handshake();
+  }
+
+  private async handshake(): Promise<Handshake> {
     const { clock } = this.options;
     let child: ChildProcess;
     try {
-      // Started at once when its launch line is known, as a restart's timer fires.
-      const launch = this.options.launch();
-      const { command, args, env } = launch instanceof Promise ? await launch : launch;
+      const { command, args, env } = await this.options.launch();
       child = this.options.spawnBridge(command, args, env);
     } catch (error) {
-      return (error as Error).message;
+      return { kind: error instanceof BridgeNotInstalled ? 'not-installed' : 'failed', error: (error as Error).message };
     }
     const connection = new BridgeConnection(child, clock);
     this.connection = connection;
@@ -165,21 +140,16 @@ export class Environment {
       const bridge = await connection.request<BridgeInfo>('handshake', HANDSHAKE_TIMEOUT_MS);
       if (bridge.protocolVersion !== PROTOCOL_VERSION || bridge.version !== this.options.appVersion) {
         child.kill();
-        return {
-          error: `loom-bridge ${bridge.version} (protocol ${bridge.protocolVersion}) does not match Loom ${this.options.appVersion} (protocol ${PROTOCOL_VERSION})`,
-          reinstall: true,
-        };
+        return { kind: 'failed', error: `loom-bridge ${bridge.version} (protocol ${bridge.protocolVersion}) does not match Loom ${this.options.appVersion} (protocol ${PROTOCOL_VERSION})` };
       }
-      if (this.stopped) return connection;
+      if (this.stopped) return { kind: 'connected', connection };
       this.restarts = 0;
       this.update({ state: 'connected', bridge, error: undefined, lastSeenAt: clock.now() });
       this.schedulePing(connection);
-      return connection;
+      return { kind: 'connected', connection };
     } catch (error) {
       child.kill();
-      // The shell the bridge is started through couldn't find it (127) or run it (126).
-      if (child.exitCode === 127 || child.exitCode === 126) return { error: (error as Error).message, reinstall: true };
-      return (error as Error).message;
+      return { kind: 'failed', error: (error as Error).message };
     }
   }
 
@@ -283,11 +253,11 @@ export class Environment {
   }
 
   /** Sends one request to the bridge; rejects unless the Environment is connected. */
-  request<T>(method: string, timeoutMs: number, params?: unknown): Promise<T> {
+  readonly request = <T>(method: string, timeoutMs: number, params?: unknown): Promise<T> => {
     const connection = this.connected();
     if (!connection) return Promise.reject(new Error(`${this.options.label} is not connected`));
     return connection.request<T>(method, timeoutMs, params);
-  }
+  };
 
   /** Starts a process on a channel; rejects unless the Environment is connected. */
   openChannel(params: ChannelParams): Promise<Channel> {

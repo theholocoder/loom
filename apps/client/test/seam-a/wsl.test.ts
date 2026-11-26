@@ -4,18 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { appVersion, realBridgePath, startMain, tempDir, tempMachine, waitFor, type Machine } from './harness';
 import type { EnvironmentStatus } from '../../src/shared/api';
 
-// WSL is a stand-in wsl.exe the native bridge reaches (see Machine.installWsl):
-// a shell script, so these run on Unix only. Windows itself is checked by hand
-// (issue #38).
 const unix = describe.skipIf(process.platform === 'win32');
 
 const env = (envs: EnvironmentStatus[], id: string) => envs.find((e) => e.id === id);
 const state = (id: string, wanted: EnvironmentStatus['state']) => (envs: EnvironmentStatus[]) => env(envs, id)?.state === wanted;
 
-/** Where Loom installs its bridge in a distro, for this Client's version. */
 const installedBridge = (machine: Machine, distro: string) => join(machine.distroHome(distro), '.local/share/loom/bridge', appVersion, 'loom-bridge');
 
-/** A bridge of another Client's version: it answers the handshake as loom-bridge 0.0.1 would. */
 function staleBridge(path: string): void {
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(
@@ -101,7 +96,7 @@ unix('starting a WSL Environment', () => {
     expect(statSync(installedBridge(machine, 'Ubuntu')).mtimeMs).toBe(installedAt);
   });
 
-  it('reinstalls a bridge of another version found in the distro', async () => {
+  it("replaces a bridge in the distro that is not this Client's", async () => {
     const machine = tempMachine();
     machine.installWsl(['Ubuntu']);
     staleBridge(installedBridge(machine, 'Ubuntu'));

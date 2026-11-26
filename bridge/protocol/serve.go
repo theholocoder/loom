@@ -50,9 +50,7 @@ type Machine struct {
 	// ShellTimeout bounds each attempt at running Shell; zero means
 	// shellenv.DefaultTimeout.
 	ShellTimeout time.Duration
-	// WSL is wsl.exe's path, through which the bridge lists and installs WSL
-	// distros' bridges; empty where there is no WSL to reach.
-	WSL string
+	WSL          string
 	// StopGrace is how long a stopped channel's process group has to exit
 	// after SIGTERM before it is killed; zero means proc.DefaultGrace.
 	StopGrace time.Duration
@@ -130,9 +128,8 @@ type server struct {
 	home     string
 	env      *environment
 	channels *channels
-	// wsl is wsl.exe's path, or empty; environ is the bridge's own environment, which wsl.exe runs with.
-	wsl     string
-	environ []string
+	wsl      string
+	environ  []string
 }
 
 func (s *server) handle(ctx context.Context, req request) response {
@@ -208,12 +205,18 @@ func (s *server) handle(ctx context.Context, req request) response {
 		return reply(probeOpencode(ctx, s.env.get(), params))
 	case "wsl.list":
 		return reply(s.listWSL(ctx))
-	case "wsl.install":
-		var params wslInstallParams
+	case "wsl.bridge":
+		var params wslBridgeParams
 		if err := decodeParams(req.Params, &params); err != nil {
 			return reply(nil, err)
 		}
-		return reply(s.installWSL(ctx, params))
+		return reply(s.findWSLBridge(ctx, params))
+	case "wsl.install":
+		var params wslBridgeParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.installWSLBridge(ctx, params))
 	case "channel.open":
 		var params openParams
 		if err := decodeParams(req.Params, &params); err != nil {
