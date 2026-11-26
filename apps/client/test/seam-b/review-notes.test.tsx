@@ -5,6 +5,7 @@ import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { DiffFile, DiffSummary, MergeRequestDetails, MergeRequestDiff, Project, ReviewThread, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
+import { openFromSidebar } from './sidebar';
 
 type Handlers = NonNullable<ConstructorParameters<typeof FakeMain>[1]>;
 
@@ -113,9 +114,7 @@ function renderApp({ s = session, p = project, shown = 'changes' as 'changes' | 
       <App />
     </ApiProvider>,
   );
-  const inbox = within(screen.getByRole('complementary', { name: 'Inbox' }));
-  if (s.status === 'archived') fireEvent.click(inbox.getByRole('button', { name: 'Archived' }));
-  fireEvent.click(inbox.getByRole('button', { name: s.title }));
+  openFromSidebar(s.title);
   return main;
 }
 

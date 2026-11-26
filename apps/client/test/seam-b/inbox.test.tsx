@@ -41,6 +41,9 @@ const billing: Project = {
 // 2026-11-02 10:42 local time.
 const NOW = new Date(2026, 10, 2, 10, 42).getTime();
 
+/** An open Merge request Babysit watches. */
+const openMergeRequest = { mergeRequest: { number: 38, url: 'https://github.com/theholocoder/loom/pull/38' }, mergeRequestState: 'open' } as const;
+
 let nextId = 1;
 function session(change: Partial<Session>): Session {
   const id = nextId++;
@@ -153,13 +156,83 @@ describe('the Inbox', () => {
     }
   });
 
-  it('keeps the Inbox at the top, with Snoozed, Working and Archived together at the bottom, above the footer', () => {
+  it('keeps a read Session whose open Merge request Babysit watches in a collapsed Pending approval section, out of the Inbox', () => {
+        renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [session({ title: 'In review', ...openMergeRequest }), session({ title: 'Needs me' })],
+      }),
+    );
+
+    const head = within(inbox()).getByRole('button', { name: 'Pending approval' });
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.textContent).toContain('1');
+    expect(within(inbox()).queryByRole('button', { name: 'In review' })).toBeNull();
+    expect(within(inbox()).getByRole('group', { name: 'loom' }).textContent).not.toContain('In review');
+    fireEvent.click(head);
+    const card = within(within(inbox()).getByRole('list', { name: 'Pending approval' })).getByRole('listitem', { name: 'In review' });
+    expect(within(card).getByTitle('Merge request').textContent).toBe('#38');
+    expect(within(card).getByTitle('Project').textContent).toBe('loom');
+  });
+
+  it('keeps in the Inbox a Session with a Merge request that still needs the user: unread, with feedback, a question, Babysit stopped, interrupted, or merged', () => {
+            renderApp(
+      new FakeMain({
+        projects: [loom],
+        sessions: [
+          session({ title: 'Unread', unread: true, ...openMergeRequest }),
+          session({ title: 'Feedback', waitingReason: 'feedback', ...openMergeRequest }),
+          session({ title: 'Asks', waitingReason: 'question', ...openMergeRequest }),
+          session({ title: 'Not watched', babysitOff: true, ...openMergeRequest }),
+          session({ title: 'Cut off', waitingReason: 'interrupted', ...openMergeRequest }),
+          session({ title: 'Merged', waitingReason: 'unsaved-work', ...openMergeRequest, mergeRequestState: 'merged' }),
+        ],
+      }),
+    );
+
+    const group = within(inbox()).getByRole('group', { name: 'loom' });
+    for (const title of ['Unread', 'Feedback', 'Asks', 'Not watched', 'Cut off', 'Merged']) expect(within(group).getByRole('listitem', { name: title })).toBeTruthy();
+    expect(within(inbox()).getByRole('button', { name: 'Pending approval' }).textContent).toContain('0');
+  });
+
+  it('moves a Session into Pending approval once opened and read, and back to the Inbox when Babysit brings feedback', () => {
+    const fresh = session({ title: 'In review', unread: true, ...openMergeRequest });
+    const main = renderApp(new FakeMain({ projects: [loom], sessions: [fresh] }));
+    const pendingHead = () => within(inbox()).getByRole('button', { name: 'Pending approval' });
+
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'In review' }));
+    expect(main.invoked.filter((i) => i.command === 'sessions.setUnread').map((i) => i.params)).toEqual([{ id: fresh.id, unread: false }]);
+    act(() => main.publish('sessions', [{ ...fresh, unread: false }]));
+
+    // Read now, it leaves the Inbox; its section opens, its card still selected.
+    expect(within(inbox()).queryByRole('group', { name: 'loom' })).toBeNull();
+    expect(pendingHead().getAttribute('aria-expanded')).toBe('true');
+    expect(within(within(inbox()).getByRole('list', { name: 'Pending approval' })).getByRole('button', { name: 'In review' }).getAttribute('aria-current')).toBe('true');
+
+    act(() => main.publish('sessions', [{ ...main.value('sessions')[0]!, waitingReason: 'feedback', unread: true, updatedAt: fresh.updatedAt + 1 }]));
+
+    expect(within(within(inbox()).getByRole('group', { name: 'loom' })).getByRole('listitem', { name: 'In review' })).toBeTruthy();
+    expect(pendingHead().textContent).toContain('0');
+  });
+
+  it('steps with j through the Inbox only, skipping a Session Pending approval', () => {
+    renderApp(new FakeMain({ projects: [loom], sessions: [session({ title: 'In review', waitingReason: 'stopped', updatedAt: NOW, ...openMergeRequest }), session({ title: 'Needs me' })] }));
+    const current = () => within(inbox()).queryAllByRole('button', { current: true }).map((b) => b.getAttribute('aria-label'));
+
+    fireEvent.keyDown(document.body, { key: 'j' });
+    expect(current()).toEqual(['Needs me']);
+    fireEvent.keyDown(document.body, { key: 'j' });
+    expect(current()).toEqual(['Needs me']);
+  });
+
+  it('keeps the Inbox at the top, with Pending approval, Snoozed, Working and Archived together at the bottom, above the footer', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: NOW });
     renderApp(
       new FakeMain({
         projects: [loom],
         sessions: [
           session({ title: 'Needs me' }),
+          session({ title: 'In review', ...openMergeRequest }),
           session({ title: 'Later', snoozedUntil: NOW + 3_600_000 }),
           session({ title: 'Busy', status: 'working', waitingReason: undefined }),
           session({ title: 'Done long ago', status: 'archived', waitingReason: undefined }),
@@ -167,12 +240,12 @@ describe('the Inbox', () => {
       }),
     );
     const card = within(inbox()).getByRole('listitem', { name: 'Needs me' });
-    const heads = ['Snoozed', 'Working', 'Archived'].map((name) => within(inbox()).getByRole('button', { name }));
+    const heads = ['Pending approval', 'Snoozed', 'Working', 'Archived'].map((name) => within(inbox()).getByRole('button', { name }));
     const footer = within(inbox()).getByRole('navigation');
     const follows = (a: Node, b: Node) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
     // In this order: the Inbox's cards, then each section, then the footer.
-    for (const [before, after] of [[card, heads[0]], [heads[0], heads[1]], [heads[1], heads[2]], [heads[2], footer]] as const) {
+    for (const [before, after] of [[card, heads[0]], [heads[0], heads[1]], [heads[1], heads[2]], [heads[2], heads[3]], [heads[3], footer]] as const) {
       expect(follows(before!, after!)).toBe(true);
     }
     // The Inbox scrolls on its own, taking the space in between; the sections share the bottom block.
@@ -182,7 +255,7 @@ describe('the Inbox', () => {
     expect(card.closest('.side-list')).toBeTruthy();
     expect(bottom!.closest('.side-list')).toBeNull();
     // Each is still collapsible.
-    fireEvent.click(heads[0]!);
+    fireEvent.click(heads[1]!);
     expect(within(bottom as HTMLElement).getByRole('listitem', { name: 'Later' })).toBeTruthy();
   });
 

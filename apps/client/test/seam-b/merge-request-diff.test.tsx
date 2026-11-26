@@ -5,6 +5,7 @@ import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { MergeRequestDetails, MergeRequestDiff, Project, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
+import { openFromSidebar } from './sidebar';
 
 type DiffProps = { patch: string; options: { onGutterUtilityClick?: (range: SelectedLineRange) => void } };
 const drawn = vi.hoisted(() => new Map<string, DiffProps>());
@@ -89,7 +90,7 @@ function renderApp({ sessions = [session], read = () => diff }: { sessions?: Ses
       <App />
     </ApiProvider>,
   );
-  fireEvent.click(within(screen.getByRole('complementary', { name: 'Inbox' })).getByRole('button', { name: session.title }));
+  openFromSidebar(session.title);
   return main;
 }
 

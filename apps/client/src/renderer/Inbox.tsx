@@ -1,8 +1,8 @@
 // The sidebar's Inbox, following docs/prototypes/ui-layout.html (variant B):
-// Waiting Sessions grouped by Project, with Snoozed, Working and Archived
-// Sessions in collapsed sections together at the bottom, as
+// Waiting Sessions grouped by Project, with Pending approval, Snoozed,
+// Working and Archived Sessions in collapsed sections together at the bottom, as
 // docs/prototypes/side-panels.html draws it. Every section shows the same cards.
-import { AlarmClock, AlarmClockOff, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
+import { AlarmClock, AlarmClockOff, Archive, ChevronDown, ChevronRight, CircleDot, ExternalLink, GitBranch, GitPullRequest, GitPullRequestCreate, Hourglass, Inbox as InboxIcon, LoaderCircle, Mail, Reply, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { mergeRequestRef, type ForgeKind, type Project, type Session } from '../shared/api';
 import { PROJECT_COLOR_NAMES } from '../shared/projects';
@@ -35,6 +35,7 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
   const named = [...projects, ...(removed ?? []).map((p) => ({ ...unknownProject(p.id), name: p.name, color: p.color }))];
   const waiting = sessions.filter(inInbox);
   const groups = groupByProject(waiting, named);
+  const pending = [...sessions.filter(isPendingApproval)].sort((a, b) => b.updatedAt - a.updatedAt);
   const snoozed = [...sessions.filter(isSnoozed)].sort((a, b) => a.snoozedUntil! - b.snoozedUntil!);
   const working = sessions.filter((s) => s.status === 'working');
   const archived = [...sessions.filter((s) => s.status === 'archived')].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -61,6 +62,9 @@ export function InboxList({ sessions, projects, selectedId, onSelect, onReply }:
         <ProjectGroups groups={groups} {...cards} />
       </div>
       <div className="side-bottom">
+        <Section label="Pending approval" icon={Hourglass} sessions={pending} opensOn={holdsViewed(pending)}>
+          {sectionCards('Pending approval', pending)}
+        </Section>
         <Section label="Snoozed" icon={AlarmClock} sessions={snoozed} opensOn={holdsViewed(snoozed)}>
           {sectionCards('Snoozed', snoozed)}
         </Section>
@@ -106,9 +110,31 @@ function ProjectGroups({ groups, now, selectedId, onSelect, onReply }: { groups:
   );
 }
 
-/** Whether the Session is in the Inbox: Waiting, and not Snoozed. */
+/** Whether the Session is in the Inbox: Waiting, neither Snoozed nor Pending approval. */
 function inInbox(session: Session): boolean {
-  return session.status === 'waiting' && !isSnoozed(session);
+  return session.status === 'waiting' && !isSnoozed(session) && !isPendingApproval(session);
+}
+
+/** Waiting reasons that leave nothing for the user to do but wait on the Merge request's reviewers: the agent's run ended as it should. */
+const AGENT_DONE = new Set<Session['waitingReason']>(['finished', 'stopped']);
+
+/**
+ * Whether the Session is Pending approval: Waiting, not Snoozed, read, its
+ * agent finished or stopped, its worktree there, and its open Merge request
+ * watched by Babysit. Feedback, a
+ * question or anything else that needs the user brings it back to the Inbox.
+ */
+function isPendingApproval(session: Session): boolean {
+  return (
+    session.status === 'waiting' &&
+    !isSnoozed(session) &&
+    !session.unread &&
+    !session.worktreeMissing &&
+    AGENT_DONE.has(session.waitingReason) &&
+    session.mergeRequest !== undefined &&
+    session.mergeRequestState === 'open' &&
+    !session.babysitOff
+  );
 }
 
 /** The Waiting Sessions in the order the Inbox lists them: what `j` and `k` step through, and Ctrl+1 to Ctrl+9 count. */
@@ -320,7 +346,7 @@ function UnreadDot() {
 }
 
 /**
- * A collapsible sidebar section (Snoozed, Working, Archived) below the Inbox,
+ * A collapsible sidebar section (Pending approval, Snoozed, Working, Archived) below the Inbox,
  * showing `children` when open and `collapsed`, if any, when not. It opens
  * when `opensOn` turns true: when the Session being viewed moves in.
  */

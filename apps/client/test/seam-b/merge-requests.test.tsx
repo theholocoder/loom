@@ -4,6 +4,7 @@ import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { MergeRequestDetails, Project, Session, TranscriptItem } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
+import { openFromSidebar } from './sidebar';
 
 afterEach(cleanup);
 
@@ -45,7 +46,7 @@ function session(fields: Partial<Session> = {}): Session {
 
 function open(main: FakeMain) {
   renderApp(main);
-  fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
+  openFromSidebar('Fix login');
   return { header: screen.getByRole('region', { name: 'Session header' }), log: screen.getByRole('log', { name: 'Conversation' }) };
 }
 

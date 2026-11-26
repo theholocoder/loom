@@ -62,12 +62,16 @@ A **Session** the user did away with for good, whatever its status: its agent st
 _Avoid_: Remove (a **Project** is Removed)
 
 **Inbox**:
-The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**), archives it, deletes it or **Snoozes** it.
+The Client's list of a user's **Waiting** Sessions, grouped by **Project**: what needs the user's attention now. A Session leaves the Inbox when the user replies (it becomes **Working**), archives it, deletes it or **Snoozes** it, or once it is **Pending approval**.
 _Avoid_: Queue, notifications
 
 **Notification**:
 A desktop notification that a **Session** went **Waiting**: its run finished or failed, its agent asked a question or for an **Approval request**, **Babysit** brought news of its **Merge request**, or it got stuck. Each kind is turned on in Settings (all are off until then); none comes while the window has the focus on that Session, nor for what the user did themselves (Stop, reopening). A click opens the Session.
 _Avoid_: Alert, Inbox (the Inbox is the list, not the notification)
+
+**Pending approval**:
+A **Waiting** Session with nothing left for the user to do but wait on its **Merge request**'s reviewers: read, its agent finished or stopped (not interrupted, nor failed), its worktree still there, its open Merge request watched by **Babysit**. It is listed in its own sidebar section, out of the **Inbox**; new feedback, a question or anything else that needs the user brings it back. It is still **Waiting**: it is not a status.
+_Avoid_: In review, awaiting merge
 
 **Snoozed**:
 A **Waiting** Session the user set aside until a time they picked: out of the **Inbox** until then, when it comes back unread. Anything that changes its status (a reply, new feedback, archiving) ends the snooze early, as does waking it by hand. It is still **Waiting**: a snooze is not a status.
