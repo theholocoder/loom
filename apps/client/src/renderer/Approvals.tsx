@@ -1,7 +1,8 @@
 // Approval requests: the agent paused before an action reaching beyond its
 // Session's working copy. The card shows the exact command or paths, and
 // decides it: Approve once, Approve for this Session (naming the category),
-// or Deny with an optional message to the agent. Kept, read-only, once decided.
+// Approve always (the agent's own option, where Loom has no category), or
+// Deny with an optional message to the agent. Kept, read-only, once decided.
 import { ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import { APPROVAL_CATEGORIES, type ApprovalDecision, type ApprovalState, type TranscriptItem } from '../shared/api';
@@ -13,6 +14,7 @@ const STATES: Record<ApprovalState, string | undefined> = {
   asked: undefined,
   approved: 'Approved once',
   'approved-session': 'Approved for this Session',
+  'approved-always': 'Approved always',
   denied: 'Denied',
   expired: 'No longer asked',
 };
@@ -43,6 +45,11 @@ export function ApprovalCard({ item, onDecide }: { item: Approval; onDecide: (de
               // The category is said above the buttons; the name says it again for a screen reader.
               <button type="button" aria-label={`Approve for this Session: ${category.label}`} title={`Approve every “${category.label}” request for the rest of this Session`} disabled={busy} onClick={() => void decide('session')}>
                 Approve for this Session
+              </button>
+            )}
+            {item.always && (
+              <button type="button" title="Let the agent stop asking for this; how long it remembers is up to the agent" disabled={busy} onClick={() => void decide('always')}>
+                Approve always
               </button>
             )}
           </div>

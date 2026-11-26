@@ -141,6 +141,8 @@ export interface ApprovalAction {
   paths: string[];
   /** Whether the tool is from the user's MCP servers or plugins rather than the agent's own. */
   extension: boolean;
+  /** Whether the agent offers to allow it always (ACP's `allow_always`), as it keeps such a grant. */
+  always?: true;
 }
 
 export interface OpenOptions {
@@ -238,5 +240,9 @@ export interface PromptFile {
   data?: Uint8Array;
 }
 
-/** The user's response to an agent's request: an answer to its question (null dismisses it), whether to trust, or whether to go ahead once. */
-export type AgentResponse = { kind: 'question'; answer: Answer | null } | { kind: 'trust'; trusted: boolean } | { kind: 'approval'; approved: boolean };
+/**
+ * The user's response to an agent's request: an answer to its question (null
+ * dismisses it), whether to trust, or whether to go ahead, once or, with
+ * `always`, by the agent's own "always" option.
+ */
+export type AgentResponse = { kind: 'question'; answer: Answer | null } | { kind: 'trust'; trusted: boolean } | { kind: 'approval'; approved: boolean; always?: boolean };

@@ -194,18 +194,17 @@ function acp() {
       if (chunk.permission) await askPermission(chunk.permission, chunk.from);
     }
   };
-  /** A permission request, with OpenCode's options, from the session or, `from`, one of its subagents: resolves with whether it was allowed once. */
-  const askPermission = async (toolCall, from) => {
-    const reply = await ask('session/request_permission', {
-      sessionId: from ?? sessionId,
-      toolCall: { status: 'pending', ...toolCall },
-      options: [
-        { optionId: 'once', kind: 'allow_once', name: 'Allow once' },
-        { optionId: 'always', kind: 'allow_always', name: 'Always allow' },
-        { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
-      ],
-    });
-    return reply.result?.outcome?.optionId === 'once';
+  /** OpenCode's permission options. */
+  const OPENCODE_OPTIONS = [
+    { optionId: 'once', kind: 'allow_once', name: 'Allow once' },
+    { optionId: 'always', kind: 'allow_always', name: 'Always allow' },
+    { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
+  ];
+  /** A permission request, with OpenCode's options or `options`, from the session or, `from`, one of its subagents: resolves with whether it was allowed. */
+  const askPermission = async (toolCall, from, options = OPENCODE_OPTIONS) => {
+    const reply = await ask('session/request_permission', { sessionId: from ?? sessionId, toolCall: { status: 'pending', ...toolCall }, options });
+    const picked = options.find((o) => o.optionId === reply.result?.outcome?.optionId);
+    return picked?.kind.startsWith('allow') ?? false;
   };
   const lines = createInterface({ input: process.stdin });
   lines.on('line', async (line) => {
@@ -280,7 +279,7 @@ function acp() {
           // An elicitation (a question, or a plugin's form): the turn goes on once Loom answers it.
           if (text.elicit) await ask('elicitation/create', { sessionId, mode: 'form', ...text.elicit });
           // A permission request, with OpenCode's options; a reject cancels the rest of the turn.
-          if (text.permission && !(await askPermission(text.permission, text.from))) rejected = true;
+          if (text.permission && !(await askPermission(text.permission, text.from, text.options))) rejected = true;
           if (text.update) send({ method: 'session/update', params: { sessionId, update: text.update } });
           if (text.notify) notifyOf(text.notify);
           // A tool output of `bytes` bytes, made here so the script stays small: HEAD>, x's, <TAIL.
