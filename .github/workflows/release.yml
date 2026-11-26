@@ -1,42 +1,159 @@
 name: Release
 
-# A vX.Y.Z tag on main publishes that version to GitHub Releases, where
-# electron-updater finds it. Only plain X.Y.Z tags: Loom offers stable
-# releases only, so there are no prerelease tags to publish.
+# Run by hand from main (Actions → Release → Run workflow). It sets the new
+# version in apps/client/package.json, commits that to main, tags the commit
+# vX.Y.Z, then builds, self-tests and publishes both installers to GitHub
+# Releases, where electron-updater finds them. Loom offers stable releases
+# only: every version is a plain X.Y.Z, with no prereleases.
 on:
-  push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise; auto reads it from the commits since the last release.
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      version:
+        description: Or the exact version to release (X.Y.Z), instead of a bump.
+        type: string
+        required: false
+      draft:
+        description: Publish as a draft, to check updating from the previous release before publishing it by hand.
+        type: boolean
+        default: false
+      dry_run:
+        description: Dry run, from any branch. Works out the version, commits and tags it in the runner only, builds and self-tests; pushes nothing and publishes nothing.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# One release at a time: two would race for the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   version:
-    name: Check the version
+    name: Set the version and tag it
+    if: github.ref == 'refs/heads/main' || inputs.dry_run
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       # The bridge and the app are stamped with apps/client/package.json's
       # version, and electron-updater compares releases by it.
-      - name: The tag names the Client's version
+      #
+      # auto reads the Conventional Commits since the last vX.Y.Z tag (PRs are
+      # squash-merged, so each is one commit titled by its PR): a breaking
+      # change (type! or a BREAKING CHANGE footer) is major, else a feat is
+      # minor, else patch. Before 1.0.0 a breaking change is only minor, so
+      # 1.0.0 comes when it's asked for.
+      - name: Work out the next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+          VERSION: ${{ inputs.version }}
         run: |
-          version=$(node -p "require('./apps/client/package.json').version")
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::The tag $GITHUB_REF_NAME doesn't match apps/client/package.json's version $version."
+          current=$(node -p "require('./apps/client/package.json').version")
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)
+          range=${last:+$last..}HEAD
+          commits=$(git log --format='%h %s' "$range")
+          if [ -z "$commits" ]; then
+            echo "::error::There are no commits since $last to release."
             exit 1
+          fi
+          {
+            echo "### Commits since ${last:-the first commit}"
+            echo
+            echo "$commits" | sed 's/^/- /'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$BUMP" = auto ] && [ -z "$VERSION" ]; then
+            type='[a-z]+(\([^)]*\))?'
+            if git log --format='%s' "$range" | grep -qE "^$type!:" \
+              || git log --format='%B' "$range" | grep -qE '^BREAKING[ -]CHANGE:'; then
+              BUMP=major
+            elif git log --format='%s' "$range" | grep -qE '^feat(\([^)]*\))?:'; then
+              BUMP=minor
+            else
+              BUMP=patch
+            fi
+            if [ "$BUMP" = major ] && [ "${current%%.*}" = 0 ]; then
+              BUMP=minor
+            fi
+            echo "auto: the commits since ${last:-the first commit} make this a $BUMP release."
+            echo "auto chose a **$BUMP** release." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -n "$VERSION" ]; then
+            next=${VERSION#v}
+            if ! [[ "$next" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::$VERSION isn't a plain X.Y.Z version."
+              exit 1
+            fi
+          else
+            IFS=. read -r major minor patch <<< "$current"
+            case "$BUMP" in
+              major) next="$((major + 1)).0.0" ;;
+              minor) next="$major.$((minor + 1)).0" ;;
+              patch) next="$major.$minor.$((patch + 1))" ;;
+            esac
+          fi
+          if [ "$next" = "$current" ] || [ "$(printf '%s\n%s\n' "$current" "$next" | sort -V | tail -1)" != "$next" ]; then
+            echo "::error::$next isn't after the current version $current."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$next" >/dev/null; then
+            echo "::error::The tag v$next already exists."
+            exit 1
+          fi
+          echo "Releasing $current → $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next" >> "$GITHUB_OUTPUT"
+
+      # Main and the tag go up together, or neither does.
+      - name: Commit the version and tag it
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+          TAG: ${{ steps.next.outputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          node -e 'const fs = require("fs"), f = "apps/client/package.json", p = JSON.parse(fs.readFileSync(f)); p.version = process.env.VERSION; fs.writeFileSync(f, JSON.stringify(p, null, 2) + "\n")'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898783+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): $TAG"
+          git tag "$TAG"
+          if [ "$DRY_RUN" = true ]; then
+            echo "Dry run: would push this commit to main and tag it $TAG."
+            git show --stat HEAD
+            git show HEAD -- apps/client/package.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            git push --atomic origin HEAD:main "$TAG"
           fi
 
   package:
     needs: version
     uses: ./.github/workflows/package.yml
+    # A dry run's tag was never pushed: it builds the branch it ran from, at
+    # its current version, and uploads no source maps to Sentry.
     with:
+      ref: ${{ inputs.dry_run && github.sha || needs.version.outputs.tag }}
       upload: true
     secrets:
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_AUTH_TOKEN: ${{ !inputs.dry_run && secrets.SENTRY_AUTH_TOKEN || '' }}
 
   publish:
     name: Publish
-    needs: package
+    needs: [version, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -51,6 +168,9 @@ jobs:
         run: ls release/latest.yml release/latest-linux.yml release/Loom-*-x86_64.AppImage release/Loom-Setup-*.exe release/Loom-Setup-*.exe.blockmap
 
       - name: Create the GitHub Release
+        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "Loom ${GITHUB_REF_NAME#v}" --generate-notes --latest
+          TAG: ${{ needs.version.outputs.tag }}
+          DRAFT: ${{ inputs.draft && '--draft' || '' }}
+        run: gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "Loom ${TAG#v}" --generate-notes --latest $DRAFT
