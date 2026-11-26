@@ -1,7 +1,7 @@
 // The main pane for Sessions: starting one, and its chat, following
 // docs/prototypes/ui-layout.html.
 import { AlarmClock, AlarmClockOff, Archive, Bot, CircleCheckBig, CirclePause, FolderOpen, FolderTree, GitBranch, GitPullRequest, ListPlus, LoaderCircle, MessageCircleQuestionMark, MessageSquareQuote, MessageSquareWarning, Navigation, OctagonX, Paperclip, Pause, Pencil, Play, RotateCw, SendHorizontal, ShieldAlert, ShieldCheck, ShieldOff, Square, SquareTerminal, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import { APPROVAL_MODES, mergeRequestRef, OPENCODE_NAME, type ApprovalMode, type Branches, type Highlight, type Commands, type ExistingBranch, type ExistingWorktree, type ForgeKind, type Issue, hasNothingToSend, modelNameIn, type ModelChoice, type NewAttachment, type QueuedMessage, type Session, type TranscriptItem, type WaitingReason } from '../shared/api';
 import { goingOn } from '../shared/going-on';
 import { branchName, branchNameProblem, issueBranch, suggestBranch } from '../shared/branches';
@@ -28,6 +28,7 @@ import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { PlanCard, ThinkingBlock, ToolCard, ToolRunCard, withRuns } from './WorkCards';
+import { lastTurns, TURNS_SHOWN, turnsReaching } from './conversation-tail';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed } from './Snooze';
 import { MessageTime, withDays } from './MessageTimes';
@@ -567,12 +568,12 @@ export function SessionView({
   const offeredModels = listedModels(sessionModels.listed);
   const shownModel = session.model ?? agentConfig?.model;
   const shownEfforts = agentConfig && agentConfig.model === shownModel ? agentConfig.efforts : effortsOf(sessionModels.listed, shownModel);
-  /** What is typed in the composer, which the question's Next and Answer take as an answer of one's own. */
-  const [typed, setTyped] = useState('');
+  /** Whether something is typed in the composer, which the question's Next and Answer take as an answer of one's own. */
+  const [hasTyped, setHasTyped] = useState(false);
   const { panel, freeAnswer, stepKey } = useQuestionPanel(
     firstAsked?.kind === 'question' ? firstAsked : undefined,
     (itemId, answer) => api.invoke('sessions.answer', { id: session.id, itemId, answer }),
-    typed,
+    hasTyped,
   );
 
   useEffect(() => {
@@ -622,6 +623,22 @@ export function SessionView({
   }, [items]);
   /** Whether the user had the conversation scrolled to its foot, as of its last scroll. */
   const atFoot = useRef(true);
+  const [turnsShown, setTurnsShown] = useState(TURNS_SHOWN);
+  const tail = lastTurns(items, turnsShown);
+  const afterShowingTurns = useRef<() => void>(undefined);
+  useLayoutEffect(() => {
+    afterShowingTurns.current?.();
+    afterShowingTurns.current = undefined;
+  }, [turnsShown]);
+  const showEarlierTurns = () => {
+    const firstShown = conversation.current?.querySelector('[data-item-id]');
+    const top = firstShown?.getBoundingClientRect().top;
+    afterShowingTurns.current = () => {
+      const chat = conversation.current;
+      if (chat && firstShown && top !== undefined) chat.scrollTop += firstShown.getBoundingClientRect().top - top;
+    };
+    setTurnsShown((turns) => turns + TURNS_SHOWN);
+  };
   const scrolled = () => {
     const chat = conversation.current;
     // Following the agent scrolls to the end of what was said, which leaves the bottom padding below.
@@ -758,6 +775,12 @@ export function SessionView({
    */
   const showTurn = (itemId: number) => {
     if (panels.drawer) panels.closeDrawer();
+    const reaching = turnsReaching(items, itemId);
+    if (reaching <= turnsShown) return scrollToTurn(itemId);
+    afterShowingTurns.current = () => scrollToTurn(itemId);
+    setTurnsShown(reaching);
+  };
+  const scrollToTurn = (itemId: number) => {
     const messages = [...document.querySelectorAll<HTMLElement>('[data-item-id]')];
     const target = messages.filter((m) => Number(m.dataset.itemId) <= itemId).at(-1) ?? messages[0];
     target?.scrollIntoView?.({ block: 'start' });
@@ -773,7 +796,7 @@ export function SessionView({
 
   /** The conversation as shown: what the agent said in a row together, and two or more tool calls in a row gathered into a run. */
   const conversationParts = withRuns(
-    turnParts(items),
+    turnParts(tail.shown),
     (part) => (!('said' in part) && part.kind === 'tool' && !startsSubagent(part, subagents) ? part : undefined),
     (part) => ('said' in part && part.said.every((s) => s.kind === 'thinking') ? (part.said as Array<Extract<Said, { kind: 'thinking' }>>) : undefined),
   );
@@ -818,6 +841,7 @@ export function SessionView({
           ) : (
           <>
           <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnConversation}>
+            {tail.hasEarlier && <EarlierTurns key={turnsShown} conversation={conversation} onShow={showEarlierTurns} />}
             {withDays(conversationParts, saidAt, (item, at, parts) =>
               'run' in item ? (
                 <ToolRunCard key={item.run[0]!.id} run={item.run} live={working && at === parts.length - 1} />
@@ -920,7 +944,7 @@ export function SessionView({
             disabled={composerDisabled}
             dock={panel}
             clearKey={stepKey}
-            onDraftChange={setTyped}
+            onDraftChange={(draft) => setHasTyped(draft.trim() !== '')}
             focusRequest={replyRequest}
             onSend={send}
             canAttach={!freeAnswer}
@@ -980,6 +1004,23 @@ export function SessionView({
       )}
     </main>
     </SessionPanelProvider>
+  );
+}
+
+function EarlierTurns({ conversation, onShow }: { conversation: RefObject<HTMLDivElement | null>; onShow: () => void }) {
+  const marker = useRef<HTMLButtonElement>(null);
+  const show = useRef(onShow);
+  show.current = onShow;
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined' || !marker.current) return;
+    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && show.current(), { root: conversation.current, rootMargin: '400px 0px 0px 0px' });
+    observer.observe(marker.current);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <button ref={marker} type="button" className="earlier-turns" onClick={onShow}>
+      Show earlier messages
+    </button>
   );
 }
 

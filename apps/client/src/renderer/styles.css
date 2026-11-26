@@ -122,6 +122,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .msg .body > .msg-time { display: block; margin-top: 3px; }
 .day-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; font-size: 11.5px; color: var(--muted); }
 .day-divider::before, .day-divider::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+.earlier-turns { display: block; margin: 0 auto 8px; background: none; border: 0; padding: 4px 8px; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; }
+.earlier-turns:hover { text-decoration: underline; }
 .tools { margin-left: 42px; }
 .tool { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 6px 0; overflow: hidden; }
 .tool-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; font-size: 13px; }
