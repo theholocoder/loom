@@ -97,16 +97,24 @@ export interface AcpTurn {
     | { hold: string }
     | { update: Record<string, unknown> }
     | { bigOutput: { toolCallId: string; bytes: number } }
-    | { elicit: { message: string; requestedSchema: Record<string, unknown>; toolCallId?: string } }
+    | { elicit: { message: string; requestedSchema: Record<string, unknown>; toolCallId?: string }; from?: string }
     | { permission: PermissionToolCall; from?: string; options?: Array<{ optionId: string; kind: string; name: string }> }
     | { notify: { method: string; params: Record<string, unknown> } }
   >;
   /**
    * What the agent sends once the run's `session/prompt` has been answered,
-   * with no prompt open: text, `{ update }`s, `{ notify }`s and `{ hold }`s,
-   * as in `chunks`.
+   * with no prompt open: text, `{ update }`s, `{ notify }`s, `{ hold }`s,
+   * `{ permission }`s and `{ elicit }`s, as in `chunks`. A `from` asks as
+   * that subagent, the way OpenCode 2.4.2 does.
    */
-  after?: Array<string | { hold: string } | { update: Record<string, unknown> } | { notify: { method: string; params: Record<string, unknown> } } | { permission: PermissionToolCall; from?: string }>;
+  after?: Array<
+    | string
+    | { hold: string }
+    | { update: Record<string, unknown> }
+    | { notify: { method: string; params: Record<string, unknown> } }
+    | { permission: PermissionToolCall; from?: string }
+    | { elicit: { message: string; requestedSchema: Record<string, unknown>; toolCallId?: string }; from?: string }
+  >;
   /** After the chunks, the run holds until the test calls `machine.release(hold)`. */
   hold?: string;
   /** The run fails with this JSON-RPC error message, as a provider error does. */
@@ -578,7 +586,10 @@ function readLines(file: string): string[] {
   } catch {
     return [];
   }
-  return log.split('\n').filter(Boolean);
+  // A stand-in may be writing a line as it is read: one with no newline yet isn't there.
+  const lines = log.split('\n');
+  lines.pop();
+  return lines.filter(Boolean);
 }
 
 /** Where `tool` is on the PATH this test process was started with. */

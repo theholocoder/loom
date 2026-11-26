@@ -241,6 +241,22 @@ describe('a Session with Subagents', () => {
     expect(answers.map((m) => m.message.result)).toEqual([{ outcome: { outcome: 'selected', optionId: 'once' } }]);
   });
 
+  it("puts a Subagent's question in the Session, named for the Subagent, and sends the answer back", async () => {
+    const form = { toolCallId: 'call_q', message: 'Which color?', requestedSchema: { type: 'object', properties: { q0: { type: 'string', title: 'Color' } }, required: [] } };
+    const { machine, main, id } = await started({
+      turns: [{ chunks: [...startsSubagent('call_sub', 'ses_child1', EXPLORE), 'Waiting on it.'], after: [{ elicit: form, from: 'ses_child1' }, childText('ses_child1', 'Blue it is.'), { hold: 'never' }] }],
+    });
+    const items = await waitFor(main.api, 'transcript', (all) => all.some((i) => i.kind === 'question'), { sessionId: id });
+    const card = items.find((i) => i.kind === 'question')!;
+    expect(card).toMatchObject({ kind: 'question', message: 'Which color?', state: 'asked', subagent: { id: 'ses_child1', description: 'Explore auth' } });
+    await waitFor(main.api, 'sessions', session(id, waiting('question')));
+
+    await main.api.invoke('sessions.answer', { id, itemId: card.id, answer: { q0: 'blue' } });
+    await transcriptOf(main, id, 'ses_child1', (all) => all.some((i) => i.kind === 'agent' && i.text === 'Blue it is.'));
+    const answers = machine.acpMessages().filter((m) => m.message.result?.action);
+    expect(answers.map((m) => m.message.result)).toEqual([{ action: 'accept', content: { q0: 'blue' } }]);
+  });
+
   it("counts a Subagent's tokens, when the agent reports them, as the Session's", async () => {
     const { main, id } = await started({
       turns: [
