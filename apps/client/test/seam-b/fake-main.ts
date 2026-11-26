@@ -76,6 +76,7 @@ export class FakeMain implements LoomApi {
       'environments.list': () => this.value('environments'),
       'environments.detect': () => {},
       'environments.reload': () => {},
+      'environments.start': () => {},
       'links.open': () => {},
       'dialogs.chooseFolder': () => null,
       'projects.list': () => this.value('projects'),

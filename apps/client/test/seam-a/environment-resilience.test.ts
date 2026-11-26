@@ -58,6 +58,8 @@ describe('a native bridge that dies', () => {
 /** A path where no bridge is: starting it fails at once. */
 const missingBridge = '/nonexistent/loom-bridge';
 
+const launchesSettled = () => new Promise((resolve) => setImmediate(resolve));
+
 describe('a native bridge that dies and cannot start again', () => {
   it('is tried again after 1, 5 and 30 seconds, then the Environment is failed', async () => {
     const main = await startMain();
@@ -71,14 +73,17 @@ describe('a native bridge that dies and cannot start again', () => {
       [30_000, 4],
     ] as const) {
       main.clock.advance(delay - 1);
+      await launchesSettled();
       expect(main.bridgeStarts()).toBe(starts - 1);
       main.clock.advance(1);
+      await launchesSettled();
       expect(main.bridgeStarts()).toBe(starts);
       if (starts < 4) await waitFor(main.api, 'environments', (e) => native(e).state === 'disconnected');
     }
 
     await waitFor(main.api, 'environments', (e) => native(e).state === 'failed');
     main.clock.advance(60_000);
+    await launchesSettled();
     expect(main.bridgeStarts()).toBe(4);
   });
 });

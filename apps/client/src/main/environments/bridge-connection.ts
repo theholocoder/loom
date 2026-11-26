@@ -14,6 +14,9 @@ type BridgeEvent =
   | { event: 'channel.data'; params: { channel: number; data: string } }
   | { event: 'channel.exit'; params: { channel: number; exitCode: number; stderr: string } };
 
+const STDERR_KEPT = 500;
+const STDERR_WAIT_MS = 200;
+
 /** The bridge answers channel.open once the process has started. */
 const CHANNEL_OPEN_TIMEOUT_MS = 30_000;
 
@@ -43,6 +46,7 @@ export class BridgeConnection {
    */
   private unclaimed = new Map<number, BridgeEvent[]>();
   private closedReason: Error | undefined;
+  private stderrTail = '';
   private closeListeners: Array<(reason: Error) => void> = [];
 
   constructor(
@@ -66,7 +70,20 @@ export class BridgeConnection {
     });
     child.stdin!.on('error', () => {});
     child.on('error', (error) => this.fail(error));
-    child.on('exit', (code, signal) => this.fail(new Error(`bridge exited (${signal ?? `code ${code}`})`)));
+    child.stderr?.on('data', (chunk: Buffer) => (this.stderrTail = (this.stderrTail + chunk.toString('utf8')).slice(-STDERR_KEPT)));
+    child.on('exit', (code, signal) => {
+      const exited = () => {
+        const lastWords = this.stderrTail.replaceAll('\0', '').replace(/\s+/g, ' ').trim();
+        this.fail(new Error(`bridge exited (${signal ?? `code ${code}`})${lastWords ? `: ${lastWords}` : ''}`));
+      };
+      const stderr = child.stderr;
+      if (!stderr || stderr.readableEnded) return exited();
+      const timer = setTimeout(exited, STDERR_WAIT_MS);
+      stderr.once('end', () => {
+        clearTimeout(timer);
+        exited();
+      });
+    });
   }
 
   request<T>(method: string, timeoutMs: number, params?: unknown): Promise<T> {

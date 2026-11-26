@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 
 	"github.com/theholocoder/loom/bridge/mcp"
@@ -36,6 +37,14 @@ func main() {
 	// something like Git Bash and isn't the Environment's.
 	if runtime.GOOS == "windows" {
 		machine.Shell = ""
+		if wsl, err := exec.LookPath("wsl.exe"); err == nil {
+			machine.WSL = wsl
+		}
+	}
+	if wsl := os.Getenv("LOOM_TEST_WSL"); wsl != "" {
+		machine.WSL = wsl
+		os.Unsetenv("LOOM_TEST_WSL")
+		machine.Environ = os.Environ()
 	}
 	// Without its own path, agents get no Loom tools.
 	executable, _ := os.Executable()

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { AgentStatus, EnvironmentStatus, ForgeStatus, Project } from '../../src/shared/api';
+import { wslEnvironmentId } from '../../src/shared/environment-ids';
 import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
 
@@ -182,6 +183,61 @@ describe('Settings: the agent in each Environment', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'Reload' }));
 
     expect(main.invoked).toContainEqual({ command: 'environments.reload', params: { id: 'native' } });
+  });
+});
+
+describe('Settings: WSL distros', () => {
+  const distro = (name: string, env: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({ id: wslEnvironmentId(name), label: name, distro: name, state: 'idle', ...env });
+
+  function openSettings(...environments: EnvironmentStatus[]) {
+    const main = renderApp(new FakeMain({ environments: [connectedNative, ...environments] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    settingsPage('Environments');
+    return main;
+  }
+  const row = (name: string) => screen.getByRole('row', { name: new RegExp(name) });
+
+  it('lists each distro as an Environment of its own, with its bridge and agent', () => {
+    openSettings(
+      distro('Ubuntu', { state: 'connected', bridge: { ...connectedNative.bridge!, os: 'linux' }, shellEnvironment: 'interactive', agent: { name: 'OpenCode', state: 'ready', version: '2.1.4', checking: false } }),
+      distro('Debian'),
+    );
+
+    expect(within(row('Ubuntu')).getByText('OpenCode 2.1.4')).toBeTruthy();
+    expect(within(row('Ubuntu')).getByText(`loom-bridge ${connectedNative.bridge!.version}`)).toBeTruthy();
+    expect(within(row('Ubuntu')).getByText('WSL')).toBeTruthy();
+    expect(within(row('Debian')).getByText('not started')).toBeTruthy();
+  });
+
+  it('starts a distro not started yet', () => {
+    const main = openSettings(distro('Debian'));
+
+    fireEvent.click(within(row('Debian')).getByRole('button', { name: 'Start' }));
+
+    expect(main.invoked).toContainEqual({ command: 'environments.start', params: { id: wslEnvironmentId('Debian') } });
+  });
+
+  it('retries a distro that failed to start', () => {
+    const main = openSettings(distro('Debian', { state: 'failed', error: 'There is no distribution with the supplied name.' }));
+
+    fireEvent.click(within(row('Debian')).getByRole('button', { name: 'Retry' }));
+
+    expect(main.invoked).toContainEqual({ command: 'environments.start', params: { id: wslEnvironmentId('Debian') } });
+  });
+
+  it('says the distro is starting, and when Loom installs its bridge there', () => {
+    openSettings(distro('Ubuntu', { state: 'starting' }), distro('Debian', { state: 'starting', installing: true }));
+
+    expect(within(row('Ubuntu')).getByText('Starting Ubuntu…')).toBeTruthy();
+    expect(within(row('Debian')).getByText('Starting Debian… (installing loom-bridge)')).toBeTruthy();
+  });
+
+  it('reloads one distro on its own', () => {
+    const main = openSettings(distro('Ubuntu', { state: 'connected', bridge: { ...connectedNative.bridge!, os: 'linux' } }));
+
+    fireEvent.click(within(row('Ubuntu')).getByRole('button', { name: 'Reload' }));
+
+    expect(main.invoked).toContainEqual({ command: 'environments.reload', params: { id: wslEnvironmentId('Ubuntu') } });
   });
 });
 

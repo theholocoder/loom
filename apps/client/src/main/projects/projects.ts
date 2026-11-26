@@ -3,6 +3,7 @@
 import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type ModelPick, type Project, type ProjectEdit, type RemovedProject, type RestorableProject } from '../../shared/api';
 import { branchPrefixError, branchPrefixOf, defaultBranchError, defaultBranchOf } from '../../shared/branches';
 import { avatarError, isProjectColor, nextProjectColor, projectColorOf, projectNameError } from '../../shared/projects';
+import { NATIVE_ENVIRONMENT_ID } from '../../shared/environment-ids';
 import { splitDetails, withDetails } from '../../shared/errors';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
@@ -93,7 +94,7 @@ export class Projects {
     return [...this.removed.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
   }
 
-  async link({ path, environmentId = 'native', restore }: { path: string; environmentId?: string; restore?: number }): Promise<Project> {
+  async link({ path, environmentId = NATIVE_ENVIRONMENT_ID, restore }: { path: string; environmentId?: string; restore?: number }): Promise<Project> {
     const environment = this.environment(environmentId);
     const topLevel = await topLevelOf(environment, path);
     const name = topLevel.split('/').filter(Boolean).pop() ?? topLevel;
@@ -151,7 +152,7 @@ export class Projects {
   }
 
   /** The removed Project a link of the checkout containing `path` would restore, if any. */
-  async restorable({ path, environmentId = 'native' }: { path: string; environmentId?: string }): Promise<RestorableProject | null> {
+  async restorable({ path, environmentId = NATIVE_ENVIRONMENT_ID }: { path: string; environmentId?: string }): Promise<RestorableProject | null> {
     // Nothing removed, nothing to ask git.
     if (this.removed.size === 0) return null;
     const environment = this.environment(environmentId);

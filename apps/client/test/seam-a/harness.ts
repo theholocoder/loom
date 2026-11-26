@@ -163,9 +163,10 @@ export async function startMain(
     sqliteDriver: options.sqliteDriver,
     sendFeedback: options.sendFeedback,
     bridgePath: options.bridgePath ?? realBridgePath,
-    spawnBridge: (command, args) => {
+    spawnBridge: (command, args, env) => {
+      if (command !== (options.bridgePath ?? realBridgePath)) return spawn(command, args, { stdio: 'pipe', env: { ...machine.bridgeEnv(), ...env } });
       bridgeStarts++;
-      return (bridge = spawn(bridgePath ?? command, args, { stdio: 'pipe', env: machine.bridgeEnv() }));
+      return (bridge = spawn(bridgePath ?? command, args, { stdio: 'pipe', env: { ...machine.bridgeEnv(), ...env } }));
     },
     openExternal: async (url) => {
       opened.push(url);

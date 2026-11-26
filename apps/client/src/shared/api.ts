@@ -23,13 +23,14 @@ export interface BridgeInfo {
 }
 
 /**
+ * - `idle`: a WSL distro's, not started yet: it starts once used.
  * - `starting`: the bridge is launching or hasn't finished its handshake.
  * - `connected`: the handshake succeeded and the bridge answers pings.
  * - `unresponsive`: the last ping went unanswered within its timeout.
  * - `disconnected`: the bridge process exited.
  * - `failed`: the bridge could not be started or its handshake failed.
  */
-export type EnvironmentState = 'starting' | 'connected' | 'unresponsive' | 'disconnected' | 'failed';
+export type EnvironmentState = 'idle' | 'starting' | 'connected' | 'unresponsive' | 'disconnected' | 'failed';
 
 /**
  * Where the bridge got the environment it runs the agent and git with:
@@ -151,7 +152,9 @@ export interface ContextUsage {
 export interface EnvironmentStatus {
   id: string;
   label: string;
+  distro?: string;
   state: EnvironmentState;
+  installing?: boolean;
   /** Present once the handshake has succeeded. */
   bridge?: BridgeInfo;
   /** Why the Environment is `failed` or `disconnected`. */
@@ -1573,8 +1576,12 @@ export interface TerminalOutput {
 /** Commands the renderer can invoke, with their parameters and results. */
 export interface Commands {
   'environments.list': { params: void; result: EnvironmentStatus[] };
-  /** Checks the agent again in every connected Environment, and resolves once done. */
+  /**
+   * Looks for WSL distros again, then checks the agent again in every
+   * connected Environment, and resolves once done.
+   */
   'environments.detect': { params: void; result: void };
+  'environments.start': { params: { id: string }; result: void };
   /**
    * Re-reads an Environment's shell environment, for processes started from
    * now on, then checks its agent again.

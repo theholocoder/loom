@@ -302,6 +302,7 @@ export class Machine {
   /** The origins `gitOrigin` copied from a template, and their refs then. */
   private pristineOrigins = new Map<string, { key: string; refs: string }>();
   private scripts: string[] = [];
+  private wsl: string | undefined;
 
   constructor() {
     this.addToShellPath(this.binDir());
@@ -334,7 +335,36 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
       { mode: 0o755 },
     );
     this.writeShellPath();
-    return { ...process.env, ...home, SHELL: shell };
+    return { ...process.env, ...home, SHELL: shell, ...(this.wsl && { LOOM_TEST_WSL: this.wsl }) };
+  }
+
+  installWsl(distros: string[]): void {
+    const dir = this.binDir('wsl');
+    const listing = join(dir, 'listing');
+    writeFileSync(listing, Buffer.from(distros.map((d) => `${d}\r\n`).join(''), 'utf16le'));
+    const cases = distros.map((d) => `  '${d}') HOME='${this.distroHome(d)}' ;;`).join('\n');
+    this.wsl = join(dir, 'wsl.exe');
+    writeFileSync(
+      this.wsl,
+      `#!/bin/sh
+if [ "$1" = -l ] && [ "$2" = -q ]; then exec cat '${listing}'; fi
+[ "$1" = -d ] && [ "$3" = --exec ] || { echo "wsl: bad command line: $*" >&2; exit 1; }
+case "$2" in
+${cases}
+  *) echo "There is no distribution with the supplied name." >&2; exit 1 ;;
+esac
+export HOME
+shift 3
+exec "$@"
+`,
+      { mode: 0o755 },
+    );
+  }
+
+  distroHome(distro: string): string {
+    const dir = join(this.dir, 'distros', distro, 'home');
+    mkdirSync(dir, { recursive: true });
+    return realpathSync.native(dir);
   }
 
   /** Adds `dir` to the PATH the login shell reports from now on. */

@@ -5,6 +5,7 @@
 import { Check, CodeXml, Copy, Info, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { useEffect, useState, type ReactNode, type RefObject } from 'react';
 import { APPROVAL_MODES, modelNameIn, type EnvironmentStatus, type Project, type Session } from '../shared/api';
+import { NATIVE_ENVIRONMENT_ID } from '../shared/environment-ids';
 import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
 import { baseName, copyable } from './ContextMenu';
@@ -139,7 +140,7 @@ export function SessionDetails({ session, project, anchor, onClose, onError }: {
 function environmentText(environment: EnvironmentStatus | undefined): string {
   if (!environment) return 'Unknown';
   const os = environment.bridge?.os;
-  return environment.id === 'native' && os ? `${environment.label} (${osName(os)})` : environment.label;
+  return environment.id === NATIVE_ENVIRONMENT_ID && os ? `${environment.label} (${osName(os)})` : environment.label;
 }
 
 function osName(os: string): string {
