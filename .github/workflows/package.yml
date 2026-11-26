@@ -7,6 +7,10 @@ name: Package
 on:
   workflow_call:
     inputs:
+      ref:
+        description: The commit, branch or tag to build; the triggering one if empty.
+        type: string
+        default: ''
       upload:
         description: Upload the builds and their update metadata as workflow artifacts.
         type: boolean
@@ -37,6 +41,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       # Go, Node and pnpm at the versions pinned in mise.toml.
       - uses: jdx/mise-action@v2
