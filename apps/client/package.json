@@ -15,7 +15,8 @@
     "test:seam-a": "vitest run --project seam-a",
     "test:seam-b": "vitest run --project seam-b",
     "test:e2e": "node ../../scripts/ensure-electron.mjs && electron-vite build && playwright test",
-    "package": "node ../../scripts/ensure-electron.mjs && electron-vite build && electron-builder --publish never"
+    "package": "node ../../scripts/ensure-electron.mjs && electron-vite build && electron-builder --publish never",
+    "prototype:tool-runs": "vite --config vite.prototype.config.ts"
   },
   "dependencies": {
     "@sentry/electron": "8.4.0",
