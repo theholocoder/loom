@@ -872,7 +872,7 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
     api.invoke('environments.start', { id: env.id }).catch((error: unknown) => setReloadError((error as Error).message));
   };
   // A distro not started yet, or one that failed to, is started from here; a connected one reloaded.
-  const startable = env.state === 'stopped' || env.state === 'failed';
+  const startable = env.state === 'idle' || env.state === 'failed';
   return (
     <tr>
       <td>
@@ -890,9 +890,9 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
       <td>{env.bridge ? <span className="tech">{`loom-bridge ${env.bridge.version}`}</span> : <span className="muted">—</span>}</td>
       <td>
         {startable ? (
-          <button type="button" title={env.state === 'stopped' ? `Start ${env.label}, and check its agent` : `Try starting ${env.label} again`} onClick={start}>
+          <button type="button" title={env.state === 'idle' ? `Start ${env.label}, and check its agent` : `Try starting ${env.label} again`} onClick={start}>
             <Play className="sm" />
-            {env.state === 'stopped' ? 'Start' : 'Retry'}
+            {env.state === 'idle' ? 'Start' : 'Retry'}
           </button>
         ) : (
           <button
@@ -1027,15 +1027,15 @@ function shellWarning(env: EnvironmentStatus): string | undefined {
 
 /** What the Environment is doing, in words: a WSL distro's start says which, as it may be slow. */
 function stateLabel(env: EnvironmentStatus): string {
-  if (env.state === 'stopped') return 'not started';
-  if (env.state === 'starting' && env.installing) return `Installing loom-bridge in ${env.label}…`;
+  if (env.state === 'idle') return 'not started';
+  if (env.state === 'starting' && env.installing) return `Starting ${env.label}… (installing loom-bridge)`;
   if (env.state === 'starting' && env.distro) return `Starting ${env.label}…`;
   return env.state;
 }
 
 function StateIcon({ state }: { state: EnvironmentState }) {
   switch (state) {
-    case 'stopped':
+    case 'idle':
       return <CirclePause className="sm" />;
     case 'connected':
       return <CircleCheckBig className="sm" />;

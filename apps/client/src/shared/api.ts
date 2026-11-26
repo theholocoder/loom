@@ -23,14 +23,14 @@ export interface BridgeInfo {
 }
 
 /**
- * - `stopped`: a WSL distro's, not started yet: it starts once used.
+ * - `idle`: a WSL distro's, not started yet: it starts once used.
  * - `starting`: the bridge is launching or hasn't finished its handshake.
  * - `connected`: the handshake succeeded and the bridge answers pings.
  * - `unresponsive`: the last ping went unanswered within its timeout.
  * - `disconnected`: the bridge process exited.
  * - `failed`: the bridge could not be started or its handshake failed.
  */
-export type EnvironmentState = 'stopped' | 'starting' | 'connected' | 'unresponsive' | 'disconnected' | 'failed';
+export type EnvironmentState = 'idle' | 'starting' | 'connected' | 'unresponsive' | 'disconnected' | 'failed';
 
 /**
  * Where the bridge got the environment it runs the agent and git with:

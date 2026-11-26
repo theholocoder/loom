@@ -39,7 +39,7 @@ export interface EnvironmentOptions {
    */
   install?: () => Promise<void>;
   /** Waits to be used before starting, rather than at `start` (a WSL distro's, which would boot). */
-  stopped?: boolean;
+  waitsForUse?: boolean;
   /** The Client's version, which the bridge must have been built with. */
   appVersion: string;
   clock: Clock;
@@ -65,7 +65,7 @@ export class Environment {
   private asking = new Map<string, Promise<CheckoutOffer>>();
 
   constructor(private readonly options: EnvironmentOptions) {
-    this.current = { id: options.id, label: options.label, ...(options.distro && { distro: options.distro }), state: options.stopped ? 'stopped' : 'starting' };
+    this.current = { id: options.id, label: options.label, ...(options.distro && { distro: options.distro }), state: options.waitsForUse ? 'idle' : 'starting' };
   }
 
   get status(): EnvironmentStatus {
@@ -77,7 +77,7 @@ export class Environment {
    * start leaves the Environment failed.
    */
   start(): Promise<void> {
-    if (this.current.state === 'stopped') return Promise.resolve();
+    if (this.current.state === 'idle') return Promise.resolve();
     return this.connect();
   }
 
@@ -86,7 +86,7 @@ export class Environment {
    * started yet; nothing happens otherwise.
    */
   async restart(): Promise<void> {
-    if ((this.current.state !== 'failed' && this.current.state !== 'stopped') || this.stopped) return;
+    if ((this.current.state !== 'failed' && this.current.state !== 'idle') || this.stopped) return;
     this.restarts = 0;
     await this.connect();
   }
@@ -98,7 +98,7 @@ export class Environment {
    */
   ready(): Promise<void> {
     if (this.current.state === 'connected') return Promise.resolve();
-    if (this.current.state === 'stopped' && !this.stopped) void this.connect();
+    if (this.current.state === 'idle' && !this.stopped) void this.connect();
     if (this.current.state === 'failed' || this.stopped) return Promise.reject(this.failure());
     return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
   }
@@ -106,7 +106,7 @@ export class Environment {
   private async connect(): Promise<void> {
     if (this.current.state !== 'starting') this.update({ state: 'starting' });
     let connection = await this.handshake();
-    if (typeof connection === 'string' && this.options.install && !this.stopped) {
+    if (typeof connection === 'object' && 'reinstall' in connection && this.options.install && !this.stopped) {
       // A bridge missing where it is started from, or another Client's, is installed again.
       this.update({ installing: true });
       try {
@@ -119,8 +119,8 @@ export class Environment {
       this.update({ installing: undefined });
       connection = await this.handshake();
     }
-    if (typeof connection === 'string') {
-      this.startFailed(connection);
+    if (!(connection instanceof BridgeConnection)) {
+      this.startFailed(typeof connection === 'string' ? connection : connection.error);
       return;
     }
     if (this.stopped) return;
@@ -135,9 +135,11 @@ export class Environment {
 
   /**
    * Starts the bridge and shakes hands with it: its connection, once that is
-   * done and the Environment is connected, or why it didn't start.
+   * done and the Environment is connected, or why it didn't start, and
+   * whether installing it again would help: it wasn't there to run, or it is
+   * another Client's.
    */
-  private async handshake(): Promise<BridgeConnection | string> {
+  private async handshake(): Promise<BridgeConnection | string | { error: string; reinstall: true }> {
     const { clock } = this.options;
     let child: ChildProcess;
     try {
@@ -162,9 +164,11 @@ export class Environment {
     try {
       const bridge = await connection.request<BridgeInfo>('handshake', HANDSHAKE_TIMEOUT_MS);
       if (bridge.protocolVersion !== PROTOCOL_VERSION || bridge.version !== this.options.appVersion) {
-        throw new Error(
-          `loom-bridge ${bridge.version} (protocol ${bridge.protocolVersion}) does not match Loom ${this.options.appVersion} (protocol ${PROTOCOL_VERSION})`,
-        );
+        child.kill();
+        return {
+          error: `loom-bridge ${bridge.version} (protocol ${bridge.protocolVersion}) does not match Loom ${this.options.appVersion} (protocol ${PROTOCOL_VERSION})`,
+          reinstall: true,
+        };
       }
       if (this.stopped) return connection;
       this.restarts = 0;
@@ -173,6 +177,8 @@ export class Environment {
       return connection;
     } catch (error) {
       child.kill();
+      // The shell the bridge is started through couldn't find it (127) or run it (126).
+      if (child.exitCode === 127 || child.exitCode === 126) return { error: (error as Error).message, reinstall: true };
       return (error as Error).message;
     }
   }

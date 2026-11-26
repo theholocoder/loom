@@ -41,6 +41,7 @@ func utf16LE(s string) []byte {
 	return out
 }
 
+// distroNames is the names of the distros a wsl.list result lists.
 func distroNames(t *testing.T, result map[string]any) []string {
 	t.Helper()
 	var names []string

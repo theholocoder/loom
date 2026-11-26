@@ -186,7 +186,7 @@ describe('Settings: the agent in each Environment', () => {
 });
 
 describe('Settings: WSL distros', () => {
-  const distro = (name: string, env: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({ id: `wsl:${name}`, label: name, distro: name, state: 'stopped', ...env });
+  const distro = (name: string, env: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({ id: `wsl:${name}`, label: name, distro: name, state: 'idle', ...env });
 
   function openSettings(...environments: EnvironmentStatus[]) {
     const main = renderApp(new FakeMain({ environments: [connectedNative, ...environments] }));
@@ -228,7 +228,7 @@ describe('Settings: WSL distros', () => {
     openSettings(distro('Ubuntu', { state: 'starting' }), distro('Debian', { state: 'starting', installing: true }));
 
     expect(within(row('Ubuntu')).getByText('Starting Ubuntu…')).toBeTruthy();
-    expect(within(row('Debian')).getByText('Installing loom-bridge in Debian…')).toBeTruthy();
+    expect(within(row('Debian')).getByText('Starting Debian… (installing loom-bridge)')).toBeTruthy();
   });
 
   it('reloads one distro on its own', () => {

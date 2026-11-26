@@ -45,7 +45,9 @@ mkdir -p "$dir"
 tmp="$dir/loom-bridge.$$.tmp"
 trap 'rm -f "$tmp"' EXIT
 cat > "$tmp"
-if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$tmp"); else sum=$(shasum -a 256 "$tmp"); fi
+if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$tmp")
+elif command -v shasum >/dev/null 2>&1; then sum=$(shasum -a 256 "$tmp")
+else echo "loom-bridge can't be checked: the distro has neither sha256sum nor shasum" >&2; exit 1; fi
 sum=${sum%% *}
 if [ "$sum" != "$2" ]; then echo "loom-bridge arrived changed (SHA-256 $sum, want $2)" >&2; exit 1; fi
 chmod 755 "$tmp"
@@ -56,6 +58,7 @@ done
 printf '%s\n' "$dir/loom-bridge"
 `
 
+// wslDistro is one distro, as `wsl.exe -l` names it.
 type wslDistro struct {
 	Name string `json:"name"`
 }
@@ -68,12 +71,14 @@ type wslListResult struct {
 }
 
 type wslInstallParams struct {
+	// Distro is the distro to install the bridge into, as `wsl.exe -l` names it.
 	Distro string `json:"distro"`
 	// Version names the folder the bridge goes in: the Client's.
 	Version string `json:"version"`
 	// Binary is the Linux bridge's path on this machine.
-	Binary    string `json:"binary"`
-	TimeoutMs int    `json:"timeoutMs"`
+	Binary string `json:"binary"`
+	// TimeoutMs bounds the install; zero means defaultWSLInstallTimeout.
+	TimeoutMs int `json:"timeoutMs"`
 }
 
 type wslInstallResult struct {
