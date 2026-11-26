@@ -6,6 +6,7 @@ import type { DiffSummary, Project, Session, TranscriptItem } from '../../src/sh
 import { Dates, ownLocale } from '../../src/shared/dates';
 import { settingsPage } from './settings-page';
 import { FakeMain } from './fake-main';
+import { openFromSidebar } from './sidebar';
 
 afterEach(cleanup);
 
@@ -29,7 +30,7 @@ function open(main: FakeMain) {
       <App />
     </ApiProvider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Fix login' }));
+  openFromSidebar('Fix login');
   return screen.getByRole('log', { name: 'Conversation' });
 }
 

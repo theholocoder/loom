@@ -4,6 +4,7 @@ import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
 import type { Project, Session } from '../../src/shared/api';
 import { FakeMain } from './fake-main';
+import { openFromSidebar } from './sidebar';
 
 afterEach(() => {
   cleanup();
@@ -53,9 +54,7 @@ function renderApp(s: Session = full, handlers: ConstructorParameters<typeof Fak
       <App />
     </ApiProvider>,
   );
-  const inbox = within(screen.getByRole('complementary', { name: 'Inbox' }));
-  if (s.status === 'archived') fireEvent.click(inbox.getByRole('button', { name: 'Archived' }));
-  fireEvent.click(inbox.getByRole('button', { name: s.title }));
+  openFromSidebar(s.title);
   return main;
 }
 
