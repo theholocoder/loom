@@ -27,7 +27,7 @@ import { useDelete } from './Delete';
 import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
-import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
+import { PlanCard, ThinkingBlock, ToolCard, ToolRunCard, withRuns } from './WorkCards';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed } from './Snooze';
 import { useNow } from './now';
@@ -811,8 +811,14 @@ export function SessionView({
           ) : (
           <>
           <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnConversation}>
-            {turnParts(items).map((item) =>
-              'said' in item ? (
+            {withRuns(
+              turnParts(items),
+              (part) => (!('said' in part) && part.kind === 'tool' && !startsSubagent(part, subagents) ? part : undefined),
+              (part) => ('said' in part && part.said.every((s) => s.kind === 'thinking') ? (part.said as Array<Extract<Said, { kind: 'thinking' }>>) : undefined),
+            ).map((item, at, parts) =>
+              'run' in item ? (
+                <ToolRunCard key={item.run[0]!.id} run={item.run} live={working && at === parts.length - 1} />
+              ) : 'said' in item ? (
                 <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
               ) : item.kind === 'user' ? (
                 <div key={item.id} className="msg user" data-item-id={item.id}>
