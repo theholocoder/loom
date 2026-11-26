@@ -19,7 +19,7 @@ import { Panels } from './sessions/panels';
 import { SessionForge } from './sessions/session-forge';
 import { Sessions, type SessionEnvironment } from './sessions/sessions';
 import { Terminals } from './sessions/terminals';
-import { checkWorktreeRootFolder } from './sessions/working-copies';
+import { checkWorktreeRootFolder, expandRoot } from './sessions/working-copies';
 import { Settings } from './settings';
 import { DATABASE_FILE, DatabaseDamagedError, openDatabase, type LoomDatabase } from './storage/database';
 import { listSnapshots, restoreLatestSnapshot } from './storage/snapshots';
@@ -27,6 +27,7 @@ import type { SqliteDriver } from './storage/sqlite';
 import { Topic } from './topic';
 import { Updates, type Updater } from './updates';
 import { dashboard } from './usage/usage';
+import { UsageSync } from './usage/usage-sync';
 import { isWebLink } from '../shared/links';
 import { ownLocale } from '../shared/dates';
 
@@ -122,6 +123,9 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
   };
 }
 
+/** How long the dashboard waits for the agents' records to be read before showing what Loom has. */
+const DASHBOARD_SYNC_MS = 5_000;
+
 /** The longest feedback message sent, which is plenty for one. */
 const MAX_FEEDBACK = 10_000;
 
@@ -145,6 +149,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
   let wasConnected = false;
   let lastState: EnvironmentStatus['state'] = 'starting';
   let babysit: Babysit | undefined;
+  /** The agents' records' latest reading since the Environment connected. */
+  let usageRead: Promise<void> = Promise.resolve();
   const native = new Environment({
     id: 'native',
     label: 'Native',
@@ -162,6 +168,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
         void projectService.checkForges(status.id).catch(() => {}).then(() => babysit?.pollAll());
         // Branches may have changed while Loom wasn't looking.
         void sessionService.lookUpBranches(status.id);
+        // So may the agent's usage, in Loom and outside it.
+        usageRead = usageSync.sync(status.id);
       }
       wasConnected = isConnected;
       // A bridge that was up and died took its agents with it.
@@ -203,7 +211,11 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     request: (...args) => native.request(...args),
     home: () => native.status.bridge?.home || undefined,
     openChannel: (params) => native.openChannel(params),
-    ready: () => native.ready(),
+    ready: async () => {
+      await native.ready();
+      // The agent's records are first read before its first run, which they then count (ADR 0012).
+      if (adapter.usage && !usageSync.covers(adapter.name, native.status.id)) await usageRead;
+    },
     restart: () => native.restart(),
     tempDir: () => tempDirOf(native.status.bridge?.os, native.status.bridge?.home),
     bridgeExecutable: () => native.status.bridge?.executable || undefined,
@@ -257,6 +269,32 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     linkIssue: (id, issue) => sessionService.linkIssue({ id, issue }),
   });
   const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion, options.clock);
+  // Usage read from the agents' own records, where they keep them (ADR 0012).
+  const usageSync = await UsageSync.load({
+    db,
+    clock: options.clock,
+    agents: adapter.usage ? [{ name: adapter.name, usage: adapter.usage }] : [],
+    environment: (id) => (id === native.status.id && native.status.state === 'connected' ? (...args) => native.request(...args) : undefined),
+    loomFolder: (environmentId, directory) => {
+      if (environmentId !== native.status.id) return false;
+      const path = directory.replaceAll('\\', '/').replace(/\/+$/, '');
+      // Session highlights' checks' folder, and the worktrees Loom made (ADR 0012).
+      if (path.endsWith('/loom-highlights')) return true;
+      try {
+        const root = expandRoot(nativeForSessions, settingsService.value.worktreeRoot).replaceAll('\\', '/');
+        return path.startsWith(`${root}/`);
+      } catch {
+        return false;
+      }
+    },
+    session: (id) => sessionService.usageFiling(id),
+    onSessionUsage: (id, tokens, cost) => sessionService.addUsage(id, tokens, cost),
+  });
+  /** Each Session's agent and Environment, as its usage is counted. */
+  const usageOf = (session: Session) => {
+    const environmentId = environmentIdOf(session.projectId);
+    return environmentId === undefined ? undefined : { agent: session.agent, environmentId };
+  };
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
@@ -273,6 +311,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     onTurnEnded: (id, through) => highlights?.turnEnded(id, through),
     linkNamedIssue: (id, issue) => sessionForge.linkNamedIssue(id, issue),
     onNews: (id, reason) => notifications.news(id, reason),
+    usage: { covers: (agent, environmentId) => usageSync.covers(agent, environmentId), changed: (agent, environmentId) => void usageSync.sync(environmentId, agent) },
     maxUntrackedCounted: options.maxUntrackedCounted,
     projectTrust: { get: (id) => projectService.trusted(id), set: (id, trusted) => projectService.setTrusted(id, trusted) },
     approvals: () => settingsService.value.approvals,
@@ -295,6 +334,21 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     transcript: (id) => sessionService.transcriptItems(id),
     projectName,
     onCounts: (id, counts) => sessionService.setHighlightCounts(id, counts),
+    // A check runs on the adapter's agent, whichever its Session's is.
+    usage: {
+      covers: (session) => {
+        const key = usageOf(session);
+        return !!key && usageSync.covers(adapter.name, key.environmentId);
+      },
+      register: async (session, conversationId) => {
+        const key = usageOf(session);
+        if (key) await usageSync.registerHighlights(adapter.name, key.environmentId, conversationId, session.id);
+      },
+      changed: (session) => {
+        const key = usageOf(session);
+        if (key) void usageSync.sync(key.environmentId, adapter.name);
+      },
+    },
   });
   const highlighter = highlights;
 
@@ -467,9 +521,14 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.trust': (params) => sessionService.trust(params),
     'sessions.approve': (params) => sessionService.approve(params),
     'usage.dashboard': async ({ days }) => {
+      // What the agents' records hold now counts, as far as they can be read in a moment.
+      let timer: unknown;
+      await Promise.race([usageSync.sync(native.status.id), new Promise<void>((resolve) => (timer = options.clock.setTimeout(resolve, DASHBOARD_SYNC_MS)))]);
+      options.clock.clearTimeout(timer);
       // What the Sessions have recorded so far counts.
       await sessionService.flush();
-      return dashboard(db, days, options.clock.now());
+      const data = await dashboard(db, days, options.clock.now());
+      return usageSync.countingPast() ? { ...data, countingPast: true } : data;
     },
     'update.status': () => updates.status.value,
     'update.restart': () => updates.restart(),
@@ -503,6 +562,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       await terminals.closeAll();
       sessionForge.stop();
       await sessionService.shutdown();
+      await usageSync.stop();
       await native.stop();
       await db.destroy();
     },

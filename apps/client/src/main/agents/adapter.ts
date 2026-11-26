@@ -4,6 +4,7 @@
 // Session status from them.
 import type { AgentCommand, AgentConfig, Answer, ApprovalPolicy, ModelPick, FileChange, PlanEntry, QuestionField, SubagentStatus, TokenCounts, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
+import type { BridgeCall } from '../environments/exec';
 
 /** Where an agent's process runs: its Session's Environment. */
 export interface AgentEnvironment {
@@ -177,11 +178,64 @@ export interface OpenOptions {
 /** The agent started but can't take up the conversation it was asked to resume, as when it no longer has it. */
 export class ResumeRefused extends Error {}
 
+/**
+ * Where an agent keeps the usage of its conversations, Loom's and the user's
+ * own alike (its database, its transcripts), step by step, as it lets Loom
+ * read it through an Environment's bridge. Absent for an agent Loom can only
+ * count from what it reports of Loom's runs (`turn-usage`).
+ */
+export interface AgentUsageSource {
+  /**
+   * The agent's conversations in the Environment changed at or after `since`
+   * (the agent's clock time, ms), or all of them without it. Rejects when the
+   * agent can't say, as an older version that keeps no such record.
+   */
+  conversations(call: BridgeCall, since?: number): Promise<AgentConversation[]>;
+  /**
+   * The steps of conversation `id` that used the model, in any order: every
+   * one completed at or after `since`, or all of them without it. A step
+   * still going is left out until it completes.
+   */
+  steps(call: BridgeCall, id: string, since?: number): Promise<UsageStep[]>;
+}
+
+/** One of an agent's conversations, as its own records list it. */
+export interface AgentConversation {
+  /** The agent's own id for it: a Session's `AgentSession.id`, or a Subagent's `subagentId`. */
+  id: string;
+  /** The conversation that started it, for a Subagent's. */
+  parentId?: string;
+  /** The folder it runs in, when the agent says. */
+  directory?: string;
+  /** The agent's clock time it last changed. */
+  updatedAt: number;
+  /**
+   * All it has used so far, when the agent keeps a total: more than its
+   * steps when it also ran the model for itself (OpenCode's titles).
+   */
+  total?: { tokens: TokenCounts; cost: number };
+}
+
+/** One step of a conversation that used the model, as the agent's own records count it. */
+export interface UsageStep {
+  /** The agent's own id for it, unique in its conversation and growing with time. */
+  id: string;
+  /** The agent's clock time it completed: its usage is filed under that day. */
+  at: number;
+  /** The model it ran with, `provider/model`, when the agent says. */
+  model?: string;
+  tokens: TokenCounts;
+  /** What it cost, in USD, as the agent reports it (0 for subscription and local models). */
+  cost: number;
+}
+
 export interface AgentAdapter {
   /** The agent's name, as the UI shows it. */
   readonly name: string;
   /** Whether its sessions take a message mid-run (`AgentSession.steer`). */
   readonly canSteer?: boolean;
+  /** Where its usage can be read from, every conversation's, when it keeps one Loom can read. */
+  readonly usage?: AgentUsageSource;
   /** Starts the agent in the working copy, for a new conversation or one it resumes. */
   open(options: OpenOptions): Promise<AgentSession>;
 }

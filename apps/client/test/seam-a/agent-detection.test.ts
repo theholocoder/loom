@@ -76,14 +76,17 @@ describe('detecting OpenCode at startup', () => {
     expect(agent).toMatchObject({ state: 'signed-out', version: '2.1.4' });
   });
 
-  it('only runs `opencode --version` and a `serve --stdio` probe, never `auth list` or `models`', async () => {
+  it('only runs `opencode --version`, a `serve --stdio` probe and its usage list on a private server, never `auth list` or `models`', async () => {
     const machine = new Machine();
     machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn });
 
     await detectedAtStartup(machine);
 
     const invocations = machine.opencodeInvocations();
-    expect(invocations.map((argv) => argv.slice(0, 2))).toEqual([['--version'], ['serve', '--stdio']]);
+    // Reading its sessions' usage (ADR 0012) starts no shared background service either.
+    const [usage, others] = [invocations.filter((argv) => argv[0] === 'api'), invocations.filter((argv) => argv[0] !== 'api')];
+    expect(others.map((argv) => argv.slice(0, 2))).toEqual([['--version'], ['serve', '--stdio']]);
+    expect(usage.every((argv) => argv[1] === '--standalone' && argv[2] === 'session.list')).toBe(true);
   });
 
   it("finds OpenCode on the login shell's PATH, which the launcher's PATH lacks", async () => {

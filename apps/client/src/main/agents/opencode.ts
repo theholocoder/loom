@@ -8,6 +8,7 @@ import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environme
 import type { AcpProfile } from './acp-adapter';
 import { agentCommandsOf } from './commands';
 import { NO_TOOLS, OPENCODE_TOOLS, openCodePermission } from './opencode-permission';
+import { openCodeUsage } from './opencode-usage';
 
 /**
  * Sessions run on `opencode acp`, one process each, with Loom's approval
@@ -26,6 +27,8 @@ export const OPENCODE_ACP: AcpProfile = {
   planTool: 'todowrite',
   // OpenCode 2.4.2 runs Subagents in the background, and reports them apart to a client that opts in.
   subagentTool: 'subagent',
+  // OpenCode 2.4.2 keeps every session's usage, Subagents' and the user's own included, and lists it.
+  usage: openCodeUsage,
 };
 const VERSION_TIMEOUT_MS = 10_000;
 // The bridge gives the probe 15 s; this leaves it room to answer.

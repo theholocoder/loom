@@ -10,6 +10,9 @@ import { RemovedTag } from './Archive';
 import { ModelName } from './ModelPicker';
 import { projectColor } from './ProjectAvatar';
 
+/** How often the figures are asked for again while past usage is still being counted. */
+const COUNTING_PAST_POLL_MS = 3_000;
+
 const OUTCOME_LABEL: Record<SessionOutcome, string> = { merged: 'Merged', closed: 'Closed', archived: 'Archived', open: 'Open' };
 
 export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session) => void }) {
@@ -19,6 +22,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
   const [days, setDays] = useState<UsageRange>(7);
   const [data, setData] = useState<UsageDashboard>();
   const [error, setError] = useState<string>();
+  const [again, setAgain] = useState(0);
   // Worked out again whenever a Session's status changes, as runs end and Sessions are archived.
   const changed = sessions.reduce((latest, s) => Math.max(latest, s.updatedAt), 0);
 
@@ -32,7 +36,14 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
     return () => {
       current = false;
     };
-  }, [api, days, changed]);
+  }, [api, days, changed, again]);
+
+  // While past usage is still being counted, the figures are asked for again every few seconds.
+  useEffect(() => {
+    if (!data?.countingPast) return;
+    const timer = setTimeout(() => setAgain((n) => n + 1), COUNTING_PAST_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [data]);
 
   // Each Project in its own colour, as everywhere else: a removed one in the colour it had.
   const colorOf = (projectId: number) => {
@@ -46,8 +57,8 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
       <div className="row">
         <h1>Dashboard</h1>
         <span className="grow" />
-        <span className="muted" style={{ fontSize: 12 }}>
-          Computed from Sessions on this machine
+        <span className="muted" style={{ fontSize: 12 }} role="status">
+          {shown?.countingPast ? 'Counting past usage from the agents’ records…' : 'Computed from Sessions on this machine'}
         </span>
       </div>
       <div className="dash-filters">
@@ -147,7 +158,9 @@ function Content({
             {mixParts.map((part) => (
               <span key={part.label}>
                 <span className="sw" style={{ background: part.color }} />
-                {part.label} {percent(data.tokens ? part.value / data.tokens : 0)}
+                <span title={`${part.value.toLocaleString()} tokens`}>
+                  {part.label} {percent(data.tokens ? part.value / data.tokens : 0)}
+                </span>
               </span>
             ))}
           </div>
@@ -163,6 +176,28 @@ function Content({
             </span>
           </div>
           <Bars label="Session outcomes" rows={outcomes} format={String} />
+        </section>
+        <section className="card wide" aria-labelledby="dash-outside">
+          <div className="card-head">
+            <h3 id="dash-outside">Outside Loom</h3>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Your own runs of the agents, from their records. Not in the figures above.
+            </span>
+          </div>
+          {data.outside.tokens === 0 ? (
+            <div className="empty">No use outside Loom in the last {data.days} days.</div>
+          ) : (
+            <>
+              <p className="muted" style={{ fontSize: 12.5, margin: '0 0 10px' }}>
+                {formatTokens(data.outside.tokens)} tokens · {formatCost(data.outside.reportedCost)} reported
+              </p>
+              <Bars
+                label="Tokens outside Loom per model"
+                rows={data.outside.perModel.map((m) => ({ key: `${m.agent}/${m.model}`, label: `${m.agent} · ${m.name ?? m.model}`, title: m.model, value: m.tokens, color: 'var(--muted)', tech: !m.name }))}
+                format={formatTokens}
+              />
+            </>
+          )}
         </section>
         <section className="card wide" aria-labelledby="dash-top">
           <div className="card-head">
@@ -383,6 +418,10 @@ export function formatDuration(ms: number | undefined): string {
   return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
 }
 
+/** A share as a whole percent: one above none that rounds to 0% shows as <1%, and one short of all that rounds to 100% as >99%. */
 function percent(fraction: number): string {
-  return `${Math.round(fraction * 100)}%`;
+  const rounded = Math.round(fraction * 100);
+  if (rounded === 0 && fraction > 0) return '<1%';
+  if (rounded === 100 && fraction < 1) return '>99%';
+  return `${rounded}%`;
 }

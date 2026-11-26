@@ -49,6 +49,14 @@
 // Every message it receives is appended to
 // <script.json>.acp.log as {pid, cwd, config, message}, `config` being its
 // OPENCODE_CONFIG_CONTENT. It exits when its stdin closes.
+//
+// Like OpenCode, it keeps each session's usage: a turn adds its `tokens` and
+// sets its `cost` in <script.json>.sessions.json, before answering its
+// `session/prompt`, and adds its `records` (a Subagent's, or a background
+// run's, `"$ROOT"` standing for the session's id) once it has played. With
+// `sessionList`, `opencode api --standalone session.list` lists them as
+// OpenCode 2.4.2 does: newest change first, paged by `limit` and `cursor`.
+// Without it, it fails as an OpenCode without that command would.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
@@ -64,9 +72,83 @@ if (args[0] === '--version') {
   serve();
 } else if (args[0] === 'acp') {
   acp();
+} else if (args[0] === 'api' && args.includes('session.list') && script.sessionList) {
+  listSessions();
+} else if (args[0] === 'api' && args.includes('session.message.list') && script.sessionList) {
+  listMessages();
 } else {
   process.stderr.write(`opencode stand-in: unscripted command ${JSON.stringify(args)}\n`);
   process.exit(1);
+}
+
+/** The sessions' usage as OpenCode keeps it, by id. */
+function readSessions() {
+  const file = `${scriptPath}.sessions.json`;
+  return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+}
+
+/** Adds a step of session `id` that used `tokens` (ACP's shape), completed now or `at`, and sets the session's cumulative `cost`, if given. */
+function recordUsage(id, { parentID, model, tokens, cost, at }) {
+  const sessions = readSessions();
+  const was = sessions[id] ?? { id, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0, steps: [] };
+  const step = {
+    input: tokens?.inputTokens ?? 0,
+    output: tokens?.outputTokens ?? 0,
+    reasoning: tokens?.thoughtTokens ?? 0,
+    cache: { read: tokens?.cachedReadTokens ?? 0, write: tokens?.cachedWriteTokens ?? 0 },
+  };
+  const t = was.tokens;
+  const now = Math.max(Date.now(), (was.time?.updated ?? 0) + 1);
+  const completed = at ?? now;
+  const stepCost = cost !== undefined ? Math.max(0, cost - was.cost) : 0;
+  sessions[id] = {
+    ...was,
+    ...(parentID ? { parentID } : {}),
+    ...(model ? { model } : {}),
+    tokens: { input: t.input + step.input, output: t.output + step.output, reasoning: t.reasoning + step.reasoning, cache: { read: t.cache.read + step.cache.read, write: t.cache.write + step.cache.write } },
+    ...(cost !== undefined ? { cost } : {}),
+    time: { updated: Math.max(now, completed) },
+    steps: [...was.steps, { id: `msg_${String(completed).padStart(15, '0')}_${was.steps.length}`, type: 'assistant', time: { created: completed - 1, completed }, ...(model ? { model } : {}), tokens: step, cost: stepCost }],
+  };
+  writeFileSync(`${scriptPath}.sessions.json`, JSON.stringify(sessions));
+}
+
+/** The `--param key=value`s of an `opencode api` command. */
+function apiParams() {
+  return Object.fromEntries(args.flatMap((arg, i) => (args[i - 1] === '--param' ? [arg.split('=')] : [])).map(([k, ...v]) => [k, v.join('=')]));
+}
+
+/** Prints a page of `items`, as `opencode api` does, its cursor the offset of the next. */
+function printPage(items, params) {
+  if (params.cursor !== undefined && params.order !== undefined) {
+    process.stderr.write('{"_tag":"InvalidCursorError","message":"Cursor cannot be combined with order"}\nHTTP 400 Bad Request\n');
+    process.exit(1);
+  }
+  const limit = Number(params.limit ?? 50);
+  const offset = Number(params.cursor ?? 0);
+  process.stdout.write(JSON.stringify({ data: items.slice(offset, offset + limit), cursor: { next: String(offset + limit), previous: String(offset) } }, null, 2) + '\n');
+}
+
+/** `opencode api --standalone session.list`, as OpenCode 2.4.2 prints it: newest change first. */
+function listSessions() {
+  const all = Object.values(readSessions()).sort((a, b) => b.time.updated - a.time.updated);
+  printPage(
+    all.map(({ steps: _steps, ...s }) => ({ projectID: 'global', title: '', location: { directory: s.directory ?? '/home/dev' }, ...s })),
+    apiParams(),
+  );
+}
+
+/** `opencode api --standalone session.message.list --param sessionID=… --param type=assistant`: its steps, newest first. */
+function listMessages() {
+  const params = apiParams();
+  const session = readSessions()[params.sessionID];
+  // A step too big to pass on: what's printed is cut off, as the bridge cuts off what it passes on.
+  if (session?.tooBig) {
+    process.stdout.write('{"data":[{"id":"msg_cut');
+    return;
+  }
+  const steps = [...(session?.steps ?? [])].sort((a, b) => b.time.created - a.time.created);
+  printPage(params.order === 'asc' ? steps.reverse() : steps, params);
 }
 
 function serve() {
@@ -322,6 +404,8 @@ function acp() {
       if (!rejected && !current.cancelled && turn.hold) await hold(turn.hold);
       running = undefined;
       if (turn.cost !== undefined) cost = turn.cost;
+      const model = selection.model ? { providerID: selection.model.providerID, id: selection.model.id } : undefined;
+      recordUsage(sessionId, { model, tokens: turn.tokens, ...(turn.cost !== undefined ? { cost } : {}) });
       if ((turn.used || turn.cost !== undefined) && selection.model?.context) {
         send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'usage_update', used: turn.used ?? 0, size: selection.model.context, cost: { amount: cost, currency: 'USD' } } } });
       }
@@ -330,6 +414,11 @@ function acp() {
       if (turn.error) send({ id, error: { code: -32603, message: turn.error } });
       else send({ id, result: { stopReason: 'end_turn', ...usage } });
       if (turn.after) await play(turn.after);
+      for (const record of turn.records ?? []) {
+        const id = record.id === '$ROOT' ? sessionId : record.id;
+        const parentID = record.parentId === '$ROOT' ? sessionId : record.parentId;
+        recordUsage(id, { parentID, model: record.model ?? model, tokens: record.tokens, cost: record.cost });
+      }
     } else if (id !== undefined) {
       send({ id, error: { code: -32601, message: `opencode stand-in: unscripted method ${method}` } });
     }

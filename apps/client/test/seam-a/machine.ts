@@ -34,6 +34,12 @@ export interface OpencodeScript {
   skills?: Array<{ id: string; name: string; description?: string; path?: string }>;
   /** `GET /api/command` and `GET /api/skill` answer 404, as an OpenCode without them would. */
   noCatalog?: boolean;
+  /**
+   * `opencode api --standalone session.list` lists the sessions' usage, as
+   * OpenCode 2.4.2 does; without it, the command fails, as an OpenCode
+   * without it would.
+   */
+  sessionList?: boolean;
   /** What `opencode acp` does. */
   acp?: {
     /** Each process plays one turn per `session/prompt`, in order; past the end, a turn that says nothing. */
@@ -58,6 +64,24 @@ export interface OpencodeScript {
     refuse?: Array<'session/resume' | 'session/load'>;
   };
 }
+
+/** A session's usage as the `opencode` stand-in keeps it, in OpenCode's `GET /api/session` shape. */
+interface StandInSession {
+  id: string;
+  parentID?: string;
+  /** The folder it runs in (`location.directory`); `/home/dev` without one. */
+  directory?: string;
+  model?: { providerID: string; id: string };
+  cost: number;
+  tokens: StandInTokens;
+  time: { updated: number };
+  /** Its steps are too big to list: `session.message.list` prints them cut off. */
+  tooBig?: boolean;
+  /** Its assistant messages, one per step, as `session.message.list` lists them. */
+  steps: Array<{ id: string; type: 'assistant'; time: { created: number; completed: number }; model?: { providerID: string; id: string }; tokens: StandInTokens; cost: number }>;
+}
+
+type StandInTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
 
 /** A model as the stand-in reports it, in OpenCode's terms. */
 export interface StandInModel {
@@ -124,7 +148,22 @@ export interface AcpTurn {
   /** The session's cumulative cost after the run, in USD, which its `usage_update` carries. */
   cost?: number;
   /** The run's token usage, which the `session/prompt` response carries (cancelled or not). */
-  tokens?: { inputTokens: number; outputTokens: number; thoughtTokens?: number; cachedReadTokens?: number; cachedWriteTokens?: number };
+  tokens?: AcpTokens;
+  /**
+   * Usage the agent's records gain once the run has played, beyond its own
+   * `tokens`, which ACP doesn't report: a Subagent's (`parentId`), or a
+   * background run's (`id: "$ROOT"`, the session's own).
+   */
+  records?: Array<{ id: string; parentId?: string; tokens: AcpTokens; cost?: number; model?: { providerID: string; id: string } }>;
+}
+
+/** Token counts in ACP's `PromptResponse.usage` shape. */
+export interface AcpTokens {
+  inputTokens: number;
+  outputTokens: number;
+  thoughtTokens?: number;
+  cachedReadTokens?: number;
+  cachedWriteTokens?: number;
 }
 
 /**
@@ -314,6 +353,58 @@ PATH="$(cat '${join(this.dir, 'shell-path')}')" exec /bin/sh -c "$2"
   /** Installs the scripted `opencode` stand-in into `binDir`. */
   installOpencode(script: OpencodeScript, binDir = this.binDir()): void {
     this.installStandIn('opencode', opencodeStandIn, script, binDir);
+  }
+
+  /**
+   * The user runs OpenCode outside Loom: session `id` takes a step that uses
+   * `tokens` with `model`, completed now or `at`, as OpenCode's own records
+   * count it; `cost` is the session's cumulative cost after it, and `title`
+   * what OpenCode used naming the session, counted in its total but in no step.
+   * With `tooBig`, its steps can't be listed whole.
+   */
+  useOpencodeOutsideLoom(id: string, tokens: AcpTokens, model: { providerID: string; id: string }, options: { at?: number; cost?: number; title?: AcpTokens; directory?: string; tooBig?: boolean } = {}): void {
+    const script = this.scripts.find((s) => basename(s) === 'opencode.json');
+    if (!script) throw new Error('no opencode stand-in installed');
+    const file = `${script}.sessions.json`;
+    const sessions = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, StandInSession>) : {};
+    const was = sessions[id] ?? { id, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { updated: 0 }, steps: [] };
+    const step = { input: tokens.inputTokens, output: tokens.outputTokens, reasoning: tokens.thoughtTokens ?? 0, cache: { read: tokens.cachedReadTokens ?? 0, write: tokens.cachedWriteTokens ?? 0 } };
+    const title = options.title ? { input: options.title.inputTokens, output: options.title.outputTokens, reasoning: 0, cache: { read: 0, write: 0 } } : { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
+    const now = Math.max(Date.now(), was.time.updated + 1);
+    const completed = options.at ?? now;
+    const cost = options.cost ?? was.cost;
+    const t = was.tokens;
+    sessions[id] = {
+      ...was,
+      model,
+      cost,
+      ...(options.directory ? { directory: options.directory } : {}),
+      ...(options.tooBig ? { tooBig: true } : {}),
+      tokens: {
+        input: t.input + step.input + title.input,
+        output: t.output + step.output + title.output,
+        reasoning: t.reasoning + step.reasoning,
+        cache: { read: t.cache.read + step.cache.read, write: t.cache.write + step.cache.write },
+      },
+      time: { updated: Math.max(now, completed) },
+      steps: [...was.steps, { id: `msg_${String(completed).padStart(15, '0')}_${was.steps.length}`, type: 'assistant', time: { created: completed - 1, completed }, model, tokens: step, cost: Math.max(0, cost - was.cost) }],
+    };
+    writeFileSync(file, JSON.stringify(sessions));
+  }
+
+  /**
+   * The user forks OpenCode session `parentId` as `id`: the fork starts with
+   * copies of its steps (new ids, the same completion, model and usage),
+   * counted in its total too.
+   */
+  forkOpencodeSession(parentId: string, id: string): void {
+    const script = this.scripts.find((s) => basename(s) === 'opencode.json');
+    if (!script) throw new Error('no opencode stand-in installed');
+    const file = `${script}.sessions.json`;
+    const sessions = JSON.parse(readFileSync(file, 'utf8')) as Record<string, StandInSession>;
+    const parent = sessions[parentId]!;
+    sessions[id] = { ...parent, id, time: { updated: Date.now() }, steps: parent.steps.map((step, i) => ({ ...step, id: `msg_fork_${String(i).padStart(4, '0')}` })) };
+    writeFileSync(file, JSON.stringify(sessions));
   }
 
   /** Every argv the installed `opencode` stand-ins were run with. */

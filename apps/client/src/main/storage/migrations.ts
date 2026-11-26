@@ -269,4 +269,74 @@ export const migrations: Migration[] = [
       .addForeignKeyConstraint('subagent_events_subagent', ['session_id', 'subagent_id'], 'subagents', ['session_id', 'id'], (c) => c.onDelete('cascade'))
       .execute();
   },
+  async (db) => {
+    // Usage read from each agent's own records (ADR 0012): what Loom has counted of each of its conversations, and whose it is.
+    await db.schema
+      .createTable('agent_conversations')
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('environment_id', 'text', (c) => c.notNull())
+      .addColumn('id', 'text', (c) => c.notNull())
+      .addColumn('owner', 'text', (c) => c.notNull())
+      .addColumn('session_id', 'integer')
+      .addColumn('seen_through', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('counted_through', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('counted_step', 'text', (c) => c.notNull().defaultTo(''))
+      .addColumn('backfill_through', 'integer')
+      .addColumn('model', 'text')
+      .addColumn('past_total', 'text')
+      .addColumn('input_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('output_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_read_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addPrimaryKeyConstraint('agent_conversations_pk', ['agent', 'environment_id', 'id'])
+      .execute();
+    // How far each agent's records have been read in each Environment.
+    await db.schema
+      .createTable('usage_syncs')
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('environment_id', 'text', (c) => c.notNull())
+      .addColumn('synced_through', 'integer', (c) => c.notNull())
+      .addPrimaryKeyConstraint('usage_syncs_pk', ['agent', 'environment_id'])
+      .execute();
+    // What Loom had recorded of each Session's runs, by day and model, when it first read an agent's records: its past steps count beyond it.
+    await db.schema
+      .createTable('usage_baseline')
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('environment_id', 'text', (c) => c.notNull())
+      .addColumn('session_id', 'integer', (c) => c.notNull())
+      .addColumn('day', 'text', (c) => c.notNull())
+      .addColumn('model', 'text', (c) => c.notNull())
+      .addColumn('input_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('output_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_read_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addPrimaryKeyConstraint('usage_baseline_pk', ['agent', 'environment_id', 'session_id', 'day', 'model'])
+      .execute();
+    // Every step counted, by what it used and when: a forked conversation's copies of its parent's steps count once.
+    await db.schema
+      .createTable('usage_steps')
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('environment_id', 'text', (c) => c.notNull())
+      .addColumn('print', 'text', (c) => c.notNull())
+      .addPrimaryKeyConstraint('usage_steps_pk', ['agent', 'environment_id', 'print'])
+      .execute();
+    // What the agents used outside Loom, by agent × day × model.
+    await db.schema
+      .createTable('outside_usage')
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('day', 'text', (c) => c.notNull())
+      .addColumn('model', 'text', (c) => c.notNull())
+      .addColumn('input_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('output_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_read_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addPrimaryKeyConstraint('outside_usage_pk', ['agent', 'day', 'model'])
+      .execute();
+  },
 ];

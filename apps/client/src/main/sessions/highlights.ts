@@ -50,6 +50,17 @@ export interface HighlightsOptions {
   projectName: (projectId: number) => string;
   /** The Session's Highlights, counted; undefined while its Panel means nothing. */
   onCounts: (id: number, counts: HighlightCounts | undefined) => void;
+  /**
+   * Usage read from the agent's own records (ADR 0012): once they `cover` a
+   * Session's Environment, a check's conversation is filed as Session
+   * highlights' before it runs, and Loom is told once it has, rather than
+   * counting what the check reports.
+   */
+  usage?: {
+    covers(session: Session): boolean;
+    register(session: Session, conversationId: string): Promise<void>;
+    changed(session: Session): void;
+  };
 }
 
 /** What the service holds of one Session. */
@@ -361,8 +372,10 @@ export class Highlights {
     await environment.request('files.write', WRITE_TIMEOUT_MS, { path: `${folder}/README.md`, data: Buffer.from(readme, 'utf8').toString('base64') });
     // `toolsOff` stands in for any approval policy; the adapter still takes one.
     agent = await this.options.adapter.open({ environment, workingCopy: folder, tempDir, approvals: DEFAULT_APPROVALS, toolsOff: true, onEvent });
+    const usage = this.options.usage?.covers(session) ? this.options.usage : undefined;
     let timer: TimerHandle | undefined;
     try {
+      await usage?.register(session, agent.id);
       await agent.configure(pick);
       timer = this.options.clock.setTimeout(() => {
         agent!.cancel();
@@ -375,7 +388,8 @@ export class Highlights {
     } finally {
       if (timer !== undefined) this.options.clock.clearTimeout(timer);
       await agent.close().catch(() => {});
-      if (tokens || cost > 0) await this.recordUsage(session, pick.model ?? 'default', tokens, cost);
+      if (usage) usage.changed(session);
+      else if (tokens || cost > 0) await this.recordUsage(session, pick.model ?? 'default', tokens, cost);
     }
   }
 

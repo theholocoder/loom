@@ -66,6 +66,15 @@ export interface SessionsOptions {
    * called when the user reopens it. For desktop notifications.
    */
   onNews?: (id: number, reason: WaitingReason) => void;
+  /**
+   * Usage read from the agents' own records (ADR 0012): once they `cover` a
+   * Session's agent in its Environment, what its runs report isn't counted,
+   * and Loom is told whenever the Session's agent may have used more.
+   */
+  usage?: {
+    covers(agent: string, environmentId: string): boolean;
+    changed(agent: string, environmentId: string): void;
+  };
 }
 
 /** What the Session service needs from an Environment: its agent's, and git. */
@@ -1895,11 +1904,14 @@ export class Sessions {
   }
 
   private onAgentEvent(id: number, event: AgentEvent): void {
-    // Usage counts however the run ended: cancelled, or by Archive.
-    if (event.type === 'usage' && event.cost !== undefined) this.recordCost(id, event.cost);
-    if (event.type === 'turn-usage') return this.recordUsage(id, event.tokens, 0);
+    // Usage counts however the run ended: cancelled, or by Archive. The agent's own records count it once they cover the Session.
+    const fromRecords = this.usageFromRecords(id);
+    if (event.type === 'usage' && event.cost !== undefined) this.recordCost(id, event.cost, fromRecords);
+    if (event.type === 'turn-usage') return fromRecords ? undefined : this.recordUsage(id, event.tokens, 0);
     // A Subagent's tokens count as the Session's, as its agent spent them.
-    if (event.type === 'subagent-usage') return this.recordUsage(id, event.tokens, 0);
+    if (event.type === 'subagent-usage') return fromRecords ? undefined : this.recordUsage(id, event.tokens, 0);
+    // The agent may have used more: once a run, or a Subagent, ends, and once it closes.
+    if (event.type === 'run-settled' || event.type === 'run-failed' || event.type === 'closed' || (event.type === 'subagent-status' && event.subagent.status !== 'running')) this.usageChanged(id);
     // The agent closing is Archive's own doing; Archive reports it if the Session stays.
     if (event.type === 'closed' && this.archiving.has(id)) {
       this.live.delete(id);
@@ -2009,13 +2021,50 @@ export class Sessions {
    * usage: a cost reported cumulatively is counted as it changes, whichever
    * turn it came with and however that turn ended.
    */
-  private recordCost(id: number, reported: number): void {
+  private recordCost(id: number, reported: number, fromRecords: boolean): void {
     const before = this.reportedCosts.get(id);
     if (reported === before) return;
     this.reportedCosts.set(id, reported);
     this.save(id, { reported_cost: reported });
     // Unknown before (a conversation from before Loom kept it): counted from here. One that went down was corrected: nothing to add.
-    if (before !== undefined && reported > before) this.recordUsage(id, NO_TOKENS, reported - before);
+    if (!fromRecords && before !== undefined && reported > before) this.recordUsage(id, NO_TOKENS, reported - before);
+  }
+
+  /** The Session's agent and Environment, as its usage is counted. */
+  private usageKey(id: number): { agent: string; environmentId: string } | undefined {
+    const session = this.get(id);
+    const environmentId = this.options.project(session.projectId)?.checkout.environmentId;
+    return environmentId === undefined ? undefined : { agent: session.agent, environmentId };
+  }
+
+  /** Whether the Session's usage is counted from its agent's own records, rather than from what its runs report. */
+  private usageFromRecords(id: number): boolean {
+    const key = this.usageKey(id);
+    return !!key && !!this.options.usage?.covers(key.agent, key.environmentId);
+  }
+
+  /** Tells Loom the Session's agent may have used more than its records counted so far. */
+  private usageChanged(id: number): void {
+    const key = this.usageKey(id);
+    if (key) this.options.usage?.changed(key.agent, key.environmentId);
+  }
+
+  /** What the Session's usage is filed under, for usage read from its agent's records: undefined for a Session Loom doesn't have. */
+  usageFiling(id: number): { projectId: number; projectName: string; modelName: (model: string) => string | undefined } | undefined {
+    const session = this.sessions.get(id);
+    if (!session) return undefined;
+    return {
+      projectId: session.projectId,
+      projectName: this.options.project(session.projectId)?.name ?? `Project ${session.projectId}`,
+      modelName: (model) => modelNameIn(session.agentConfig?.models, model),
+    };
+  }
+
+  /** Adds usage read from the agent's records, already saved, to the Session's own. */
+  addUsage(id: number, tokens: TokenCounts, cost: number): void {
+    if (!this.sessions.has(id)) return;
+    const usage = this.usageOf(id);
+    this.update(id, { usage: { ...usage, tokens: usage.tokens + totalTokens(tokens), reportedCost: usage.reportedCost + cost } });
   }
 
   /** Adds tokens and cost to the Session's bucket for today and the model its run went with. */

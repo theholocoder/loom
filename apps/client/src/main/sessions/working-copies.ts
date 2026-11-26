@@ -282,7 +282,7 @@ export async function checkWorktreeRootFolder(environment: GitEnvironment, root:
 }
 
 /** The root with a leading `~` replaced by the Environment's home. */
-function expandRoot(environment: GitEnvironment, root: string): string {
+export function expandRoot(environment: GitEnvironment, root: string): string {
   const checked = checkWorktreeRoot(root).replace(/[/\\]+$/, '');
   if (!checked.startsWith('~')) return checked;
   const home = environment.home();
