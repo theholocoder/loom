@@ -119,6 +119,23 @@ describe('Subagents', () => {
     expect(screen.getByRole('textbox', { name: 'Prompt' })).toBeTruthy();
   });
 
+  it('fold the tool calls in a row in their view into one line, as the Session does, the one going on now ending it', () => {
+    const { subagentTranscript } = openSession();
+
+    fireEvent.click(subagentCard(/Open Subagent Explore auth/));
+    subagentTranscript('ses_child1', [
+      { kind: 'tool', id: 1, toolCallId: 'call_1', title: 'read', name: 'read', toolKind: 'read', subject: 'src/auth.ts', status: 'completed' },
+      { kind: 'thinking', id: 2, text: 'Now the callers.', streaming: false },
+      { kind: 'tool', id: 3, toolCallId: 'call_3', title: 'grep', name: 'grep', toolKind: 'search', subject: 'checkSession', status: 'running' },
+    ]);
+
+    const view = screen.getByRole('log', { name: 'Subagent Explore auth' });
+    const run = within(view).getByRole('button', { name: /2 calls/ });
+    expect(run.textContent).toContain('Read 1 file, searched once · grep checkSession');
+    expect(within(run).getByRole('img', { name: 'Running' })).toBeTruthy();
+    expect(within(view).queryByText('Now the callers.')).toBeNull();
+  });
+
   it('list in a Glance strip chip while any runs, at every depth, a click opening one', () => {
     const { subagentTranscript } = openSession({ runningSubagents: 1 });
     const glance = screen.getByRole('group', { name: 'Session at a glance' });
