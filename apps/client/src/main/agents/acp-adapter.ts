@@ -231,8 +231,17 @@ export class AcpAdapter implements AgentAdapter {
       noteCall(event, child.id, update);
       onEvent({ type: 'subagent-event', subagentId: id, event: event as SubagentEvent });
     };
-    /** Which Subagent a request is from: undefined for the session's own; null for one Loom doesn't know. */
-    const askerOf = (forSession: unknown): string | undefined | null => (forSession === sessionId ? undefined : typeof forSession === 'string' && children.has(forSession) ? forSession : null);
+    /**
+     * Which Subagent a request is from: undefined for the session's own; null
+     * for one Loom doesn't know. OpenCode 2.4.2 asks for a Subagent under the
+     * session's own id, naming the Subagent apart (`named`); a request under
+     * the Subagent's own id is taken too.
+     */
+    const askerOf = (forSession: unknown, named: string | undefined): string | undefined | null => {
+      const asker = forSession === sessionId ? named : forSession;
+      if (asker === undefined) return undefined;
+      return typeof asker === 'string' && children.has(asker) ? asker : null;
+    };
     const connection = new AcpConnection(channel, {
       onNotification: (method, params) => {
         if (method === CHILD_UPDATE) {
@@ -258,7 +267,7 @@ export class AcpAdapter implements AgentAdapter {
       onRequest: (method, params) => {
         if (method === 'session/request_permission') {
           const request = params as PermissionRequest;
-          const asker = askerOf(request.sessionId);
+          const asker = askerOf(request.sessionId, childOf(request.toolCall));
           if (asker === null) return Promise.resolve({ outcome: { outcome: 'cancelled' } });
           const call = asker === undefined || !request.toolCall ? request.toolCall : unprefixed(request.toolCall as AcpToolCall & SessionUpdate, asker, children.get(asker)?.title);
           const action = approvalActionOf(call ?? {}, this.profile.ownTools, request.options);
@@ -271,14 +280,18 @@ export class AcpAdapter implements AgentAdapter {
         }
         if (method !== 'elicitation/create') return undefined;
         const request = params as ElicitationRequest;
-        const asker = askerOf(request.sessionId);
+        // OpenCode 2.4.2 names the Subagent asking by the prefix of the tool call it asks from (`<id>:`).
+        const prefix = typeof request.toolCallId === 'string' ? request.toolCallId.split(':')[0] : undefined;
+        const asker = askerOf(request.sessionId, prefix !== undefined && prefix !== request.toolCallId && children.has(prefix) ? prefix : undefined);
         if (asker === null) return Promise.resolve({ action: 'cancel' });
         const fields = request.mode === 'form' ? fieldsOf(request.requestedSchema) : undefined;
         // A form Loom can't show is cancelled, as OpenCode does when it can't show one.
         if (!fields) return Promise.resolve({ action: 'cancel' });
+        const title = asker ? children.get(asker)?.title : undefined;
+        const message = typeof request.message === 'string' ? (title && request.message.startsWith(`${title}: `) ? request.message.slice(title.length + 2) : request.message) : '';
         return ask<ElicitationResponse>(
           'elicitation',
-          (requestId) => ({ type: 'question-asked', requestId, message: typeof request.message === 'string' ? request.message : '', fields, ...(asker ? { subagentId: asker } : {}) }),
+          (requestId) => ({ type: 'question-asked', requestId, message, fields, ...(asker ? { subagentId: asker } : {}) }),
           (response) => (response.kind === 'question' ? elicitationResponse(response) : undefined),
           { action: 'cancel' },
         );
@@ -774,8 +787,16 @@ function stringOf(value: unknown): string {
 // ACP v1's permission request: the tool call the agent wants to make, and the options to answer with.
 interface PermissionRequest {
   sessionId?: unknown;
-  toolCall?: AcpToolCall;
+  toolCall?: AcpToolCall & { _meta?: { [CHILD_SESSION]?: { id?: unknown } } };
   options?: unknown;
+}
+
+/** Where OpenCode 2.4.2 names the Subagent a permission request is from, in its tool call's `_meta`. */
+const CHILD_SESSION = 'opencode/child-session';
+
+/** The Subagent a permission request's tool call names as asking, if any. */
+function childOf(call: PermissionRequest['toolCall']): string | undefined {
+  return text(call?._meta?.[CHILD_SESSION]?.id);
 }
 
 /** What the agent wants to do, from its tool call: the command for a shell one, the paths for the rest. */
@@ -822,6 +843,7 @@ function permissionResponse(options: unknown, { approved, always }: { approved: 
 // ACP v1's form elicitation: a flat JSON Schema object of primitive fields.
 interface ElicitationRequest {
   sessionId?: unknown;
+  toolCallId?: unknown;
   mode?: unknown;
   message?: unknown;
   requestedSchema?: { properties?: Record<string, PropertySchema>; required?: unknown };

@@ -43,7 +43,9 @@
 // `session/load` of a subagent's id (one that a `{ notify }` named as a
 // `childSessionId`) is answered without taking it up, and `session/close` of
 // it sends its `interrupted` status, as OpenCode 2.4.2 does. A `{ permission }`
-// chunk with `from` asks as that subagent; in `after`, its answer ends nothing.
+// or `{ elicit }` chunk with `from` asks as that subagent, the way OpenCode
+// 2.4.2 does (under the session's own id: see asChild); in `after`, its
+// answer ends nothing.
 // Every message it receives is appended to
 // <script.json>.acp.log as {pid, cwd, config, message}, `config` being its
 // OPENCODE_CONFIG_CONTENT. It exits when its stdin closes.
@@ -192,7 +194,32 @@ function acp() {
       if (chunk.notify) notifyOf(chunk.notify);
       if (chunk.update) send({ method: 'session/update', params: { sessionId, update: chunk.update } });
       if (chunk.permission) await askPermission(chunk.permission, chunk.from);
+      if (chunk.elicit) await elicit(chunk.elicit, chunk.from);
     }
+  };
+  /**
+   * What a subagent `from` asks, as OpenCode 2.4.2 sends it: under the
+   * session's own id, its tool call's id prefixed with the subagent's
+   * (`<id>:`), its title with the subagent's (`<title>: `), and the subagent
+   * named in its `_meta`.
+   */
+  const asChild = (toolCall, from) => {
+    if (!from) return toolCall;
+    const child = children.get(from);
+    const prefixed = (title) => (child?.title && title ? `${child.title}: ${title}` : title);
+    return {
+      ...toolCall,
+      ...(toolCall.toolCallId ? { toolCallId: `${from}:${toolCall.toolCallId}` } : {}),
+      ...(toolCall.title ? { title: prefixed(toolCall.title) } : {}),
+      _meta: { 'opencode/child-session': { id: from, parentID: child?.parentSessionId ?? sessionId, depth: child?.depth ?? 1, ...(child?.title ? { title: child.title } : {}) } },
+    };
+  };
+  /** An elicitation, from the session or, `from`, one of its subagents (as OpenCode 2.4.2 sends it: see asChild). */
+  const elicit = (form, from) => {
+    if (!from) return ask('elicitation/create', { sessionId, mode: 'form', ...form });
+    const title = children.get(from)?.title;
+    const { toolCallId, message, ...rest } = form;
+    return ask('elicitation/create', { sessionId, mode: 'form', ...rest, ...(toolCallId ? { toolCallId: `${from}:${toolCallId}` } : {}), message: title ? `${title}: ${message}` : message });
   };
   /** OpenCode's permission options. */
   const OPENCODE_OPTIONS = [
@@ -202,7 +229,7 @@ function acp() {
   ];
   /** A permission request, with OpenCode's options or `options`, from the session or, `from`, one of its subagents: resolves with whether it was allowed. */
   const askPermission = async (toolCall, from, options = OPENCODE_OPTIONS) => {
-    const reply = await ask('session/request_permission', { sessionId: from ?? sessionId, toolCall: { status: 'pending', ...toolCall }, options });
+    const reply = await ask('session/request_permission', { sessionId, toolCall: { status: 'pending', ...asChild(toolCall, from) }, options });
     const picked = options.find((o) => o.optionId === reply.result?.outcome?.optionId);
     return picked?.kind.startsWith('allow') ?? false;
   };
@@ -277,7 +304,7 @@ function acp() {
           if (text.hold) await hold(text.hold);
           if (current.cancelled) break;
           // An elicitation (a question, or a plugin's form): the turn goes on once Loom answers it.
-          if (text.elicit) await ask('elicitation/create', { sessionId, mode: 'form', ...text.elicit });
+          if (text.elicit) await elicit(text.elicit, text.from);
           // A permission request, with OpenCode's options; a reject cancels the rest of the turn.
           if (text.permission && !(await askPermission(text.permission, text.from, text.options))) rejected = true;
           if (text.update) send({ method: 'session/update', params: { sessionId, update: text.update } });

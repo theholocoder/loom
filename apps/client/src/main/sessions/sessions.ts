@@ -1125,7 +1125,8 @@ export class Sessions {
       context.currentBranch = await this.currentBranch(id).catch(() => undefined);
       context.defaultBranch = await this.defaultBranch(id).catch(() => undefined);
       // The run may have ended while git answered.
-      if (this.live.get(id) !== agent || (!subagent && !this.inRun(id))) return;
+      if (this.live.get(id) !== agent) return;
+      if (!subagent && !this.mayAsk(id)) return agent?.answer(requestId, { kind: 'approval', approved: false });
     }
     const goAhead = () => agent?.answer(requestId, { kind: 'approval', approved: true });
     // The user approved this call's card, which showed all of it.
@@ -1176,6 +1177,14 @@ export class Sessions {
     // Working on its Subagents alone, its agent is between runs; what one of them asked is still waited on.
     if (this.asks.has(id)) return true;
     return !this.betweenRuns.has(id) && (this.get(id).status === 'working' || this.isStuck(id));
+  }
+
+  /**
+   * Whether the Session's agent may ask the user something of its own: mid-run,
+   * or between runs while its Subagents work, when what it asks may be theirs.
+   */
+  private mayAsk(id: number): boolean {
+    return this.inRun(id) || this.betweenRuns.has(id);
   }
 
   /** Whether the Session is Waiting as stuck: its run is still going, as far as Loom knows, but its agent has said nothing for a while. */
@@ -1941,7 +1950,8 @@ export class Sessions {
         return this.noticeLinkCall(id, event);
       case 'question-asked': {
         const subagent = this.askingSubagent(id, event.subagentId);
-        if (subagent === null || (!subagent && !this.inRun(id))) return;
+        // What no one is there to answer is declined at once: left unanswered, the agent would wait on it for good.
+        if (subagent === null || (!subagent && !this.mayAsk(id))) return this.live.get(id)?.answer(event.requestId, { kind: 'question', answer: null });
         return this.ask(id, event.requestId, withoutUndefined({ kind: 'question' as const, message: event.message, fields: event.fields, state: 'asked' as const, subagent }));
       }
       case 'trust-asked': {
@@ -1953,7 +1963,7 @@ export class Sessions {
       }
       case 'approval-asked': {
         const subagent = this.askingSubagent(id, event.subagentId);
-        if (subagent === null || (!subagent && !this.inRun(id))) return;
+        if (subagent === null || (!subagent && !this.mayAsk(id))) return this.live.get(id)?.answer(event.requestId, { kind: 'approval', approved: false });
         return void this.askApproval(id, event.requestId, event.action, subagent).catch((error: unknown) => console.error(`could not ask Session ${id}'s approval:`, error));
       }
       case 'run-settled': {
