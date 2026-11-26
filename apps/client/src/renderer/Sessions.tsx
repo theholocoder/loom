@@ -28,6 +28,7 @@ import { QuestionCard, TrustCard, useQuestionPanel } from './Questions';
 import { ApprovalCard } from './Approvals';
 import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './FeedbackCards';
 import { PlanCard, ThinkingBlock, ToolCard } from './WorkCards';
+import { PrototypeSwitcher, ToolRun, useVariant, withRuns } from './ToolRuns.prototype';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed } from './Snooze';
 import { useNow } from './now';
@@ -770,6 +771,7 @@ export function SessionView({
   /** Shows the Merge request Panel, at its link form or its reviews when asked. */
   const showMergeRequest = (to?: PanelRequests['merge-request']) => panelContext.show('merge-request', to);
 
+  const protoVariant = useVariant();
   const StatusGlyph = status.icon;
   const statusIcon = <StatusGlyph className="sm" />;
   return (
@@ -811,8 +813,11 @@ export function SessionView({
           ) : (
           <>
           <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnConversation}>
-            {turnParts(items).map((item) =>
-              'said' in item ? (
+            {withRuns(turnParts(items), (t) => !startsSubagent(t, subagents)).map((item, at, parts) =>
+              'run' in item ? (
+                // PROTOTYPE (#256): a run of tool calls, as the picked variant shows it.
+                <ToolRun key={`run-${item.run[0]!.id}`} variant={protoVariant} run={item.run} live={working && at === parts.length - 1} />
+              ) : 'said' in item ? (
                 <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
               ) : item.kind === 'user' ? (
                 <div key={item.id} className="msg user" data-item-id={item.id}>
@@ -968,6 +973,7 @@ export function SessionView({
       {panels.ready && hasDock && dock.open && (
         <PanelArea area="dock" session={session} project={project} terminals={terminals} control={panels} onError={actionFailed} />
       )}
+      <PrototypeSwitcher />
     </main>
     </SessionPanelProvider>
   );

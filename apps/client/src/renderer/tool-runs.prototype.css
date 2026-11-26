@@ -1,0 +1,64 @@
+/* PROTOTYPE (#256), throwaway: styles of the tool-run variants and their switcher. */
+.proto-switcher { position: fixed; right: 28px; bottom: 128px; z-index: 9999; display: flex; align-items: center; gap: 6px;
+  background: #111; color: #fff; border-radius: 999px; padding: 4px 6px; box-shadow: 0 6px 24px #0007; font: 12.5px var(--font); outline: 2px dashed #f0f; }
+.proto-switcher button { background: none; border: 0; color: inherit; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; cursor: pointer; }
+.proto-switcher button:hover { background: #fff2; }
+.proto-switcher span { padding: 0 6px; white-space: nowrap; }
+
+.proto-count { font-size: 11.5px; color: var(--muted); flex: none; }
+.proto-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; flex: none; }
+.proto-badge.err { color: var(--err); }
+
+/* Rows: one call per line, no card. */
+.proto-row-head { display: flex; gap: 8px; align-items: center; width: 100%; border: 0; background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; padding: 3px 10px; cursor: pointer; }
+.proto-row-head:hover { background: var(--hover); }
+.proto-row-head .chev { color: var(--muted); flex: none; transition: transform .15s; } .proto-row-head .chev.open { transform: rotate(90deg); }
+.proto-row-body { padding: 4px 10px 6px 32px; }
+.proto-row.failed .tool-name { color: var(--err); }
+.proto-row.thought { color: var(--muted); font-style: italic; }
+.proto-row .tool-name { font-family: var(--mono); font-size: 12.5px; flex: none; }
+
+/* A: summary line. */
+.proto-a .proto-a-head { width: 100%; border: 0; background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; }
+.proto-a .proto-a-head:hover { background: var(--hover); }
+.proto-a .chev { color: var(--muted); flex: none; transition: transform .15s; } .proto-a .chev.open { transform: rotate(90deg); }
+.proto-a-icons { display: inline-flex; gap: 2px; color: var(--muted); flex: none; }
+.proto-a-now { color: var(--muted); }
+.proto-a-now .tool-name { font-family: var(--mono); font-size: 12px; }
+.proto-a-now .tool-title { margin-left: 6px; }
+.proto-a.live { border-color: color-mix(in srgb, var(--work) 40%, var(--line)); }
+.proto-a.has-failed:not(.live) { border-color: color-mix(in srgb, var(--err) 30%, var(--line)); }
+.proto-a-list { border-top: 1px solid var(--line); padding: 4px 0; }
+
+/* B: dense log. */
+.proto-b { border-left: 2px solid var(--line); margin: 6px 0 6px 6px; padding: 2px 0; }
+.proto-b .proto-row-head { padding: 2px 8px; font-size: 12.5px; }
+.proto-b .proto-row .tool-name { color: var(--muted); }
+.proto-b .proto-row.now { background: color-mix(in srgb, var(--work) 10%, transparent); }
+.proto-b .proto-row.now .tool-name { color: var(--work); }
+.proto-b .proto-row.failed .tool-name { color: var(--err); }
+.proto-b-more { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 2px 8px 2px 32px; cursor: pointer; text-align: left; width: 100%; }
+.proto-b-more:hover { color: var(--text); background: var(--hover); }
+
+/* C: chips. */
+.proto-c { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.proto-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 280px; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 2px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+.proto-chip svg { color: var(--muted); flex: none; }
+.proto-chip .tool-name { font-family: var(--mono); font-size: 11.5px; flex: none; }
+.proto-chip-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); min-width: 0; }
+.proto-chip:hover { background: var(--hover); }
+.proto-chip.open { border-color: var(--accent); }
+.proto-chip.failed { border-color: color-mix(in srgb, var(--err) 50%, var(--line)); } .proto-chip.failed svg, .proto-chip.failed .tool-name { color: var(--err); }
+.proto-chip.running, .proto-chip.now { border-color: var(--work); animation: proto-pulse 1.2s ease-in-out infinite; }
+.proto-chip.thought { border-style: dashed; padding: 2px 6px; }
+@keyframes proto-pulse { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--work) 25%, transparent); } }
+.proto-c-detail .tool-head { cursor: default; }
+
+/* D: the looking folded, the doing kept. */
+.proto-d { margin: 4px 0; }
+.proto-d-head { display: flex; gap: 8px; align-items: center; width: 100%; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-align: left; padding: 3px 10px; border-radius: 8px; cursor: pointer; }
+.proto-d-head:hover { background: var(--hover); color: var(--text); }
+.proto-d-head .chev { flex: none; transition: transform .15s; } .proto-d-head .chev.open { transform: rotate(90deg); }
+.proto-d-head .tool-name { font-family: var(--mono); font-size: 12.5px; }
+.proto-d-head .tool-title .tool-title { margin-left: 6px; }
+.proto-d-list { margin-left: 18px; border-left: 2px solid var(--line); }

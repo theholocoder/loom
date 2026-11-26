@@ -55,7 +55,7 @@ export function ThinkingBlock({ item }: { item: Thinking }) {
   );
 }
 
-const STATUS = {
+export const STATUS = {
   running: { label: 'Running', icon: <LoaderCircle className="sm" /> },
   completed: { label: 'Completed', icon: <CircleCheckBig className="sm" /> },
   failed: { label: 'Failed', icon: <OctagonX className="sm" /> },
@@ -87,22 +87,31 @@ export function ToolCard({ item }: { item: Tool }) {
           </>
         }
       >
-        {item.command !== undefined ? (
-          <pre className="tool-output tool-command">{`$ ${item.command}`}</pre>
-        ) : item.diffs?.length ? (
-          <ToolDiffs diffs={item.diffs} />
-        ) : (
-          item.input !== undefined && (
-            <>
-              <div className="tool-label">Input</div>
-              <pre className="tool-output">{item.input}</pre>
-            </>
-          )
-        )}
-        <div className="tool-label">Output</div>
-        {item.output ? <pre className="tool-output">{item.output}</pre> : <div className="muted">{item.status === 'running' ? 'No output yet.' : 'No output.'}</div>}
+        <ToolDetail item={item} />
       </Fold>
     </div>
+  );
+}
+
+/** PROTOTYPE (#256): a call's inside, apart from its card, for the tool-run variants. */
+export function ToolDetail({ item }: { item: Tool }) {
+  return (
+    <>
+      {item.command !== undefined ? (
+        <pre className="tool-output tool-command">{`$ ${item.command}`}</pre>
+      ) : item.diffs?.length ? (
+        <ToolDiffs diffs={item.diffs} />
+      ) : (
+        item.input !== undefined && (
+          <>
+            <div className="tool-label">Input</div>
+            <pre className="tool-output">{item.input}</pre>
+          </>
+        )
+      )}
+      <div className="tool-label">Output</div>
+      {item.output ? <pre className="tool-output">{item.output}</pre> : <div className="muted">{item.status === 'running' ? 'No output yet.' : 'No output.'}</div>}
+    </>
   );
 }
 
