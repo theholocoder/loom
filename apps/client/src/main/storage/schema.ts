@@ -1,6 +1,6 @@
 // The database's typed schema, as of the latest migration.
 import type { Generated } from 'kysely';
-import type { ApprovalMode, HighlightKind, MergeRequestState, SessionStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
+import type { ApprovalMode, HighlightKind, MergeRequestState, SessionStatus, SubagentStatus, TranscriptItem, WaitingReason, WorkingCopyKind } from '../../shared/api';
 
 export interface SettingsTable {
   key: string;
@@ -144,6 +144,33 @@ export interface EventsTable {
   data: string;
 }
 
+/** A Session's Subagent (shared/api's Subagent), by the agent's id for it. */
+export interface SubagentsTable {
+  session_id: number;
+  id: string;
+  /** The Subagent that started it; null for one the Session's agent started. */
+  parent_id: string | null;
+  depth: number;
+  tool_call_id: string | null;
+  agent: string | null;
+  description: string;
+  model: string | null;
+  status: SubagentStatus;
+  error: string | null;
+  /** Clock times. */
+  started_at: number;
+  ended_at: number | null;
+}
+
+/** A Subagent's transcript, as `events` is a Session's. */
+export interface SubagentEventsTable {
+  session_id: number;
+  subagent_id: string;
+  seq: number;
+  kind: TranscriptItem['kind'];
+  data: string;
+}
+
 /** The messages queued for Sessions while Working, sent in `id` order. */
 export interface QueuedMessagesTable {
   id: number;
@@ -200,6 +227,8 @@ export interface Schema {
   checkouts: CheckoutsTable;
   sessions: SessionsTable;
   events: EventsTable;
+  subagents: SubagentsTable;
+  subagent_events: SubagentEventsTable;
   queued_messages: QueuedMessagesTable;
   usage_buckets: UsageBucketsTable;
   session_spans: SessionSpansTable;

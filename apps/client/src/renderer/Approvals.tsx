@@ -26,6 +26,7 @@ export function ApprovalCard({ item, onDecide }: { item: Approval; onDecide: (de
   const decide = (decision: ApprovalDecision) => run(() => onDecide(decision, decision === 'deny' && message.trim() ? message.trim() : undefined));
   return (
     <AskCard label="Approval request" icon={<ShieldAlert className="sm" />} name={item.tool} asked={asked} state={STATES[item.state]}>
+      {item.subagent && <p className="muted ask-hint">{`From Subagent ${item.subagent.description}`}</p>}
       <pre className="tech approval-detail">{item.detail}</pre>
       {category && <p className="muted ask-hint">{category.label}</p>}
       {item.defaultBranch && asked && <p className="muted ask-hint">{`A push to ${item.defaultBranch}, the default branch, always asks.`}</p>}

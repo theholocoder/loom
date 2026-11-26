@@ -43,6 +43,7 @@ export function QuestionCard({ item }: { item: Question }) {
   const asked = item.state === 'asked';
   return (
     <AskCard label="Question" icon={<MessageCircleQuestionMark className="sm" />} name="question" asked={asked} state={QUESTION_STATES[item.state]}>
+      {item.subagent && <p className="muted ask-hint">{`From Subagent ${item.subagent.description}`}</p>}
       {item.message && <p className="ask-message">{item.message}</p>}
       {asked ? <p className="muted ask-hint">Answer below.</p> : item.answer && <AnswerSummary fields={item.fields} answer={item.answer} />}
     </AskCard>

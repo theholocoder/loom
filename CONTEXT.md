@@ -29,8 +29,12 @@ The coding agent a **Session** runs on (OpenCode in v1), installed on the develo
 How much reasoning the agent's model puts into each prompt, at one of the levels the **Agent** offers for that model (`default` among them; some models have none). Picked with the model (shown by the name its provider gives it, `provider/model` in its tooltip) for a **Session**: both change only between runs, from the next prompt.
 _Avoid_: Thought level, variant, reasoning effort
 
+**Subagent**:
+A conversation the agent of a **Session** starts on its own to do part of the work, possibly starting Subagents of its own. It belongs to that Session: no status, **Inbox** entry, archive or composer of its own, and it isn't listed as a Session. It runs, completes, fails or is stopped; it can be stopped on its own, apart from the Session's run. Its conversation is kept with the Session, and can be read but not replied to.
+_Avoid_: Child session, task, sub-session
+
 **Working** (Session status):
-The agent is currently running; the **Session** does not need the user's attention.
+The agent is currently running, or any of the **Session**'s **Subagents** is; the Session does not need the user's attention. While only Subagents run, a message to the Session goes to its agent at once rather than being queued, and **Stop** has no run to interrupt.
 
 **Waiting** (Session status):
 The agent has finished, was stopped or interrupted, hit an error, is stuck, has asked a question, is held on an **Approval request**, its **Merge request** has new feedback from **Babysit**, or was merged or closed while its worktree has uncommitted changes or unpushed commits; the **Session** needs the user's attention.

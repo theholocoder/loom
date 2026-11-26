@@ -6,4 +6,5 @@ The costs:
 - about 400 MB per live Session, kept in check by stopping the process of an idle Waiting Session;
 - usage arrives only at the end of a turn;
 - Loom must store the session ids OpenCode generates;
-- OpenCode 2.1.4's ACP bridge refuses a second prompt during a run, so a queued message can't be steered into the run, only sent after interrupting it.
+- OpenCode 2.1.4's ACP bridge refuses a second prompt during a run, so a queued message can't be steered into the run, only sent after interrupting it;
+- OpenCode runs Subagents in the background and reports them over an extension of its own (`opencode/session/child_update`, opted into in `initialize`), with no token usage for them: Subagents' tokens aren't counted on the Dashboard (#274). A run the agent starts on its own, on a Subagent's result, has no ACP prompt and no reported end: Loom takes it as ended once it has been quiet for a while. One Subagent is stopped by taking it up as an ACP session (`session/load`) and closing it (`session/close`); stopping the Session's run (`session/cancel`) leaves its Subagents running.

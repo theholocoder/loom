@@ -88,7 +88,9 @@ export interface AcpTurn {
    * `session/update` as is, and a `{ bigOutput }` completes a tool call with
    * an output of that many bytes, `HEAD>` x's `<TAIL`. An `{ elicit }` sends
    * `elicitation/create` (form mode, with these params) and waits for Loom's
-   * response, which the ACP log records.
+   * response, which the ACP log records. A `{ notify }` sends that
+   * notification as it is, `"$ROOT"` in its params standing for the
+   * session's id (OpenCode's `opencode/session/child_update`).
    */
   chunks?: Array<
     | string
@@ -96,8 +98,15 @@ export interface AcpTurn {
     | { update: Record<string, unknown> }
     | { bigOutput: { toolCallId: string; bytes: number } }
     | { elicit: { message: string; requestedSchema: Record<string, unknown>; toolCallId?: string } }
-    | { permission: PermissionToolCall }
+    | { permission: PermissionToolCall; from?: string }
+    | { notify: { method: string; params: Record<string, unknown> } }
   >;
+  /**
+   * What the agent sends once the run's `session/prompt` has been answered,
+   * with no prompt open: text, `{ update }`s, `{ notify }`s and `{ hold }`s,
+   * as in `chunks`.
+   */
+  after?: Array<string | { hold: string } | { update: Record<string, unknown> } | { notify: { method: string; params: Record<string, unknown> } } | { permission: PermissionToolCall; from?: string }>;
   /** After the chunks, the run holds until the test calls `machine.release(hold)`. */
   hold?: string;
   /** The run fails with this JSON-RPC error message, as a provider error does. */

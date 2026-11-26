@@ -23,6 +23,8 @@ import { goingOn } from '../../shared/going-on';
 import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict } from './approvals';
 import { checkAttachments, type Attachments } from './attachments';
 import { recordSpan, recordTurn } from '../usage/usage';
+import { Subagents } from './subagents';
+import type { AskingSubagent, Subagent } from '../../shared/api';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -217,8 +219,17 @@ export class Sessions {
   private readonly spans = this.perSession<OpenSpan>();
   /** The pending wake of each Snoozed Session. */
   private readonly wakes = this.perSessionTimers();
+  /**
+   * The Sessions Working on their Subagents alone: their agent is between
+   * runs (its run ended, or was stopped) while a Subagent goes on.
+   */
+  private readonly betweenRuns = this.perSession<true>();
+  /** Every Session's Subagents and their transcripts. */
+  private readonly subagents: Subagents;
 
-  private constructor(private readonly options: SessionsOptions) {}
+  private constructor(private readonly options: SessionsOptions) {
+    this.subagents = new Subagents({ db: options.db, clock: options.clock, write: (write) => this.write(write), checkpointMs: CHECKPOINT_MS });
+  }
 
   /** A map of something held per Session, which a deleted Session is dropped from. */
   private perSession<V>(): Map<number, V> {
@@ -250,6 +261,8 @@ export class Sessions {
       if (row.auto_prompts_in_a_row > 0) sessions.autoPromptsInARow.set(row.id, row.auto_prompts_in_a_row);
     }
     await sessions.loadUsage();
+    // A Subagent left running went with its agent's process.
+    await sessions.subagents.load();
     const queued = await options.db.selectFrom('queued_messages').selectAll().orderBy('id').execute();
     for (const { id, session_id, text, attachments } of queued) {
       const session = sessions.sessions.get(session_id);
@@ -562,7 +575,7 @@ export class Sessions {
     await this.switched(id);
     // A prompt that can't go is turned down before its attachments are kept.
     if (reopening) this.assertCanReopen(id);
-    else if (this.get(id).status !== 'working' && !this.isStuck(id)) this.assertCanReply(id);
+    else if ((this.get(id).status !== 'working' || this.betweenRuns.has(id)) && !this.isStuck(id)) this.assertCanReply(id);
     const attachments = newAttachments.length ? await this.options.attachments.store(id, newAttachments) : undefined;
     const message = messageOf({ text, attachments });
     this.resetAutoPrompts(id);
@@ -571,7 +584,8 @@ export class Sessions {
       this.assertCanReopen(id);
       return this.reply(id, message, { reopening });
     }
-    if (this.get(id).status === 'working') return void this.enqueue(id, message);
+    // Working on its Subagents alone, the agent takes the message now.
+    if (this.get(id).status === 'working' && !this.betweenRuns.has(id)) return void this.enqueue(id, message);
     // A stuck run gives way to the message, as with Send now; one sent meanwhile waits its turn behind it.
     if (this.isStuck(id)) {
       const queued = this.enqueue(id, message);
@@ -676,6 +690,28 @@ export class Sessions {
     this.interrupt(id, {});
   }
 
+  /** Stops one of the Session's Subagents, and only it, if its agent can. */
+  async stopSubagent({ id, subagentId }: { id: number; subagentId: string }): Promise<void> {
+    this.get(id);
+    if (this.subagents.find(id, subagentId)?.status !== 'running') throw new Error('That Subagent is not running.');
+    const agent = this.live.get(id);
+    if (!agent) throw new Error('That Subagent is not running.');
+    if (!agent.stopSubagent) throw new Error(`${this.options.adapter.name} can't stop one Subagent on its own.`);
+    await agent.stopSubagent(subagentId);
+  }
+
+  /** Calls `listener` with the Session's Subagents, then as they change. */
+  subscribeSubagents(id: number, listener: (list: Subagent[]) => void): () => void {
+    this.get(id);
+    return this.subagents.subscribeList(id, listener);
+  }
+
+  /** Calls `listener` with a Subagent's transcript, read from the database, then as it changes. */
+  subscribeSubagentTranscript(id: number, subagentId: string, listener: (items: TranscriptItem[]) => void): () => void {
+    this.get(id);
+    return this.subagents.subscribeTranscript(id, subagentId, listener);
+  }
+
   /**
    * Asks the Session's agent to end its run; what happens once it has is
    * `interruption`. An agent still starting is never prompted.
@@ -695,7 +731,61 @@ export class Sessions {
     this.addItem(id, { kind: 'interruption', by: message ? 'send-now' : 'stop' });
     this.afterTurn(id);
     if (message) return this.sendNext(id, messageOf(message));
-    this.setStatus(id, { status: 'waiting', waitingReason: 'stopped' });
+    this.runEnded(id, 'stopped');
+  }
+
+  /**
+   * The Session's agent is between runs, its run having ended without
+   * error: Waiting (`reason`), unless a Subagent of its goes on, which keeps
+   * it Working (or Waiting on what that one asked).
+   */
+  private runEnded(id: number, reason: Extract<WaitingReason, 'finished' | 'stopped'>): void {
+    if (this.subagents.running(id) === 0) return this.setStatus(id, { status: 'waiting', waitingReason: reason });
+    this.betweenRuns.set(id, true);
+    if (!this.asks.has(id)) this.setStatus(id, { status: 'working' });
+    this.subagentsChanged(id);
+  }
+
+  /**
+   * Keeps the Session's view of its Subagents: how many run, and whether it
+   * works on them alone. Once the last has ended with its agent between
+   * runs, it is Waiting (finished).
+   */
+  private subagentsChanged(id: number): void {
+    const running = this.subagents.running(id);
+    if (running === 0 && this.betweenRuns.has(id)) {
+      this.betweenRuns.delete(id);
+      if (this.get(id).status === 'working') this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
+    }
+    const session = this.get(id);
+    const subagentsOnly = this.betweenRuns.has(id) ? (true as const) : undefined;
+    if (session.runningSubagents !== (running || undefined) || session.subagentsOnly !== subagentsOnly) this.update(id, { runningSubagents: running || undefined, subagentsOnly });
+    // An idle agent may be stopped once none runs.
+    this.watchIdle(id);
+  }
+
+  /** Expires what a Subagent that ended still asked: nothing waits on the answer any more. */
+  private expireAsks(id: number, subagentId: string): void {
+    const asked = this.asks.get(id);
+    const items = this.transcripts.get(id)?.value;
+    if (!asked || !items) return;
+    for (const seq of [...asked.keys()]) {
+      const item = items[seq];
+      if ((item?.kind !== 'question' && item?.kind !== 'approval') || item.subagent?.id !== subagentId) continue;
+      asked.delete(seq);
+      this.replaceItem(id, { ...item, state: 'expired' });
+    }
+    if (asked.size > 0) return;
+    this.asks.delete(id);
+    // Its agent goes on with its run, or its Subagents do; with neither, it is Waiting once they're counted.
+    if (this.get(id).status === 'waiting') this.setStatus(id, { status: 'working' });
+  }
+
+  /** The agent's process ended, and its Subagents with it. */
+  private subagentsGone(id: number): void {
+    this.subagents.endAll(id);
+    this.betweenRuns.delete(id);
+    this.subagentsChanged(id);
   }
 
   /**
@@ -849,7 +939,8 @@ export class Sessions {
 
   /** The Session, with what its agent can do. */
   private withCapabilities(session: Session): Session {
-    return this.options.adapter.canSteer ? { ...session, canSteer: true } : session;
+    const { canSteer, canStopSubagents } = this.options.adapter;
+    return withoutUndefined({ ...session, canSteer: canSteer || undefined, canStopSubagents: canStopSubagents ? (true as const) : undefined });
   }
 
   /**
@@ -1018,7 +1109,7 @@ export class Sessions {
    * already approved. Otherwise it is an Approval request card: Waiting
    * (approval), with no timeout.
    */
-  private async askApproval(id: number, requestId: string, action: ApprovalAction): Promise<void> {
+  private async askApproval(id: number, requestId: string, action: ApprovalAction, subagent?: AskingSubagent): Promise<void> {
     const agent = this.live.get(id);
     const session = this.get(id);
     if (session.fullAccess) return agent?.answer(requestId, { kind: 'approval', approved: true });
@@ -1033,7 +1124,7 @@ export class Sessions {
       context.currentBranch = await this.currentBranch(id).catch(() => undefined);
       context.defaultBranch = await this.defaultBranch(id).catch(() => undefined);
       // The run may have ended while git answered.
-      if (this.live.get(id) !== agent || !this.inRun(id)) return;
+      if (this.live.get(id) !== agent || (!subagent && !this.inRun(id))) return;
     }
     const goAhead = () => agent?.answer(requestId, { kind: 'approval', approved: true });
     // The user approved this call's card, which showed all of it.
@@ -1049,7 +1140,7 @@ export class Sessions {
     this.ask(
       id,
       requestId,
-      withoutUndefined({ kind: 'approval' as const, toolCallId: action.toolCallId, title: action.title, tool: action.tool, detail, category, defaultBranch, state: 'asked' as const }),
+      withoutUndefined({ kind: 'approval' as const, toolCallId: action.toolCallId, title: action.title, tool: action.tool, detail, category, defaultBranch, state: 'asked' as const, subagent }),
       'approval',
     );
   }
@@ -1078,9 +1169,11 @@ export class Sessions {
     if (!this.asks.has(id)) this.setStatus(id, { status: 'working' });
   }
 
-  /** Whether the Session's agent is mid-run: working, stuck, or waiting on the user's answer to something it asked. */
+  /** Whether the Session's agent is mid-run: working, stuck, or waiting on the user's answer to something it (or a Subagent) asked. */
   private inRun(id: number): boolean {
-    return this.get(id).status === 'working' || this.asks.has(id) || this.isStuck(id);
+    // Working on its Subagents alone, its agent is between runs; what one of them asked is still waited on.
+    if (this.asks.has(id)) return true;
+    return !this.betweenRuns.has(id) && (this.get(id).status === 'working' || this.isStuck(id));
   }
 
   /** Whether the Session is Waiting as stuck: its run is still going, as far as Loom knows, but its agent has said nothing for a while. */
@@ -1177,6 +1270,7 @@ export class Sessions {
       if (handle !== undefined) this.options.clock.clearTimeout(handle);
     }
     for (const map of this.perSessionMaps) map.delete(id);
+    this.subagents.forget(id);
     this.deleted.add(id);
     // After the writes made before, in order; its events, queue and Babysit record go with it.
     this.write((trx) => trx.deleteFrom('sessions').where('id', '=', id).execute());
@@ -1661,6 +1755,7 @@ export class Sessions {
       if (this.options.project(this.get(id).projectId)?.checkout.environmentId !== environmentId) continue;
       this.live.delete(id);
       this.fail(id, ENVIRONMENT_RESTARTED, { evenIfWaiting: true });
+      this.subagentsGone(id);
     }
   }
 
@@ -1678,6 +1773,7 @@ export class Sessions {
     for (const handle of this.wakes.values()) this.options.clock.clearTimeout(handle);
     this.wakes.clear();
     for (const id of [...this.checkpoints.keys()]) this.checkpoint(id);
+    this.subagents.checkpointAll();
     // Time while Loom is closed counts for nothing: a wait goes on once it starts again, a run is over.
     const now = this.options.clock.now();
     for (const [id, span] of [...this.spans]) {
@@ -1689,6 +1785,7 @@ export class Sessions {
   }
 
   private async run(id: number, { text, attachments }: Message): Promise<void> {
+    this.leaveBetweenRuns(id);
     let agent = this.live.get(id);
     if (!agent) {
       try {
@@ -1722,6 +1819,12 @@ export class Sessions {
     // Interrupted while the agent started: the prompt never goes.
     if (this.interrupting.has(id)) return this.interrupted(id);
     agent.prompt({ text, files });
+  }
+
+  /** A run of the Session's agent starts: it no longer works on its Subagents alone. */
+  private leaveBetweenRuns(id: number): void {
+    if (!this.betweenRuns.delete(id)) return;
+    this.subagentsChanged(id);
   }
 
   /** Writes the attachments into the Session's Environment, for its agent to read. */
@@ -1781,18 +1884,34 @@ export class Sessions {
     // Usage counts however the run ended: cancelled, or by Archive.
     if (event.type === 'usage' && event.cost !== undefined) this.recordCost(id, event.cost);
     if (event.type === 'turn-usage') return this.recordUsage(id, event.tokens, 0);
+    // A Subagent's tokens count as the Session's, as its agent spent them.
+    if (event.type === 'subagent-usage') return this.recordUsage(id, event.tokens, 0);
     // The agent closing is Archive's own doing; Archive reports it if the Session stays.
-    if (event.type === 'closed' && this.archiving.has(id)) return void this.live.delete(id);
+    if (event.type === 'closed' && this.archiving.has(id)) {
+      this.live.delete(id);
+      return this.subagentsGone(id);
+    }
     // An archived Session's agent is on its way out; nothing it says counts.
     if (this.shuttingDown || this.get(id).status === 'archived') return;
     // The agent said something: its stuck watchdog starts again, and a stuck run is going again.
     this.watchStuck(id);
     if (this.isStuck(id) && !SETTLING_EVENTS.has(event.type)) this.setStatus(id, { status: 'working' });
     // What an interrupted run asks is withdrawn as soon as it's asked.
-    if (this.interrupting.has(id) && (event.type === 'question-asked' || event.type === 'trust-asked' || event.type === 'approval-asked')) return this.live.get(id)?.cancel();
+    if (this.interrupting.has(id) && (event.type === 'question-asked' || event.type === 'trust-asked' || event.type === 'approval-asked') && !('subagentId' in event && event.subagentId)) return this.live.get(id)?.cancel();
     switch (event.type) {
       case 'run-started':
+        // A run the agent started on its own, as on a Subagent's result: the Session is Working on it.
+        if (!event.background) return;
+        this.leaveBetweenRuns(id);
+        this.runModels.set(id, this.modelOf(id));
+        if (this.get(id).status !== 'working' && !this.asks.has(id)) this.setStatus(id, { status: 'working' });
         return;
+      case 'subagent-status':
+        if (!this.subagents.report(id, event.subagent)) return;
+        if (event.subagent.status !== 'running') this.expireAsks(id, event.subagent.subagentId);
+        return this.subagentsChanged(id);
+      case 'subagent-event':
+        return this.subagents.event(id, event.subagentId, event.event);
       case 'config':
         return this.update(id, { agentConfig: event.config });
       case 'commands':
@@ -1815,9 +1934,11 @@ export class Sessions {
         if (!this.inRun(id)) return;
         this.recordTool(id, event);
         return this.noticeLinkCall(id, event);
-      case 'question-asked':
-        if (!this.inRun(id)) return;
-        return this.ask(id, event.requestId, { kind: 'question', message: event.message, fields: event.fields, state: 'asked' });
+      case 'question-asked': {
+        const subagent = this.askingSubagent(id, event.subagentId);
+        if (subagent === null || (!subagent && !this.inRun(id))) return;
+        return this.ask(id, event.requestId, withoutUndefined({ kind: 'question' as const, message: event.message, fields: event.fields, state: 'asked' as const, subagent }));
+      }
       case 'trust-asked': {
         if (!this.inRun(id)) return;
         const trusted = this.options.projectTrust.get(this.get(id).projectId);
@@ -1825,9 +1946,11 @@ export class Sessions {
         if (trusted !== undefined) return void this.live.get(id)?.answer(event.requestId, { kind: 'trust', trusted });
         return this.ask(id, event.requestId, { kind: 'trust', message: event.message, state: 'asked' });
       }
-      case 'approval-asked':
-        if (!this.inRun(id)) return;
-        return void this.askApproval(id, event.requestId, event.action).catch((error: unknown) => console.error(`could not ask Session ${id}'s approval:`, error));
+      case 'approval-asked': {
+        const subagent = this.askingSubagent(id, event.subagentId);
+        if (subagent === null || (!subagent && !this.inRun(id))) return;
+        return void this.askApproval(id, event.requestId, event.action, subagent).catch((error: unknown) => console.error(`could not ask Session ${id}'s approval:`, error));
+      }
       case 'run-settled': {
         if (this.interrupting.has(id)) return this.interrupted(id);
         const followUp = this.denyMessages.get(id);
@@ -1839,7 +1962,7 @@ export class Sessions {
         // Then the queue, one message per run.
         const next = this.dequeue(id);
         if (next) return this.sendNext(id, messageOf(next));
-        return this.setStatus(id, { status: 'waiting', waitingReason: 'finished' });
+        return this.runEnded(id, 'finished');
       }
       case 'run-failed':
         // An agent may fail the run it was asked to end; that's still the user's interruption.
@@ -1849,9 +1972,21 @@ export class Sessions {
       case 'closed':
         this.live.delete(id);
         this.fail(id, event.error ?? `${this.options.adapter.name} stopped`);
+        this.subagentsGone(id);
         // A run it ended is a turn that ended; with none, Session highlights finds nothing new to check.
         return this.turnEnded(id);
     }
+  }
+
+  /**
+   * The Subagent a question or Approval request came from, as its card names
+   * it: undefined for the Session's agent's own, null for one of a Subagent
+   * Loom doesn't know or that no longer runs.
+   */
+  private askingSubagent(id: number, subagentId: string | undefined): AskingSubagent | undefined | null {
+    if (subagentId === undefined) return undefined;
+    const subagent = this.subagents.find(id, subagentId);
+    return subagent?.status === 'running' ? { id: subagent.id, description: subagent.description } : null;
   }
 
   /**
@@ -2215,8 +2350,10 @@ export class Sessions {
   /** Puts a Working Session (or, `evenIfWaiting`, a Waiting one) in Waiting (error), showing why in its conversation. */
   private fail(id: number, error: string, { evenIfWaiting = false } = {}): void {
     const { status } = this.get(id);
-    const inRun = this.inRun(id);
+    // Working on its Subagents alone, the Session has something going that failed too.
+    const inRun = this.inRun(id) || this.betweenRuns.has(id);
     if (!inRun && !(evenIfWaiting && status === 'waiting')) return;
+    this.leaveBetweenRuns(id);
     this.endRun(id);
     this.denyMessages.delete(id);
     this.addItem(id, { kind: 'error', message: error, ...(inRun ? {} : { betweenRuns: true as const }) });
@@ -2275,15 +2412,25 @@ export class Sessions {
   private endRun(id: number): void {
     this.interrupting.delete(id);
     this.endStreaming(id);
-    this.asks.delete(id);
+    const items = this.transcript(id).value;
+    // What a running Subagent asks outlives the run of the Session's agent.
+    const kept = new Map([...(this.asks.get(id) ?? [])].filter(([seq]) => this.fromRunningSubagent(id, items[seq])));
+    if (kept.size) this.asks.set(id, kept);
+    else this.asks.delete(id);
     this.approvedCalls.delete(id);
     this.linkCalls.delete(id);
     this.plans.delete(id);
-    const items = this.transcript(id).value;
-    if (!items.some(leftGoing)) return;
-    const ended = items.map((i) => (!leftGoing(i) ? i : i.kind === 'tool' ? { ...i, status: 'failed' as const } : { ...i, state: 'expired' as const }));
+    const ends = (i: TranscriptItem): i is Extract<TranscriptItem, { kind: 'tool' | 'question' | 'trust' | 'approval' }> => leftGoing(i) && !kept.has(i.id);
+    if (!items.some(ends)) return;
+    const ended = items.map((i) => (!ends(i) ? i : i.kind === 'tool' ? { ...i, status: 'failed' as const } : { ...i, state: 'expired' as const }));
     this.transcript(id).set(ended);
     for (const [seq, item] of ended.entries()) if (item !== items[seq]) this.writeItem(id, item);
+  }
+
+  /** Whether a transcript item is what a Subagent still running asked. */
+  private fromRunningSubagent(id: number, item: TranscriptItem | undefined): boolean {
+    const subagent = (item?.kind === 'question' || item?.kind === 'approval') && item.state === 'asked' ? item.subagent : undefined;
+    return !!subagent && this.subagents.find(id, subagent.id)?.status === 'running';
   }
 
   /**
@@ -2459,14 +2606,15 @@ export class Sessions {
     const handle = this.idleStops.get(id);
     if (handle !== undefined) this.options.clock.clearTimeout(handle);
     this.idleStops.delete(id);
-    if (this.shuttingDown || this.get(id).status !== 'waiting' || this.inRun(id) || !this.live.has(id)) return;
+    // A Subagent running would go with the agent.
+    if (this.shuttingDown || this.get(id).status !== 'waiting' || this.inRun(id) || !this.live.has(id) || this.subagents.running(id) > 0) return;
     this.idleStops.set(id, this.options.clock.setTimeout(() => this.stopIdle(id), IDLE_STOP_MS));
   }
 
   /** Stops the idle Session's agent, unless something is in flight after all. */
   private stopIdle(id: number): void {
     this.idleStops.delete(id);
-    if (this.shuttingDown || this.get(id).status !== 'waiting' || this.inRun(id)) return;
+    if (this.shuttingDown || this.get(id).status !== 'waiting' || this.inRun(id) || this.subagents.running(id) > 0) return;
     // A model change talks to the agent: the wait starts again once it is done (see setModel).
     if (this.switching.has(id)) return;
     const agent = this.live.get(id);

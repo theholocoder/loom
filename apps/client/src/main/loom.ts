@@ -256,7 +256,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     environment: environmentForSession,
     linkIssue: (id, issue) => sessionService.linkIssue({ id, issue }),
   });
-  const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion);
+  const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion, options.clock);
   const sessionService = await Sessions.load({
     db,
     clock: options.clock,
@@ -332,6 +332,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     reviewThreads: ({ sessionId }, listener) => babysitter.subscribeThreads(sessionId, listener),
     terminals: ({ sessionId }, listener) => terminals.subscribeList(sessionId, listener),
     terminalOutput: ({ id }, listener) => terminals.subscribeOutput(id, listener),
+    subagents: ({ sessionId }, listener) => sessionService.subscribeSubagents(sessionId, listener),
+    subagentTranscript: ({ sessionId, subagentId }, listener) => sessionService.subscribeSubagentTranscript(sessionId, subagentId, listener),
   };
   const commands: { [C in keyof Commands]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> } = {
     'environments.list': () => environments.value,
@@ -397,6 +399,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.send': (params) => sessionService.send(params),
     'sessions.files': ({ id }) => sessionService.files(id),
     'sessions.stop': (params) => sessionService.stop(params),
+    'sessions.stopSubagent': (params) => sessionService.stopSubagent(params),
     'sessions.removeQueued': (params) => sessionService.removeQueued(params),
     'sessions.editQueued': (params) => sessionService.editQueued(params),
     'sessions.sendNow': (params) => sessionService.sendNow(params),
