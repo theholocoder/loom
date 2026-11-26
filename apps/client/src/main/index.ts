@@ -11,6 +11,7 @@ import { createLoom, type Loom } from './loom';
 import type { DesktopNotification } from './notifications';
 import { isWebLink } from '../shared/links';
 import { guardQuit, quitQuestion } from './quit';
+import { restartAppImage } from './appimage-restart';
 import { selfTest } from './self-test';
 import { startTelemetry } from './telemetry';
 import type { SqliteDriver } from './storage/sqlite';
@@ -28,6 +29,7 @@ let loom: Loom | undefined;
 let sessions: Session[] = [];
 /** Set once the user has said to quit with Sessions Working, so the window closes without asking again. */
 let quitConfirmed = false;
+let restartingForUpdate = false;
 /**
  * CI's check of a packaged build (see self-test.ts): Loom starts, opens its
  * database, connects the bridge, then quits, exiting 1 if any of it failed.
@@ -149,6 +151,8 @@ function releaseUpdater(): Updater | undefined {
       if (message !== null && !(await askToQuit(message))) return;
       quitConfirmed = true;
       if (process.platform === 'linux') {
+        if (restartingForUpdate) return;
+        restartingForUpdate = true;
         // electron-updater would start the new AppImage at once, while this
         // Loom still holds the single-instance lock as it shuts down, so it
         // would quit straight away. Instead, the update installs as on any
@@ -156,7 +160,7 @@ function releaseUpdater(): Updater | undefined {
         let appImage = process.env.APPIMAGE!;
         autoUpdater.once('appimage-filename-updated', (path: string) => (appImage = path));
         // After electron-updater's own quit handler, which installs.
-        app.once('quit', () => app.relaunch({ execPath: appImage, args: process.argv.slice(1) }));
+        app.once('quit', () => restartAppImage({ pid: process.pid, appImage, args: process.argv.slice(1), env: process.env }));
         app.quit();
         return;
       }
