@@ -201,65 +201,108 @@ describe('Projects', () => {
     return main;
   }
 
-  it('lists each Project with its checkout, Environment and branch prefix', () => {
-    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('billing-api')] }));
+  const page = () => screen.getByRole('dialog', { name: 'Projects' });
+  const list = () => within(page()).getByRole('navigation', { name: 'Projects' });
+  /** One of the picked Project's cards of settings. */
+  const card = (title: string) => within(page()).getByRole('region', { name: title });
+  const field = (name: string) => within(page()).getByRole('textbox', { name }) as HTMLInputElement;
 
-    const row = screen.getByRole('row', { name: /billing-api/ });
-    expect(within(row).getByText('/home/dev/code/billing-api')).toBeTruthy();
-    expect(within(row).getByText('Native')).toBeTruthy();
-    expect((within(row).getByRole('textbox', { name: 'Branch prefix for billing-api' }) as HTMLInputElement).value).toBe('loom');
+  it('lists each Project beside, and shows the first one\'s settings', () => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('billing-api', {}, 1), project('loom', {}, 2)] }));
+
+    expect(within(list()).getAllByRole('button').map((b) => b.textContent)).toEqual(['BIbilling-api', 'LOloom']);
+    expect(within(list()).getByRole('button', { name: /billing-api/ }).getAttribute('aria-current')).toBe('page');
+    expect(within(page()).getByRole('heading', { name: 'billing-api', level: 2 })).toBeTruthy();
+    expect(within(card('Checkout')).getByText('/home/dev/code/billing-api')).toBeTruthy();
+    expect(within(card('Checkout')).getByText('Native')).toBeTruthy();
+    expect(field('Branch prefix').value).toBe('loom');
+  });
+
+  it('loads the settings of the Project picked from the list', () => {
+    openProjects(new FakeMain({ environments: [connectedNative], projects: [project('billing-api', {}, 1), { ...project('loom', {}, 2), branchPrefix: 'feat', defaultBranch: 'develop' }] }));
+
+    fireEvent.click(within(list()).getByRole('button', { name: /loom/ }));
+
+    expect(within(list()).getByRole('button', { name: /loom/ }).getAttribute('aria-current')).toBe('page');
+    expect(within(list()).getByRole('button', { name: /billing-api/ }).getAttribute('aria-current')).toBeNull();
+    expect(within(page()).getByRole('heading', { name: 'loom', level: 2 })).toBeTruthy();
+    expect(field('Name').value).toBe('loom');
+    expect(field('Branch prefix').value).toBe('feat');
+    expect(field('Default branch').value).toBe('develop');
+    expect(within(card('Checkout')).getByText('/home/dev/code/loom')).toBeTruthy();
+  });
+
+  it('says how to add a Project while there is none', () => {
+    openProjects(new FakeMain({}));
+
+    expect(within(page()).getByText(/No Projects yet/)).toBeTruthy();
+    expect(within(page()).queryByRole('navigation', { name: 'Projects' })).toBeNull();
+  });
+
+  it('filters a long list of Projects by name or checkout, Enter picking the first found', () => {
+    const names = ['api', 'billing', 'docs', 'infra', 'loom', 'mobile', 'web'];
+    openProjects(new FakeMain({ projects: names.map((name, i) => project(name, {}, i + 1)) }));
+
+    fireEvent.change(within(page()).getByRole('searchbox', { name: 'Filter Projects' }), { target: { value: 'LO' } });
+
+    expect(within(list()).getAllByRole('button').map((b) => b.textContent)).toEqual(['LOloom']);
+    fireEvent.keyDown(within(page()).getByRole('searchbox', { name: 'Filter Projects' }), { key: 'Enter' });
+    expect(within(page()).getByRole('heading', { name: 'loom', level: 2 })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Projects' })).toBeTruthy();
+
+    fireEvent.change(within(page()).getByRole('searchbox', { name: 'Filter Projects' }), { target: { value: 'nothing' } });
+    expect(within(list()).getByText('No Project matches “nothing”.')).toBeTruthy();
   });
 
   it('shows Forge features available, with the repository', () => {
     openProjects(new FakeMain({ projects: [project('loom', { repository: 'theholocoder/loom' })] }));
 
-    const row = screen.getByRole('row', { name: /loom/ });
-    expect(within(row).getByText('GitHub')).toBeTruthy();
-    expect(within(row).getByText('theholocoder/loom')).toBeTruthy();
-    expect(within(row).queryByRole('alert')).toBeNull();
+    expect(within(card('Checkout')).getByText('GitHub')).toBeTruthy();
+    expect(within(card('Checkout')).getByText('theholocoder/loom')).toBeTruthy();
+    expect(within(page()).queryByRole('alert')).toBeNull();
   });
 
   it.each([
     [{ state: 'cli-missing', kind: 'gitlab', host: 'gitlab.com' }, /glab isn't installed in Native/],
     [{ state: 'signed-out', kind: 'github', host: 'github.com' }, /gh isn't signed in to github\.com.*gh auth login --hostname github\.com/],
     [{ state: 'error', error: 'bridge did not answer' }, /couldn't check.*bridge did not answer/],
-  ] as const)('shows Forge features off and why when the Forge is %o', (forge, reason) => {
+  ] as const)('shows Forge features off and why when the Forge is %o, and marks the Project in the list', (forge, reason) => {
     openProjects(new FakeMain({ environments: [connectedNative], projects: [project('loom', forge)] }));
 
-    const row = screen.getByRole('row', { name: /loom/ });
-    expect(within(row).getByText('off')).toBeTruthy();
-    expect(within(row).getByRole('alert').textContent).toMatch(reason);
+    expect(within(card('Checkout')).getByText('off')).toBeTruthy();
+    expect(within(card('Checkout')).getByRole('note').textContent).toMatch(reason);
+    expect(within(list()).getByRole('button', { name: /^loom, Forge features off$/ })).toBeTruthy();
   });
 
   it('shows a checkout with no origin remote as local only, muted, with why on hover', () => {
     openProjects(new FakeMain({ environments: [connectedNative], projects: [project('notes', { state: 'no-remote', kind: undefined, host: undefined })] }));
 
-    const row = screen.getByRole('row', { name: /notes/ });
-    const local = within(row).getByText('Local only').parentElement!;
+    const local = within(card('Checkout')).getByText('Local only').parentElement!;
     expect(local.className).toMatch('fg-local');
     expect(local.getAttribute('title')).toMatch(/no origin remote/);
-    expect(within(row).queryByRole('alert')).toBeNull();
-    expect(within(row).queryByText('off')).toBeNull();
+    expect(within(page()).queryByRole('note')).toBeNull();
+    expect(within(page()).queryByText('off')).toBeNull();
+    expect(within(list()).queryByRole('button', { name: /Forge features off/ })).toBeNull();
   });
 
   it("shows an origin that isn't on GitHub or GitLab as no Forge, muted, with why on hover", () => {
     openProjects(new FakeMain({ environments: [connectedNative], projects: [project('notes', { state: 'unsupported', kind: undefined, host: 'bitbucket.org', remote: 'https://bitbucket.org/acme/x.git' })] }));
 
-    const row = screen.getByRole('row', { name: /notes/ });
-    const none = within(row).getByText('No Forge').parentElement!;
+    const none = within(card('Checkout')).getByText('No Forge').parentElement!;
     expect(none.className).toMatch('fg-local');
     expect(none.getAttribute('title')).toMatch(/https:\/\/bitbucket\.org\/acme\/x\.git.*isn't on GitHub or GitLab/);
-    expect(within(row).queryByRole('alert')).toBeNull();
-    expect(within(row).queryByText('off')).toBeNull();
+    expect(within(page()).queryByRole('alert')).toBeNull();
+    expect(within(page()).queryByText('off')).toBeNull();
   });
 
   it('cuts a long Project name to one line, with the full name on hover', () => {
     const name = 'customer-billing-and-invoicing-platform-api-gateway';
     openProjects(new FakeMain({ environments: [connectedNative], projects: [project(name)] }));
 
-    const shown = within(screen.getByRole('row', { name: new RegExp(name) })).getByText(name);
-    expect(shown.className).toMatch('ellipsis');
-    expect(shown.getAttribute('title')).toBe(name);
+    expect(within(list()).getByText(name).className).toMatch('ellipsis');
+    const heading = within(page()).getByRole('heading', { name, level: 2 });
+    expect(heading.className).toMatch('ellipsis');
+    expect(heading.getAttribute('title')).toBe(name);
   });
 
   it('checks the Forges again when Projects opens', () => {
@@ -368,48 +411,44 @@ describe('Projects', () => {
   it('labels Remove, with the Project in its tooltip', () => {
     openProjects(new FakeMain({ projects: [project('loom')] }));
 
-    const remove = within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Remove loom' });
+    const remove = within(card('Remove')).getByRole('button', { name: 'Remove loom' });
     expect(remove.textContent).toBe('Remove');
     expect(remove.getAttribute('title')).toBe('Remove loom');
   });
 
   it('saves a new branch prefix', async () => {
     const main = openProjects(new FakeMain({ projects: [project('loom')] }));
-    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
 
-    fireEvent.change(input, { target: { value: 'feat' } });
-    fireEvent.submit(input);
+    fireEvent.change(field('Branch prefix'), { target: { value: 'feat' } });
+    fireEvent.submit(field('Branch prefix'));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.setBranchPrefix', params: { id: 1, branchPrefix: 'feat' } }));
   });
 
   it('saves a branch prefix once when Enter is followed by leaving the field', async () => {
     const main = openProjects(new FakeMain({ projects: [project('loom')] }));
-    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
 
-    fireEvent.change(input, { target: { value: 'feat' } });
-    fireEvent.submit(input);
-    fireEvent.blur(input);
+    fireEvent.change(field('Branch prefix'), { target: { value: 'feat' } });
+    fireEvent.submit(field('Branch prefix'));
+    fireEvent.blur(field('Branch prefix'));
 
     await waitFor(() => expect(main.invoked.filter((i) => i.command === 'projects.setBranchPrefix')).toHaveLength(1));
   });
 
   it('previews the branches a prefix makes, without the trailing / Loom adds itself', () => {
     openProjects(new FakeMain({ projects: [project('loom')] }));
-    const row = screen.getByRole('row', { name: /loom/ });
-    expect(within(row).getByText('loom/<session>')).toBeTruthy();
+    expect(within(card('New Sessions')).getByText('loom/<session>')).toBeTruthy();
 
-    fireEvent.change(within(row).getByRole('textbox', { name: 'Branch prefix for loom' }), { target: { value: 'feat/' } });
+    fireEvent.change(field('Branch prefix'), { target: { value: 'feat/' } });
 
-    expect(within(row).getByText('feat/<session>')).toBeTruthy();
+    expect(within(card('New Sessions')).getByText('feat/<session>')).toBeTruthy();
   });
 
   it('saves a branch prefix typed with a trailing /', async () => {
     const main = openProjects(new FakeMain({ projects: [project('loom')] }));
-    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
 
-    fireEvent.change(input, { target: { value: 'feat/' } });
-    fireEvent.submit(input);
+    fireEvent.change(field('Branch prefix'), { target: { value: 'feat/' } });
+    fireEvent.submit(field('Branch prefix'));
 
     await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.setBranchPrefix', params: { id: 1, branchPrefix: 'feat/' } }));
     expect(screen.queryByRole('alert')).toBeNull();
@@ -417,7 +456,7 @@ describe('Projects', () => {
 
   it('keeps an invalid branch prefix in the field, saying why, until it is fixed', () => {
     const main = openProjects(new FakeMain({ projects: [project('loom')] }));
-    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' }) as HTMLInputElement;
+    const input = field('Branch prefix');
 
     fireEvent.change(input, { target: { value: 'a b' } });
     fireEvent.blur(input);
@@ -444,98 +483,124 @@ describe('Projects', () => {
         },
       ),
     );
-    const input = screen.getByRole('textbox', { name: 'Branch prefix for loom' });
 
-    fireEvent.change(input, { target: { value: 'feat' } });
-    fireEvent.submit(input);
+    fireEvent.change(field('Branch prefix'), { target: { value: 'feat' } });
+    fireEvent.submit(field('Branch prefix'));
 
     expect((await screen.findByRole('alert')).textContent).toMatch('database is locked');
   });
 
-  describe('Edit', () => {
-    const editDialog = () => screen.getByRole('dialog', { name: 'Edit loom' });
+  it('picks the Project just added, to set it up', async () => {
+    const docs = project('docs', {}, 1);
+    const loom = project('loom', {}, 2);
+    const main: FakeMain = new FakeMain(
+      { projects: [docs] },
+      {
+        'dialogs.chooseFolder': () => '/home/dev/code/loom',
+        'projects.link': () => {
+          main.publish('projects', [docs, loom]);
+          return loom;
+        },
+      },
+    );
+    openProjects(main);
 
-    function openEdit(main: FakeMain) {
-      openProjects(main);
-      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
-      return editDialog();
-    }
+    fireEvent.click(addProjectButton());
 
-    it('saves a new name, colour, avatar and default model together, then closes', async () => {
+    expect(await within(page()).findByText('Added loom.')).toBeTruthy();
+    expect(within(list()).getByRole('button', { name: /loom/ }).getAttribute('aria-current')).toBe('page');
+    expect(within(page()).getByRole('button', { name: 'Start a Session' }).className).toMatch('primary');
+  });
+
+  describe('its settings, each saved as it changes', () => {
+    const edits = (main: FakeMain) => main.invoked.filter((i) => i.command === 'projects.edit').map((i) => i.params);
+
+    it('saves a new name, and shows it in the list', async () => {
+      const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+
+      fireEvent.change(field('Name'), { target: { value: 'Loom app' } });
+      fireEvent.submit(field('Name'));
+
+      await waitFor(() => expect(edits(main)).toEqual([{ id: 1, name: 'Loom app' }]));
+      expect(within(list()).getByText('Loom app')).toBeTruthy();
+      expect(await within(card('General')).findByText('Saved')).toBeTruthy();
+    });
+
+    it('says why a name or avatar is refused, without sending it', () => {
+      const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+
+      fireEvent.change(field('Name'), { target: { value: '  ' } });
+      fireEvent.blur(field('Name'));
+      expect(within(card('General')).getByRole('alert').textContent).toMatch('needs a name');
+      fireEvent.change(field('Name'), { target: { value: 'loom' } });
+      expect(within(card('General')).queryByRole('alert')).toBeNull();
+
+      fireEvent.change(field('Avatar'), { target: { value: 'ABC' } });
+      fireEvent.blur(field('Avatar'));
+      expect(within(card('General')).getByRole('alert').textContent).toMatch('at most 2 characters');
+      expect(edits(main)).toEqual([]);
+    });
+
+    it('saves a colour as soon as it is picked', async () => {
+      const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+
+      fireEvent.click(within(card('General')).getByRole('radio', { name: 'Violet' }));
+
+      await waitFor(() => expect(edits(main)).toEqual([{ id: 1, color: 'violet' }]));
+      expect((within(card('General')).getByRole('radio', { name: 'Violet' }) as HTMLInputElement).checked).toBe(true);
+    });
+
+    it('saves an avatar, and goes back to the initials when it is emptied', async () => {
+      const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+      expect(field('Avatar').placeholder).toBe('LO');
+
+      fireEvent.change(field('Avatar'), { target: { value: '🦊' } });
+      fireEvent.submit(field('Avatar'));
+      await waitFor(() => expect(edits(main)).toEqual([{ id: 1, avatar: '🦊' }]));
+
+      fireEvent.change(field('Avatar'), { target: { value: '' } });
+      fireEvent.submit(field('Avatar'));
+      await waitFor(() => expect(edits(main)).toEqual([{ id: 1, avatar: '🦊' }, { id: 1, avatar: null }]));
+    });
+
+    it("saves a default model and its Effort level, and goes back to OpenCode's own", async () => {
       const main = new FakeMain({ projects: [project('loom')] }, { 'projects.models': () => [{ id: 'anthropic/claude-haiku-5-5', name: 'Claude Haiku 5.5', efforts: ['low', 'high', 'default'] }] });
-      const dialog = openEdit(main);
+      openProjects(main);
+      const sessions = card('New Sessions');
 
-      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'Loom app' } });
-      fireEvent.click(within(dialog).getByRole('radio', { name: 'Violet' }));
-      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: '🦊' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Model' }));
+      fireEvent.click(within(sessions).getByRole('button', { name: 'Model' }));
       fireEvent.click(await screen.findByRole('option', { name: /claude-haiku-5-5/ }));
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Effort' }));
+      await waitFor(() => expect(edits(main)).toEqual([{ id: 1, defaultModel: { model: 'anthropic/claude-haiku-5-5' } }]));
+      fireEvent.click(within(sessions).getByRole('button', { name: 'Effort' }));
       fireEvent.click(screen.getByRole('option', { name: 'Effort: high' }));
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(edits(main)).toContainEqual({ id: 1, defaultModel: { model: 'anthropic/claude-haiku-5-5', effort: 'high' } }));
 
-      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull());
-      expect(main.invoked).toContainEqual({
-        command: 'projects.edit',
-        params: { id: 1, name: 'Loom app', color: 'violet', avatar: '🦊', defaultModel: { model: 'anthropic/claude-haiku-5-5', effort: 'high' } },
-      });
-      const row = screen.getByRole('row', { name: /Loom app/ });
-      expect(within(row).getByText('anthropic/claude-haiku-5-5')).toBeTruthy();
-    });
-
-    it('sends only what changed, and nothing when nothing did', async () => {
-      const main = new FakeMain({ projects: [{ ...project('loom'), avatar: 'LM', defaultModel: { model: 'anthropic/claude-haiku-5-5' } }] });
-      let dialog = openEdit(main);
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-      expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull();
-      expect(main.invoked.map((i) => i.command)).not.toContain('projects.edit');
-
-      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
-      dialog = editDialog();
-      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: '' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: "Use OpenCode's own" }));
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-
-      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.edit', params: { id: 1, avatar: null, defaultModel: null } }));
-    });
-
-    it('says why a name or avatar is refused, and holds Save until it is fixed', () => {
-      const dialog = openEdit(new FakeMain({ projects: [project('loom')] }));
-
-      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: '  ' } });
-      expect(within(dialog).getByRole('alert').textContent).toMatch('needs a name');
-      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
-
-      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'loom' } });
-      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Avatar' }), { target: { value: 'ABC' } });
-      expect(within(dialog).getByRole('alert').textContent).toMatch('at most 2 characters');
-      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(within(sessions).getByRole('button', { name: "Use OpenCode's own" }));
+      await waitFor(() => expect(edits(main)).toContainEqual({ id: 1, defaultModel: null }));
+      expect(within(sessions).queryByRole('button', { name: "Use OpenCode's own" })).toBeNull();
     });
 
     it("sets a default branch over git's, says why one is refused, and goes back to git's when emptied", async () => {
-      const main = new FakeMain({ projects: [project('loom')] });
-      let dialog = openEdit(main);
-      const field = () => within(dialog).getByRole('textbox', { name: 'Default branch' });
-      expect((field() as HTMLInputElement).placeholder).toBe("git's own");
+      const main = openProjects(new FakeMain({ projects: [project('loom')] }));
+      expect(field('Default branch').placeholder).toBe("git's own");
 
-      fireEvent.change(field(), { target: { value: 'feat..x' } });
-      expect(within(dialog).getByRole('alert').textContent).toMatch("can't be a default branch");
-      expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
-      fireEvent.change(field(), { target: { value: ' origin/develop ' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.edit', params: { id: 1, defaultBranch: 'develop' } }));
+      fireEvent.change(field('Default branch'), { target: { value: 'feat..x' } });
+      fireEvent.blur(field('Default branch'));
+      expect(within(card('New Sessions')).getByRole('alert').textContent).toMatch("can't be a default branch");
+      expect(edits(main)).toEqual([]);
 
-      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull());
-      fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Edit loom' }));
-      dialog = editDialog();
-      expect((field() as HTMLInputElement).value).toBe('develop');
-      fireEvent.change(field(), { target: { value: '' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.edit', params: { id: 1, defaultBranch: null } }));
+      fireEvent.change(field('Default branch'), { target: { value: ' origin/develop ' } });
+      fireEvent.submit(field('Default branch'));
+      await waitFor(() => expect(edits(main)).toEqual([{ id: 1, defaultBranch: 'develop' }]));
+      await waitFor(() => expect(field('Default branch').value).toBe('develop'));
+
+      fireEvent.change(field('Default branch'), { target: { value: '' } });
+      fireEvent.submit(field('Default branch'));
+      await waitFor(() => expect(edits(main)).toContainEqual({ id: 1, defaultBranch: null }));
     });
 
-    it("shows main's error and stays open", async () => {
-      const dialog = openEdit(
+    it("shows main's error, keeping what was typed", async () => {
+      openProjects(
         new FakeMain(
           { projects: [project('loom')] },
           {
@@ -545,22 +610,24 @@ describe('Projects', () => {
           },
         ),
       );
-      fireEvent.click(within(dialog).getByRole('radio', { name: 'Red' }));
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
-      expect((await within(dialog).findByRole('alert')).textContent).toMatch('database is locked');
-      expect(editDialog()).toBeTruthy();
+      fireEvent.change(field('Name'), { target: { value: 'Loom app' } });
+      fireEvent.submit(field('Name'));
+
+      expect((await within(card('General')).findByRole('alert')).textContent).toMatch('database is locked');
+      expect(field('Name').value).toBe('Loom app');
     });
 
-    it('closes on Escape without saving', () => {
-      const main = new FakeMain({ projects: [project('loom')] });
-      const dialog = openEdit(main);
-      fireEvent.click(within(dialog).getByRole('radio', { name: 'Red' }));
+    it('puts the saved value back on Escape, without saving', () => {
+      const main = openProjects(new FakeMain({ projects: [project('loom')] }));
 
-      fireEvent.keyDown(within(dialog).getByRole('textbox', { name: 'Name' }), { key: 'Escape' });
+      fireEvent.change(field('Name'), { target: { value: 'Loom app' } });
+      fireEvent.keyDown(field('Name'), { key: 'Escape' });
 
-      expect(screen.queryByRole('dialog', { name: 'Edit loom' })).toBeNull();
-      expect(main.invoked.map((i) => i.command)).not.toContain('projects.edit');
+      expect(field('Name').value).toBe('loom');
+      expect(screen.getByRole('dialog', { name: 'Projects' })).toBeTruthy();
+      fireEvent.blur(field('Name'));
+      expect(edits(main)).toEqual([]);
     });
   });
 

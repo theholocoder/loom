@@ -357,11 +357,9 @@ button.search { border: 0; width: 100%; text-align: left; }
 .ag-ready { color: var(--ok); } .ag-checking { color: var(--work); } .ag-signed-out, .ag-unsupported { color: var(--wait); }
 .ag-missing, .ag-error { color: var(--err); } .ag-unknown { color: var(--muted); }
 .fg-available { color: var(--ok); } .fg-checking { color: var(--work); } .fg-off { color: var(--wait); } .fg-unknown { color: var(--muted); } .fg-local { color: var(--muted); cursor: help; }
-input.prefix { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; width: 16ch; }
-input.prefix[aria-invalid] { border-color: var(--err); }
-.prefix-preview { font-size: 12px; margin-top: 2px; }
 .page-error, .page-note { gap: 6px; }
 .page-note { margin-top: 8px; }
+.settings-sections > .page-note, .settings-sections > .page-error { margin-top: 0; }
 .pick .issue-title { max-width: 28ch; }
 .popover.issue-popover { width: 360px; gap: 4px; }
 .st-waiting-error, .st-waiting-interrupted, .st-waiting-stopped { color: var(--err); }
@@ -796,6 +794,11 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .settings-nav a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; }
 .settings-nav a:hover { background: var(--hover); color: var(--text); }
 .settings-nav a[aria-current="page"] { background: var(--panel2); color: var(--text); }
+/* A list of things to pick, such as Projects, rather than sections to go to. */
+.settings-nav button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border: 0; border-radius: 8px; background: none; color: var(--muted); text-align: left; font-size: 13px; }
+.settings-nav button:hover { background: var(--hover); color: var(--text); }
+.settings-nav button[aria-current="page"] { background: var(--panel2); color: var(--text); font-weight: 600; }
+.settings-nav button > .ellipsis { flex: 1; min-width: 0; }
 /* The page leaves the close button its corner. */
 .settings-sections { display: flex; flex-direction: column; gap: 18px; min-width: 0; min-height: 0; overflow: auto; padding: 20px 64px 90px 28px; }
 .settings-sections > * { width: 100%; max-width: 780px; }
@@ -825,6 +828,7 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .text-setting:focus { outline: none; border-color: var(--accent); }
 .text-setting[aria-invalid="true"] { border-color: var(--err); }
 .setting.wide .text-setting { width: 100%; }
+.setting-hint { font-size: 12px; margin-top: 4px; }
 textarea.text-setting { resize: vertical; field-sizing: content; min-height: 4.5em; max-height: 18em; line-height: 1.5; }
 input.toggle { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); cursor: pointer; }
 input.toggle:disabled { cursor: not-allowed; }
@@ -929,18 +933,32 @@ input.toggle:disabled { cursor: not-allowed; }
 [data-density="compact"] .settings-sections { gap: 12px; }
 [data-density="compact"] .setting { padding: 8px 0; }
 
-/* The Projects page: a Project's avatar beside its name, and its Edit dialog. */
-.project-name { gap: 8px; font-weight: 600; max-width: 180px; }
-.project-name > .ellipsis { min-width: 0; }
-.project-actions { gap: 6px; flex-wrap: nowrap; }
-.project-edit { display: flex; flex-direction: column; gap: 6px; width: min(520px, calc(100vw - 32px)); }
-.project-field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12.5px; }
-.project-field > span { color: var(--muted); font-weight: 600; }
-.project-field input { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; color: var(--text); }
-.project-field input.project-avatar-input { width: 8ch; }
-.project-model { gap: 6px; flex-wrap: wrap; }
-.project-hint { font-size: 12px; }
-.project-model .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px; }
+/* The Projects page, laid out as Settings is: the Projects listed beside,
+   the one picked on the page under its name, its settings in cards. */
+.projects-page .settings-layout { grid-template-columns: 220px minmax(0, 1fr); }
+.projects-page .settings-side > button { justify-content: center; }
+.project-nav-warn { flex: none; color: var(--wait); }
+.project-nav-none { padding: 6px 10px; font-size: 12.5px; }
+.project-header { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.project-header-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.project-header h2 { margin: 0; font-size: 18px; }
+.project-header .tech { font-size: 12px; }
+.project-path { overflow-wrap: anywhere; }
+.project-forge { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.project-forge-reason { text-align: right; }
+.project-model { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.projects-page .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 12.5px; }
+.projects-page .link:hover { background: none; text-decoration: underline; }
+.project-model-reset { margin-top: 4px; }
+@container (max-width: 640px) {
+  .projects-page .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .projects-page .settings-side > button { align-self: flex-start; }
+  .settings-nav button { width: auto; max-width: 220px; }
+  /* A long list scrolls, leaving the page below it the room. */
+  .projects-page .settings-nav { max-height: 30cqh; overflow: auto; }
+  .project-forge-reason { text-align: left; }
+  .project-forge, .project-model { align-items: flex-start; justify-content: flex-start; }
+}
 
 /* Loom: each Project's colour (shared/projects.ts), the validated categorical
    palette's eight slots in order, its dark or light step (the first three are

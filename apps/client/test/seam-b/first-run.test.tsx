@@ -137,7 +137,7 @@ describe('after adding a Project', () => {
     fireEvent.click(within(screen.getByRole('region', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
 
     const page = screen.getByRole('dialog', { name: 'Projects' });
-    expect((await within(page).findByRole('status')).textContent).toMatch('Added loom.');
+    expect(await within(page).findByText('Added loom.')).toBeTruthy();
     fireEvent.click(within(page).getByRole('button', { name: 'Start a Session' }));
 
     expect(screen.queryByRole('dialog', { name: 'Projects' })).toBeNull();
@@ -149,8 +149,9 @@ describe('after adding a Project', () => {
     renderApp(linking({ projects: [docs] }));
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add a Project…' }));
+    await screen.findByText('Added loom.');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Start a Session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start a Session' }));
 
     expect(within(screen.getByRole('main', { name: 'New Session' })).getByRole('button', { name: 'Project' }).textContent).toBe('loom');
   });
@@ -172,7 +173,7 @@ describe('after adding a Project', () => {
     fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Restore loom?' })).getByRole('button', { name: 'Restore' }));
 
     const page = screen.getByRole('dialog', { name: 'Projects' });
-    expect((await within(page).findByRole('status')).textContent).toBe('Restored loom.');
+    expect(await within(page).findByText('Restored loom.')).toBeTruthy();
     fireEvent.click(within(page).getByRole('button', { name: 'Start a Session' }));
 
     expect(within(screen.getByRole('main', { name: 'New Session' })).getByRole('button', { name: 'Project' }).textContent).toBe('loom');
@@ -181,11 +182,11 @@ describe('after adding a Project', () => {
   it('forgets the offer when leaving Projects', async () => {
     renderApp(linking());
     fireEvent.click(within(screen.getByRole('region', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
-    await screen.findByRole('button', { name: 'Start a Session' });
+    await screen.findByText('Added loom.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
 
-    expect(screen.queryByRole('button', { name: 'Start a Session' })).toBeNull();
+    expect(screen.queryByText('Added loom.')).toBeNull();
   });
 });

@@ -55,11 +55,32 @@ function openProjects(main: FakeMain) {
 const removeCalls = (main: FakeMain) => main.invoked.filter((i) => i.command === 'projects.remove');
 
 describe('removing a Project from Projects', () => {
+  it('shows the next Project once the one shown is removed, its entry in the list taking the focus', async () => {
+    const docs = { ...loom, id: 2, name: 'docs', checkout: { environmentId: 'native', path: '/home/dev/code/docs' } };
+    const main: FakeMain = openProjects(
+      new FakeMain(
+        { projects: [loom, docs] },
+        {
+          'projects.remove': () => {
+            main.publish('projects', [docs]);
+            return { removed: true };
+          },
+        },
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove loom' }));
+    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Remove loom?' })).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'docs', level: 2 })).toBeTruthy());
+    expect(document.activeElement).toBe(within(screen.getByRole('navigation', { name: 'Projects' })).getByRole('button', { name: /docs/ }));
+  });
+
   it('asks first, saying the folder stays and how many Sessions go to the Archive', async () => {
     const sessions = [session({}), session({ status: 'working', waitingReason: undefined }), session({ status: 'archived', waitingReason: undefined })];
     const main = openProjects(new FakeMain({ projects: [loom], sessions }));
 
-    fireEvent.click(within(screen.getByRole('row', { name: /loom/ })).getByRole('button', { name: 'Remove loom' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove loom' }));
 
     const dialog = screen.getByRole('alertdialog', { name: 'Remove loom?' });
     expect(dialog.textContent).toContain('/home/dev/code/loom');
