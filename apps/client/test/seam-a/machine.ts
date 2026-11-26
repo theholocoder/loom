@@ -586,7 +586,10 @@ function readLines(file: string): string[] {
   } catch {
     return [];
   }
-  return log.split('\n').filter(Boolean);
+  // A stand-in may be writing a line as it is read: one with no newline yet isn't there.
+  const lines = log.split('\n');
+  lines.pop();
+  return lines.filter(Boolean);
 }
 
 /** Where `tool` is on the PATH this test process was started with. */
