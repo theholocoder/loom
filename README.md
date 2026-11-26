@@ -31,7 +31,7 @@ Loom has no server and no account of its own. It drives the agent you already ha
 - **Approvals and questions**: the agent pauses before it acts outside its working copy, and you approve once, for the Session, or deny with a reason.
 - **Changes Panel**: the Session's diff against its base, with comments on the lines you pick that go out with your next message, and a full-size Review mode.
 - **Merge requests** on GitHub and GitLab: create or link one, read its checks and reviews, reply to and resolve review threads, squash and merge.
-- **Babysit**: Loom watches a Session's open Merge request and brings it back to the Inbox on new reviews, failed checks or conflicts. It can prompt the agent for you.
+- **Babysit**: Loom watches a Session's open Merge request and brings it back to the Inbox on new reviews, failed checks, conflicts, or a branch the Forge won't merge until it is brought up to date with its target. It can prompt the agent for you.
 - **Issues**: start a Session from an issue and keep it open in a Panel beside the conversation.
 - **Terminal** in the Session's working copy, plus "Open in editor" with your own editor.
 - **Panels** (Changes, Merge request, Issue, Highlights, Terminal) that you arrange in a Side area and a Dock.

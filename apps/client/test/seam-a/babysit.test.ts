@@ -181,7 +181,7 @@ describe('what counts as feedback', () => {
     const { main, id } = await babysat('gh', { conflicts: true, checks: [{ id: 7, name: 'test', conclusion: 'FAILURE', url: 'https://ci/7' }, { id: 8, name: 'lint', conclusion: 'SUCCESS' }] });
     await main.elapse(QUIET_WINDOW);
 
-    expect((await nextCard(main, id)).items).toEqual([{ kind: 'ci-failed', checks: [{ name: 'test', url: 'https://ci/7' }] }, { kind: 'conflicts' }]);
+    expect((await nextCard(main, id)).items).toEqual([{ kind: 'ci-failed', checks: [{ name: 'test', url: 'https://ci/7' }] }, { kind: 'conflicts', target: 'main' }]);
     expect(infoCards(await waitFor(main.api, 'transcript', () => true, { sessionId: id }))).toEqual([]);
   });
 
@@ -200,7 +200,70 @@ describe('what counts as feedback', () => {
     forge({ conflicts: true });
     await pollNow(main, id);
     await main.elapse(QUIET_WINDOW);
-    expect((await nextCard(main, id, 2)).items).toEqual([{ kind: 'conflicts' }]);
+    expect((await nextCard(main, id, 2)).items).toEqual([{ kind: 'conflicts', target: 'main' }]);
+  });
+
+  it('reports a branch GitHub won\'t merge until it is brought up to date with its target', async () => {
+    const { main, id, forge } = await babysat('gh', { conflicts: false });
+    forge({ conflicts: false, behind: true, target: 'develop' });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+
+    expect((await nextCard(main, id)).items).toEqual([{ kind: 'behind', target: 'develop' }]);
+  });
+
+  it('reports a branch behind once, and again if it falls behind after being brought up to date', async () => {
+    const { main, id, forge } = await babysat('gh', { conflicts: false });
+    forge({ conflicts: false, behind: true });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+    await nextCard(main, id);
+    // GitHub's BLOCKED, on a review, may be hiding a BEHIND: it is no sign the branch was brought up to date.
+    forge({ conflicts: false, behind: 'hidden' });
+    await pollNow(main, id);
+    forge({ conflicts: false, behind: true });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+
+    forge({ conflicts: false, behind: false, target: 'develop' });
+    await pollNow(main, id);
+    forge({ conflicts: false, behind: true, target: 'develop' });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+    expect((await nextCard(main, id, 2)).items).toEqual([{ kind: 'behind', target: 'develop' }]);
+  });
+
+  it('reports a branch behind again once a push has brought it up to date, though GitHub never said so', async () => {
+    const { main, id, forge } = await babysat('gh', { conflicts: false });
+    forge({ conflicts: false, behind: true });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+    await nextCard(main, id);
+    // The agent rebases and pushes, and the review it still needs blocks the merge: GitHub says BLOCKED, not CLEAN.
+    forge({ conflicts: false, behind: 'hidden', oid: 'commit-2' });
+    await pollNow(main, id);
+    forge({ conflicts: false, behind: true, oid: 'commit-2', target: 'develop' });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+
+    expect((await nextCard(main, id, 2)).items).toEqual([{ kind: 'behind', target: 'develop' }]);
+  });
+
+  it("doesn't report a branch behind that conflicts, nor one brought up to date before the quiet window ends", async () => {
+    const { main, id, forge } = await babysat('gh', { conflicts: false });
+    forge({ conflicts: true, behind: true });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+    expect((await nextCard(main, id)).items).toEqual([{ kind: 'conflicts', target: 'main' }]);
+
+    forge({ conflicts: false, behind: false });
+    await pollNow(main, id);
+    forge({ conflicts: false, behind: true });
+    await pollNow(main, id);
+    forge({ conflicts: false, behind: false });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+    expect(await cardsOf(main, id)).toHaveLength(1);
   });
 });
 
@@ -527,13 +590,27 @@ describe('Send to agent', () => {
         `2. Comment by bob: "Please add a test" (${URLS.gh}#c1)`,
         '3. CI failed:',
         '   - unit (https://ci/3)',
-        '4. The Merge request has conflicts with its target branch.',
+        '4. The Merge request has conflicts with its target branch `main`: fetch it, rebase the branch onto it resolving them, then push with `git push --force-with-lease`.',
         '',
         "Read the details you need with `gh` (a whole thread, a failing check's log), fix what needs fixing, push the branch, then reply to or resolve each item on the Merge request.",
       ].join('\n'),
     );
     expect((await cardsOf(main, id))[0]!.state).toBe('sent');
     await expect(main.api.invoke('sessions.sendFeedback', { id, itemId: card.id })).rejects.toThrow('already been sent');
+  });
+
+  it('tells the agent to rebase a branch behind onto its target branch', async () => {
+    const { machine, main, id, forge } = await babysat('gh', { conflicts: false }, { turns: [{ chunks: ['Done.'] }, { chunks: ['Rebased.'] }] });
+    forge({ conflicts: false, behind: true, target: 'develop' });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+    const card = await nextCard(main, id);
+
+    await main.api.invoke('sessions.sendFeedback', { id, itemId: card.id });
+    await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'agent' && i.text === 'Rebased.'), { sessionId: id });
+    expect(prompts(machine).at(-1)).toContain(
+      "\n1. The Merge request is behind its target branch `develop`, and won't be merged until it is up to date: fetch it, rebase the branch onto it, then push with `git push --force-with-lease`.\n",
+    );
   });
 });
 
@@ -569,13 +646,22 @@ describe('Babysit on GitLab', () => {
     expect(card.items).toEqual([
       { kind: 'comment', author: 'carol', path: 'lib/a.rb', line: 3, excerpt: 'On the code', url: `${URLS.glab}#note_2` },
       { kind: 'ci-failed', checks: [{ name: 'rspec', url: 'https://ci/job' }] },
-      { kind: 'conflicts' },
+      { kind: 'conflicts', target: 'main' },
     ]);
     const items = await waitFor(main.api, 'transcript', (list) => infoCards(list).length === 1, { sessionId: id });
     expect(infoCards(items)).toEqual([{ kind: 'feedback-info', id: expect.any(Number), event: 'approved', author: 'dave', url: URLS.glab }]);
     const invocations = machine.forgeCliInvocations('glab');
     const at = invocations.findIndex((args) => args[0] === 'api' && args[1] === 'user');
     expect(machine.forgeCliCwds('glab')[at]).toBe(checkout);
+  });
+
+  it('reports a branch GitLab says needs a rebase onto its target branch', async () => {
+    const { main, id, forge } = await babysat('glab', { conflicts: false });
+    forge({ conflicts: false, behind: true, target: 'develop' });
+    await pollNow(main, id);
+    await main.elapse(QUIET_WINDOW);
+
+    expect((await nextCard(main, id)).items).toEqual([{ kind: 'behind', target: 'develop' }]);
   });
 });
 

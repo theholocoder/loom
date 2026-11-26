@@ -45,7 +45,8 @@ const feedback: Extract<TranscriptItem, { kind: 'feedback' }> = {
     { kind: 'review', author: 'alice', verdict: 'changes-requested', excerpt: 'Needs work', url: `${url}#r1`, comments: [{ path: 'src/a.ts', line: 10, excerpt: 'Off by one', url: `${url}#r1a` }] },
     { kind: 'comment', author: 'bob', excerpt: 'Add a test', url: `${url}#c2` },
     { kind: 'ci-failed', checks: [{ name: 'unit', url: 'https://ci/1' }] },
-    { kind: 'conflicts' },
+    { kind: 'conflicts', target: 'develop' },
+    { kind: 'behind', target: 'develop' },
   ],
 };
 
@@ -62,7 +63,8 @@ describe('the feedback card', () => {
       'alice requested changes: 1 comment on src/a.ts:10',
       'bob commented: Add a test',
       'CI failed: unit',
-      'Conflicts with its target branch',
+      'Conflicts with develop',
+      'Needs a rebase onto develop',
     ]);
 
     fireEvent.click(within(card).getByRole('button', { name: 'unit' }));

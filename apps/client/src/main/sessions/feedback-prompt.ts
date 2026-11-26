@@ -20,6 +20,15 @@ function linesOf(item: FeedbackItem, n: number): string[] {
     case 'ci-failed':
       return [`${n}. CI failed:`, ...item.checks.map((check) => `   - ${check.name}${check.url ? ` (${check.url})` : ''}`)];
     case 'conflicts':
-      return [`${n}. The Merge request has conflicts with its target branch.`];
+      return [`${n}. The Merge request has conflicts with ${targetOf(item)}: fetch it, rebase the branch onto it resolving them, then push with ${FORCE_PUSH}.`];
+    case 'behind':
+      return [`${n}. The Merge request is behind ${targetOf(item)}, and won't be merged until it is up to date: fetch it, rebase the branch onto it, then push with ${FORCE_PUSH}.`];
   }
+}
+
+const FORCE_PUSH = '`git push --force-with-lease`';
+
+/** One reported before Loom kept its target branch doesn't name it. */
+function targetOf({ target }: Extract<FeedbackItem, { kind: 'conflicts' | 'behind' }>): string {
+  return target ? `its target branch \`${target}\`` : 'its target branch';
 }

@@ -200,6 +200,13 @@ export interface ScriptedActivity {
   oid?: string;
   /** Absent while the Forge hasn't worked it out. */
   conflicts?: boolean;
+  /**
+   * Whether the Forge won't merge it until it is brought up to date with its
+   * target: GitHub's `BEHIND`, GitLab's `need_rebase`. `hidden` when the Forge
+   * says only that something else blocks it: GitHub's `BLOCKED`, GitLab's
+   * `not_approved`. Absent while it hasn't worked it out, as `conflicts`.
+   */
+  behind?: boolean | 'hidden';
   /** GitLab's head pipeline. */
   pipeline?: { id: number; status: string; failedJobs?: { id: number; name: string; url: string }[]; jobs?: { id: number; name: string; status: string; url: string }[] };
   /** Who approved it on GitLab. */

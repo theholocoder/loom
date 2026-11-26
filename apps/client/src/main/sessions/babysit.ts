@@ -50,6 +50,8 @@ interface BabysitRecord {
   /** The finished CI run last reported. */
   ciReported?: string;
   conflictsReported: boolean;
+  /** The head commit the branch was last reported behind at: a push may bring it up to date without the Forge saying so. */
+  behindReportedAt?: string;
   /** Feedback not given to the Session yet, and when its quiet window ends. */
   pending: FeedbackItem[];
   quietUntil?: number;
@@ -249,14 +251,26 @@ export class Babysit {
     }
     if (activity.conflicts === true && !record.conflictsReported) {
       record.conflictsReported = true;
-      fresh.push({ kind: 'conflicts' });
+      fresh.push({ kind: 'conflicts', target: activity.target });
     } else if (activity.conflicts === false) {
       record.conflictsReported = false;
+    }
+    // A conflict says it already: the rebase that resolves it brings the branch up to date.
+    const mayBeBehind = activity.behind !== false && activity.conflicts !== true;
+    if (mayBeBehind && activity.behind === true && record.behindReportedAt !== activity.head) {
+      record.behindReportedAt = activity.head;
+      fresh.push({ kind: 'behind', target: activity.target });
+    } else if (activity.behind === false) {
+      record.behindReportedAt = undefined;
     }
 
     // What has stopped being true by the time it would be told isn't worth waking anyone for.
     const replacedCi = fresh.some((item) => item.kind === 'ci-failed');
-    record.pending = record.pending.filter((item) => (item.kind === 'conflicts' ? activity.conflicts !== false : item.kind !== 'ci-failed' || (ci.status === 'failed' && !replacedCi)));
+    record.pending = record.pending.filter((item) => {
+      if (item.kind === 'conflicts') return activity.conflicts !== false;
+      if (item.kind === 'behind') return mayBeBehind;
+      return item.kind !== 'ci-failed' || (ci.status === 'failed' && !replacedCi);
+    });
     record.pending.push(...fresh);
     if (!record.pending.length) record.quietUntil = undefined;
     else if (fresh.length) {

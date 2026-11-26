@@ -466,7 +466,10 @@ export type FeedbackItem =
   | { kind: 'comment'; author: string; path?: string; line?: number; excerpt: string; url: string }
   /** The CI finished, and these failed. */
   | { kind: 'ci-failed'; checks: FeedbackCheck[] }
-  | { kind: 'conflicts' };
+  /** It conflicts with `target`, its target branch (unknown on one reported before Loom kept it). */
+  | { kind: 'conflicts'; target?: string }
+  /** The Forge won't merge it until it is brought up to date with `target`: GitHub's `BEHIND`, GitLab's `need_rebase`. */
+  | { kind: 'behind'; target: string };
 
 /** Progress worth seeing that needs nothing done. */
 export type FeedbackInfo = { event: 'approved'; author: string; url: string } | { event: 'ci-passed'; url: string };

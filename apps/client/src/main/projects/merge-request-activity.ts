@@ -1,6 +1,7 @@
 // What is going on on a Merge request, read through the Forge's CLI and the
 // user's login (ADR 0002), in terms Babysit needs: who said what, its CI, and
-// whether it conflicts. The user's own comments are already left out.
+// whether it conflicts or must be rebased. The user's own comments are
+// already left out.
 import { FORGE_CLI, type BabysitCheck, type BabysitCheckState, type BabysitCi, type FeedbackCheck, type FeedbackItem, type ForgeStatus, type MergeRequestState, type ReviewCount, type ReviewThread } from '../../shared/api';
 import { exec, type BridgeCall } from '../environments/exec';
 import { describeFailure } from '../environments/failures';
@@ -37,6 +38,16 @@ export interface MergeRequestActivity {
   };
   /** Absent while the Forge hasn't worked it out. */
   conflicts?: boolean;
+  /**
+   * Whether the Forge won't merge it until it is brought up to date with its
+   * target, which it requires only when set to. Absent while the Forge hasn't
+   * worked it out, or when it says only that something else blocks the merge.
+   */
+  behind?: boolean;
+  /** The branch it is to merge into. */
+  target: string;
+  /** Its head commit: a push changes it. */
+  head: string;
   /** The reviews and comments of others. */
   reviews: ReviewCount;
   /** The review threads on the code, not resolved, that others wrote in. */
@@ -59,6 +70,8 @@ const GITHUB_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
     pullRequest(number: $number) {
       state
       mergeable
+      mergeStateStatus
+      baseRefName
       reviews(last: 100) { nodes { databaseId state body url author { login } comments(first: 100) { nodes { path line originalLine body url } } } }
       comments(last: 100) { nodes { databaseId body url author { login } } }
       reviewThreads(last: 100) { nodes { id isResolved isOutdated path line originalLine diffSide viewerCanResolve
@@ -71,6 +84,9 @@ const GITHUB_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
     }
   }
 }`.replace(/\s*\n\s*/g, ' ');
+
+/** What GitHub says only of a branch it doesn't need brought up to date: `BLOCKED` and `DRAFT` may be hiding a `BEHIND`. */
+const GITHUB_UP_TO_DATE = new Set(['CLEAN', 'UNSTABLE', 'HAS_HOOKS', 'DIRTY']);
 
 export interface GitHubAuthored {
   author: { login: string } | null;
@@ -106,6 +122,8 @@ interface GitHubResponse {
       pullRequest: {
         state: string;
         mergeable: string;
+        mergeStateStatus: string;
+        baseRefName: string;
         reviews: { nodes: GitHubReview[] };
         comments: { nodes: GitHubComment[] };
         reviewThreads: { nodes: GitHubThread[] };
@@ -148,6 +166,9 @@ async function readGitHub(call: BridgeCall, host: string, repository: string, nu
     approvals,
     ci: gitHubCi(commit?.oid ?? '', commit?.statusCheckRollup ?? undefined),
     conflicts: pull.mergeable === 'CONFLICTING' ? true : pull.mergeable === 'MERGEABLE' ? false : undefined,
+    behind: pull.mergeStateStatus === 'BEHIND' ? true : GITHUB_UP_TO_DATE.has(pull.mergeStateStatus) ? false : undefined,
+    target: pull.baseRefName,
+    head: commit?.oid ?? '',
     threads: pull.reviewThreads.nodes.flatMap((thread) => {
       const comments = thread.comments.nodes;
       if (thread.isResolved || !others(comments).length) return [];
@@ -201,6 +222,10 @@ function gitHubCheckState(result: string | undefined): BabysitCheckState {
 export interface GitLabMergeRequest {
   state: string;
   has_conflicts?: boolean;
+  /** The first of GitLab's merge checks that fails, so another, `not_approved` say, may be hiding a `need_rebase`. */
+  detailed_merge_status?: string;
+  target_branch: string;
+  sha?: string | null;
   head_pipeline?: { id: number; status: string } | null;
   web_url: string;
 }
@@ -252,6 +277,9 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     approvals: approved.map(({ user: u }) => ({ key: `approval:${u.username}`, author: u.username, url })),
     ci: await gitLabCi(run, project, request.head_pipeline ?? undefined),
     conflicts: request.has_conflicts,
+    behind: request.detailed_merge_status === 'need_rebase' ? true : GITLAB_UP_TO_DATE.has(request.detailed_merge_status ?? '') ? false : undefined,
+    target: request.target_branch,
+    head: request.sha ?? '',
     threads: discussions.flatMap((discussion) => {
       const notes = discussion.notes.filter((note) => !note.system);
       const first = notes[0];
@@ -271,6 +299,9 @@ async function readGitLab(call: BridgeCall, repository: string, workingCopy: str
     }),
   };
 }
+
+/** What GitLab says only of a branch it doesn't need rebased: a conflict is checked for before it. */
+const GITLAB_UP_TO_DATE = new Set(['mergeable', 'conflict']);
 
 const GITLAB_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'scheduled']);
 
