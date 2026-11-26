@@ -1297,14 +1297,20 @@ export interface AskingSubagent {
 
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
-  /** What the user sent, with what they attached to it, if anything. */
-  | { kind: 'user'; id: number; text: string; attachments?: Attachment[] }
-  /** `streaming` while the agent is still adding to it; `model` the one that said it, as `provider/model`, when Loom knows. */
-  | { kind: 'agent'; id: number; text: string; streaming: boolean; model?: string }
+  /**
+   * What the user sent, with what they attached to it, if anything. `at` is
+   * when it went to the agent (a clock time), absent on one from before Loom kept it.
+   */
+  | { kind: 'user'; id: number; text: string; attachments?: Attachment[]; at?: number }
+  /**
+   * `streaming` while the agent is still adding to it; `model` the one that said it, as
+   * `provider/model`, when Loom knows; `at` when the agent started saying it, as for `user`.
+   */
+  | { kind: 'agent'; id: number; text: string; streaming: boolean; model?: string; at?: number }
   /** The agent's plan for its run, as it last gave it: one per run, kept up to date. */
   | { kind: 'plan'; id: number; entries: PlanEntry[] }
-  /** The agent's thinking, apart from its reply; `streaming` and `model` as for `agent`. */
-  | { kind: 'thinking'; id: number; text: string; streaming: boolean; model?: string }
+  /** The agent's thinking, apart from its reply; `streaming`, `model` and `at` as for `agent`. */
+  | { kind: 'thinking'; id: number; text: string; streaming: boolean; model?: string; at?: number }
   /**
    * One tool call, kept up to date. Its `input` and `output` are capped at
    * 256 KB each, keeping head and tail around a marker, and a diff over 256 KB
@@ -1397,6 +1403,11 @@ export type TranscriptItem =
    * (`unsaved-work`) for the user to archive or carry on.
    */
   | { kind: 'merge-request-ended'; id: number; number: number; url: string; state: EndedMergeRequestState; archived: boolean; unsavedWork?: UnsavedWork };
+
+/** Whether the item is a message (what the user sent, what the agent said or thought), which keeps when it was said. */
+export function keepsWhenSaid<I extends { kind: TranscriptItem['kind'] }>(item: I): item is I & { kind: 'user' | 'agent' | 'thinking' } {
+  return item.kind === 'user' || item.kind === 'agent' || item.kind === 'thinking';
+}
 
 /** The ranges the usage dashboard covers, in days ending today. */
 export const USAGE_RANGES = [7, 30, 90] as const;

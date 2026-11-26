@@ -30,6 +30,7 @@ import { ENDED, FeedbackCard, FeedbackInfoCard, MergeRequestEndedCard } from './
 import { PlanCard, ThinkingBlock, ToolCard, ToolRunCard, withRuns } from './WorkCards';
 import { useAgentCommands, useCheckoutModels, useSessionModels } from './checkout';
 import { isSnoozed } from './Snooze';
+import { MessageTime, withDays } from './MessageTimes';
 import { useNow } from './now';
 import { ContextGauge, effortsOf, effortTaken, listedModels, ModelMarker, ModelName, ModelPickers } from './ModelPicker';
 import { AttachmentList, CommentNoteForm, Composer } from './Composer';
@@ -770,6 +771,12 @@ export function SessionView({
   /** Shows the Merge request Panel, at its link form or its reviews when asked. */
   const showMergeRequest = (to?: PanelRequests['merge-request']) => panelContext.show('merge-request', to);
 
+  /** The conversation as shown: what the agent said in a row together, and two or more tool calls in a row gathered into a run. */
+  const conversationParts = withRuns(
+    turnParts(items),
+    (part) => (!('said' in part) && part.kind === 'tool' && !startsSubagent(part, subagents) ? part : undefined),
+    (part) => ('said' in part && part.said.every((s) => s.kind === 'thinking') ? (part.said as Array<Extract<Said, { kind: 'thinking' }>>) : undefined),
+  );
   const StatusGlyph = status.icon;
   const statusIcon = <StatusGlyph className="sm" />;
   return (
@@ -811,22 +818,19 @@ export function SessionView({
           ) : (
           <>
           <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnConversation}>
-            {withRuns(
-              turnParts(items),
-              (part) => (!('said' in part) && part.kind === 'tool' && !startsSubagent(part, subagents) ? part : undefined),
-              (part) => ('said' in part && part.said.every((s) => s.kind === 'thinking') ? (part.said as Array<Extract<Said, { kind: 'thinking' }>>) : undefined),
-            ).map((item, at, parts) =>
+            {withDays(conversationParts, saidAt, (item, at, parts) =>
               'run' in item ? (
                 <ToolRunCard key={item.run[0]!.id} run={item.run} live={working && at === parts.length - 1} />
               ) : 'said' in item ? (
-                <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
+                <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} at={saidAt(item)} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
               ) : item.kind === 'user' ? (
                 <div key={item.id} className="msg user" data-item-id={item.id}>
-                  <div className="body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div className="body">
                     <div className="bubble">
                       {item.text && <Markdown text={item.text} flavour="user" />}
                       {item.attachments && <AttachmentList attachments={item.attachments} />}
                     </div>
+                    <MessageTime at={item.at} />
                   </div>
                 </div>
               ) : item.kind === 'tool' ? (
@@ -1226,8 +1230,18 @@ function turnParts(items: TranscriptItem[]): Array<Exclude<TranscriptItem, Said>
   return parts;
 }
 
-/** The agent's name, and the model that spoke when known ("OpenCode · Claude Sonnet 5.5", `provider/model` in its tooltip), over its thinking and its words. */
-function AgentWords({ agent, said, model, models }: { agent: string; said: Said[]; model: string | undefined; models: readonly ModelChoice[] | undefined }) {
+/** When a part of the conversation was said: a message the user sent, or what the agent said in a row; nothing for any other. */
+function saidAt(part: ReturnType<typeof turnParts>[number] | { run: unknown }): number | undefined {
+  if ('run' in part) return undefined;
+  if ('said' in part) return part.said.find((item) => item.at !== undefined)?.at;
+  return part.kind === 'user' ? part.at : undefined;
+}
+
+/**
+ * The agent's name, the model that spoke when known ("OpenCode · Claude Sonnet 5.5",
+ * `provider/model` in its tooltip) and when it started, over its thinking and its words.
+ */
+function AgentWords({ agent, said, at, model, models }: { agent: string; said: Said[]; at: number | undefined; model: string | undefined; models: readonly ModelChoice[] | undefined }) {
   return (
     <div className="msg agent">
       <div className="who">
@@ -1240,6 +1254,12 @@ function AgentWords({ agent, said, model, models }: { agent: string; said: Said[
             <>
               {' · '}
               <ModelName id={model} name={modelNameIn(models, model)} />
+            </>
+          )}
+          {at !== undefined && (
+            <>
+              {' · '}
+              <MessageTime at={at} />
             </>
           )}
         </div>

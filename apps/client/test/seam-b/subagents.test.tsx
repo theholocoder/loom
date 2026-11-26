@@ -106,8 +106,13 @@ describe('Subagents', () => {
     expect(within(footer).getByRole('button', { name: 'Stop Subagent Explore auth' })).toBeTruthy();
 
     fireEvent.click(within(view).getByRole('button', { name: /Open Subagent Read the tests/ }));
-    subagentTranscript('ses_child2', [{ kind: 'agent', id: 0, text: 'The tests cover it.', streaming: false }]);
-    expect(within(screen.getByRole('log', { name: 'Subagent Read the tests' })).getByText('The tests cover it.')).toBeTruthy();
+    const saidAt = Date.UTC(2026, 10, 11, 9, 30);
+    subagentTranscript('ses_child2', [{ kind: 'agent', id: 0, text: 'The tests cover it.', streaming: false, at: saidAt }]);
+    const read = within(screen.getByRole('log', { name: 'Subagent Read the tests' }));
+    expect(read.getByText('The tests cover it.')).toBeTruthy();
+    // When it said it, under its words, and the day over them.
+    expect(read.getByRole('time').getAttribute('dateTime')).toBe('2026-11-11T09:30:00.000Z');
+    expect(read.getAllByRole('separator')).toHaveLength(1);
     const nested = screen.getByRole('contentinfo', { name: 'Subagent' });
     expect(within(nested).getByText('anthropic/claude-haiku-5-5')).toBeTruthy();
     expect(within(nested).queryByRole('button', { name: /Stop/ })).toBeNull();

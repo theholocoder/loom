@@ -108,7 +108,7 @@ function isTwelveHour(locale: string): boolean {
 }
 
 /** The midnight starting `at`'s day, local time. */
-function startOfDay(at: number): number {
+export function startOfDay(at: number): number {
   return new Date(at).setHours(0, 0, 0, 0);
 }
 
@@ -154,6 +154,15 @@ export class Dates {
   day(at: number, now: number): string {
     const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
     return this.format(at, sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  /** The day as a heading: "Today", "Yesterday", else the weekday and day, "Mon, 9 Nov", with the year when it isn't `now`'s. */
+  dayHeading(at: number, now: number): string {
+    const days = daysFrom(now, at);
+    if (days === 0) return 'Today';
+    if (days === -1) return 'Yesterday';
+    const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
+    return this.format(at, sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
   }
 
   /** A day of the calendar, as `2026-11-05`: "5 Nov", or "Nov 5". */

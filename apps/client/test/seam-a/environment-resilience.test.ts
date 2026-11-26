@@ -94,8 +94,8 @@ describe('the Sessions of a bridge that dies', () => {
 
     expect(await sessionNow(main, id)).toMatchObject({ status: 'waiting', waitingReason: 'error', error: 'Environment restarted', unread: true });
     expect(await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'error'), { sessionId: id })).toEqual([
-      { kind: 'user', id: expect.any(Number), text: 'Go' },
-      { kind: 'agent', id: expect.any(Number), text: 'Working on it', streaming: false },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Go' },
+      { kind: 'agent', at: expect.any(Number), id: expect.any(Number), text: 'Working on it', streaming: false },
       { kind: 'error', id: expect.any(Number), message: 'Environment restarted' },
     ]);
   });
@@ -176,7 +176,7 @@ describe('a native bridge that fails to start', () => {
     const failed = (await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'))).find((s) => s.id === id)!;
     expect(failed).toMatchObject({ waitingReason: 'error', error: expect.stringMatching(/^Native could not start: /) });
     expect(await waitFor(main.api, 'transcript', (items) => items.some((i) => i.kind === 'error'), { sessionId: id })).toEqual([
-      { kind: 'user', id: expect.any(Number), text: 'Fix it' },
+      { kind: 'user', at: expect.any(Number), id: expect.any(Number), text: 'Fix it' },
       { kind: 'error', id: expect.any(Number), message: failed.error },
     ]);
 

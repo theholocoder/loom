@@ -2,7 +2,7 @@
 // its agent. Adapters report facts (a run started, text arrived, the run
 // settled or failed); this service derives each Session's status from them.
 import type { Transaction } from 'kysely';
-import { FORGE_CLI, hasNothingToSend, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
+import { FORGE_CLI, hasNothingToSend, keepsWhenSaid, isApprovalMode, MAX_AUTO_PROMPTS, MAX_LISTED_FILES, modelNameIn, type Answer, type BabysitStatus, type EndedMergeRequestState, type MergeRequestState, type ApprovalCategory, type ApprovalDecision, type ApprovalMode, type ApprovalPolicy, type ArchiveResult, type Attachment, type CloseSessionParams, type DeleteResult, type Branches, type Commands, type ExistingBranch, type ExistingWorkingCopy, type MessageComment, type DiffFile, DIFF_SCOPES, type DiffScope, type DiffStat, type DiffSummary, type FileDiff, type ForgeLink, type HighlightCounts, type Issue, type ModelChoice, type ModelPick, type PlanEntry, type Project, type QueuedMessage, type RemoveProjectResult, type Session, type UnsavedSession, type UnsavedWork, type SessionStatus, type SessionUsage, type TokenCounts, totalTokens, type TranscriptItem, type WaitingReason, type WorkingCopyKind } from '../../shared/api';
 import { issueBranch, suggestBranch } from '../../shared/branches';
 import { ResumeRefused, type AgentAdapter, type AgentEnvironment, type AgentEvent, type AgentSession, type ApprovalAction, type PromptFile, type ScriptCall } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
@@ -2481,7 +2481,7 @@ export class Sessions {
   /** Appends an event to the Session's transcript and writes it; its id is its place there. */
   private addItem(id: number, item: NewItem): void {
     const items = this.transcript(id).value;
-    const added = { ...item, id: items.length } as TranscriptItem;
+    const added = { ...item, ...(keepsWhenSaid(item) ? { at: this.options.clock.now() } : {}), id: items.length } as TranscriptItem;
     this.transcript(id).set([...items, added]);
     this.writeItem(id, added);
   }

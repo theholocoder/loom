@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { ApiProvider } from '../../src/renderer/api';
@@ -117,6 +117,38 @@ describe('dates and times', () => {
     expect(custom.getByRole('status').textContent).toBe('Comes back 20 Nov 14:30');
     fireEvent.change(custom.getByLabelText('Date'), { target: { value: '2026-11-01' } });
     expect(custom.queryByRole('status')).toBeNull();
+  });
+});
+
+describe("a conversation's messages", () => {
+  const at = (day: number, hour: number, minute: number) => new Date(2026, 10, day, hour, minute).getTime();
+
+  it('show when each was said, as Loom writes the time, and the day wherever it changes', async () => {
+    const talk = session({ title: 'Talk' });
+    const main = renderApp({ systemLocale: 'fr-FR', sessions: [talk] });
+    await waitFor(() => within(inbox()).getByRole('button', { name: 'Talk' }));
+    fireEvent.click(within(inbox()).getByRole('button', { name: 'Talk' }));
+    act(() =>
+      main.publish(
+        'transcript',
+        [
+          { kind: 'user', id: 0, text: 'From before times were kept' },
+          { kind: 'user', id: 1, text: 'Fix the tests', at: at(9, 14, 5) },
+          { kind: 'agent', id: 2, text: 'On it.', streaming: false, at: at(9, 14, 6) },
+          { kind: 'user', id: 3, text: 'Any news?', at: at(10, 9, 0) },
+          { kind: 'thinking', id: 4, text: 'Checking.', streaming: false, at: at(11, 10, 40) },
+          { kind: 'agent', id: 5, text: 'Done.', streaming: false, at: at(11, 10, 41) },
+        ],
+        { sessionId: talk.id },
+      ),
+    );
+    const chat = within(screen.getByRole('log', { name: 'Conversation' }));
+
+    expect(chat.getAllByRole('separator').map((s) => s.getAttribute('aria-label'))).toEqual(['Mon, 9 Nov', 'Yesterday', 'Today']);
+    const times = chat.getAllByRole('time');
+    expect(times.map((t) => t.textContent)).toEqual(['14:05', '14:06', '09:00', '10:40']);
+    expect(times[0]!.getAttribute('title')).toBe('Mon, 9 Nov 2026, 14:05');
+    expect(within(chat.getByText('From before times were kept').closest('.msg') as HTMLElement).queryByRole('time')).toBeNull();
   });
 });
 
