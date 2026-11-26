@@ -24,6 +24,8 @@ export const OPENCODE_ACP: AcpProfile = {
   ownTools: new Set(OPENCODE_TOOLS),
   // OpenCode keeps its to-do list with a tool, and tells ACP nothing else of it.
   planTool: 'todowrite',
+  // OpenCode 2.4.2 runs Subagents in the background, and reports them apart to a client that opts in.
+  subagentTool: 'subagent',
 };
 const VERSION_TIMEOUT_MS = 10_000;
 // The bridge gives the probe 15 s; this leaves it room to answer.

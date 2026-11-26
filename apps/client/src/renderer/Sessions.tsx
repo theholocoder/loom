@@ -33,6 +33,7 @@ import { isSnoozed } from './Snooze';
 import { useNow } from './now';
 import { ContextGauge, effortsOf, effortTaken, listedModels, ModelMarker, ModelName, ModelPickers } from './ModelPicker';
 import { AttachmentList, CommentNoteForm, Composer } from './Composer';
+import { startsSubagent, SubagentCard, subagentOfCall, SubagentView } from './Subagents';
 import { withNote, type PendingComment } from './diff-comments';
 import { useSessionMenu } from './SessionMenu';
 import { isFreeEscape } from './escape';
@@ -498,6 +499,11 @@ export function SessionView({
 }) {
   const api = useApi();
   const items = useTopic('transcript', { sessionId: session.id }) ?? [];
+  const subagents = useTopic('subagents', { sessionId: session.id }) ?? [];
+  /** The Subagent shown in place of the conversation, if any. */
+  const [viewing, setViewing] = useState<string>();
+  useEffect(() => setViewing(undefined), [session.id]);
+  const viewed = viewing === undefined ? undefined : subagents.find((s) => s.id === viewing);
   const project = useTopic('projects')?.find((p) => p.id === session.projectId);
   const { commands, refresh: refreshCommands } = useAgentCommands(project?.id, session.agentCommands);
   const removedProject = useRemovedProject(session.projectId);
@@ -537,6 +543,9 @@ export function SessionView({
   const menu = useSessionMenu(session, actionFailed);
   const status = statusOf(session);
   const working = session.status === 'working';
+  // Working on its Subagents alone, the agent is between runs: a message goes as a reply, and there's no run to Stop.
+  const agentWorking = working && !session.subagentsOnly;
+  const stopSubagent = session.canStopSubagents ? (subagentId: string) => void runCommand(() => api.invoke('sessions.stopSubagent', { id: session.id, subagentId })) : undefined;
   // The conversation lives only while the Client runs; the error is stored.
   const unshownError = session.waitingReason === 'error' && session.error && !items.some((i) => i.kind === 'error') ? session.error : undefined;
   const environment = useTopic('environments')?.find((e) => e.id === project?.checkout.environmentId);
@@ -648,7 +657,7 @@ export function SessionView({
 
   /** What the composer is for right now, when it isn't for a reply. */
   const composerSituation = (): string | undefined => {
-    if (working) return `Queue a message for when ${session.agent} finishes…`;
+    if (agentWorking) return `Queue a message for when ${session.agent} finishes…`;
     if (freeAnswer) return freeAnswer.placeholder;
     if (firstAsked?.kind === 'approval') return 'Approve or deny the request above to go on.';
     if (asked) return 'Answer the question above to go on.';
@@ -780,6 +789,7 @@ export function SessionView({
         onShowChanges={() => panels.show('changes')}
         onShowMergeRequest={showMergeRequest}
         onShowIssue={() => panels.show('issue')}
+        onOpenSubagent={setViewing}
         onError={actionFailed}
       >
         {archiver.dialog}
@@ -788,6 +798,18 @@ export function SessionView({
       </SessionHeader>
       <div className={panels.review ? 'session-body reviewing' : 'session-body'}>
         <div className="convo">
+          {viewed ? (
+            <SubagentView
+              session={session}
+              subagent={viewed}
+              subagents={subagents}
+              asking={items.find((i): i is Extract<TranscriptItem, { kind: 'question' | 'approval' }> => (i.kind === 'question' || i.kind === 'approval') && i.state === 'asked' && i.subagent?.id === viewed.id)}
+              onOpen={setViewing}
+              onBack={setViewing}
+              onStop={stopSubagent}
+            />
+          ) : (
+          <>
           <div ref={conversation} className="chat" role="log" aria-label="Conversation" tabIndex={-1} onScroll={scrolled} onContextMenu={commentOnConversation}>
             {turnParts(items).map((item) =>
               'said' in item ? (
@@ -802,7 +824,18 @@ export function SessionView({
                   </div>
                 </div>
               ) : item.kind === 'tool' ? (
-                <ToolCard key={item.id} item={item} />
+                startsSubagent(item, subagents) ? (
+                  <SubagentCard
+                    key={item.id}
+                    subagent={subagentOfCall(item, subagents)!}
+                    sessionModel={session.model ?? agentConfig?.model}
+                    models={offeredModels}
+                    onOpen={() => setViewing(subagentOfCall(item, subagents)!.id)}
+                    onStop={stopSubagent && (() => stopSubagent(subagentOfCall(item, subagents)!.id))}
+                  />
+                ) : (
+                  <ToolCard key={item.id} item={item} />
+                )
               ) : item.kind === 'plan' ? (
                 <PlanCard key={item.id} item={item} />
               ) : item.kind === 'question' ? (
@@ -892,7 +925,7 @@ export function SessionView({
             onEscape={() => conversation.current?.focus()}
             onDisabledWithFocus={focusAsked}
             draftKey={sessionDraft(session.id)}
-            queueing={working}
+            queueing={agentWorking}
             tools={
               <ModelPickers
                 agent={session.agent}
@@ -907,13 +940,13 @@ export function SessionView({
               />
             }
             gauge={session.context && <ContextGauge context={session.context} />}
-            onStop={working ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
+            onStop={agentWorking ? () => void runCommand(() => api.invoke('sessions.stop', { id: session.id })) : undefined}
             queue={
               session.queue && session.status !== 'archived' ? (
                 <Queue
                   queue={session.queue}
                   // Steering needs a run going; otherwise Send now sends it as the reply.
-                  steer={working && !!session.canSteer}
+                  steer={agentWorking && !!session.canSteer}
                   onSendNow={(queuedId) => void runCommand(() => api.invoke('sessions.sendNow', { id: session.id, queuedId }))}
                   onSteer={(queuedId) => void runCommand(() => api.invoke('sessions.steer', { id: session.id, queuedId }))}
                   onRemove={(queuedId) => void runCommand(() => api.invoke('sessions.removeQueued', { id: session.id, queuedId }))}
@@ -923,6 +956,8 @@ export function SessionView({
               ) : undefined
             }
           />
+          </>
+          )}
         </div>
         {panels.ready && (sideShown || panels.review) && (
           <PanelArea area="side" session={session} project={project} terminals={terminals} control={panels} onError={actionFailed} />

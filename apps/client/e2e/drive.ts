@@ -57,7 +57,45 @@ const turns: AcpTurn[] = [
   },
   { chunks: ['Working on the long task…'], hold: 'long' },
   { chunks: ['Trying'], error: 'Provider error: rate limit exceeded (429). Try again later.' },
+  subagentsTurn(),
 ];
+
+/**
+ * A turn that starts a Subagent, as OpenCode 2.4.2 reports it: it reads,
+ * starts a nested Subagent that completes, and runs until `subagent` is
+ * released; its result then starts the parent's next run.
+ */
+function subagentsTurn(): AcpTurn {
+  const child = (id: string, what: Record<string, unknown>, parent = '$ROOT', depth = 1, title = 'Explore auth') => ({
+    notify: { method: 'opencode/session/child_update', params: { rootSessionId: '$ROOT', childSessionId: id, parentSessionId: parent, depth, title, ...what } },
+  });
+  const inChild = (update: Record<string, unknown>) => child('ses_explore', { type: 'update', update: { ...update, toolCallId: `ses_explore:${String(update.toolCallId)}` } });
+  const starts = (callId: string, id: string, input: Record<string, string>, send: (update: Record<string, unknown>) => AcpTurn['after'] extends Array<infer C> | undefined ? C : never, parent?: string, depth?: number) => [
+    send({ sessionUpdate: 'tool_call', toolCallId: callId, name: 'subagent', title: 'subagent', kind: 'think', status: 'pending', rawInput: {} }),
+    send({ sessionUpdate: 'tool_call_update', toolCallId: callId, status: 'in_progress', kind: 'think', rawInput: input }),
+    child(id, { type: 'status', status: 'created' }, parent, depth, input.description),
+    send({ sessionUpdate: 'tool_call_update', toolCallId: callId, status: 'completed', content: text(`The subagent is working in the background (sessionID: ${id}).`), rawOutput: { metadata: { sessionID: id, status: 'running' } } }),
+    child(id, { type: 'status', status: 'running' }, parent, depth, input.description),
+  ];
+  return {
+    chunks: [
+      "I'll have a Subagent explore the auth code while I wait.",
+      ...starts('call_explore', 'ses_explore', { agent: 'explore', description: 'Explore auth', prompt: 'Find where sessions are checked.' }, (update) => ({ update })),
+    ],
+    after: [
+      child('ses_explore', { type: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Looking for where sessions are checked.' } } }),
+      inChild({ sessionUpdate: 'tool_call', toolCallId: 'call_grep', name: 'grep', title: 'grep', kind: 'search', status: 'pending', rawInput: { pattern: 'checkSession' } }),
+      inChild({ sessionUpdate: 'tool_call_update', toolCallId: 'call_grep', status: 'completed', content: text('src/auth.ts:12: export function checkSession(req) {') }),
+      ...starts('call_tests', 'ses_tests', { agent: 'general', description: 'Read the auth tests', prompt: 'Read auth.test.ts.', model: 'anthropic/claude-sonnet-5-5' }, inChild, 'ses_explore', 2),
+      child('ses_tests', { type: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests cover expired sessions only.' } } }, 'ses_explore', 2, 'Read the auth tests'),
+      child('ses_tests', { type: 'status', status: 'completed' }, 'ses_explore', 2, 'Read the auth tests'),
+      { hold: 'subagent' },
+      child('ses_explore', { type: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Sessions are checked in `src/auth.ts`, line 12.' } } }),
+      child('ses_explore', { type: 'status', status: 'completed' }),
+      'The Subagent found it: sessions are checked in `src/auth.ts`.',
+    ],
+  };
+}
 
 /** What Session highlights' checks answer, one per check: notes on the first turn, then a resolution. */
 const highlightTurns: AcpTurn[] = [

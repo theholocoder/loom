@@ -39,6 +39,7 @@ import { attempt, openable, SessionDetails, workingMs } from './SessionDetails';
 import { RenameSession, type SessionMenu } from './SessionMenu';
 import { SnoozeMenu } from './Snooze';
 import { canActOnForge, CHECK_STATES, checksSummary, countText, ENDED_LOOKS } from './MergeRequestLooks';
+import { SubagentsChip } from './Subagents';
 
 /** Where Session details opens from: the title, the branch chip, the context meter or the ⋯ menu. */
 export type DetailsAnchor = 'title' | 'branch' | 'context' | 'menu';
@@ -49,6 +50,8 @@ export type HeaderPopover =
   | { kind: 'checks' }
   | { kind: 'issue' }
   | { kind: 'menu' }
+  /** The Subagents running, from their chip. */
+  | { kind: 'subagents' }
   /** Snooze and Rename, asked from the palette: beside the title. */
   | { kind: 'snooze' }
   | { kind: 'rename' };
@@ -80,6 +83,7 @@ export function SessionHeader({
   onShowChanges,
   onShowMergeRequest,
   onShowIssue,
+  onOpenSubagent,
   onError,
   children,
 }: {
@@ -98,6 +102,8 @@ export function SessionHeader({
   onShowMergeRequest: (at?: 'reviews') => void;
   /** Shows the Issue Panel. */
   onShowIssue: () => void;
+  /** Opens one of the Session's Subagents, in place of its conversation. */
+  onOpenSubagent: (subagentId: string) => void;
   onError: (message: string | undefined) => void;
   /** Rendered in the header: the dialogs its actions open. */
   children?: ReactNode;
@@ -218,6 +224,15 @@ export function SessionHeader({
         <ChangesChip stat={session.diffStat} onClick={onShowChanges} />
         <ContextChip session={session} anchor={anchors.context} expanded={details === 'context'} onClick={() => toggleDetails('context')} />
         <IssueChip session={session} project={project} open={popover?.kind === 'issue'} onPopover={onPopover} onShow={onShowIssue} onError={onError} />
+        <SubagentsChip
+          session={session}
+          open={popover?.kind === 'subagents'}
+          onToggle={() => onPopover(popover?.kind === 'subagents' ? undefined : { kind: 'subagents' })}
+          onOpen={(subagentId) => {
+            close();
+            onOpenSubagent(subagentId);
+          }}
+        />
       </div>
     </>
   );

@@ -35,6 +35,15 @@
 // process with every tool denied (a Session highlights check) plays the next
 // of `highlightTurns` instead, counted across processes; past their end, an
 // answer with nothing to add.
+// A `{ notify }` chunk sends that notification as it is, `"$ROOT"` in its
+// params standing for the session's id: OpenCode 2.4.2's
+// `opencode/session/child_update`, which goes to a client that opted in.
+// A turn's `after` chunks play once its `session/prompt` has been answered:
+// what a subagent and the run its result starts send with no prompt open.
+// `session/load` of a subagent's id (one that a `{ notify }` named as a
+// `childSessionId`) is answered without taking it up, and `session/close` of
+// it sends its `interrupted` status, as OpenCode 2.4.2 does. A `{ permission }`
+// chunk with `from` asks as that subagent; in `after`, its answer ends nothing.
 // Every message it receives is appended to
 // <script.json>.acp.log as {pid, cwd, config, message}, `config` being its
 // OPENCODE_CONFIG_CONTENT. It exits when its stdin closes.
@@ -163,6 +172,41 @@ function acp() {
     const availableCommands = [...(script.commands ?? []).map(({ name, description }) => ({ name, description: description ?? '' })), { name: 'compact', description: 'Compact the session' }];
     send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'available_commands_update', availableCommands } } });
   };
+  /** The subagents `{ notify }` chunks named, by id: what their status notifications said of them. */
+  const children = new Map();
+  const notifyOf = ({ method, params }) => {
+    const filled = JSON.parse(JSON.stringify(params).replaceAll('"$ROOT"', JSON.stringify(sessionId)));
+    if (method === 'opencode/session/child_update' && filled.childSessionId) children.set(filled.childSessionId, filled);
+    send({ method, params: filled });
+  };
+  /** Plays chunks that send no request of their own: notifications, updates and holds. */
+  const play = async (chunks, current) => {
+    for (const chunk of chunks) {
+      if (current?.cancelled) break;
+      if (typeof chunk === 'string') {
+        send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } } } });
+        continue;
+      }
+      if (chunk.hold) await (current ? Promise.race([released(chunk.hold), current.stopped]) : released(chunk.hold));
+      if (current?.cancelled) break;
+      if (chunk.notify) notifyOf(chunk.notify);
+      if (chunk.update) send({ method: 'session/update', params: { sessionId, update: chunk.update } });
+      if (chunk.permission) await askPermission(chunk.permission, chunk.from);
+    }
+  };
+  /** A permission request, with OpenCode's options, from the session or, `from`, one of its subagents: resolves with whether it was allowed once. */
+  const askPermission = async (toolCall, from) => {
+    const reply = await ask('session/request_permission', {
+      sessionId: from ?? sessionId,
+      toolCall: { status: 'pending', ...toolCall },
+      options: [
+        { optionId: 'once', kind: 'allow_once', name: 'Allow once' },
+        { optionId: 'always', kind: 'allow_always', name: 'Always allow' },
+        { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
+      ],
+    });
+    return reply.result?.outcome?.optionId === 'once';
+  };
   const lines = createInterface({ input: process.stdin });
   lines.on('line', async (line) => {
     if (!line.trim()) return;
@@ -176,12 +220,20 @@ function acp() {
       return;
     }
     if (method === 'initialize') {
-      send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} }, ...(script.acp?.images ? { promptCapabilities: { image: true } } : {}) }, authMethods: [] } });
+      send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {}, close: {} }, ...(script.acp?.images ? { promptCapabilities: { image: true } } : {}) }, authMethods: [] } });
     } else if (method === 'session/new') {
       if (script.acp?.holdNew) await released(script.acp.holdNew);
       sessionId = `ses_standin${process.pid}`;
       send({ id, result: { sessionId, configOptions: configOptions(models, selection) } });
       announceCommands();
+    } else if (method === 'session/load' && children.has(params.sessionId)) {
+      send({ id, result: { configOptions: configOptions(models, selection) } });
+    } else if (method === 'session/close') {
+      const child = children.get(params.sessionId);
+      if (!child) return send({ id, error: { code: -32602, message: `Invalid params: session not found: ${params.sessionId}` } });
+      send({ id, result: {} });
+      const { update: _update, error: _error, ...ids } = child;
+      notifyOf({ method: 'opencode/session/child_update', params: { ...ids, type: 'status', status: 'interrupted' } });
     } else if (method === 'session/resume' || method === 'session/load') {
       if ((script.acp?.refuse ?? []).includes(method)) return send({ id, error: { code: -32602, message: `Invalid params: session not found: ${params.sessionId}` } });
       sessionId = params.sessionId;
@@ -228,19 +280,9 @@ function acp() {
           // An elicitation (a question, or a plugin's form): the turn goes on once Loom answers it.
           if (text.elicit) await ask('elicitation/create', { sessionId, mode: 'form', ...text.elicit });
           // A permission request, with OpenCode's options; a reject cancels the rest of the turn.
-          if (text.permission) {
-            const reply = await ask('session/request_permission', {
-              sessionId,
-              toolCall: { status: 'pending', ...text.permission },
-              options: [
-                { optionId: 'once', kind: 'allow_once', name: 'Allow once' },
-                { optionId: 'always', kind: 'allow_always', name: 'Always allow' },
-                { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
-              ],
-            });
-            if (reply.result?.outcome?.optionId !== 'once') rejected = true;
-          }
+          if (text.permission && !(await askPermission(text.permission, text.from))) rejected = true;
           if (text.update) send({ method: 'session/update', params: { sessionId, update: text.update } });
+          if (text.notify) notifyOf(text.notify);
           // A tool output of `bytes` bytes, made here so the script stays small: HEAD>, x's, <TAIL.
           if (text.bigOutput) {
             const { toolCallId, bytes } = text.bigOutput;
@@ -261,6 +303,7 @@ function acp() {
       if (rejected || current.cancelled) return send({ id, result: { stopReason: 'cancelled', ...usage } });
       if (turn.error) send({ id, error: { code: -32603, message: turn.error } });
       else send({ id, result: { stopReason: 'end_turn', ...usage } });
+      if (turn.after) await play(turn.after);
     } else if (id !== undefined) {
       send({ id, error: { code: -32601, message: `opencode stand-in: unscripted method ${method}` } });
     }

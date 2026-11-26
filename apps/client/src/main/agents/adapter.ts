@@ -2,7 +2,7 @@
 // every agent through it; how an agent is spoken to (ACP for OpenCode) stays
 // behind it. Adapters report facts as events; the Session service derives
 // Session status from them.
-import type { AgentCommand, AgentConfig, Answer, ApprovalPolicy, ModelPick, FileChange, PlanEntry, QuestionField, TokenCounts, ToolStatus } from '../../shared/api';
+import type { AgentCommand, AgentConfig, Answer, ApprovalPolicy, ModelPick, FileChange, PlanEntry, QuestionField, SubagentStatus, TokenCounts, ToolStatus } from '../../shared/api';
 import type { Channel, ChannelParams } from '../environments/channel';
 
 /** Where an agent's process runs: its Session's Environment. */
@@ -13,7 +13,12 @@ export interface AgentEnvironment {
 
 /** What an agent reports, in Loom's vocabulary. */
 export type AgentEvent =
-  | { type: 'run-started' }
+  /**
+   * A run started: one Loom prompted, or, `background`, one the agent
+   * started on its own, as on a Subagent's result. A background run ends
+   * with `run-settled` like any other.
+   */
+  | { type: 'run-started'; background?: true }
   | { type: 'text-delta'; text: string }
   /** More of the agent's thinking, shown apart from its reply. */
   | { type: 'thinking-delta'; text: string }
@@ -28,14 +33,21 @@ export type AgentEvent =
    * tool, or a dialog from the user's plugins or MCP servers. Answered with
    * AgentSession.answer, under `requestId`.
    */
-  | { type: 'question-asked'; requestId: string; message: string; fields: QuestionField[] }
+  | { type: 'question-asked'; requestId: string; message: string; fields: QuestionField[]; subagentId?: string }
   /** The agent asks whether to trust the Project's local files; answered like a question. */
   | { type: 'trust-asked'; requestId: string; message: string }
   /**
    * The agent paused before an action its approval rules ask about, until
    * AgentSession.answer approves or denies it under `requestId`.
    */
-  | { type: 'approval-asked'; requestId: string; action: ApprovalAction }
+  | { type: 'approval-asked'; requestId: string; action: ApprovalAction; subagentId?: string }
+  /**
+   * A Subagent started, or how its work goes changed: all that is known of
+   * it each time. Its parent is the Session's agent, or another Subagent.
+   */
+  | { type: 'subagent-status'; subagent: SubagentReport }
+  /** Something a Subagent did, as the Session's agent would report it. */
+  | { type: 'subagent-event'; subagentId: string; event: SubagentEvent }
   /** What the agent offers to pick and runs with: when it starts, and whenever that changes. */
   | { type: 'config'; config: AgentConfig }
   /** The commands it offers, all of them (`kind: 'command'`): when it starts, and whenever they change. */
@@ -48,12 +60,35 @@ export type AgentEvent =
   | { type: 'usage'; used: number; size: number; cost?: number }
   /** The tokens the run used, by kind, once it has ended, cancelled or not: before its `run-settled`. */
   | { type: 'turn-usage'; tokens: TokenCounts }
+  /** The tokens a Subagent used, when the agent reports them: counted as the Session's. */
+  | { type: 'subagent-usage'; subagentId: string; tokens: TokenCounts }
   /** The run ended normally. */
   | { type: 'run-settled' }
   /** The run ended in an error, such as a provider's (no credit, exhausted quota). */
   | { type: 'run-failed'; error: string }
   /** The agent's process ended; the session can't be used any more. */
   | { type: 'closed'; error?: string };
+
+/** What a Subagent does that its transcript shows. */
+export type SubagentEvent = Extract<AgentEvent, { type: 'text-delta' | 'thinking-delta' | 'plan' | 'tool-started' | 'tool-updated' }>;
+
+/** A Subagent as the agent reports it. */
+export interface SubagentReport {
+  /** The agent's own id for it. */
+  subagentId: string;
+  /** The Subagent that started it; absent for one the Session's agent started. */
+  parentId?: string;
+  depth: number;
+  status: SubagentStatus;
+  /** What it was asked to do, in a few words, once the agent says. */
+  description?: string;
+  /** The tool call that started it, in its parent's, once linked. */
+  toolCallId?: string;
+  /** The kind of agent it runs as, and the model it was given, when the agent says. */
+  agent?: string;
+  model?: string;
+  error?: string;
+}
 
 /** A tool call as an agent reports it, by the agent's id for it. */
 export interface ToolCall {
@@ -77,6 +112,8 @@ export interface ToolCall {
    * Mode reports no tool call of its own for them.
    */
   scriptCalls?: ScriptCall[];
+  /** The Subagent it started, for the agent's subagent tool, once the agent says which. */
+  subagentId?: string;
 }
 
 /** A tool a script called, as the agent reports it: its name, how it went, and its input. */
@@ -170,6 +207,11 @@ export interface AgentSession {
    * the run ends (settles or fails) soon after.
    */
   cancel(): void;
+  /**
+   * Stops the running Subagent `subagentId` alone; its `subagent-status`
+   * follows. Absent for an agent that can't. Rejects if the agent can't.
+   */
+  stopSubagent?(subagentId: string): Promise<void>;
   /** Gives the agent `text` mid-run, for an agent that can be steered (`AgentAdapter.canSteer`). */
   steer?(prompt: AgentPrompt): void;
   /** Ends the agent's process; resolves once it has exited, killed if it doesn't within a few seconds. */

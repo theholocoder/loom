@@ -138,6 +138,29 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tool-diff-path { font-size: 12px; color: var(--muted); margin: 4px 0; overflow-wrap: anywhere; }
 .tool-diff .file-diff { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; max-height: 420px; overflow-y: auto; }
 .msg.agent .body > .tool { margin: 0 0 6px; }
+/* A Subagent's card where its parent started it: opens the Subagent; Stop beside it while it runs. */
+.tool.subagent-card { display: flex; align-items: stretch; }
+.tool.subagent-card.running { border-color: color-mix(in srgb, var(--work) 40%, var(--line)); }
+.tool.subagent-card.failed { border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+.subagent-open { flex: 1; min-width: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; }
+.subagent-open:hover { background: var(--hover); }
+.subagent-open:focus-visible, .subagent-stop:focus-visible, .subagent-back:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.subagent-status { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--muted); }
+.subagent-status.running { color: var(--work); } .subagent-status.completed { color: var(--ok); } .subagent-status.failed { color: var(--err); }
+.subagent-stop { display: inline-flex; align-items: center; gap: 4px; flex: none; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: none; color: var(--muted); padding: 0 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.subagent-stop:hover { background: var(--hover); color: var(--err); }
+/* A Subagent opened in place of the conversation: readonly, its footer where the composer was. */
+.subagent-empty { text-align: center; }
+.subagent-footer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 28px 16px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); font-size: 13px; }
+.subagent-footer .subagent-stop { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; }
+.subagent-back { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 40%; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--text); padding: 4px 10px; font: inherit; cursor: pointer; }
+.subagent-back:hover { background: var(--hover); }
+.subagent-back-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-facts { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.subagent-description { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.subagent-list { list-style: none; margin: 0; padding: 4px; min-width: 260px; }
+.subagent-list button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; background: none; color: var(--text); padding: 6px 8px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.subagent-list button:hover, .subagent-list button:focus-visible { background: var(--hover); }
 /* The agent's plan: open, each step with where it is. */
 .plan-steps { list-style: none; margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .plan-step { display: flex; gap: 8px; align-items: flex-start; }

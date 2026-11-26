@@ -654,6 +654,15 @@ export interface Session {
   queue?: QueuedMessage[];
   /** Set when its agent can take a queued message mid-run (Steer); otherwise Send now interrupts the run. */
   canSteer?: boolean;
+  /** Set when its agent, as last started, can stop one Subagent on its own (`sessions.stopSubagent`). */
+  canStopSubagents?: true;
+  /** How many of its Subagents are running; absent when none is. A Session is Working while any is. */
+  runningSubagents?: number;
+  /**
+   * Set while it is Working on its Subagents alone: its agent is between
+   * runs, so a message goes to it as a reply, and it has no run to Stop.
+   */
+  subagentsOnly?: true;
   /**
    * The model the user picked, `provider/model`, and its Effort level: what
    * each prompt runs with, from the next one. Absent for the agent's own
@@ -1144,6 +1153,36 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export type ToolStatus = 'running' | 'completed' | 'failed';
 
+/** How a Subagent's work went: `running` until it completes, fails, or is stopped (`interrupted`). */
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'interrupted';
+
+/**
+ * A conversation the agent of a Session started on its own to do part of
+ * the work (CONTEXT.md): kept with the Session, with its own transcript.
+ */
+export interface Subagent {
+  /** The agent's own id for it (OpenCode's `ses_…`). */
+  id: string;
+  /** The Subagent that started it; absent for one the Session's agent started. */
+  parentId?: string;
+  /** 1 for one the Session's agent started, 2 for one that one started, and so on. */
+  depth: number;
+  /** The tool call that started it, in its parent's transcript, once Loom has linked it. */
+  toolCallId?: string;
+  /** The kind of agent it runs as, such as `general` or `explore`, when the agent says. */
+  agent?: string;
+  /** What it was asked to do, in a few words. */
+  description: string;
+  /** The model it runs with, `provider/model`, when it was given one of its own. */
+  model?: string;
+  status: SubagentStatus;
+  /** What went wrong, when `failed` and the agent says. */
+  error?: string;
+  /** Clock times it started and, once it has, ended. */
+  startedAt: number;
+  endedAt?: number;
+}
+
 /**
  * One file a tool call changed, as the agent reports it: its path, in the
  * working copy when it is in there, its text before (none for a new file) and
@@ -1244,6 +1283,12 @@ export interface PlanEntry {
   status: PlanStatus;
 }
 
+/** The Subagent a question or Approval request came from, as the Session's transcript names it. */
+export interface AskingSubagent {
+  id: string;
+  description: string;
+}
+
 /** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
   /** What the user sent, with what they attached to it, if anything. */
@@ -1278,12 +1323,14 @@ export type TranscriptItem =
       /** The files it changed, for an edit. */
       diffs?: ToolDiff[];
       truncated?: boolean;
+      /** The Subagent it started, for the agent's subagent tool, once the agent has said which. */
+      subagentId?: string;
     }
   /**
    * A question the agent asked: its question tool, or a dialog from the
    * user's plugins or MCP servers. `answer` is set once `answered`.
    */
-  | { kind: 'question'; id: number; message: string; fields: QuestionField[]; state: QuestionState; answer?: Answer }
+  | { kind: 'question'; id: number; message: string; fields: QuestionField[]; state: QuestionState; answer?: Answer; subagent?: AskingSubagent }
   /** The agent asking whether to trust the Project's local files: asked once per Project. */
   | { kind: 'trust'; id: number; message: string; state: TrustState }
   /**
@@ -1305,6 +1352,7 @@ export type TranscriptItem =
       defaultBranch?: string;
       state: ApprovalState;
       message?: string;
+      subagent?: AskingSubagent;
     }
   /**
    * A run that failed, with the agent's message; `betweenRuns` when it
@@ -1736,6 +1784,11 @@ export interface Commands {
    * the Session goes Waiting (stopped). Rejects when no run is going.
    */
   'sessions.stop': { params: { id: number }; result: void };
+  /**
+   * Stops one of the Session's Subagents, and only it: it ends `interrupted`.
+   * Rejects when it isn't running.
+   */
+  'sessions.stopSubagent': { params: { id: number; subagentId: string }; result: void };
   /** Drops a message from the Session's queue. */
   'sessions.removeQueued': { params: { id: number; queuedId: number }; result: void };
   /**
@@ -2039,6 +2092,10 @@ export interface Topics {
   sessions: Session[];
   /** One Session's conversation, as it streams in. */
   transcript: TranscriptItem[];
+  /** One Session's Subagents, at every depth, in the order they started. */
+  subagents: Subagent[];
+  /** One Subagent's conversation, as it streams in: readonly. */
+  subagentTranscript: TranscriptItem[];
   /** One Session's Panels in each Panel area, as the user left them. */
   panels: SessionPanels;
   /** One Session's Highlights, and how checking them goes. */
@@ -2084,6 +2141,8 @@ export interface TopicParams {
   reviewThreads: { sessionId: number };
   terminals: { sessionId: number };
   terminalOutput: { id: number };
+  subagents: { sessionId: number };
+  subagentTranscript: { sessionId: number; subagentId: string };
 }
 
 /** How much of what a terminal printed main keeps, to show it to a new listener. */

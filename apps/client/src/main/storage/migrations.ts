@@ -240,4 +240,33 @@ export const migrations: Migration[] = [
     // The branch the user set as a Project's default, over git's: null for git's own.
     await db.schema.alterTable('projects').addColumn('default_branch', 'text').execute();
   },
+  async (db) => {
+    // A Session's Subagents, kept with it, and each one's transcript, as `events` keeps the Session's own.
+    await db.schema
+      .createTable('subagents')
+      .addColumn('session_id', 'integer', (c) => c.notNull().references('sessions.id').onDelete('cascade'))
+      .addColumn('id', 'text', (c) => c.notNull())
+      .addColumn('parent_id', 'text')
+      .addColumn('depth', 'integer', (c) => c.notNull())
+      .addColumn('tool_call_id', 'text')
+      .addColumn('agent', 'text')
+      .addColumn('description', 'text', (c) => c.notNull())
+      .addColumn('model', 'text')
+      .addColumn('status', 'text', (c) => c.notNull())
+      .addColumn('error', 'text')
+      .addColumn('started_at', 'integer', (c) => c.notNull())
+      .addColumn('ended_at', 'integer')
+      .addPrimaryKeyConstraint('subagents_pk', ['session_id', 'id'])
+      .execute();
+    await db.schema
+      .createTable('subagent_events')
+      .addColumn('session_id', 'integer', (c) => c.notNull())
+      .addColumn('subagent_id', 'text', (c) => c.notNull())
+      .addColumn('seq', 'integer', (c) => c.notNull())
+      .addColumn('kind', 'text', (c) => c.notNull())
+      .addColumn('data', 'text', (c) => c.notNull())
+      .addPrimaryKeyConstraint('subagent_events_pk', ['session_id', 'subagent_id', 'seq'])
+      .addForeignKeyConstraint('subagent_events_subagent', ['session_id', 'subagent_id'], 'subagents', ['session_id', 'id'], (c) => c.onDelete('cascade'))
+      .execute();
+  },
 ];
