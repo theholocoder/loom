@@ -3,7 +3,7 @@
 // Environment with its full PATH.
 import { splitCommandLine } from '../command-line';
 import { isNotFound, type BridgeCall } from '../environments/exec';
-import { drivePathOf, onWindowsDrive, windowsPathOf } from '../../shared/environment-ids';
+import { windowsPath } from '../../shared/environment-paths';
 
 /** How long the bridge may take to start the program. */
 const LAUNCH_TIMEOUT_MS = 15_000;
@@ -38,44 +38,32 @@ export interface OpenRequest {
  * natively and gets the path as Windows shows it, `\\wsl.localhost\<distro>\…`.
  */
 export async function openIn(environment: OpenEnvironment, request: OpenRequest): Promise<void> {
-  const words = splitCommandLine(request.command);
-  if (!words.length) {
+  const [program, ...rest] = splitCommandLine(request.command);
+  if (program === undefined) {
     throw new Error(request.opener === 'terminal' ? 'Set a terminal command in Settings to open a terminal.' : 'Set an editor command in Settings to open the editor.');
   }
-  const program = words[0]!;
   const { wsl } = environment;
-  if (wsl && isWindowsProgram(program)) {
-    const workingCopy = windowsPathOf(wsl.distro, request.workingCopy);
-    return launch(wsl.windows, request.opener, onWindowsDrive(program) ? drivePathOf(program) : program, argsOf(request.opener, words, fileOf(workingCopy, request.file)));
-  }
-  return launch(environment, request.opener, program, argsOf(request.opener, words, fileOf(request.workingCopy, request.file)), request.workingCopy);
-}
-
-function argsOf(opener: Opener, [, ...rest]: string[], path: string): string[] {
+  const onWindows = wsl && isWindowsProgram(program);
+  const runIn = onWindows ? wsl.windows : environment;
+  const command = onWindows && program.startsWith('/') ? windowsPath(wsl.distro, program) : program;
+  const workingCopy = onWindows ? windowsPath(wsl.distro, request.workingCopy) : request.workingCopy;
+  const path = request.file === undefined ? workingCopy : fileIn(workingCopy, request.file);
   // `{path}` is substituted only in the arguments, never in the program word, deliberately.
   const args = rest.map((word) => word.replaceAll(PATH_PLACEHOLDER, path));
-  if (opener === 'editor' && !rest.some((word) => word.includes(PATH_PLACEHOLDER))) args.push(path);
-  return args;
-}
-
-function fileOf(workingCopy: string, file: string | undefined): string {
-  return file === undefined ? workingCopy : fileIn(workingCopy, file);
-}
-
-/** Whether `program` names a Windows file: one with a Windows program's extension, or a Windows path. A distro's path to one is run as Windows writes it. */
-function isWindowsProgram(program: string): boolean {
-  return /\.(exe|cmd|bat|com)$/i.test(program) || /^([A-Za-z]:[\\/]|\\)/.test(program);
-}
-
-async function launch(environment: OpenEnvironment, opener: Opener, program: string, args: string[], cwd?: string): Promise<void> {
+  if (request.opener === 'editor' && !rest.some((word) => word.includes(PATH_PLACEHOLDER))) args.push(path);
   try {
-    await environment.request('launch', LAUNCH_TIMEOUT_MS, { command: program, args, ...(cwd !== undefined && { cwd }) });
+    await runIn.request('launch', LAUNCH_TIMEOUT_MS, { command, args, ...(!onWindows && { cwd: workingCopy }) });
   } catch (error) {
     if (isNotFound(error)) {
-      throw new Error(`${program} isn't installed in ${environment.label}, or isn't on your shell's PATH. Check the ${opener} command in Settings.`);
+      throw new Error(`${program} isn't installed in ${runIn.label}, or isn't on your shell's PATH. Check the ${request.opener} command in Settings.`);
     }
     throw error;
   }
+}
+
+/** Whether `program` names a Windows file: one with a Windows program's extension, or a Windows path. */
+function isWindowsProgram(program: string): boolean {
+  return /\.(exe|cmd|bat|com)$/i.test(program) || /^([A-Za-z]:[\\/]|\\)/.test(program);
 }
 
 /** `file`, relative to `workingCopy`, as a path there; rejects one that leads out of it. */

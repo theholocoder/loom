@@ -1,7 +1,8 @@
 import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, GitBranch, LoaderCircle, MessageSquarePlus, Palette, Search, Trash2, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FORGE_CLI, FORGE_NAMES, OPENCODE_NAME, type Commands, type EnvironmentStatus, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
-import { distroOf, NATIVE_ENVIRONMENT_ID, onWindowsDrive } from '../shared/environment-ids';
+import { distroOf, NATIVE_ENVIRONMENT_ID } from '../shared/environment-ids';
+import { isSlowCheckout } from '../shared/environment-paths';
 import { branchPrefixError, branchPrefixOf, defaultBranchError, defaultBranchOf } from '../shared/branches';
 import { AVATAR_MAX, avatarError, avatarText, PROJECT_COLOR_NAMES, PROJECT_COLORS, projectNameError, type ProjectColor } from '../shared/projects';
 import { ErrorText } from './ErrorText';
@@ -67,10 +68,9 @@ export function useProjectAdder(): ProjectAdder {
   };
   const linkIn = (environmentId: string) =>
     run(async () => {
-      const inWsl = environmentId !== NATIVE_ENVIRONMENT_ID;
-      const path = await api.invoke('dialogs.chooseFolder', inWsl ? { environmentId } : undefined);
+      const path = await api.invoke('dialogs.chooseFolder', { environmentId });
       if (!path) return undefined;
-      const checkout: CheckoutPick = inWsl ? { path, environmentId } : { path };
+      const checkout: CheckoutPick = { path, environmentId };
       const project = await api.invoke('projects.restorable', checkout);
       if (!project) return { project: await api.invoke('projects.link', checkout), restored: false };
       setOffer({ checkout, project });
@@ -78,8 +78,7 @@ export function useProjectAdder(): ProjectAdder {
     });
   const distros = environments.filter((e) => e.distro && e.state !== 'failed');
   const link = async () => {
-    const hasWsl = distros.length > 0;
-    if (hasWsl) setChoosing(true);
+    if (distros.length > 0) setChoosing(true);
     else await linkIn(NATIVE_ENVIRONMENT_ID);
   };
   const answer = (restore: boolean) => {
@@ -109,7 +108,7 @@ export function useProjectAdder(): ProjectAdder {
   return { linking, error, added, link, dismiss, dialog };
 }
 
-/** A checkout to link: its folder, and its Environment unless native. */
+/** A checkout to link: its folder and its Environment. */
 type CheckoutPick = Commands['projects.restorable']['params'];
 
 /** Asks where a checkout's work runs: natively on Windows or in one of the WSL distros, the first preselected. */
@@ -151,8 +150,8 @@ function EnvironmentChoice({ distros, onChoose, onCancel }: { distros: Environme
 /** Why a WSL checkout on a Windows drive (`/mnt/c/…`) is slow, and what to do instead. */
 function SlowCheckout({ project }: { project: Project }) {
   const { environmentId, path } = project.checkout;
+  if (!isSlowCheckout(project.checkout)) return null;
   const distro = distroOf(environmentId);
-  if (!distro || !onWindowsDrive(path)) return null;
   return (
     <div className="warn page-note" role="note" aria-label="Slow checkout">
       <TriangleAlert className="sm" /> {path} is on a Windows drive: git and the agent are slow there from {distro}. For speed, clone it into {distro}'s own folders, like ~/code, and add that clone.

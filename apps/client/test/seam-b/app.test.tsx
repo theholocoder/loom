@@ -380,7 +380,7 @@ describe('Projects', () => {
 
     fireEvent.click(addProjectButton());
 
-    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom', environmentId: 'native' } }));
   });
 
   it('links nothing when the folder picker is cancelled', async () => {
@@ -427,7 +427,7 @@ describe('Projects', () => {
       fireEvent.click(within(choice()).getByRole('radio', { name: 'Windows' }));
       fireEvent.click(within(choice()).getByRole('button', { name: 'Choose the folder…' }));
 
-      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: 'C:\\code\\loom' } }));
+      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: 'C:\\code\\loom', environmentId: 'native' } }));
     });
 
     it('warns that a WSL checkout on a Windows drive is slow', async () => {
@@ -765,7 +765,7 @@ describe('the + menu', () => {
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add a Project…' }));
 
-    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom', environmentId: 'native' } }));
     expect(screen.getByRole('dialog', { name: 'Projects' })).toBeTruthy();
     expect(screen.queryByRole('menu')).toBeNull();
   });

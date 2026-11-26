@@ -66,7 +66,7 @@ describe('the welcome, with no Project', () => {
 
     fireEvent.click(within(screen.getByRole('region', { name: 'Welcome' })).getByRole('button', { name: 'Add a Project…' }));
 
-    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom', environmentId: 'native' } }));
   });
 
   it('checks each Environment and its agent', () => {
@@ -125,7 +125,7 @@ describe('New Session, with no Project', () => {
     expect(within(pane).getByText('Add a Project before starting a Session.')).toBeTruthy();
     fireEvent.click(within(pane).getByRole('button', { name: 'Add a Project…' }));
 
-    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom' } }));
+    await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '/home/dev/code/loom', environmentId: 'native' } }));
   });
 });
 

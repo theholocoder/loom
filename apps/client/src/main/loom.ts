@@ -7,7 +7,8 @@ import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
 import type { Clock } from './clock';
-import { distroOf, NATIVE_ENVIRONMENT_ID, windowsPathOf, wslEnvironmentId } from '../shared/environment-ids';
+import { distroOf, NATIVE_ENVIRONMENT_ID, wslEnvironmentId } from '../shared/environment-ids';
+import { windowsPath } from '../shared/environment-paths';
 import { bridgeBinaryPath } from './environments/bridge-path';
 import { BridgeNotInstalled, Environment, type SpawnBridge } from './environments/environment';
 import { Projects } from './projects/projects';
@@ -457,7 +458,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     const distro = environment?.status.distro;
     if (!environment || !distro) return undefined;
     await environment.ready().catch(() => {});
-    return windowsPathOf(distro, environment.status.bridge?.home || '/');
+    return windowsPath(distro, environment.status.bridge?.home || '/');
   };
 
   /** Opens a Session's working copy in the user's editor or terminal, in its Environment. */
@@ -467,7 +468,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     const environment = knownEnvironment(environmentIdOf(session.projectId));
     const { editorCommand, terminalCommand } = settingsService.value;
     const { distro } = environment.status;
-    return openIn(distro ? { ...forSessions(environment), wsl: { distro, windows: forSessions(native) } } : forSessions(environment), {
+    const opening = forSessions(environment);
+    return openIn(distro ? { ...opening, wsl: { distro, windows: forSessions(native) } } : opening, {
       opener,
       command: opener === 'editor' ? editorCommand : terminalCommand,
       workingCopy: session.workingCopy.path,
