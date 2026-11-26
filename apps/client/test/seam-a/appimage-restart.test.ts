@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { restartAppImage } from '../../src/main/appimage-restart';
 import { tempDir, until } from './harness';
 
-// The AppImage stand-in records how it was started.
 describe.skipIf(process.platform !== 'linux')('restarting into the updated AppImage', () => {
   let dir: string;
   let appImage: string;
@@ -20,22 +19,20 @@ describe.skipIf(process.platform !== 'linux')('restarting into the updated AppIm
     chmodSync(appImage, 0o755);
   });
 
-  /** Whether the stand-in has started, and finished writing its record. */
-  const started = () => existsSync(record) && readFileSync(record, 'utf8').includes('--env');
+  const standInStarted = () => existsSync(record) && readFileSync(record, 'utf8').includes('--env');
 
   it('starts it once this Loom has exited, with its arguments', async () => {
-    // This Loom runs until the test ends it.
-    const loom = spawn('sleep', ['60']);
-    const exited = new Promise((resolve) => loom.once('exit', resolve));
-    restartAppImage({ pid: loom.pid!, appImage, args: ['--flag', 'with space'], env: { PATH: process.env.PATH } });
+    const loomUntilKilled = spawn('sleep', ['60']);
+    const exited = new Promise((resolve) => loomUntilKilled.once('exit', resolve));
+    restartAppImage({ pid: loomUntilKilled.pid!, appImage, args: ['--flag', 'with space'], env: { PATH: process.env.PATH } });
 
-    // Time enough for the shell to have started the stand-in, were it not waiting.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const timeForTheShellToStartIt = 500;
+    await new Promise((resolve) => setTimeout(resolve, timeForTheShellToStartIt));
     expect(existsSync(record)).toBe(false);
 
-    loom.kill();
+    loomUntilKilled.kill();
     await exited;
-    await until(started);
+    await until(standInStarted);
     expect(readFileSync(record, 'utf8').split('\n').slice(0, 2)).toEqual(['--flag', 'with space']);
   });
 
@@ -45,13 +42,10 @@ describe.skipIf(process.platform !== 'linux')('restarting into the updated AppIm
     await new Promise((resolve) => loom.once('exit', resolve));
     restartAppImage({ pid: loom.pid!, appImage, args: [], env });
 
-    await until(started);
+    await until(standInStarted);
     expect(readFileSync(record, 'utf8').split('--env\n')[1]?.trim()).toBe('LOOM_KEPT=1');
   });
 
-  // Electron's main process leaves descriptors open across exec: passed on,
-  // they would keep the old AppImage mounted, and the old profile's files
-  // open, for as long as the new Loom runs.
   it('passes on none of the descriptors Electron has open', async () => {
     const fds = join(dir, 'fds');
     writeFileSync(appImage, `#!/bin/sh\nfor fd in /proc/$$/fd/*; do readlink "$fd"; done > '${fds}.part'; mv '${fds}.part' '${fds}'\n`);
@@ -67,7 +61,7 @@ describe.skipIf(process.platform !== 'linux')('restarting into the updated AppIm
     await new Promise((resolve) => loom.once('exit', resolve));
 
     await until(() => existsSync(fds), 15_000);
-    // Only its stdio, and the stand-in's own script and the file it writes.
-    expect(new Set(readFileSync(fds, 'utf8').trim().split('\n'))).toEqual(new Set(['/dev/null', appImage, `${fds}.part`]));
+    const stdioAndTheStandInsOwnFiles = new Set(['/dev/null', appImage, `${fds}.part`]);
+    expect(new Set(readFileSync(fds, 'utf8').trim().split('\n'))).toEqual(stdioAndTheStandInsOwnFiles);
   }, 30_000);
 });
