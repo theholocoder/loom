@@ -108,7 +108,7 @@ function isTwelveHour(locale: string): boolean {
 }
 
 /** The midnight starting `at`'s day, local time. */
-function startOfDay(at: number): number {
+export function startOfDay(at: number): number {
   return new Date(at).setHours(0, 0, 0, 0);
 }
 

@@ -1405,7 +1405,7 @@ export type TranscriptItem =
   | { kind: 'merge-request-ended'; id: number; number: number; url: string; state: EndedMergeRequestState; archived: boolean; unsavedWork?: UnsavedWork };
 
 /** Whether the item is a message (what the user sent, what the agent said or thought), which keeps when it was said. */
-export function saysWhen<I extends { kind: TranscriptItem['kind'] }>(item: I): item is I & { kind: 'user' | 'agent' | 'thinking' } {
+export function keepsWhenSaid<I extends { kind: TranscriptItem['kind'] }>(item: I): item is I & { kind: 'user' | 'agent' | 'thinking' } {
   return item.kind === 'user' || item.kind === 'agent' || item.kind === 'thinking';
 }
 

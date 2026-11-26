@@ -822,7 +822,7 @@ export function SessionView({
               'run' in item ? (
                 <ToolRunCard key={item.run[0]!.id} run={item.run} live={working && at === parts.length - 1} />
               ) : 'said' in item ? (
-                <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
+                <AgentWords key={item.said[0]!.id} agent={session.agent} said={item.said} at={saidAt(item)} model={item.said.find((i) => i.model)?.model} models={offeredModels} />
               ) : item.kind === 'user' ? (
                 <div key={item.id} className="msg user" data-item-id={item.id}>
                   <div className="body">
@@ -1241,8 +1241,7 @@ function saidAt(part: ReturnType<typeof turnParts>[number] | { run: unknown }): 
  * The agent's name, the model that spoke when known ("OpenCode · Claude Sonnet 5.5",
  * `provider/model` in its tooltip) and when it started, over its thinking and its words.
  */
-function AgentWords({ agent, said, model, models }: { agent: string; said: Said[]; model: string | undefined; models: readonly ModelChoice[] | undefined }) {
-  const at = said.find((item) => item.at !== undefined)?.at;
+function AgentWords({ agent, said, at, model, models }: { agent: string; said: Said[]; at: number | undefined; model: string | undefined; models: readonly ModelChoice[] | undefined }) {
   return (
     <div className="msg agent">
       <div className="who">

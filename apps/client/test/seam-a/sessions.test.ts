@@ -42,6 +42,7 @@ const agentText = (items: TranscriptItem[]) =>
 
 /** Each item's kind, and when it was said for one that keeps it. */
 const timesOf = (items: TranscriptItem[]) => items.map((i) => ('at' in i ? [i.kind, i.at] : [i.kind]));
+/** Whether the agent has finished its reply. */
 const settled = (items: TranscriptItem[]) => items.some((i) => i.kind === 'agent' && !i.streaming);
 
 describe('a checkout Session', () => {

@@ -4,7 +4,7 @@
 // once there are any.
 import { ArrowLeft, Bot, CircleCheckBig, CircleSlash, LoaderCircle, OctagonX, Square, Workflow } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { modelNameIn, type ModelChoice, type Session, type Subagent, type SubagentStatus, type TranscriptItem } from '../shared/api';
+import { keepsWhenSaid, modelNameIn, type ModelChoice, type Session, type Subagent, type SubagentStatus, type TranscriptItem } from '../shared/api';
 import { useTopic } from './api';
 import { formatDuration } from './Dashboard';
 import { Markdown } from './Markdown';
@@ -156,7 +156,7 @@ export function SubagentView({
   return (
     <>
       <div className="chat subagent-chat" role="log" aria-label={`Subagent ${subagent.description}`} tabIndex={-1}>
-        {withDays(conversationParts, (item) => ('run' in item ? undefined : item.kind === 'agent' || item.kind === 'thinking' ? item.at : undefined), (item, at, parts) =>
+        {withDays(conversationParts, (item) => ('run' in item || !keepsWhenSaid(item) ? undefined : item.at), (item, at, parts) =>
           'run' in item ? (
             <ToolRunCard key={item.run[0]!.id} run={item.run} live={subagent.status === 'running' && at === parts.length - 1} />
           ) : item.kind === 'agent' ? (

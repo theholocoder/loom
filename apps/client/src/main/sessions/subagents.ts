@@ -3,7 +3,7 @@
 // is, but readonly: a Subagent asks nothing of the user in it. Both are kept in
 // the database with the Session, and go with it.
 import type { Transaction } from 'kysely';
-import { saysWhen, type PlanEntry, type Subagent, type TranscriptItem } from '../../shared/api';
+import { keepsWhenSaid, type PlanEntry, type Subagent, type TranscriptItem } from '../../shared/api';
 import type { SubagentEvent, SubagentReport } from '../agents/adapter';
 import type { Clock, TimerHandle } from '../clock';
 import type { LoomDatabase } from '../storage/database';
@@ -267,7 +267,7 @@ export class Subagents {
 
   private addItem(sessionId: number, subagentId: string, held: Held, item: NewItem): void {
     const items = held.topic.value;
-    const added = { ...item, ...(saysWhen(item) ? { at: this.options.clock.now() } : {}), id: items.length } as TranscriptItem;
+    const added = { ...item, ...(keepsWhenSaid(item) ? { at: this.options.clock.now() } : {}), id: items.length } as TranscriptItem;
     held.topic.set([...items, added]);
     this.writeItem(sessionId, subagentId, added);
   }

@@ -1,6 +1,7 @@
 // When a conversation's messages were said: each one's time, and the day
 // above the first one said on it.
-import { Fragment, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { startOfDay } from '../shared/dates';
 import { useDates } from './dates';
 import { useNow } from './now';
 
@@ -32,18 +33,12 @@ function DayDivider({ at }: { at: number }) {
  */
 export function withDays<P>(parts: P[], when: (part: P) => number | undefined, show: (part: P, index: number, parts: P[]) => ReactNode): ReactNode[] {
   let day: number | undefined;
-  return parts.map((part, index) => {
+  // The day beside its first part, not around it: a part the day moves off isn't shown afresh.
+  return parts.flatMap((part, index) => {
     const shown = show(part, index, parts);
     const at = when(part);
-    if (at === undefined) return shown;
-    const its = new Date(at).setHours(0, 0, 0, 0);
-    if (its === day) return shown;
-    day = its;
-    return (
-      <Fragment key={`day-${its}`}>
-        <DayDivider at={at} />
-        {shown}
-      </Fragment>
-    );
+    if (at === undefined || startOfDay(at) === day) return [shown];
+    day = startOfDay(at);
+    return [<DayDivider key={`day-${day}`} at={at} />, shown];
   });
 }
