@@ -1,5 +1,5 @@
-import { Bell, CalendarClock, Check, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, Keyboard, LoaderCircle, MessagesSquare, Palette, Pencil, RotateCcw, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { Bell, CalendarClock, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, Keyboard, LoaderCircle, MessagesSquare, Palette, Pencil, RotateCcw, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { isValidElement, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi, type NotificationKind } from '../shared/api';
 import { assignedBindings, checkShortcut, DEFAULT_KEYBINDINGS, isDefaultKeybindings, MODIFIER_KEYS, REMAPPABLE_SHORTCUTS, sameShortcut, SHORTCUTS, shortcutLabel, takenBy, type Shortcut, type ShortcutName } from '../shared/shortcuts';
 import { ACCENTS, accentColours, DENSITIES, FONT_SIZES, isDarkTheme, isLightTheme, MATCH_SYSTEM_LABEL, MONO_FONTS, THEMES, UI_FONTS, type Accent, type Appearance, type Theme, type ThemeChoice } from '../shared/appearance';
@@ -11,6 +11,7 @@ import { useTheme } from './appearance';
 import { useCheckoutModels } from './checkout';
 import { effortsOf, ModelPickers } from './ModelPicker';
 import { Select } from './Popover';
+import { SaveFeedback, Setting, TextSetting, useSaving } from './SettingControls';
 
 /** One setting: its name and what it does on the left, its control on the right, or under them for a wide one. */
 interface SettingEntry {
@@ -134,15 +135,9 @@ function Section({ section: { id, title, icon: Icon, description, Body }, settin
 
 function SettingRow({ setting: { title, description, wide, Control } }: { setting: SettingEntry }) {
   return (
-    <div className={wide ? 'setting wide' : 'setting'}>
-      <div className="setting-text">
-        <div className="setting-title">{title}</div>
-        {description && <div className="setting-description">{description}</div>}
-      </div>
-      <div className="setting-control">
-        <Control label={title} />
-      </div>
-    </div>
+    <Setting title={title} description={description} wide={wide}>
+      <Control label={title} />
+    </Setting>
   );
 }
 
@@ -172,68 +167,6 @@ function textOf(node: ReactNode): string {
   if (Array.isArray(node)) return node.map(textOf).join('');
   if (isValidElement(node)) return textOf((node.props as { children?: ReactNode }).children);
   return '';
-}
-
-/** How long "Saved" shows after a change is saved. */
-const SAVED_FOR_MS = 2000;
-
-/**
- * Saving a setting's changes, and what to show of it: "Saved" for a moment
- * once main has kept one, or why main refused it, until the next change. Only
- * the latest change's outcome shows.
- */
-function useSaving() {
-  const [outcome, setOutcome] = useState<{ saved?: boolean; error?: string }>({});
-  const latest = useRef(0);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  /** Shows how `sending` went; resolves with its result, or undefined once refused. */
-  const save = useCallback(<T,>(sending: Promise<T>): Promise<T | undefined> => {
-    const id = ++latest.current;
-    clearTimeout(timer.current);
-    setOutcome({});
-    return sending.then(
-      (result) => {
-        if (id === latest.current) {
-          setOutcome({ saved: true });
-          timer.current = setTimeout(() => setOutcome({}), SAVED_FOR_MS);
-        }
-        return result;
-      },
-      (error: unknown) => {
-        if (id === latest.current) setOutcome({ error: (error as Error).message });
-        return undefined;
-      },
-    );
-  }, []);
-  /** Forgets how the last change went, as when the value is put back. */
-  const clear = useCallback(() => {
-    latest.current++;
-    clearTimeout(timer.current);
-    setOutcome({});
-  }, []);
-  return { save, clear, ...outcome };
-}
-
-/** "Saved", announced, for a moment after a change is saved; why it was refused, if it was. */
-function SaveFeedback({ saved, error, errorId }: { saved?: boolean; error?: string; errorId?: string }) {
-  return (
-    <>
-      <span className="saved" role="status">
-        {saved && (
-          <>
-            <Check className="sm" />
-            Saved
-          </>
-        )}
-      </span>
-      {error && (
-        <div className="err" role="alert" id={errorId}>
-          <ErrorText text={error} />
-        </div>
-      )}
-    </>
-  );
 }
 
 const THEME_NAMES = Object.keys(THEMES) as Theme[];
@@ -664,87 +597,6 @@ function DiffCollapsedPatterns({ label }: { label: string }) {
       placeholder="*.lock"
       save={(api, value) => api.invoke('settings.setDiffCollapsedPatterns', { patterns: value.split(/[\n,]/) }).then((s) => s.diffCollapsedPatterns.join('\n'))}
     />
-  );
-}
-
-/**
- * One text setting, saved on Enter (Ctrl+Enter in a multi-line one) or on
- * leaving the field; Escape puts back the saved value. Says when it's saved,
- * or why main refused it until the field holds a value main takes, or the
- * saved one again.
- */
-function TextSetting({
-  label,
-  stored,
-  width,
-  placeholder,
-  multiline = false,
-  inputMode,
-  save: send,
-}: {
-  label: string;
-  /** The value main has kept. */
-  stored: string;
-  /** A narrow field's width; without it, the field takes the row's. */
-  width?: string;
-  placeholder?: string;
-  multiline?: boolean;
-  inputMode?: 'numeric';
-  /** Sends the new value to main; resolves with the value as main kept it. */
-  save: (api: LoomApi, value: string) => Promise<string>;
-}) {
-  const api = useApi();
-  const [value, setValue] = useState(stored);
-  const { save, clear, saved, error } = useSaving();
-  const errorId = useId();
-  useEffect(() => setValue(stored), [stored]);
-
-  // Enter submits, then leaving the field blurs it: save each value once.
-  const sent = useRef<string>(undefined);
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault();
-    if (value === stored) {
-      // Back to the saved value: a refusal of another no longer holds.
-      if (error) clear();
-      return;
-    }
-    if (value === sent.current) return;
-    sent.current = value;
-    void save(send(api, value))
-      .then((kept) => kept !== undefined && setValue(kept))
-      .finally(() => (sent.current = undefined));
-  };
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape' && (value !== stored || error)) {
-      event.stopPropagation();
-      setValue(stored);
-      clear();
-    } else if (multiline && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      submit();
-    }
-  };
-  const field = {
-    className: 'tech text-setting',
-    style: width ? { width } : undefined,
-    'aria-label': label,
-    'aria-invalid': error ? true : undefined,
-    'aria-describedby': error ? errorId : undefined,
-    value,
-    placeholder,
-    spellCheck: false,
-    onKeyDown,
-    onBlur: () => submit(),
-  };
-  return (
-    <form className="setting-form" onSubmit={submit}>
-      {multiline ? (
-        <textarea {...field} rows={3} onChange={(event) => setValue(event.target.value)} />
-      ) : (
-        <input {...field} inputMode={inputMode} onChange={(event) => setValue(event.target.value)} />
-      )}
-      <SaveFeedback saved={saved} error={error} errorId={errorId} />
-    </form>
   );
 }
 

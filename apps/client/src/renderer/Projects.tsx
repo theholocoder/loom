@@ -1,5 +1,5 @@
-import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, LoaderCircle, MessageSquarePlus, Pencil, TriangleAlert, X } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, GitBranch, LoaderCircle, MessageSquarePlus, Palette, Search, Trash2, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FORGE_CLI, FORGE_NAMES, OPENCODE_NAME, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
 import { branchPrefixError, branchPrefixOf, defaultBranchError, defaultBranchOf } from '../shared/branches';
 import { AVATAR_MAX, avatarError, avatarText, PROJECT_COLOR_NAMES, PROJECT_COLORS, projectNameError, type ProjectColor } from '../shared/projects';
@@ -8,8 +8,10 @@ import { useApi, useTopic } from './api';
 import { unsavedWorkSummary } from './Archive';
 import { useCheckoutModels } from './checkout';
 import { copyable } from './ContextMenu';
-import { effortsOf, effortTaken, ModelPickers } from './ModelPicker';
+import { effortsOf, ModelPickers } from './ModelPicker';
 import { ProjectAvatar, projectColor } from './ProjectAvatar';
+import { filterProjects } from './ProjectPicker';
+import { SaveFeedback, Setting, TextSetting, useSaving } from './SettingControls';
 import { SHORTCUTS } from './shortcuts';
 
 
@@ -119,8 +121,10 @@ function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: Restor
   );
 }
 
-// Laid out like Settings: a .dash page with a card holding a data table. The
-// adder is shared with the sidebar's + menu, whose result shows here.
+// Laid out like Settings: the list of Projects beside, under the title and a
+// way to add one; the Project picked from it on the page, its settings in
+// cards, each saved as it changes. Only the page scrolls, so the list stays in
+// sight. The adder is shared with the sidebar's + menu, whose result shows here.
 export function Projects({ adder, onStartSession }: { adder: ProjectAdder; onStartSession: (project: Project) => void }) {
   const api = useApi();
   const projects = useTopic('projects') ?? [];
@@ -133,77 +137,121 @@ export function Projects({ adder, onStartSession }: { adder: ProjectAdder; onSta
   const { dismiss } = adder;
   useEffect(() => dismiss, [dismiss]);
 
+  const [picked, setPicked] = useState<number>();
+  const [filter, setFilter] = useState('');
+  // A Project just added or restored is the one to set up next.
+  const addedId = adder.added?.project.id;
+  const [seenAdded, setSeenAdded] = useState(addedId);
+  if (addedId !== seenAdded) {
+    setSeenAdded(addedId);
+    if (addedId !== undefined) {
+      setPicked(addedId);
+      setFilter('');
+    }
+  }
+  // The Project picked, while there is one; else, as when it was removed, the first.
+  const selected = projects.find((p) => p.id === picked) ?? projects[0];
+  const listed = filterProjects(projects, filter);
+  const page = useRef<HTMLDivElement>(null);
+  const nav = useRef<HTMLElement>(null);
+  // Each Project's settings start at their top. Focus lost with the last
+  // one's (as with a Project just removed) goes to the one now shown, in the list.
+  useEffect(() => {
+    if (page.current) page.current.scrollTop = 0;
+    if (document.activeElement === document.body) nav.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
+  }, [selected?.id]);
+  const onFilterKey = (event: KeyboardEvent) => {
+    if (event.key === 'Enter' && listed[0]) {
+      event.preventDefault();
+      setPicked(listed[0].id);
+    } else if (event.key === 'Escape' && filter) {
+      event.stopPropagation();
+      setFilter('');
+    }
+  };
+
   const environmentLabel = (id: string) => environments.find((e) => e.id === id)?.label ?? id;
   return (
-    <div className="dash">
-      <div className="row">
-        <h1>Projects</h1>
-        <span className="grow" />
-        {/* Once a Project is added, starting a Session in it is the next step. */}
-        <button className={adder.added ? undefined : 'primary'} type="button" disabled={adder.linking} onClick={() => void adder.link()}>
-          <FolderOpen className="sm" />
-          {SHORTCUTS.addProject.label}
-        </button>
-      </div>
-      {adder.dialog}
-      {adder.added && (
-        <NextStep added={adder.added} onStartSession={onStartSession} onDismiss={dismiss} />
-      )}
-      {adder.error && (
-        <div className="row page-error" style={{ marginTop: 8 }}>
-          <div className="err" role="alert">
-            <ErrorText text={adder.error} />
-          </div>
-          <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={dismiss}>
-            <X />
+    <div className="settings projects-page">
+      <div className="settings-layout">
+        <aside className="settings-side">
+          <h1>Projects</h1>
+          <button className={adder.added ? undefined : 'primary'} type="button" disabled={adder.linking} onClick={() => void adder.link()}>
+            <FolderOpen className="sm" />
+            {SHORTCUTS.addProject.label}
           </button>
+          {projects.length > FILTER_FROM && (
+            <label className="settings-search">
+              <Search className="sm" />
+              <input type="search" aria-label="Filter Projects" placeholder="Filter Projects" value={filter} spellCheck={false} onChange={(event) => setFilter(event.target.value)} onKeyDown={onFilterKey} />
+            </label>
+          )}
+          {projects.length > 0 && (
+            <nav ref={nav} className="settings-nav" aria-label="Projects">
+              {listed.map((project) => (
+                <ProjectNavItem key={project.id} project={project} current={project.id === selected?.id} onPick={() => setPicked(project.id)} />
+              ))}
+              {listed.length === 0 && <div className="muted project-nav-none">No Project matches “{filter.trim()}”.</div>}
+            </nav>
+          )}
+        </aside>
+        <div className="settings-sections" ref={page}>
+          {adder.dialog}
+          {adder.added && <NextStep added={adder.added} onDismiss={dismiss} />}
+          {adder.error && (
+            <div className="row page-error">
+              <div className="err" role="alert">
+                <ErrorText text={adder.error} />
+              </div>
+              <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={dismiss}>
+                <X />
+              </button>
+            </div>
+          )}
+          {selected ? (
+            <ProjectSettings key={selected.id} project={selected} environmentLabel={environmentLabel(selected.checkout.environmentId)} justAdded={addedId === selected.id} onStartSession={() => onStartSession(selected)} />
+          ) : (
+            <div className="card">
+              <div className="empty">
+                <FolderGit2 className="sm" />
+                No Projects yet. Add a git checkout on this machine with "{SHORTCUTS.addProject.label}".
+              </div>
+            </div>
+          )}
         </div>
-      )}
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <FolderGit2 className="sm" />
-          <h3>Projects</h3>
-        </div>
-        {projects.length === 0 ? (
-          <div className="empty">No Projects yet. Add a git checkout on this machine with "{SHORTCUTS.addProject.label}".</div>
-        ) : (
-          <div className="table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th>Checkout</th>
-                  <th>Environment</th>
-                  <th>Forge</th>
-                  <th>Branch prefix</th>
-                  <th>Default model</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((project) => (
-                  <ProjectRow key={project.id} project={project} environmentLabel={environmentLabel(project.checkout.environmentId)} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-/** The way on after adding a Project: a Session in it. */
-function NextStep({ added: { project, restored }, onStartSession, onDismiss }: { added: AddedProject; onStartSession: (project: Project) => void; onDismiss: () => void }) {
+/** How many Projects the list shows before it has a filter. */
+const FILTER_FROM = 6;
+
+/** A Project in the list: its avatar and name, and a mark when its Forge features are off for a reason the user can fix. */
+function ProjectNavItem({ project, current, onPick }: { project: Project; current: boolean; onPick: () => void }) {
+  return (
+    <button type="button" aria-current={current ? 'page' : undefined} title={project.checkout.path} onClick={onPick}>
+      <ProjectAvatar project={project} size={20} />
+      <span className="ellipsis">{project.name}</span>
+      {forgeNeedsFixing(project.forge) && (
+        <>
+          <TriangleAlert className="sm project-nav-warn" aria-hidden="true" />
+          <span className="sr-only">, Forge features off</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+/** The way on after adding a Project: setting it up, then a Session in it, from its page's head. */
+function NextStep({ added: { project, restored }, onDismiss }: { added: AddedProject; onDismiss: () => void }) {
   return (
     <div className="row page-note">
       <span role="status">
         {restored ? 'Restored' : 'Added'} {project.name}.
       </span>
-      <button className="primary" type="button" onClick={() => onStartSession(project)}>
-        <MessageSquarePlus className="sm" />
-        Start a Session
-      </button>
+      <span className="muted">Check its settings below, then start a Session in it.</span>
+      <span className="grow" />
       <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={onDismiss}>
         <X />
       </button>
@@ -211,209 +259,180 @@ function NextStep({ added: { project, restored }, onStartSession, onDismiss }: {
   );
 }
 
-function ProjectRow({ project, environmentLabel }: { project: Project; environmentLabel: string }) {
-  const reason = forgeOffReason(project.forge, environmentLabel);
-  const [editing, setEditing] = useState(false);
-  return (
-    <tr>
-      <td>
-        <span className="row project-name">
-          <ProjectAvatar project={project} size={22} />
-          <span className="ellipsis" title={project.name}>
-            {project.name}
-          </span>
-        </span>
-      </td>
-      <td>
-        <span className="tech" {...copyable('path', project.checkout.path)}>
-          {project.checkout.path}
-        </span>
-      </td>
-      <td>{environmentLabel}</td>
-      <td>
-        <ForgeCell forge={project.forge} />
-        {reason && (
-          <div className="warn" role="alert">
-            {reason}
-          </div>
-        )}
-      </td>
-      <td>
-        <BranchPrefix project={project} />
-      </td>
-      <td>{project.defaultModel?.model ? <DefaultModel pick={project.defaultModel} /> : <span className="muted">{OPENCODE_NAME}'s own</span>}</td>
-      <td>
-        <span className="row project-actions">
-          <button className="sm" type="button" title={`Edit ${project.name}`} aria-label={`Edit ${project.name}`} onClick={() => setEditing(true)}>
-            <Pencil className="sm" />
-            Edit
-          </button>
-          <RemoveProject project={project} />
-        </span>
-        {editing && <EditProject project={project} onClose={() => setEditing(false)} />}
-      </td>
-    </tr>
-  );
-}
-
-/** A Project's default model, as `provider/model`, and its Effort level when one is set. */
-function DefaultModel({ pick }: { pick: ModelPick }) {
-  return (
-    <span className="tech">
-      {pick.model}
-      {pick.effort !== undefined && <span className="muted"> · {pick.effort}</span>}
-    </span>
-  );
-}
-
-/** The Edit dialog: the Project's name, colour, avatar, default model and default branch, saved together. */
-function EditProject({ project, onClose }: { project: Project; onClose: () => void }) {
+/** A Project's settings: what it is called and looks like, where its checkout is, how its Sessions start, and removing it. */
+function ProjectSettings({ project, environmentLabel, justAdded, onStartSession }: { project: Project; environmentLabel: string; justAdded: boolean; onStartSession: () => void }) {
   const api = useApi();
-  const [name, setName] = useState(project.name);
-  const [color, setColor] = useState<ProjectColor>(project.color);
-  const [avatar, setAvatar] = useState(project.avatar ?? '');
-  const [model, setModel] = useState(project.defaultModel?.model);
-  const [effort, setEffort] = useState(project.defaultModel?.effort);
-  const [defaultBranch, setDefaultBranch] = useState(project.defaultBranch ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const models = useCheckoutModels(project.id);
-  const efforts = effortsOf(models.listed, model);
-  const nameField = useRef<HTMLInputElement>(null);
-  useEffect(() => nameField.current?.select(), []);
-  const id = useId();
-  const nameError = projectNameError(name);
-  const avatarProblem = avatarError(avatar);
-  const branchProblem = defaultBranchError(defaultBranch);
-
-  const save = (event: FormEvent) => {
-    event.preventDefault();
-    if (nameError || avatarProblem || branchProblem) return;
-    const edit: ProjectEdit = { id: project.id };
-    if (name.trim() !== project.name) edit.name = name;
-    if (color !== project.color) edit.color = color;
-    const typed = avatar.trim();
-    if (typed !== (project.avatar ?? '')) edit.avatar = typed || null;
-    const kept = effortTaken(models.listed, model, effort);
-    if (model !== project.defaultModel?.model || kept !== project.defaultModel?.effort) edit.defaultModel = model === undefined ? null : { model, ...(kept !== undefined && { effort: kept }) };
-    const branch = defaultBranchOf(defaultBranch);
-    if (branch !== (project.defaultBranch ?? '')) edit.defaultBranch = branch || null;
-    if (Object.keys(edit).length === 1) return onClose();
-    setError(undefined);
-    setBusy(true);
-    api
-      .invoke('projects.edit', edit)
-      .then(onClose)
-      .catch((e: unknown) => setError((e as Error).message))
-      .finally(() => setBusy(false));
-  };
+  const id = `project-${project.id}`;
+  const reason = forgeOffReason(project.forge, environmentLabel);
+  const edit: EditProject = (change) => api.invoke('projects.edit', { id: project.id, ...change });
   return (
-    <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && !e.defaultPrevented && onClose()}>
-      <form className="card modal project-edit" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} onSubmit={save}>
-        <div className="card-head">
-          <ProjectAvatar project={{ name: name.trim() || project.name, color, avatar: avatar.trim() && !avatarProblem ? avatar.trim() : undefined }} size={26} />
-          <h3 id={`${id}-title`}>Edit {project.name}</h3>
+    <>
+      <header className="project-header">
+        <ProjectAvatar project={project} size={36} />
+        <div className="project-header-text">
+          <h2 className="ellipsis" title={project.name}>
+            {project.name}
+          </h2>
+          <span className="tech muted ellipsis" title={project.checkout.path} {...copyable('path', project.checkout.path)}>
+            {project.checkout.path}
+          </span>
         </div>
-        <label className="project-field">
-          <span>Name</span>
-          <input ref={nameField} value={name} aria-invalid={nameError ? true : undefined} aria-describedby={nameError ? `${id}-name-error` : undefined} onChange={(e) => setName(e.target.value)} />
-        </label>
-        {nameError && (
-          <div id={`${id}-name-error`} className="err" role="alert">
-            {nameError}
-          </div>
-        )}
-        <div className="project-field">
-          <span id={`${id}-color`}>Colour</span>
-          <div role="radiogroup" aria-labelledby={`${id}-color`} className="accent-picker">
-            {PROJECT_COLOR_NAMES.map((choice) => (
-              <label key={choice} className="accent-option">
-                <input type="radio" className="sr-only" name={`${id}-color`} checked={color === choice} onChange={() => setColor(choice)} />
-                <span className="accent-swatch" aria-hidden="true" style={{ background: projectColor({ color: choice }) }} />
-                {PROJECT_COLORS[choice].label}
-              </label>
-            ))}
-          </div>
-        </div>
-        <label className="project-field">
-          <span>Avatar</span>
-          <input
-            className="project-avatar-input"
-            value={avatar}
-            placeholder={avatarText({ name: name.trim() || project.name })}
-            aria-invalid={avatarProblem ? true : undefined}
-            aria-describedby={`${id}-avatar-hint`}
-            onChange={(e) => setAvatar(e.target.value)}
+        {/* Once a Project is added, starting a Session in it is the next step. */}
+        <button className={justAdded ? 'primary' : undefined} type="button" onClick={onStartSession}>
+          <MessageSquarePlus className="sm" />
+          Start a Session
+        </button>
+      </header>
+
+      <SettingsCard id={`${id}-general`} icon={Palette} title="General">
+        <Setting title="Name" description="How the Project shows in the Inbox, the Dashboard and the Project picker.">
+          <TextSetting label="Name" stored={project.name} width="24ch" check={projectNameError} save={(_, name) => edit({ name }).then((p) => p.name)} />
+        </Setting>
+        <Setting title="Colour" description="Marks the Project's Sessions wherever they show." wide>
+          <ProjectColorPicker color={project.color} edit={edit} />
+        </Setting>
+        <Setting title="Avatar" description={`Up to ${AVATAR_MAX} characters, or an emoji. Empty, the name's first letters.`}>
+          <TextSetting
+            label="Avatar"
+            stored={project.avatar ?? ''}
+            width="8ch"
+            placeholder={avatarText({ name: project.name })}
+            check={avatarError}
+            save={(_, avatar) => edit({ avatar: avatar.trim() || null }).then((p) => p.avatar ?? '')}
           />
-        </label>
-        <div id={`${id}-avatar-hint`} className={avatarProblem ? 'err' : 'muted project-hint'} role={avatarProblem ? 'alert' : undefined}>
-          {avatarProblem ?? `Up to ${AVATAR_MAX} characters, or an emoji. Empty, the name's first letters.`}
-        </div>
-        <div className="project-field">
-          <span>Default model</span>
-          <div className="row project-model">
-            <ModelPickers
-              agent={OPENCODE_NAME}
-              models={models.listed}
-              model={model}
-              efforts={efforts}
-              effort={effort}
-              onOpen={models.refresh}
-              onModel={(picked) => {
-                setModel(picked);
-                setEffort(undefined);
-              }}
-              onEffort={setEffort}
-            />
-            {model !== undefined && (
-              <button
-                type="button"
-                className="link"
-                onClick={() => {
-                  setModel(undefined);
-                  setEffort(undefined);
-                }}
-              >
-                Use {OPENCODE_NAME}'s own
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="muted project-hint">New Sessions in {project.name} start on it, until another is picked.</div>
-        <label className="project-field">
-          <span>Default branch</span>
-          <input
-            className="tech"
-            value={defaultBranch}
+        </Setting>
+      </SettingsCard>
+
+      <SettingsCard id={`${id}-sessions`} icon={GitBranch} title="New Sessions">
+        <Setting title="Branch prefix" description="What the branch of each new worktree Session starts with.">
+          <TextSetting
+            label="Branch prefix"
+            stored={project.branchPrefix}
+            width="16ch"
+            check={branchPrefixError}
+            hint={(value) => (branchPrefixError(value) ? 'Not a valid branch prefix' : <span className="tech">{`${branchPrefixOf(value)}/<session>`}</span>)}
+            save={(_, branchPrefix) => api.invoke('projects.setBranchPrefix', { id: project.id, branchPrefix }).then((p) => p.branchPrefix)}
+          />
+        </Setting>
+        <Setting title="Default branch" description="What new worktree Sessions branch from, on origin or else local, and what Changes compares with when where a branch started isn't known. Empty, origin's default branch.">
+          <TextSetting
+            label="Default branch"
+            stored={project.defaultBranch ?? ''}
+            width="16ch"
             placeholder="git's own"
-            spellCheck={false}
-            aria-invalid={branchProblem ? true : undefined}
-            aria-describedby={`${id}-branch-hint`}
-            onChange={(e) => setDefaultBranch(e.target.value)}
+            check={defaultBranchError}
+            save={(_, branch) => edit({ defaultBranch: defaultBranchOf(branch) || null }).then((p) => p.defaultBranch ?? '')}
           />
-        </label>
-        <div id={`${id}-branch-hint`} className={branchProblem ? 'err' : 'muted project-hint'} role={branchProblem ? 'alert' : undefined}>
-          {branchProblem ?? "What new worktree Sessions branch from, on origin or else local, and what Changes compares with when where a branch started isn't known. Empty, origin's default branch."}
-        </div>
-        {error && (
-          <div className="err" role="alert">
-            <ErrorText text={error} />
+        </Setting>
+        <Setting title="Default model" description={`New Sessions in ${project.name} start on it, until another is picked.`}>
+          <DefaultModelPicker project={project} edit={edit} />
+        </Setting>
+      </SettingsCard>
+
+      <SettingsCard id={`${id}-checkout`} icon={FolderGit2} title="Checkout">
+        <Setting title="Folder" description="The git checkout the Project's Sessions work in, or branch their worktrees from." wide>
+          <span className="tech project-path" {...copyable('path', project.checkout.path)}>
+            {project.checkout.path}
+          </span>
+        </Setting>
+        <Setting title="Environment" description="Where the Project's agent, git and Forge CLI run.">
+          <span>{environmentLabel}</span>
+        </Setting>
+        <Setting title="Forge" description="Issues, Merge requests and Babysit, through the Forge's CLI.">
+          <div className="project-forge">
+            <ForgeCell forge={project.forge} />
           </div>
-        )}
-        <div className="row modal-actions">
-          <button type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="primary" disabled={busy || !!nameError || !!avatarProblem || !!branchProblem}>
-            Save
-          </button>
-        </div>
-      </form>
-    </div>
+          {reason && (
+            <div className="warn project-forge-reason" role="note">
+              {reason}
+            </div>
+          )}
+        </Setting>
+      </SettingsCard>
+
+      <SettingsCard id={`${id}-remove`} icon={Trash2} title="Remove">
+        <Setting title={`Remove ${project.name}`} description="Loom forgets the Project; its folder stays on disk and its Sessions are Archived, read-only. Adding a checkout of it again offers to restore it.">
+          <RemoveProject project={project} />
+        </Setting>
+      </SettingsCard>
+    </>
   );
 }
 
-/** The row's Remove button, and the dialogs it opens: Remove? then, with unsaved work, Discard and remove? */
+/** A card of a Project's settings, as Settings' sections are. */
+function SettingsCard({ id, icon: Icon, title, children }: { id: string; icon: LucideIcon; title: string; children: ReactNode }) {
+  return (
+    <section className="card settings-section" aria-labelledby={`${id}-title`}>
+      <div className="card-head">
+        <Icon className="sm" />
+        <h2 id={`${id}-title`}>{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** Saves a change to the Project shown; resolves with the Project as main kept it. */
+type EditProject = (change: Omit<ProjectEdit, 'id'>) => Promise<Project>;
+
+/** The Project's colour, saved as soon as one is picked. */
+function ProjectColorPicker({ color, edit }: { color: ProjectColor; edit: EditProject }) {
+  const { save, saved, error } = useSaving();
+  const name = useId();
+  return (
+    <>
+      <div role="radiogroup" aria-label="Colour" className="accent-picker">
+        {PROJECT_COLOR_NAMES.map((choice) => (
+          <label key={choice} className="accent-option">
+            <input
+              type="radio"
+              className="sr-only"
+              name={name}
+              checked={color === choice}
+              onChange={() => void save(edit({ color: choice }))}
+            />
+            <span className="accent-swatch" aria-hidden="true" style={{ background: projectColor({ color: choice }) }} />
+            {PROJECT_COLORS[choice].label}
+          </label>
+        ))}
+      </div>
+      <SaveFeedback saved={saved} error={error} />
+    </>
+  );
+}
+
+/** The model new Sessions in the Project start on, saved as soon as it, or its Effort level, is picked. */
+function DefaultModelPicker({ project, edit }: { project: Project; edit: EditProject }) {
+  const models = useCheckoutModels(project.id);
+  const { save, saved, error } = useSaving();
+  const pick = project.defaultModel;
+  const change = (defaultModel: ModelPick | null) => void save(edit({ defaultModel }));
+  return (
+    <>
+      <div className="row project-model">
+        <ModelPickers
+          agent={OPENCODE_NAME}
+          models={models.listed}
+          model={pick?.model}
+          efforts={effortsOf(models.listed, pick?.model)}
+          effort={pick?.effort}
+          onOpen={models.refresh}
+          // A new model starts on its own Effort level.
+          onModel={(model) => change({ model })}
+          onEffort={(effort) => pick && change({ model: pick.model, effort })}
+        />
+      </div>
+      {pick && (
+        <button type="button" className="link project-model-reset" onClick={() => change(null)}>
+          Use {OPENCODE_NAME}'s own
+        </button>
+      )}
+      <SaveFeedback saved={saved} error={error} />
+    </>
+  );
+}
+
+/** The Remove button, and the dialogs it opens: Remove? then, with unsaved work, Discard and remove? */
 function RemoveProject({ project }: { project: Project }) {
   const api = useApi();
   const sessions = (useTopic('sessions') ?? []).filter((s) => s.projectId === project.id);
@@ -551,6 +570,11 @@ function ForgeIcon({ forge }: { forge: ForgeStatus }) {
   }
 }
 
+/** Whether the Project's Forge features are off for a reason the user can fix (forgeOffReason says which). */
+function forgeNeedsFixing(forge: ForgeStatus): boolean {
+  return forge.state === 'cli-missing' || forge.state === 'signed-out' || forge.state === 'error';
+}
+
 /**
  * Why the Project's Forge features are off, and what to do about it, if they
  * are and the user can do something. A checkout with no origin remote, or
@@ -581,69 +605,3 @@ function forgeOffReason(forge: ForgeStatus, environmentLabel: string): ReactNode
       return undefined;
   }
 }
-
-function BranchPrefix({ project }: { project: Project }) {
-  const api = useApi();
-  const [value, setValue] = useState(project.branchPrefix);
-  const [error, setError] = useState<string>();
-  useEffect(() => setValue(project.branchPrefix), [project.branchPrefix]);
-
-  // Enter submits, then leaving the field blurs it: save each value once.
-  const sent = useRef<string>(undefined);
-  const save = (event?: FormEvent) => {
-    event?.preventDefault();
-    if (value === sent.current) return;
-    if (sent.current === undefined && branchPrefixOf(value) === project.branchPrefix) {
-      // "feat/" for "feat": show what is kept.
-      setValue(project.branchPrefix);
-      setError(undefined);
-      return;
-    }
-    // An invalid value stays in the field, with why, until the user fixes it.
-    const invalid = branchPrefixError(value);
-    setError(invalid);
-    if (invalid) return;
-    const sending = value;
-    sent.current = sending;
-    api
-      .invoke('projects.setBranchPrefix', { id: project.id, branchPrefix: sending })
-      // Main trims the prefix and drops a trailing '/', which may leave it as it was;
-      // a value typed since is the user's, and is left alone.
-      .then((saved) => setValue((typed) => (typed === sending ? saved.branchPrefix : typed)))
-      .catch((e: unknown) => setError((e as Error).message))
-      .finally(() => {
-        if (sent.current === sending) sent.current = undefined;
-      });
-  };
-  const change = (next: string) => {
-    setValue(next);
-    // Once shown, the error follows the value, and goes when it is fixed.
-    if (error) setError(branchPrefixError(next));
-  };
-  const prefix = branchPrefixOf(value);
-  const id = `prefix-${project.id}`;
-  return (
-    <form onSubmit={save}>
-      <input
-        className="tech prefix"
-        aria-label={`Branch prefix for ${project.name}`}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={id}
-        value={value}
-        spellCheck={false}
-        onChange={(event) => change(event.target.value)}
-        onBlur={() => save()}
-      />
-      {error ? (
-        <div id={id} className="err" role="alert">
-          <ErrorText text={error} />
-        </div>
-      ) : (
-        <div id={id} className="muted prefix-preview">
-          {branchPrefixError(value) ? 'Not a valid branch prefix' : <span className="tech">{`${prefix}/<session>`}</span>}
-        </div>
-      )}
-    </form>
-  );
-}
-
