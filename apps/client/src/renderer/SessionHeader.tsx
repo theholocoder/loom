@@ -50,7 +50,7 @@ export type HeaderPopover =
   | { kind: 'checks' }
   | { kind: 'issue' }
   | { kind: 'menu' }
-  /** The Subagents running, from their chip. */
+  /** The Subagents, from their chip. */
   | { kind: 'subagents' }
   /** Snooze and Rename, asked from the palette: beside the title. */
   | { kind: 'snooze' }

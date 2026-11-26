@@ -1,7 +1,7 @@
 // A Session's Subagents (CONTEXT.md): a card for each where its parent
 // started it, a readonly view of one in place of the conversation with a
 // footer in place of the composer, and the Glance strip chip listing them
-// while any runs.
+// once there are any.
 import { ArrowLeft, Bot, CircleCheckBig, CircleSlash, LoaderCircle, OctagonX, Square, Workflow } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { modelNameIn, type ModelChoice, type Session, type Subagent, type SubagentStatus, type TranscriptItem } from '../shared/api';
@@ -225,20 +225,24 @@ export function SubagentView({
   );
 }
 
-/** The Glance strip chip while any Subagent runs: it lists them all, a click opening one. */
+/**
+ * The Glance strip chip once the Session has started a Subagent, kept after
+ * they end so what they did stays at hand: it lists them all, a click
+ * opening one. It does not move; the Session's Working says something runs.
+ */
 export function SubagentsChip({ session, open, onToggle, onOpen }: { session: Session; open: boolean; onToggle: () => void; onOpen: (subagentId: string) => void }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const subagents = useTopic('subagents', { sessionId: session.id }) ?? [];
   const running = session.runningSubagents ?? 0;
-  if (running === 0) return null;
-  const label = `${running} ${running === 1 ? 'Subagent' : 'Subagents'} running`;
+  const count = Math.max(subagents.length, running);
+  if (count === 0) return null;
+  const name = count === 1 ? '1 Subagent' : `${count} Subagents`;
+  const label = running === 0 ? name : running === count ? `${name} running` : `${name}, ${running} running`;
   return (
     <span className="g-chip">
       <button ref={trigger} type="button" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open} onClick={onToggle}>
-        <span className="spin" aria-hidden="true">
-          <Workflow className="sm" />
-        </span>
-        {running === 1 ? '1 Subagent' : `${running} Subagents`}
+        <Workflow className="sm" />
+        {name}
       </button>
       {open && (
         <Popover anchor={trigger} role="dialog" label="Subagents" className="subagents-popover" onClose={onToggle}>

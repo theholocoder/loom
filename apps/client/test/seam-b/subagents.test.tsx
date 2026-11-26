@@ -1,6 +1,6 @@
 // Subagents in the renderer: a card for each in the transcript, a readonly
 // view of one in place of the conversation with a footer for the composer,
-// and a Glance strip chip listing them while any runs.
+// and a Glance strip chip listing them once there are any.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../src/renderer/App';
@@ -136,11 +136,11 @@ describe('Subagents', () => {
     expect(within(view).queryByText('Now the callers.')).toBeNull();
   });
 
-  it('list in a Glance strip chip while any runs, at every depth, a click opening one', () => {
+  it('list in a Glance strip chip, at every depth, a click opening one', () => {
     const { subagentTranscript } = openSession({ runningSubagents: 1 });
     const glance = screen.getByRole('group', { name: 'Session at a glance' });
 
-    fireEvent.click(within(glance).getByRole('button', { name: '1 Subagent running' }));
+    fireEvent.click(within(glance).getByRole('button', { name: '2 Subagents, 1 running' }));
     const list = screen.getByRole('dialog', { name: 'Subagents' });
     const rows = within(list).getAllByRole('button');
     expect(rows.map((row) => row.textContent)).toEqual(['exploreExplore authRunning', 'generalRead the testsCompleted']);
@@ -152,8 +152,23 @@ describe('Subagents', () => {
     expect(screen.getByRole('log', { name: 'Subagent Read the tests' })).toBeTruthy();
   });
 
-  it('show no chip while none runs', () => {
-    openSession({ status: 'waiting', waitingReason: 'finished' }, { subagents: [{ ...explore, status: 'completed', endedAt: 3 }] });
+  it('keep the chip, still, once they have all ended, so what they did stays at hand', () => {
+    openSession({ status: 'waiting', waitingReason: 'finished' }, { subagents: [{ ...explore, status: 'completed', endedAt: 3 }, inner] });
+    const chip = within(screen.getByRole('group', { name: 'Session at a glance' })).getByRole('button', { name: '2 Subagents' });
+    expect(chip.querySelector('.spin')).toBeNull();
+
+    fireEvent.click(chip);
+    expect(within(screen.getByRole('dialog', { name: 'Subagents' })).getAllByRole('button')).toHaveLength(2);
+  });
+
+  it('say how many of them run, without spinning', () => {
+    openSession({ runningSubagents: 1 });
+    const chip = within(screen.getByRole('group', { name: 'Session at a glance' })).getByRole('button', { name: '2 Subagents, 1 running' });
+    expect(chip.querySelector('.spin')).toBeNull();
+  });
+
+  it('show no chip before any is started', () => {
+    openSession({ status: 'waiting', waitingReason: 'finished' }, { items: [], subagents: [] });
     expect(within(screen.getByRole('group', { name: 'Session at a glance' })).queryByRole('button', { name: /Subagent/ })).toBeNull();
   });
 
