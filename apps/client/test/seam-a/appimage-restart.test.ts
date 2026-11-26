@@ -4,15 +4,7 @@ import { join } from 'node:path';
 import electronBinary from 'electron';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { restartAppImage } from '../../src/main/appimage-restart';
-import { tempDir } from './harness';
-
-const until = async (check: () => boolean, ms = 5000) => {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-};
+import { tempDir, until } from './harness';
 
 // The AppImage stand-in records how it was started.
 describe.skipIf(process.platform !== 'linux')('restarting into the updated AppImage', () => {
@@ -28,16 +20,22 @@ describe.skipIf(process.platform !== 'linux')('restarting into the updated AppIm
     chmodSync(appImage, 0o755);
   });
 
+  /** Whether the stand-in has started, and finished writing its record. */
+  const started = () => existsSync(record) && readFileSync(record, 'utf8').includes('--env');
+
   it('starts it once this Loom has exited, with its arguments', async () => {
-    const loom = spawn('sleep', ['1']);
+    // This Loom runs until the test ends it.
+    const loom = spawn('sleep', ['60']);
     const exited = new Promise((resolve) => loom.once('exit', resolve));
     restartAppImage({ pid: loom.pid!, appImage, args: ['--flag', 'with space'], env: { PATH: process.env.PATH } });
 
+    // Time enough for the shell to have started the stand-in, were it not waiting.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(existsSync(record)).toBe(false);
 
+    loom.kill();
     await exited;
-    await until(() => existsSync(record) && readFileSync(record, 'utf8').includes('--env'));
+    await until(started);
     expect(readFileSync(record, 'utf8').split('\n').slice(0, 2)).toEqual(['--flag', 'with space']);
   });
 
@@ -47,7 +45,7 @@ describe.skipIf(process.platform !== 'linux')('restarting into the updated AppIm
     await new Promise((resolve) => loom.once('exit', resolve));
     restartAppImage({ pid: loom.pid!, appImage, args: [], env });
 
-    await until(() => existsSync(record) && readFileSync(record, 'utf8').includes('--env'));
+    await until(started);
     expect(readFileSync(record, 'utf8').split('--env\n')[1]?.trim()).toBe('LOOM_KEPT=1');
   });
 
@@ -71,5 +69,5 @@ describe.skipIf(process.platform !== 'linux')('restarting into the updated AppIm
     await until(() => existsSync(fds), 15_000);
     // Only its stdio, and the stand-in's own script and the file it writes.
     expect(new Set(readFileSync(fds, 'utf8').trim().split('\n'))).toEqual(new Set(['/dev/null', appImage, `${fds}.part`]));
-   }, 30_000);
+  }, 30_000);
 });

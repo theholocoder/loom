@@ -249,8 +249,8 @@ export function waitFor<T extends TopicName>(
 }
 
 /** Resolves once `check` holds, looking every 20 ms for up to 5 s: for what only the stand-ins' logs show. */
-export async function until(check: () => boolean): Promise<void> {
-  for (const deadline = Date.now() + 5000; !check(); ) {
+export async function until(check: () => boolean, timeoutMs = 5000): Promise<void> {
+  for (const deadline = Date.now() + timeoutMs; !check(); ) {
     if (Date.now() > deadline) throw new Error('timed out');
     await new Promise((resolve) => setTimeout(resolve, 20));
   }

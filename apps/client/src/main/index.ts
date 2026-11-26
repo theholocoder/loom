@@ -29,6 +29,8 @@ let loom: Loom | undefined;
 let sessions: Session[] = [];
 /** Set once the user has said to quit with Sessions Working, so the window closes without asking again. */
 let quitConfirmed = false;
+/** Set once "Restart to update" has Loom quitting, to start the new AppImage after. */
+let restartingForUpdate = false;
 /**
  * CI's check of a packaged build (see self-test.ts): Loom starts, opens its
  * database, connects the bridge, then quits, exiting 1 if any of it failed.
@@ -150,6 +152,9 @@ function releaseUpdater(): Updater | undefined {
       if (message !== null && !(await askToQuit(message))) return;
       quitConfirmed = true;
       if (process.platform === 'linux') {
+        // A second click, while this Loom quits, would start a second one.
+        if (restartingForUpdate) return;
+        restartingForUpdate = true;
         // electron-updater would start the new AppImage at once, while this
         // Loom still holds the single-instance lock as it shuts down, so it
         // would quit straight away. Instead, the update installs as on any
