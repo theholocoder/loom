@@ -261,11 +261,11 @@ export class AcpAdapter implements AgentAdapter {
           const asker = askerOf(request.sessionId);
           if (asker === null) return Promise.resolve({ outcome: { outcome: 'cancelled' } });
           const call = asker === undefined || !request.toolCall ? request.toolCall : unprefixed(request.toolCall as AcpToolCall & SessionUpdate, asker, children.get(asker)?.title);
-          const action = approvalActionOf(call ?? {}, this.profile.ownTools);
+          const action = approvalActionOf(call ?? {}, this.profile.ownTools, request.options);
           return ask<PermissionResponse>(
             'permission',
             (requestId) => ({ type: 'approval-asked', requestId, action, ...(asker ? { subagentId: asker } : {}) }),
-            (response) => (response.kind === 'approval' ? permissionResponse(request.options, response.approved) : undefined),
+            (response) => (response.kind === 'approval' ? permissionResponse(request.options, response) : undefined),
             { outcome: { outcome: 'cancelled' } },
           );
         }
@@ -779,7 +779,7 @@ interface PermissionRequest {
 }
 
 /** What the agent wants to do, from its tool call: the command for a shell one, the paths for the rest. */
-function approvalActionOf(call: NonNullable<PermissionRequest['toolCall']>, ownTools: ReadonlySet<string>): ApprovalAction {
+function approvalActionOf(call: NonNullable<PermissionRequest['toolCall']>, ownTools: ReadonlySet<string>, options: unknown): ApprovalAction {
   const input = (call.rawInput ?? {}) as { command?: unknown; cwd?: unknown; workdir?: unknown };
   // OpenCode names the tool; ACP itself only gives its kind, which says nothing of whose it is.
   const name = typeof call.name === 'string' && call.name ? call.name : undefined;
@@ -797,21 +797,26 @@ function approvalActionOf(call: NonNullable<PermissionRequest['toolCall']>, ownT
     // A shell command's location is the folder it runs in, not what it touches.
     paths: command === undefined ? paths : [],
     extension: name !== undefined && !ownTools.has(name.toLowerCase()),
+    always: permissionOption(options, 'allow_always') ? true : undefined,
   });
+}
+
+/** The agent's option of ACP kind `kind`, if it offers one. */
+function permissionOption(options: unknown, kind: string): { optionId: string } | undefined {
+  return Array.isArray(options) ? options.find((o: { kind?: unknown; optionId?: unknown }) => o?.kind === kind && typeof o.optionId === 'string') : undefined;
 }
 
 /** ACP v1's answer to a permission request: an option picked, or cancelled with the run. */
 type PermissionResponse = { outcome: { outcome: 'selected'; optionId: string } } | { outcome: { outcome: 'cancelled' } };
 
 /**
- * Loom answers only "once" or "reject", never "always": a grant for the
- * Session lives in Loom. Options are picked by kind, falling back to
- * OpenCode's ids.
+ * Loom answers "once" or "reject", and "always" only when the user picked
+ * it: a grant for the Session lives in Loom, the agent's "always" in the
+ * agent. Options are picked by kind, falling back to OpenCode's ids.
  */
-function permissionResponse(options: unknown, approved: boolean): PermissionResponse {
-  const kind = approved ? 'allow_once' : 'reject_once';
-  const option = Array.isArray(options) ? options.find((o: { kind?: unknown; optionId?: unknown }) => o?.kind === kind && typeof o.optionId === 'string') : undefined;
-  return { outcome: { outcome: 'selected', optionId: (option as { optionId: string } | undefined)?.optionId ?? (approved ? 'once' : 'reject') } };
+function permissionResponse(options: unknown, { approved, always }: { approved: boolean; always?: boolean }): PermissionResponse {
+  const [kind, fallback] = !approved ? ['reject_once', 'reject'] : always ? ['allow_always', 'always'] : ['allow_once', 'once'];
+  return { outcome: { outcome: 'selected', optionId: permissionOption(options, kind)?.optionId ?? fallback } };
 }
 
 // ACP v1's form elicitation: a flat JSON Schema object of primitive fields.

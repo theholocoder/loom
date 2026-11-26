@@ -98,7 +98,7 @@ export interface AcpTurn {
     | { update: Record<string, unknown> }
     | { bigOutput: { toolCallId: string; bytes: number } }
     | { elicit: { message: string; requestedSchema: Record<string, unknown>; toolCallId?: string } }
-    | { permission: PermissionToolCall; from?: string }
+    | { permission: PermissionToolCall; from?: string; options?: Array<{ optionId: string; kind: string; name: string }> }
     | { notify: { method: string; params: Record<string, unknown> } }
   >;
   /**
@@ -122,7 +122,8 @@ export interface AcpTurn {
 /**
  * The tool call of a `session/request_permission` the stand-in sends, as
  * OpenCode 2.2.5 does: `{ permission }` chunks wait for Loom's answer, and a
- * reject ends the turn as cancelled.
+ * reject ends the turn as cancelled. Its options are OpenCode's (once,
+ * always, reject) unless the chunk gives its own.
  */
 export interface PermissionToolCall {
   toolCallId: string;

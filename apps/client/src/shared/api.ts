@@ -1255,13 +1255,19 @@ export type TrustState = 'asked' | 'trusted' | 'untrusted' | 'expired';
  * - `asked`: the agent waits for the user's decision;
  * - `approved`: the user approved it once;
  * - `approved-session`: the user approved its whole category for the Session;
+ * - `approved-always`: the user picked the agent's own "always" option,
+ *   which the agent keeps as it does (Loom holds no grant for it);
  * - `denied`: the user denied it, or archived the Session while it was asked;
  * - `expired`: the run ended before the user decided.
  */
-export type ApprovalState = 'asked' | 'approved' | 'approved-session' | 'denied' | 'expired';
+export type ApprovalState = 'asked' | 'approved' | 'approved-session' | 'approved-always' | 'denied' | 'expired';
 
-/** The user's decision on an Approval request. */
-export type ApprovalDecision = 'once' | 'session' | 'deny';
+/**
+ * The user's decision on an Approval request: `always` picks the agent's
+ * own "always" option (ACP's `allow_always`), offered only where Loom has no
+ * category of its own.
+ */
+export type ApprovalDecision = 'once' | 'session' | 'always' | 'deny';
 
 /**
  * How a tool call reads on one line: its tool (its name, or else its kind)
@@ -1339,7 +1345,9 @@ export type TranscriptItem =
    * about. `category` is absent when Loom can't tell which it is in (the
    * user's own OpenCode rules asked), so it can only be approved once.
    * `defaultBranch` is set for a push to the Project's default branch,
-   * which always asks. `message` is what the user told the agent on denying.
+   * which always asks. `always` is set when the agent offers its own
+   * "always" option and Loom has no category, so Approve always can pick it.
+   * `message` is what the user told the agent on denying.
    */
   | {
       kind: 'approval';
@@ -1350,6 +1358,7 @@ export type TranscriptItem =
       detail: string;
       category?: ApprovalCategory;
       defaultBranch?: string;
+      always?: true;
       state: ApprovalState;
       message?: string;
       subagent?: AskingSubagent;

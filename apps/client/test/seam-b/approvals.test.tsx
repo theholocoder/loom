@@ -104,6 +104,14 @@ describe('Approval requests', () => {
     for (const index of [0, 1]) expect(within(card(index)).getAllByRole('button').map((b) => b.textContent)).toEqual(['Approve once', 'Deny']);
   });
 
+  it("offers Approve always, the agent's own, on what Loom can't place when the agent does", async () => {
+    const { card, click, decisions } = openSession([{ ...forcePush, category: undefined, detail: 'npm test', always: true }]);
+    expect(within(card()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Approve once', 'Approve always', 'Deny']);
+    expect(within(card()).getByRole('button', { name: 'Approve always' }).title).toBe('Let the agent stop asking for this; how long it remembers is up to the agent');
+    await click('Approve always');
+    expect(decisions()).toEqual([{ id: 7, itemId: 1, decision: 'always' }]);
+  });
+
   it('shows why a decision was refused, and settled cards read-only', async () => {
     const { card, click } = openSession(
       [
@@ -111,6 +119,7 @@ describe('Approval requests', () => {
         { ...forcePush, id: 2, state: 'denied', message: 'Rebase instead.' },
         { ...forcePush, id: 3, state: 'approved-session' },
         { ...forcePush, id: 4, state: 'expired' },
+        { ...forcePush, id: 5, category: undefined, always: true, state: 'approved-always' },
       ],
       {
         'sessions.approve': () => {
@@ -124,7 +133,8 @@ describe('Approval requests', () => {
     expect(within(card(1)).getByText('Told the agent: Rebase instead.')).toBeTruthy();
     expect(within(card(2)).getByText('Approved for this Session')).toBeTruthy();
     expect(within(card(3)).getByText('No longer asked')).toBeTruthy();
-    for (const index of [1, 2, 3]) expect(within(card(index)).queryAllByRole('button')).toEqual([]);
+    expect(within(card(4)).getByText('Approved always')).toBeTruthy();
+    for (const index of [1, 2, 3, 4]) expect(within(card(index)).queryAllByRole('button')).toEqual([]);
   });
 
   it('Settings has an Allow/Ask toggle per category', async () => {

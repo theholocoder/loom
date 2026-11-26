@@ -148,6 +148,42 @@ describe('Approval requests', () => {
     for (const config of configs(setup.machine)) expect(JSON.stringify(config)).not.toContain('elsewhere');
   });
 
+  it("Approve always, on what Loom can't place, answers with the agent's own allow_always option", async () => {
+    // The user's own OpenCode rules ask for npm: Loom has no category for it.
+    const setup = machineWith((checkout) => [{ chunks: [shell('npm test && npx biome check src/', checkout, 'call_npm'), shell('git push --force origin HEAD', checkout, 'call_push'), 'Done.'] }]);
+    const { main, id, items } = await startSession(setup, 'worktree');
+    const [card] = approvals(items);
+    expect(card).toEqual({ kind: 'approval', id: 1, toolCallId: 'call_npm', title: 'npm test && npx biome check src/', tool: 'shell', detail: 'npm test && npx biome check src/', always: true, state: 'asked' });
+    await expect(main.api.invoke('sessions.approve', { id, itemId: card!.id, decision: 'session' })).rejects.toThrow('only be approved once');
+    await main.api.invoke('sessions.approve', { id, itemId: card!.id, decision: 'always' });
+
+    // A card in one of Loom's categories has its own grant for the Session, never the agent's "always".
+    const later = await waitFor(main.api, 'transcript', (list) => approvals(list).length === 2, { sessionId: id });
+    expect(approvals(later).map((a) => [a.state, a.always])).toEqual([
+      ['approved-always', true],
+      ['asked', undefined],
+    ]);
+    await expect(main.api.invoke('sessions.approve', { id, itemId: approvals(later)[1]!.id, decision: 'always' })).rejects.toThrow("agent doesn't offer");
+    await main.api.invoke('sessions.approve', { id, itemId: approvals(later)[1]!.id, decision: 'once' });
+    await waitFor(main.api, 'sessions', waitingOn(id, 'finished'));
+    expect(permissionAnswers(setup.machine)).toEqual(['always', 'once']);
+  });
+
+  it("offers no Approve always when the agent doesn't", async () => {
+    const options = [
+      { optionId: 'yes', kind: 'allow_once', name: 'Allow' },
+      { optionId: 'no', kind: 'reject_once', name: 'Reject' },
+    ];
+    const setup = machineWith((checkout) => [{ chunks: [{ ...shell('npm test', checkout), options }, 'Done.'] }]);
+    const { main, id, items } = await startSession(setup, 'worktree');
+    const [card] = approvals(items);
+    expect(card?.always).toBeUndefined();
+    await expect(main.api.invoke('sessions.approve', { id, itemId: card!.id, decision: 'always' })).rejects.toThrow("agent doesn't offer");
+    await main.api.invoke('sessions.approve', { id, itemId: card!.id, decision: 'once' });
+    await waitFor(main.api, 'sessions', waitingOn(id, 'finished'));
+    expect(permissionAnswers(setup.machine)).toEqual(['yes']);
+  });
+
   it('Deny rejects the action, and its message goes to the agent as the next prompt once the run ends', async () => {
     const setup = machineWith((checkout) => [{ chunks: [shell('gh pr merge 12 --squash', checkout), 'Merged.'] }, { chunks: ['Understood, leaving it open.'] }]);
     const { main, id, items } = await startSession(setup, 'worktree');

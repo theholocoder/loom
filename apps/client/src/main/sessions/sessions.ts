@@ -1058,8 +1058,9 @@ export class Sessions {
   /**
    * Decides the Approval request in transcript item `itemId`: approves it
    * once, or approves it and its category for the rest of the Session, whose
-   * later requests Loom then answers itself; or denies it, `message` going
-   * to the agent once its run ends.
+   * later requests Loom then answers itself, or, where Loom has no category,
+   * approves it by the agent's own "always" option, kept by the agent as it
+   * does; or denies it, `message` going to the agent once its run ends.
    */
   async approve({ id, itemId, decision, message }: { id: number; itemId: number; decision: ApprovalDecision; message?: string }): Promise<void> {
     this.get(id);
@@ -1067,9 +1068,10 @@ export class Sessions {
     if (item?.kind !== 'approval') throw new Error('There is no such Approval request in this Session.');
     const requestId = this.asks.get(id)?.get(itemId);
     if (item.state !== 'asked' || requestId === undefined) throw new Error('The agent is no longer asking for this approval.');
-    if (decision !== 'once' && decision !== 'session' && decision !== 'deny') throw new Error(`"${String(decision)}" is not a decision on an Approval request.`);
+    if (decision !== 'once' && decision !== 'session' && decision !== 'always' && decision !== 'deny') throw new Error(`"${String(decision)}" is not a decision on an Approval request.`);
     if (decision === 'session' && item.defaultBranch) throw new Error(`A push to ${item.defaultBranch}, the default branch, always asks: approve it once, or deny it.`);
     if (decision === 'session' && !item.category) throw new Error("Loom can't tell what kind of action this is, so it can only be approved once.");
+    if (decision === 'always' && !item.always) throw new Error("The agent doesn't offer to always allow this: approve it once, or for this Session.");
     if (message !== undefined && typeof message !== 'string') throw new Error('A message to the agent must be text.');
     const agent = this.live.get(id);
     if (decision === 'deny') {
@@ -1083,8 +1085,9 @@ export class Sessions {
       return;
     }
     this.approveCall(id, item.toolCallId);
-    this.settleAsk(id, itemId, { ...item, state: decision === 'session' ? 'approved-session' : 'approved' });
-    agent?.answer(requestId, { kind: 'approval', approved: true });
+    const state = decision === 'session' ? 'approved-session' : decision === 'always' ? 'approved-always' : 'approved';
+    this.settleAsk(id, itemId, { ...item, state });
+    agent?.answer(requestId, { kind: 'approval', approved: true, ...(decision === 'always' && { always: true }) });
     if (decision !== 'session') return;
     const category = item.category!;
     const grants = this.grants.get(id) ?? new Set();
@@ -1138,7 +1141,8 @@ export class Sessions {
     this.ask(
       id,
       requestId,
-      withoutUndefined({ kind: 'approval' as const, toolCallId: action.toolCallId, title: action.title, tool: action.tool, detail, category, defaultBranch, state: 'asked' as const, subagent }),
+      // The agent's "always" only where Loom has no category: its rules for Loom's categories would let through what Loom asks (a push to the default branch).
+      withoutUndefined({ kind: 'approval' as const, toolCallId: action.toolCallId, title: action.title, tool: action.tool, detail, category, defaultBranch, always: category === undefined ? action.always : undefined, state: 'asked' as const, subagent }),
       'approval',
     );
   }
