@@ -45,7 +45,7 @@ export function subagentOfCall(item: Tool, subagents: readonly Subagent[]): Suba
 
 /** Whether a tool call card is one starting a Subagent, shown as its Subagent's card. */
 export function startsSubagent(item: Tool, subagents: readonly Subagent[]): boolean {
-  return item.name === 'subagent' && subagentOfCall(item, subagents) !== undefined;
+  return subagentOfCall(item, subagents) !== undefined;
 }
 
 function StatusLine({ subagent }: { subagent: Subagent }) {
@@ -129,8 +129,8 @@ export function SubagentView({
   session: Session;
   subagent: Subagent;
   subagents: readonly Subagent[];
-  /** Whether it waits on an answer in the Session's conversation. */
-  asking: boolean;
+  /** What it asks and waits on an answer to, in the Session's conversation, if anything. */
+  asking: Extract<TranscriptItem, { kind: 'question' | 'approval' }> | undefined;
   onOpen: (subagentId: string) => void;
   /** Back to its parent: `undefined` for the Session. */
   onBack: (to: string | undefined) => void;
@@ -189,7 +189,7 @@ export function SubagentView({
         {items.length === 0 && <p className="muted subagent-empty">{subagent.status === 'running' ? 'Nothing yet.' : 'It said nothing.'}</p>}
         {asking && (
           <div className="interruption" role="note">
-            <span>It waits on you.</span>
+            <span>{asking.kind === 'approval' ? `It asks to ${asking.tool}: ${asking.title}.` : `It asks: ${asking.message || 'a question'}.`}</span>
             <button type="button" className="link" onClick={() => onBack(undefined)}>
               Answer it in the Session
             </button>

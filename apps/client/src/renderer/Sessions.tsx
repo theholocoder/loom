@@ -803,7 +803,7 @@ export function SessionView({
               session={session}
               subagent={viewed}
               subagents={subagents}
-              asking={items.some((i) => (i.kind === 'question' || i.kind === 'approval') && i.state === 'asked' && i.subagent?.id === viewed.id)}
+              asking={items.find((i): i is Extract<TranscriptItem, { kind: 'question' | 'approval' }> => (i.kind === 'question' || i.kind === 'approval') && i.state === 'asked' && i.subagent?.id === viewed.id)}
               onOpen={setViewing}
               onBack={setViewing}
               onStop={stopSubagent}

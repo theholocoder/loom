@@ -256,4 +256,23 @@ describe('a Session with Subagents', () => {
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
     expect(dashboard.tokens).toBe(152);
   });
+
+  it('takes no run of its own from an update that says nothing, such as usage after the prompt', async () => {
+    const usage = { update: { sessionUpdate: 'usage_update', used: 1000, size: 128000, cost: { amount: 0, currency: 'USD' } } };
+    const title = { update: { sessionUpdate: 'session_info_update', title: 'Login bug' } };
+    const { machine, main, id } = await started({ turns: [{ chunks: ['Done.'], after: [{ hold: 'late' }, usage, title] }] });
+    await waitFor(main.api, 'sessions', session(id, waiting('finished')));
+    machine.release('late');
+    await waitFor(main.api, 'sessions', session(id, (s) => s.context?.used === 1000));
+    await settle();
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'waiting', waitingReason: 'finished' });
+    expect(main.notifications).toHaveLength(1);
+  });
+
+  it('never goes stuck while only its Subagents work, however long they say nothing', async () => {
+    const { main, id } = await started({ turns: [{ chunks: [...startsSubagent('call_sub', 'ses_child1', EXPLORE), 'Waiting on it.'], after: [{ hold: 'never' }] }] });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.subagentsOnly === true));
+    await main.elapse(60 * 60_000);
+    expect((await main.api.invoke('sessions.list')).find((s) => s.id === id)).toMatchObject({ status: 'working', subagentsOnly: true });
+  });
 });

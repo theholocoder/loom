@@ -654,7 +654,7 @@ export interface Session {
   queue?: QueuedMessage[];
   /** Set when its agent can take a queued message mid-run (Steer); otherwise Send now interrupts the run. */
   canSteer?: boolean;
-  /** Set when its agent can stop one Subagent on its own (`sessions.stopSubagent`). */
+  /** Set when its agent, as last started, can stop one Subagent on its own (`sessions.stopSubagent`). */
   canStopSubagents?: true;
   /** How many of its Subagents are running; absent when none is. A Session is Working while any is. */
   runningSubagents?: number;
@@ -1283,13 +1283,13 @@ export interface PlanEntry {
   status: PlanStatus;
 }
 
-/** One entry of a Session's conversation, in order. */
 /** The Subagent a question or Approval request came from, as the Session's transcript names it. */
 export interface AskingSubagent {
   id: string;
   description: string;
 }
 
+/** One entry of a Session's conversation, in order. */
 export type TranscriptItem =
   /** What the user sent, with what they attached to it, if anything. */
   | { kind: 'user'; id: number; text: string; attachments?: Attachment[] }

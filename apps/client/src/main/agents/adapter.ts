@@ -80,8 +80,8 @@ export interface SubagentReport {
   parentId?: string;
   depth: number;
   status: SubagentStatus;
-  /** What it was asked to do, in a few words. */
-  description: string;
+  /** What it was asked to do, in a few words, once the agent says. */
+  description?: string;
   /** The tool call that started it, in its parent's, once linked. */
   toolCallId?: string;
   /** The kind of agent it runs as, and the model it was given, when the agent says. */
@@ -180,8 +180,6 @@ export interface AgentAdapter {
   readonly name: string;
   /** Whether its sessions take a message mid-run (`AgentSession.steer`). */
   readonly canSteer?: boolean;
-  /** Whether its sessions may stop one Subagent alone (`AgentSession.stopSubagent`), when the agent says it can. */
-  readonly canStopSubagents?: boolean;
   /** Starts the agent in the working copy, for a new conversation or one it resumes. */
   open(options: OpenOptions): Promise<AgentSession>;
 }

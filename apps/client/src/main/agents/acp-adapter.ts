@@ -68,10 +68,6 @@ export class AcpAdapter implements AgentAdapter {
     return this.profile.name;
   }
 
-  get canStopSubagents(): boolean {
-    return this.profile.subagentTool !== undefined;
-  }
-
   async open({ environment, workingCopy, tempDir, approvals, toolsOff, loomTools, resume, onEvent }: OpenOptions): Promise<AgentSession> {
     // The user's own setup (OpenCode config, MCP servers, plugins, skills,
     // AGENTS.md) loads as it would in their terminal: the agent starts in the
@@ -253,10 +249,11 @@ export class AcpAdapter implements AgentAdapter {
         }
         if (forSession !== sessionId || replaying) return;
         if (update.sessionUpdate === 'config_option_update') return configured((update as { configOptions?: unknown }).configOptions);
-        // With no prompt open, the agent is on a run of its own.
-        startBackground();
+        // With no prompt open, what the agent does is a run of its own (on a Subagent's result); news such as its usage isn't.
+        const doing = subagentTool !== undefined && BACKGROUND_WORK.has(update.sessionUpdate);
+        if (doing) startBackground();
         report(update);
-        quietLater();
+        if (doing) quietLater();
       },
       onRequest: (method, params) => {
         if (method === 'session/request_permission') {
@@ -490,11 +487,14 @@ interface SubagentInput {
   model?: string;
 }
 
+/** The session updates that are the agent at work, which start a background run with no prompt open. */
+const BACKGROUND_WORK = new Set(['agent_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update', 'plan']);
+
 const CHILD_STATUSES: Record<string, SubagentStatus> = { created: 'running', running: 'running', completed: 'completed', failed: 'failed', interrupted: 'interrupted' };
 const SUBAGENT_EVENTS = new Set<AgentEvent['type']>(['text-delta', 'thinking-delta', 'plan', 'tool-started', 'tool-updated']);
 
 function childReport({ id, parentId, depth, status, title, toolCallId, description, agent, model }: Child, error?: string): SubagentReport {
-  return defined({ subagentId: id, parentId, depth, status, description: description ?? title ?? 'Subagent', toolCallId, agent, model, error: status === 'failed' ? error : undefined });
+  return defined({ subagentId: id, parentId, depth, status, description: description ?? title, toolCallId, agent, model, error: status === 'failed' ? error : undefined });
 }
 
 /** The subagent tool's input, once it has its description: what to do, as which agent, on which model. */

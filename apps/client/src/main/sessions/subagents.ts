@@ -99,8 +99,7 @@ export class Subagents {
       depth: report.depth,
       toolCallId: report.toolCallId ?? was?.toolCallId,
       agent: report.agent ?? was?.agent,
-      // A Subagent the agent named first by its title alone keeps the description it was given since.
-      description: report.description === 'Subagent' && was ? was.description : report.description,
+      description: report.description ?? was?.description ?? 'Subagent',
       model: report.model ?? was?.model,
       status: report.status,
       error: report.error,
@@ -162,6 +161,7 @@ export class Subagents {
   /** Forgets a deleted Session's Subagents; their rows go with the Session's. */
   forget(sessionId: number): void {
     this.lists.delete(sessionId);
+    for (const key of [...this.reading.keys()]) if (parseKey(key)[0] === sessionId) this.reading.delete(key);
     for (const [key, held] of [...this.held]) {
       if (parseKey(key)[0] !== sessionId) continue;
       if (held.checkpoint !== undefined) this.options.clock.clearTimeout(held.checkpoint);

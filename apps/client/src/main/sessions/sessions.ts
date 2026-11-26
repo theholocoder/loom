@@ -693,9 +693,8 @@ export class Sessions {
   /** Stops one of the Session's Subagents, and only it, if its agent can. */
   async stopSubagent({ id, subagentId }: { id: number; subagentId: string }): Promise<void> {
     this.get(id);
-    if (this.subagents.find(id, subagentId)?.status !== 'running') throw new Error('That Subagent is not running.');
     const agent = this.live.get(id);
-    if (!agent) throw new Error('That Subagent is not running.');
+    if (!agent || this.subagents.find(id, subagentId)?.status !== 'running') throw new Error('That Subagent is not running.');
     if (!agent.stopSubagent) throw new Error(`${this.options.adapter.name} can't stop one Subagent on its own.`);
     await agent.stopSubagent(subagentId);
   }
@@ -939,8 +938,7 @@ export class Sessions {
 
   /** The Session, with what its agent can do. */
   private withCapabilities(session: Session): Session {
-    const { canSteer, canStopSubagents } = this.options.adapter;
-    return withoutUndefined({ ...session, canSteer: canSteer || undefined, canStopSubagents: canStopSubagents ? (true as const) : undefined });
+    return this.options.adapter.canSteer ? { ...session, canSteer: true } : session;
   }
 
   /**
@@ -1825,6 +1823,8 @@ export class Sessions {
   private leaveBetweenRuns(id: number): void {
     if (!this.betweenRuns.delete(id)) return;
     this.subagentsChanged(id);
+    // Its run can be stuck again.
+    this.watchStuck(id);
   }
 
   /** Writes the attachments into the Session's Environment, for its agent to read. */
@@ -1875,7 +1875,8 @@ export class Sessions {
       this.reportedCosts.set(id, 0);
       this.save(id, { reported_cost: 0 });
     }
-    this.update(id, { agentSessionId: agent.id });
+    // Whether one Subagent can be stopped alone is what this agent said it can do.
+    this.update(id, { agentSessionId: agent.id, canStopSubagents: agent.stopSubagent ? true : undefined });
     this.save(id, { agent_session_id: agent.id });
     return agent;
   }
@@ -2558,7 +2559,8 @@ export class Sessions {
     const handle = this.stuckWatches.get(id);
     if (handle !== undefined) this.options.clock.clearTimeout(handle);
     this.stuckWatches.delete(id);
-    if (this.shuttingDown || this.get(id).status !== 'working') return;
+    // Working on its Subagents alone, its agent has no run to be stuck in.
+    if (this.shuttingDown || this.get(id).status !== 'working' || this.betweenRuns.has(id)) return;
     this.stuckWatches.set(
       id,
       this.options.clock.setTimeout(() => {
