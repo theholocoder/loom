@@ -1,4 +1,4 @@
-import { Bell, CalendarClock, CircleCheckBig, CircleX, CodeXml, FileDiff, FolderTree, Keyboard, LoaderCircle, MessagesSquare, Palette, Pencil, RotateCcw, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { Bell, CalendarClock, CircleCheckBig, CirclePause, CircleX, CodeXml, FileDiff, FolderTree, Keyboard, LoaderCircle, MessagesSquare, Palette, Pencil, Play, RotateCcw, RotateCw, Search, SearchX, Server, ShieldAlert, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { isValidElement, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { APPROVAL_CATEGORIES, APPROVAL_MODES, MAX_AUTO_PROMPTS, OPENCODE_MIN_VERSION, OPENCODE_NAME, type AgentStatus, type HighlightsSettings, type ApprovalCategory, type ApprovalMode, type ApprovalSetting, type EnvironmentState, type EnvironmentStatus, type LoomApi, type NotificationKind } from '../shared/api';
 import { assignedBindings, checkShortcut, DEFAULT_KEYBINDINGS, isDefaultKeybindings, MODIFIER_KEYS, REMAPPABLE_SHORTCUTS, sameShortcut, SHORTCUTS, shortcutLabel, takenBy, type Shortcut, type ShortcutName } from '../shared/shortcuts';
@@ -867,9 +867,18 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
       .catch((error: unknown) => setReloadError((error as Error).message))
       .finally(() => setReloading(false));
   };
+  const start = () => {
+    setReloadError(undefined);
+    api.invoke('environments.start', { id: env.id }).catch((error: unknown) => setReloadError((error as Error).message));
+  };
+  // A distro not started yet, or one that failed to, is started from here; a connected one reloaded.
+  const startable = env.state === 'stopped' || env.state === 'failed';
   return (
     <tr>
-      <td>{env.label}</td>
+      <td>
+        {env.label}
+        {env.distro && <div className="muted">WSL</div>}
+      </td>
       <td>
         <EnvironmentState env={env} />
         {env.error && <div className="err"><ErrorText text={env.error} /></div>}
@@ -880,17 +889,24 @@ function EnvironmentRow({ env }: { env: EnvironmentStatus }) {
       </td>
       <td>{env.bridge ? <span className="tech">{`loom-bridge ${env.bridge.version}`}</span> : <span className="muted">—</span>}</td>
       <td>
-        <button
-          type="button"
-          title="Re-read your shell environment, for tools installed since Loom started"
-          disabled={reloading || env.state !== 'connected'}
-          onClick={reload}
-        >
-          <span className={reloading ? 'spin' : undefined}>
-            <RotateCw className="sm" />
-          </span>
-          Reload
-        </button>
+        {startable ? (
+          <button type="button" title={env.state === 'stopped' ? `Start ${env.label}, and check its agent` : `Try starting ${env.label} again`} onClick={start}>
+            <Play className="sm" />
+            {env.state === 'stopped' ? 'Start' : 'Retry'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            title="Re-read your shell environment, for tools installed since Loom started"
+            disabled={reloading || env.state !== 'connected'}
+            onClick={reload}
+          >
+            <span className={reloading ? 'spin' : undefined}>
+              <RotateCw className="sm" />
+            </span>
+            Reload
+          </button>
+        )}
         {reloadError && <div className="err"><ErrorText text={reloadError} /></div>}
       </td>
     </tr>
@@ -930,7 +946,7 @@ function EnvironmentState({ env }: { env: EnvironmentStatus }) {
   return (
     <span className={`row st-${env.state}`}>
       <StateIcon state={env.state} />
-      <span>{env.state}</span>
+      <span>{stateLabel(env)}</span>
     </span>
   );
 }
@@ -1009,8 +1025,18 @@ function shellWarning(env: EnvironmentStatus): string | undefined {
   return "Loom couldn't read your login shell's environment, so tools set up in your shell profile (mise, asdf, ~/.local/bin) may not be found.";
 }
 
+/** What the Environment is doing, in words: a WSL distro's start says which, as it may be slow. */
+function stateLabel(env: EnvironmentStatus): string {
+  if (env.state === 'stopped') return 'not started';
+  if (env.state === 'starting' && env.installing) return `Installing loom-bridge in ${env.label}…`;
+  if (env.state === 'starting' && env.distro) return `Starting ${env.label}…`;
+  return env.state;
+}
+
 function StateIcon({ state }: { state: EnvironmentState }) {
   switch (state) {
+    case 'stopped':
+      return <CirclePause className="sm" />;
     case 'connected':
       return <CircleCheckBig className="sm" />;
     case 'starting':

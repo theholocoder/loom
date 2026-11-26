@@ -23,7 +23,7 @@ import (
 
 // ProtocolVersion is bumped whenever the frames or messages change in a way
 // an older peer would not understand.
-const ProtocolVersion = 3
+const ProtocolVersion = 4
 
 // MaxFrameSize bounds a single frame so a corrupt length can't make the
 // bridge allocate without limit.
@@ -50,6 +50,9 @@ type Machine struct {
 	// ShellTimeout bounds each attempt at running Shell; zero means
 	// shellenv.DefaultTimeout.
 	ShellTimeout time.Duration
+	// WSL is wsl.exe's path, through which the bridge lists and installs WSL
+	// distros' bridges; empty where there is no WSL to reach.
+	WSL string
 	// StopGrace is how long a stopped channel's process group has to exit
 	// after SIGTERM before it is killed; zero means proc.DefaultGrace.
 	StopGrace time.Duration
@@ -91,7 +94,7 @@ type handshakeResult struct {
 func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 	out := &writer{w: w}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &server{info: info, home: machine.Home, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out, machine.StopGrace, machine.Shell)}
+	s := &server{info: info, home: machine.Home, wsl: machine.WSL, environ: machine.Environ, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out, machine.StopGrace, machine.Shell)}
 	var inFlight sync.WaitGroup
 	defer s.channels.wait()
 	defer inFlight.Wait()
@@ -127,6 +130,9 @@ type server struct {
 	home     string
 	env      *environment
 	channels *channels
+	// wsl is wsl.exe's path, or empty; environ is the bridge's own environment, which wsl.exe runs with.
+	wsl     string
+	environ []string
 }
 
 func (s *server) handle(ctx context.Context, req request) response {
@@ -200,6 +206,14 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(probeOpencode(ctx, s.env.get(), params))
+	case "wsl.list":
+		return reply(s.listWSL(ctx))
+	case "wsl.install":
+		var params wslInstallParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.installWSL(ctx, params))
 	case "channel.open":
 		var params openParams
 		if err := decodeParams(req.Params, &params); err != nil {

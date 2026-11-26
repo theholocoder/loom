@@ -1,6 +1,7 @@
 // Builds loom-bridge into bridge/dist/loom-bridge-<platform>-<arch>[.exe],
-// stamped with the Client's version. Builds the host target by default, or
-// every shipped target with --all.
+// stamped with the Client's version. Builds the host target by default (on
+// Windows with the Linux one, which Loom installs into WSL distros), or every
+// shipped target with --all.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -17,7 +18,7 @@ const targets = [
 
 const selected = process.argv.includes('--all')
   ? targets
-  : targets.filter((t) => t.platform === process.platform && t.arch === process.arch);
+  : targets.filter((t) => (t.platform === process.platform && t.arch === process.arch) || (process.platform === 'win32' && t.platform === 'linux' && t.arch === 'x64'));
 if (selected.length === 0) {
   console.error(`loom-bridge has no build target for ${process.platform}-${process.arch}`);
   process.exit(1);

@@ -373,7 +373,7 @@ button.search { border: 0; width: 100%; text-align: left; }
 /* Empty states, styled like the prototype's diff loading line. */
 .empty { padding: 30px; color: var(--muted); text-align: center; display: flex; gap: 8px; justify-content: center; align-items: center; }
 .empty:has(> .error-details) { flex-direction: column; }
-.st-connected { color: var(--ok); } .st-starting { color: var(--work); } .st-unresponsive { color: var(--wait); }
+.st-stopped { color: var(--muted); } .st-connected { color: var(--ok); } .st-starting { color: var(--work); } .st-unresponsive { color: var(--wait); }
 .st-disconnected, .st-failed { color: var(--err); }
 .err { color: var(--err); font-size: 12px; }
 /* The raw output behind an error message, folded under "Details" (ErrorText). */

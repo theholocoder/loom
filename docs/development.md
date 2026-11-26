@@ -30,7 +30,7 @@ With no display, run the smoke tests headless: `LOOM_SMOKE_HEADLESS=1 just test`
 - **Seam B** (`apps/client/test/seam-b`, `apps/client/e2e`): the renderer against a fake main, plus Electron smoke tests of the whole app.
 - **Seam C** (`bridge/protocol`): Go tests at the bridge protocol boundary.
 
-Seam A never runs the real `gh` or `glab`: it puts scripted stand-ins on the Environment's PATH (`apps/client/test/seam-a/stand-ins`).
+Seam A never runs the real `gh` or `glab`: it puts scripted stand-ins on the Environment's PATH (`apps/client/test/seam-a/stand-ins`). On Unix it also stands in for WSL (`Machine.installWsl`): a `wsl.exe` script, which the native bridge is pointed at with `LOOM_WSL`, runs each distro's commands on the test machine under a home of its own.
 
 ### Forge contract suite
 
@@ -53,7 +53,7 @@ LOOM_OPENCODE_CONTRACT=1 pnpm --filter @loom/client exec vitest run --project op
 
 ## Packaging and releasing
 
-`just package` builds the installer for this machine into `apps/client/dist`: a Linux x64 AppImage, or a Windows x64 per-user NSIS installer (no admin rights). Both are unsigned, and carry the `loom-bridge` binary in their resources (`resources/bridge`). electron-builder's config is `apps/client/electron-builder.yml`. Only main's run-time packages are `dependencies` in `apps/client/package.json`: what the renderer uses is bundled by Vite, so it belongs in `devDependencies` and stays out of the installer.
+`just package` builds the installer for this machine into `apps/client/dist`: a Linux x64 AppImage, or a Windows x64 per-user NSIS installer (no admin rights). Both are unsigned, and carry the `loom-bridge` binary in their resources (`resources/bridge`); the Windows installer carries the Linux one too, which Loom installs into each WSL distro it works in. electron-builder's config is `apps/client/electron-builder.yml`. Only main's run-time packages are `dependencies` in `apps/client/package.json`: what the renderer uses is bundled by Vite, so it belongs in `devDependencies` and stays out of the installer.
 
 `node scripts/self-test-package.mjs <AppImage or installer>` launches a build once in self-test mode (`LOOM_SELF_TEST=1`, `apps/client/src/main/self-test.ts`): Loom starts, opens its database, connects its bridge, prints the result and quits, exiting 1 if any of it failed. CI's Package job (`.github/workflows/package.yml`) runs it on every change, for each installer.
 

@@ -551,7 +551,7 @@ export function SessionView({
   const unshownError = session.waitingReason === 'error' && session.error && !items.some((i) => i.kind === 'error') ? session.error : undefined;
   const environment = useTopic('environments')?.find((e) => e.id === project?.checkout.environmentId);
   // Disconnected: the bridge died and is about to be started again.
-  const starting = working && (environment?.state === 'starting' || environment?.state === 'disconnected');
+  const starting = working && (environment?.state === 'stopped' || environment?.state === 'starting' || environment?.state === 'disconnected');
   // A run that ended early goes on from the card that ends the conversation: Retry sends an unanswered prompt again, Continue has the agent carry on.
   const going = goingOn(session, items);
   const retryable = going === 'retry';
