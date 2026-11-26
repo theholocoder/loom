@@ -503,7 +503,7 @@ describe('searching conversations', () => {
   const excerptOf = (name: string) => within(palette()).getByRole('option', { name }).getAttribute('aria-description') ?? undefined;
 
   it('finds Sessions by what was said in them, showing where', async () => {
-    const main = open((words) => (words.includes('renderer') ? [{ id: 3, words: ['renderer'], excerpt: 'The PDF renderer blocks on fonts.' }] : []));
+    const main = open((words) => (words.includes('renderer') ? [{ id: 3, itemId: 0, words: ['renderer'], excerpt: 'The PDF renderer blocks on fonts.' }] : []));
 
     type('renderer');
     await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
@@ -513,8 +513,8 @@ describe('searching conversations', () => {
 
   it('takes each word from the title or the conversation, the excerpt only when the conversation gave one', async () => {
     open((words) => [
-      { id: 1, words: words.filter((w) => w === 'token'), excerpt: 'The token expires too soon.' },
-      { id: 2, words: words.filter((w) => w === 'login' || w === 'token'), excerpt: 'Dark mode broke the login token.' },
+      { id: 1, itemId: 0, words: words.filter((w) => w === 'token'), excerpt: 'The token expires too soon.' },
+      { id: 2, itemId: 0, words: words.filter((w) => w === 'login' || w === 'token'), excerpt: 'Dark mode broke the login token.' },
     ].filter((m) => m.words.length));
 
     type('login token');
@@ -528,7 +528,7 @@ describe('searching conversations', () => {
   });
 
   it('keeps what the last answer found while the next is under way, for a word it holds', async () => {
-    open((words) => (words.some((w) => 'fonts'.includes(w)) ? [{ id: 3, words, excerpt: 'Blocks on fonts.' }] : []));
+    open((words) => (words.some((w) => 'fonts'.includes(w)) ? [{ id: 3, itemId: 0, words, excerpt: 'Blocks on fonts.' }] : []));
     type('fonts');
     await waitFor(() => expect(sessionNames()).toEqual(['Old export']));
     type('font');
@@ -538,7 +538,7 @@ describe('searching conversations', () => {
   });
 
   it('narrows conversation matches with filters too, and asks nothing for filters alone', async () => {
-    const main = open(() => [{ id: 3, words: ['fonts'], excerpt: 'fonts' }, { id: 1, words: ['fonts'], excerpt: 'fonts' }]);
+    const main = open(() => [{ id: 3, itemId: 0, words: ['fonts'], excerpt: 'fonts' }, { id: 1, itemId: 0, words: ['fonts'], excerpt: 'fonts' }]);
     type('is:archived');
     type('is:archived fonts');
     await waitFor(() => expect(sessionNames()).toEqual(['Old export']));

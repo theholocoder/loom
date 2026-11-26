@@ -7,7 +7,7 @@ import type { Element, ElementContent } from 'hast';
 import { Check, Copy, ExternalLink, Link as LinkIcon, TriangleAlert } from 'lucide-react';
 import type { Html, Nodes, PhrasingContent, Root } from 'mdast';
 import { renderAsync } from 'pele/lazy';
-import { createContext, useContext, useEffect, useId, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { createContext, memo, useContext, useEffect, useId, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
@@ -264,7 +264,7 @@ const REHYPE = [rehypeHighlight];
  */
 export type MarkdownFlavour = keyof typeof REMARKS;
 
-export function Markdown({ text, flavour = 'agent' }: { text: string; flavour?: MarkdownFlavour }) {
+export const Markdown = memo(function Markdown({ text, flavour = 'agent' }: { text: string; flavour?: MarkdownFlavour }) {
   // Each message's own prefix for its ids, so its footnote links find its own footnotes.
   const prefix = `md${useId().replace(/[^\w-]/g, '')}-`;
   return (
@@ -278,4 +278,4 @@ export function Markdown({ text, flavour = 'agent' }: { text: string; flavour?: 
       </MessageSource>
     </div>
   );
-}
+});

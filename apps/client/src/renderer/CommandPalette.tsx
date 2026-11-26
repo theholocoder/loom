@@ -28,7 +28,7 @@ export interface CommandPaletteProps {
   sessions: Session[];
   projects: Project[];
   onRun: (action: PaletteAction) => void;
-  onOpenSession: (session: Session) => void;
+  onOpenSession: (session: Session, itemId?: number) => void;
   /** Closed without running anything. */
   onClose: () => void;
 }
@@ -61,7 +61,10 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
   const run = (index: number) => {
     const inActions = index >= actionsAt && index < actionsAt + shownActions.length;
     if (inActions) onRun(shownActions[index - actionsAt]!);
-    else onOpenSession(found[index - sessionsAt]!.session);
+    else {
+      const { session, said } = found[index - sessionsAt]!;
+      onOpenSession(session, said?.itemId);
+    }
   };
   const changeQuery = (next: string) => {
     setQuery(next);
@@ -102,7 +105,7 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
   );
   const sessionGroup = found.length > 0 && (
     <Group id={`${id}-sessions`} label="Sessions" count={found.length}>
-      {found.map(({ session, excerpt }, at) => {
+      {found.map(({ session, said }, at) => {
         const project = projects.find((p) => p.id === session.projectId);
         return option(
           sessionsAt + at,
@@ -112,9 +115,9 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
             {project && <ProjectAvatar project={project} size={18} />}
             <span className="grow palette-session">
               <span className="ellipsis">{session.title}</span>
-              {excerpt && (
-                <span className="muted ellipsis palette-excerpt" title={excerpt}>
-                  {excerpt}
+              {said && (
+                <span className="muted ellipsis palette-excerpt" title={said.excerpt}>
+                  {said.excerpt}
                 </span>
               )}
             </span>
@@ -132,7 +135,7 @@ export function CommandPalette({ actions, sessions, projects, onRun, onOpenSessi
             {project && <span className="muted ellipsis palette-project">{project.name}</span>}
             {!project && removed.has(session.projectId) && <ProjectRemoved />}
           </>,
-          excerpt,
+          said?.excerpt,
         );
       })}
     </Group>

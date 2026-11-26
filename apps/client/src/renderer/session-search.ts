@@ -64,8 +64,7 @@ const STATUS_ORDER: Record<Session['status'], number> = { waiting: 0, working: 1
 /** A Session the search found, with what was said in it that it was found by, if any. */
 export interface SessionHit {
   session: Session;
-  /** Where the conversation holds words not found in the Session itself. */
-  excerpt?: string;
+  said?: ConversationMatch;
 }
 
 /**
@@ -104,11 +103,11 @@ export function searchSessions(sessions: Session[], projects: Project[], { filte
       const unfound = words.filter((word) => !found.includes(word));
       if (!unfound.length) return [{ session }];
       const match = said.get(session.id);
-      return match && unfound.every((word) => match.words.some((held) => held.includes(word))) ? [{ session, excerpt: match.excerpt }] : [];
+      return match && unfound.every((word) => match.words.some((held) => held.includes(word))) ? [{ session, said: match }] : [];
     })
     .sort(
       (a, b) =>
-        Number(a.excerpt !== undefined) - Number(b.excerpt !== undefined) ||
+        Number(a.said !== undefined) - Number(b.said !== undefined) ||
         STATUS_ORDER[a.session.status] - STATUS_ORDER[b.session.status] ||
         b.session.updatedAt - a.session.updatedAt,
     );

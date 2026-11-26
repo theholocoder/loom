@@ -23,17 +23,21 @@ async function twoSessions(prompts: [string, string], turns: AcpTurn[] = [{ chun
 }
 
 describe('searching conversations', () => {
-  it('finds the Sessions whose messages hold the words, saying which words each holds and where', async () => {
+  it('finds the Sessions whose messages hold the words, saying which words each holds and in which message', async () => {
     const { main, ids } = await twoSessions(['Why does the invoice export time out?', 'Add a dark mode to the INVOICE page'], [{ chunks: ['The PDF renderer ', 'blocks on fonts.'] }]);
+    const itemOf = async (sessionId: number, text: string) =>
+      (await waitFor(main.api, 'transcript', (items) => items.some((i) => 'text' in i && i.text === text), { sessionId })).find((i) => 'text' in i && i.text === text)!.id;
+    const answer = await itemOf(ids[0], 'The PDF renderer blocks on fonts.');
+    const [asked, darkMode] = [await itemOf(ids[0], 'Why does the invoice export time out?'), await itemOf(ids[1], 'Add a dark mode to the INVOICE page')];
 
     expect(await main.api.invoke('sessions.searchConversations', { words: ['dark', 'fonts'] })).toEqual([
-      { id: ids[0], words: ['fonts'], excerpt: 'The PDF renderer blocks on fonts.' },
+      { id: ids[0], itemId: answer, words: ['fonts'], excerpt: 'The PDF renderer blocks on fonts.' },
       // The first message holding the most of them.
-      { id: ids[1], words: ['dark', 'fonts'], excerpt: 'Add a dark mode to the INVOICE page' },
+      { id: ids[1], itemId: darkMode, words: ['dark', 'fonts'], excerpt: 'Add a dark mode to the INVOICE page' },
     ]);
     expect(await main.api.invoke('sessions.searchConversations', { words: ['invoice'] })).toEqual([
-      { id: ids[0], words: ['invoice'], excerpt: 'Why does the invoice export time out?' },
-      { id: ids[1], words: ['invoice'], excerpt: 'Add a dark mode to the INVOICE page' },
+      { id: ids[0], itemId: asked, words: ['invoice'], excerpt: 'Why does the invoice export time out?' },
+      { id: ids[1], itemId: darkMode, words: ['invoice'], excerpt: 'Add a dark mode to the INVOICE page' },
     ]);
     expect(await main.api.invoke('sessions.searchConversations', { words: ['nowhere'] })).toEqual([]);
     expect(await main.api.invoke('sessions.searchConversations', { words: [] })).toEqual([]);
