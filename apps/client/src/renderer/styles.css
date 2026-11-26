@@ -424,6 +424,8 @@ button.search { border: 0; width: 100%; text-align: left; }
 .modal { width: min(440px, calc(100vw - 32px)); box-shadow: 0 12px 40px var(--shadow); }
 .modal p { margin: 0 0 12px; color: var(--muted); }
 .modal-actions { justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.environment-choice { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.environment-choice label { gap: 8px; }
 .merge-dialog input { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
 .merge-dialog .warnings { margin-top: 10px; }
 .merge-dialog .warnline { color: var(--wait); font-size: 12.5px; display: flex; gap: 6px; align-items: center; margin: 4px 0 0; }

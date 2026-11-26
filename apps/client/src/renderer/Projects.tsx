@@ -1,6 +1,7 @@
 import { ArchiveRestore, CircleCheckBig, CircleX, FolderGit2, FolderOpen, GitBranch, LoaderCircle, MessageSquarePlus, Palette, Search, Trash2, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { FORGE_CLI, FORGE_NAMES, OPENCODE_NAME, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
+import { FORGE_CLI, FORGE_NAMES, OPENCODE_NAME, type Commands, type EnvironmentStatus, type ForgeStatus, type ModelPick, type Project, type ProjectEdit, type RestorableProject, type UnsavedSession } from '../shared/api';
+import { distroOf, NATIVE_ENVIRONMENT_ID, onWindowsDrive } from '../shared/environment-ids';
 import { branchPrefixError, branchPrefixOf, defaultBranchError, defaultBranchOf } from '../shared/branches';
 import { AVATAR_MAX, avatarError, avatarText, PROJECT_COLOR_NAMES, PROJECT_COLORS, projectNameError, type ProjectColor } from '../shared/projects';
 import { ErrorText } from './ErrorText';
@@ -41,10 +42,12 @@ export interface ProjectAdder {
 
 export function useProjectAdder(): ProjectAdder {
   const api = useApi();
+  const environments = useTopic('environments') ?? [];
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string>();
   const [added, setAdded] = useState<AddedProject>();
-  const [offer, setOffer] = useState<{ path: string; project: RestorableProject }>();
+  const [choosing, setChoosing] = useState(false);
+  const [offer, setOffer] = useState<{ checkout: CheckoutPick; project: RestorableProject }>();
   // Bumped by dismiss, so an attempt that fails after it doesn't show its error.
   const attempt = useRef(0);
   /** Runs an attempt, which resolves with the Project it added or restored, if it did. */
@@ -62,31 +65,99 @@ export function useProjectAdder(): ProjectAdder {
       setLinking(false);
     }
   };
-  const link = () =>
+  const linkIn = (environmentId: string) =>
     run(async () => {
-      const path = await api.invoke('dialogs.chooseFolder');
+      const inWsl = environmentId !== NATIVE_ENVIRONMENT_ID;
+      const path = await api.invoke('dialogs.chooseFolder', inWsl ? { environmentId } : undefined);
       if (!path) return undefined;
-      const project = await api.invoke('projects.restorable', { path });
-      if (!project) return { project: await api.invoke('projects.link', { path }), restored: false };
-      setOffer({ path, project });
+      const checkout: CheckoutPick = inWsl ? { path, environmentId } : { path };
+      const project = await api.invoke('projects.restorable', checkout);
+      if (!project) return { project: await api.invoke('projects.link', checkout), restored: false };
+      setOffer({ checkout, project });
       return undefined;
     });
+  const distros = environments.filter((e) => e.distro && e.state !== 'failed');
+  const link = async () => {
+    const hasWsl = distros.length > 0;
+    if (hasWsl) setChoosing(true);
+    else await linkIn(NATIVE_ENVIRONMENT_ID);
+  };
   const answer = (restore: boolean) => {
     if (!offer) return;
     setOffer(undefined);
     void run(async () => ({
-      project: await api.invoke('projects.link', restore ? { path: offer.path, restore: offer.project.id } : { path: offer.path }),
+      project: await api.invoke('projects.link', restore ? { ...offer.checkout, restore: offer.project.id } : offer.checkout),
       restored: restore,
     }));
   };
-  const dialog = offer && <RestoreOffer project={offer.project} onRestore={() => answer(true)} onNew={() => answer(false)} onCancel={() => setOffer(undefined)} />;
+  const chosen = (environmentId: string) => {
+    setChoosing(false);
+    void linkIn(environmentId);
+  };
+  const dialog = choosing ? (
+    <EnvironmentChoice distros={distros} onChoose={chosen} onCancel={() => setChoosing(false)} />
+  ) : (
+    offer && <RestoreOffer project={offer.project} onRestore={() => answer(true)} onNew={() => answer(false)} onCancel={() => setOffer(undefined)} />
+  );
   const dismiss = useCallback(() => {
     attempt.current++;
     setError(undefined);
     setAdded(undefined);
+    setChoosing(false);
     setOffer(undefined);
   }, []);
   return { linking, error, added, link, dismiss, dialog };
+}
+
+/** A checkout to link: its folder, and its Environment unless native. */
+type CheckoutPick = Commands['projects.restorable']['params'];
+
+/** Asks where a checkout's work runs: natively on Windows or in one of the WSL distros, the first preselected. */
+function EnvironmentChoice({ distros, onChoose, onCancel }: { distros: EnvironmentStatus[]; onChoose: (environmentId: string) => void; onCancel: () => void }) {
+  const [picked, setPicked] = useState(distros[0]!.id);
+  const name = useId();
+  const choose = useRef<HTMLButtonElement>(null);
+  useEffect(() => choose.current?.focus(), []);
+  const options = [{ id: NATIVE_ENVIRONMENT_ID, label: 'Windows' }, ...distros.map((d) => ({ id: d.id, label: `${d.label} (WSL)` }))];
+  return (
+    <div className="scrim" onKeyDown={(e) => e.key === 'Escape' && onCancel()}>
+      <div className="card modal" role="dialog" aria-modal="true" aria-labelledby={`${name}-title`} aria-describedby={`${name}-text`}>
+        <div className="card-head">
+          <FolderGit2 className="sm" />
+          <h3 id={`${name}-title`}>Where does the checkout's work run?</h3>
+        </div>
+        <p id={`${name}-text`}>Its agent, git and Forge CLI run there. A checkout in a WSL distro works fastest in the distro's own folders.</p>
+        <div className="environment-choice">
+          {options.map((option) => (
+            <label key={option.id} className="row">
+              <input type="radio" name={name} checked={picked === option.id} onChange={() => setPicked(option.id)} />
+              {option.label}
+            </label>
+          ))}
+        </div>
+        <div className="row modal-actions">
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button ref={choose} type="button" className="primary" onClick={() => onChoose(picked)}>
+            Choose the folder…
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Why a WSL checkout on a Windows drive (`/mnt/c/…`) is slow, and what to do instead. */
+function SlowCheckout({ project }: { project: Project }) {
+  const { environmentId, path } = project.checkout;
+  const distro = distroOf(environmentId);
+  if (!distro || !onWindowsDrive(path)) return null;
+  return (
+    <div className="warn page-note" role="note" aria-label="Slow checkout">
+      <TriangleAlert className="sm" /> {path} is on a Windows drive: git and the agent are slow there from {distro}. For speed, clone it into {distro}'s own folders, like ~/code, and add that clone.
+    </div>
+  );
 }
 
 function RestoreOffer({ project, onRestore, onNew, onCancel }: { project: RestorableProject; onRestore: () => void; onNew: () => void; onCancel: () => void }) {
@@ -246,16 +317,19 @@ function ProjectNavItem({ project, current, onPick }: { project: Project; curren
 /** The way on after adding a Project: setting it up, then a Session in it, from its page's head. */
 function NextStep({ added: { project, restored }, onDismiss }: { added: AddedProject; onDismiss: () => void }) {
   return (
-    <div className="row page-note">
-      <span role="status">
-        {restored ? 'Restored' : 'Added'} {project.name}.
-      </span>
-      <span className="muted">Check its settings below, then start a Session in it.</span>
-      <span className="grow" />
-      <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={onDismiss}>
-        <X />
-      </button>
-    </div>
+    <>
+      <div className="row page-note">
+        <span role="status">
+          {restored ? 'Restored' : 'Added'} {project.name}.
+        </span>
+        <span className="muted">Check its settings below, then start a Session in it.</span>
+        <span className="grow" />
+        <button className="icon-btn sm" type="button" title="Dismiss" aria-label="Dismiss" onClick={onDismiss}>
+          <X />
+        </button>
+      </div>
+      <SlowCheckout project={project} />
+    </>
   );
 }
 

@@ -3,7 +3,7 @@
 import { DEFAULT_BRANCH_PREFIX, type ForgeStatus, type Issue, type ModelPick, type Project, type ProjectEdit, type RemovedProject, type RestorableProject } from '../../shared/api';
 import { branchPrefixError, branchPrefixOf, defaultBranchError, defaultBranchOf } from '../../shared/branches';
 import { avatarError, isProjectColor, nextProjectColor, projectColorOf, projectNameError } from '../../shared/projects';
-import { NATIVE_ENVIRONMENT_ID } from '../../shared/environment-ids';
+import { distroOf, NATIVE_ENVIRONMENT_ID, pathInDistro } from '../../shared/environment-ids';
 import { splitDetails, withDetails } from '../../shared/errors';
 import type { Clock } from '../clock';
 import { exec, isNotFound, type BridgeCall, type ExecResult } from '../environments/exec';
@@ -96,7 +96,7 @@ export class Projects {
 
   async link({ path, environmentId = NATIVE_ENVIRONMENT_ID, restore }: { path: string; environmentId?: string; restore?: number }): Promise<Project> {
     const environment = this.environment(environmentId);
-    const topLevel = await topLevelOf(environment, path);
+    const topLevel = await topLevelOf(environment, inEnvironment(environmentId, path));
     const name = topLevel.split('/').filter(Boolean).pop() ?? topLevel;
     // Asked before and after inserting: a link of the same checkout running
     // alongside this one may get there first.
@@ -156,7 +156,7 @@ export class Projects {
     // Nothing removed, nothing to ask git.
     if (this.removed.size === 0) return null;
     const environment = this.environment(environmentId);
-    return this.restorableAt(environment, environmentId, await topLevelOf(environment, path));
+    return this.restorableAt(environment, environmentId, await topLevelOf(environment, inEnvironment(environmentId, path)));
   }
 
   private async restorableAt(environment: ProjectEnvironment, environmentId: string, checkout: string): Promise<RestorableProject | null> {
@@ -350,6 +350,12 @@ async function identityOf(environment: ProjectEnvironment, environmentId: string
 
 function placeIdentity(environmentId: string, checkout: string): string {
   return `${environmentId}:${checkout}`;
+}
+
+/** `path` as the Environment's own: a WSL distro's, if Windows wrote it. */
+function inEnvironment(environmentId: string, path: string): string {
+  const distro = distroOf(environmentId);
+  return distro ? pathInDistro(distro, path) : path;
 }
 
 /** The top-level folder of the git checkout containing `path`, as git reports it. */

@@ -62,9 +62,20 @@ export class ManualClock implements Clock {
 }
 
 export * from './machine';
-import { Machine, removeTemplates } from './machine';
+import { Machine, removeTemplates, type EditorInvocation } from './machine';
 
 afterAll(removeTemplates);
+
+/** Waits for the stub `name` to have been run `count` times, and returns its runs. */
+export async function launched(machine: Machine, name: string, count = 1): Promise<EditorInvocation[]> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const runs = machine.editorInvocations(name);
+    if (runs.length >= count) return runs;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`${name} was run ${machine.editorInvocations(name).length} times, want ${count}`);
+}
 
 export interface MainHarness {
   api: LoomApi;
@@ -140,6 +151,8 @@ export async function startMain(
     sqliteDriver?: SqliteDriver;
     /** Where the user's feedback goes; main sends none without it. */
     sendFeedback?: (feedback: Feedback) => void;
+    /** The folder picker, given the folder it opens in; main has none without it. */
+    chooseFolder?: (defaultPath?: string) => Promise<string | null>;
   } = {},
 ): Promise<MainHarness> {
   const ownDir = !options.userDataDir;
@@ -162,6 +175,7 @@ export async function startMain(
     updater: options.updater,
     sqliteDriver: options.sqliteDriver,
     sendFeedback: options.sendFeedback,
+    chooseFolder: options.chooseFolder,
     bridgePath: options.bridgePath ?? realBridgePath,
     spawnBridge: (command, args, env) => {
       if (command !== (options.bridgePath ?? realBridgePath)) return spawn(command, args, { stdio: 'pipe', env: { ...machine.bridgeEnv(), ...env } });

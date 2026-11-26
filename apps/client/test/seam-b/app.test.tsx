@@ -392,6 +392,54 @@ describe('Projects', () => {
     expect(main.invoked.map((i) => i.command)).not.toContain('projects.link');
   });
 
+  describe('with WSL distros', () => {
+    const windowsNative: EnvironmentStatus = { ...connectedNative, bridge: { ...connectedNative.bridge!, os: 'windows', home: 'C:\\Users\\dev' } };
+    const distro = (name: string): EnvironmentStatus => ({ id: wslEnvironmentId(name), label: name, distro: name, state: 'idle' });
+    const inUbuntu = (path: string): Project => ({ ...project('loom'), checkout: { environmentId: wslEnvironmentId('Ubuntu'), path } });
+    const choice = () => screen.getByRole('dialog', { name: "Where does the checkout's work run?" });
+
+    it('asks where the checkout works, a WSL distro picked, then picks the folder there', async () => {
+      const main = openProjects(
+        new FakeMain({ environments: [windowsNative, distro('Ubuntu'), distro('Debian')] }, { 'dialogs.chooseFolder': () => '\\\\wsl.localhost\\Ubuntu\\home\\dev\\loom', 'projects.link': () => inUbuntu('/home/dev/loom') }),
+      );
+
+      fireEvent.click(addProjectButton());
+
+      const options = within(choice()).getAllByRole('radio') as HTMLInputElement[];
+      expect(options.map((o) => [o.labels?.[0]?.textContent, o.checked])).toEqual([
+        ['Windows', false],
+        ['Ubuntu (WSL)', true],
+        ['Debian (WSL)', false],
+      ]);
+      expect(main.invoked.map((i) => i.command)).not.toContain('dialogs.chooseFolder');
+      fireEvent.click(within(choice()).getByRole('button', { name: 'Choose the folder…' }));
+
+      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: '\\\\wsl.localhost\\Ubuntu\\home\\dev\\loom', environmentId: wslEnvironmentId('Ubuntu') } }));
+      expect(main.invoked).toContainEqual({ command: 'dialogs.chooseFolder', params: { environmentId: wslEnvironmentId('Ubuntu') } });
+      expect(screen.queryByRole('dialog', { name: "Where does the checkout's work run?" })).toBeNull();
+      expect(screen.queryByRole('note', { name: 'Slow checkout' })).toBeNull();
+    });
+
+    it('links a native Windows checkout when Windows is picked', async () => {
+      const main = openProjects(new FakeMain({ environments: [windowsNative, distro('Ubuntu')] }, { 'dialogs.chooseFolder': () => 'C:\\code\\loom', 'projects.link': () => project('loom') }));
+
+      fireEvent.click(addProjectButton());
+      fireEvent.click(within(choice()).getByRole('radio', { name: 'Windows' }));
+      fireEvent.click(within(choice()).getByRole('button', { name: 'Choose the folder…' }));
+
+      await waitFor(() => expect(main.invoked).toContainEqual({ command: 'projects.link', params: { path: 'C:\\code\\loom' } }));
+    });
+
+    it('warns that a WSL checkout on a Windows drive is slow', async () => {
+      openProjects(new FakeMain({ environments: [windowsNative, distro('Ubuntu')] }, { 'dialogs.chooseFolder': () => 'C:\\code\\loom', 'projects.link': () => inUbuntu('/mnt/c/code/loom') }));
+
+      fireEvent.click(addProjectButton());
+      fireEvent.click(within(choice()).getByRole('button', { name: 'Choose the folder…' }));
+
+      expect((await screen.findByRole('note', { name: 'Slow checkout' })).textContent).toMatch('/mnt/c/code/loom is on a Windows drive');
+    });
+  });
+
   it('says why a folder was rejected', async () => {
     openProjects(
       new FakeMain(
