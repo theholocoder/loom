@@ -27,6 +27,10 @@ const session = (id: number, check: (s: Session) => boolean) => (sessions: Sessi
   return !!found && check(found);
 };
 
+/** Where Loom puts the agent's copies of attachments on this machine, under the home. */
+const copiesOf = (machine: Machine) =>
+  join(machine.home, ...(process.platform === 'win32' ? ['AppData/Local'] : process.platform === 'darwin' ? ['Library/Caches'] : ['.cache']), 'loom/attachments');
+
 const bytes = (text: string) => new TextEncoder().encode(text);
 const sha256 = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
 
@@ -193,7 +197,7 @@ describe('attachments', () => {
     const [, block] = prompts(machine)[0]!;
     expect(block).toMatchObject({ type: 'resource_link', name: 'dump.sql', size: content.length });
     const copy = fileURLToPath(block!.uri as string);
-    expect(copy).toBe(join(machine.home, '.cache/loom/attachments', String(id), sha256(content), 'dump.sql'));
+    expect(copy).toBe(join(copiesOf(machine), String(id), sha256(content), 'dump.sql'));
     expect(readFileSync(copy, 'utf8')).toBe(content);
   });
 
@@ -202,7 +206,7 @@ describe('attachments', () => {
     const { main, project } = await withProject(machine, checkout);
     const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: [{ name: 'a.txt', data: bytes('a') }] });
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
-    const copies = join(machine.home, '.cache/loom/attachments', String(id));
+    const copies = join(copiesOf(machine), String(id));
     expect(existsSync(copies)).toBe(true);
 
     await main.api.invoke('sessions.delete', { id });
