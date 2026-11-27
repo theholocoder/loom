@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,6 +36,7 @@ type upload struct {
 	hash    hash.Hash
 	written int64
 	idle    *time.Timer
+	touched time.Time
 }
 
 func newUploads() *uploads {
@@ -58,7 +60,7 @@ func (u *uploads) begin(params uploadBeginParams) (*uploadBeginResult, *Error) {
 	if params.Path == "" || params.Size < 0 || !isSha256(params.Sha256) {
 		return nil, &Error{Code: "bad_params", Message: "files.upload.begin needs a path, a size and a sha256"}
 	}
-	if isPresent(params.Path, params.Size, params.Sha256) {
+	if isPresent(params.Path, params.Size, strings.ToLower(params.Sha256)) {
 		return &uploadBeginResult{Present: true}, nil
 	}
 	file, err := createBeside(params.Path)
@@ -69,8 +71,8 @@ func (u *uploads) begin(params uploadBeginParams) (*uploadBeginResult, *Error) {
 	defer u.mu.Unlock()
 	u.next++
 	id := strconv.Itoa(u.next)
-	up := &upload{path: params.Path, size: params.Size, sha256: params.Sha256, file: file, hash: sha256.New()}
-	up.idle = time.AfterFunc(uploadIdleTimeout, func() { u.drop(id) })
+	up := &upload{path: params.Path, size: params.Size, sha256: strings.ToLower(params.Sha256), file: file, hash: sha256.New(), touched: time.Now()}
+	up.idle = time.AfterFunc(uploadIdleTimeout, func() { u.expire(id, up) })
 	u.open[id] = up
 	return &uploadBeginResult{Upload: id}, nil
 }
@@ -100,12 +102,13 @@ func (u *uploads) chunk(params uploadChunkParams) (*struct{}, *Error) {
 	if up.written+int64(len(params.Data)) > up.size {
 		return nil, &Error{Code: "too_large", Message: fmt.Sprintf("the upload is of %d bytes", up.size)}
 	}
-	up.idle.Reset(uploadIdleTimeout)
 	if _, err := up.file.Write(params.Data); err != nil {
 		return nil, &Error{Code: "write_failed", Message: err.Error()}
 	}
 	up.hash.Write(params.Data)
 	up.written += int64(len(params.Data))
+	up.touched = time.Now()
+	up.idle.Reset(uploadIdleTimeout)
 	return &struct{}{}, nil
 }
 
@@ -163,6 +166,17 @@ func (u *uploads) abortAll() {
 	}
 }
 
+// expire drops an upload its idle timer fired for, unless a chunk came while
+// the timer waited on it.
+func (u *uploads) expire(id string, up *upload) {
+	up.mu.Lock()
+	idle := time.Since(up.touched) >= uploadIdleTimeout
+	up.mu.Unlock()
+	if idle {
+		u.drop(id)
+	}
+}
+
 func (u *uploads) find(id string) *upload {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -214,7 +228,7 @@ func copyTo(params copyToParams) (*copyToResult, *Error) {
 	if params.From == "" || params.To == "" || params.Size < 0 || !isSha256(params.Sha256) {
 		return nil, &Error{Code: "bad_params", Message: "files.copyTo needs from, to, a size and a sha256"}
 	}
-	if isPresent(params.To, params.Size, params.Sha256) {
+	if isPresent(params.To, params.Size, strings.ToLower(params.Sha256)) {
 		return &copyToResult{Present: true}, nil
 	}
 	if err := copyInPlace(params.From, params.To); err != nil {
@@ -251,8 +265,8 @@ type removeParams struct {
 	Path string `json:"path"`
 }
 
-// removeAll removes a file or a folder with all in it; nothing there is no error.
-func removeAll(params removeParams) (*struct{}, *Error) {
+// removePath removes a file or a folder with all in it; nothing there is no error.
+func removePath(params removeParams) (*struct{}, *Error) {
 	if params.Path == "" {
 		return nil, &Error{Code: "bad_params", Message: "files.remove needs a path"}
 	}

@@ -152,9 +152,10 @@ export function Composer({
   const attach = (added: Iterable<File>) => {
     const list = [...added];
     if (!list.length) return;
-    const tooBig = list.map((file) => tooBigToAttach(api, file)).filter(Boolean);
+    const refusals = list.map((file) => tooBigToAttach(api, file));
+    const tooBig = refusals.filter(Boolean);
     setRefused(tooBig.length ? tooBig.join(' ') : undefined);
-    const taken = list.filter((file) => !tooBigToAttach(api, file));
+    const taken = list.filter((_, index) => !refusals[index]);
     if (taken.length) setFiles((current) => [...current, ...taken.map((file) => ({ key: nextKey.current++, file }))]);
   };
 
@@ -770,9 +771,10 @@ function tooBigToAttach(api: LoomApi, file: File): string | undefined {
   return file.size > cap ? `"${nameOf(file)}" is over ${bytesLabel(cap)}, too big to attach.` : undefined;
 }
 
-/** A file's size, as people read it: `512 B`, `14 KB`, `2.3 MB`. */
+/** A file's size, as people read it: `512 B`, `14 KB`, `2.3 MB`, `1.0 GB`. */
 function sizeLabel(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }

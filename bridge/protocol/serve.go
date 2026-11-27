@@ -228,7 +228,7 @@ func (s *server) handle(ctx context.Context, req request) response {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return reply(nil, err)
 		}
-		return reply(removeAll(params))
+		return reply(removePath(params))
 	case "files.stat":
 		var params statParams
 		if err := decodeParams(req.Params, &params); err != nil {
