@@ -8,7 +8,8 @@ import { APPROVAL_MODES, modelNameIn, type EnvironmentStatus, type Project, type
 import { NATIVE_ENVIRONMENT_ID } from '../shared/environment-ids';
 import { useApi, useTopic } from './api';
 import { RemovedTag, useRemovedProject } from './Archive';
-import { baseName, copyable } from './ContextMenu';
+import { baseName } from '../shared/paths';
+import { copyable } from './ContextMenu';
 import { formatCost, formatDuration, formatTokens } from './Dashboard';
 import { contextPercent, defaultModelOf, listedModels, ModelName } from './ModelPicker';
 import { useSessionModels } from './checkout';

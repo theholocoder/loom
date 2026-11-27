@@ -2,7 +2,9 @@
 // tests both build main through createLoom and talk to it only through `api`.
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import type { Commands, DatabaseStatus, EnvironmentStatus, Feedback, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics } from '../shared/api';
+import type { Commands, DatabaseStatus, EnvironmentStatus, Feedback, LoomApi, OpenSessionRequest, Project, RemovedProject, Session, Settings as SettingsValues, TopicParams, Topics, UsageStatus } from '../shared/api';
+import { modelNameIn } from '../shared/api';
+import { slashed } from '../shared/paths';
 import type { AgentAdapter } from './agents/adapter';
 import { AcpAdapter } from './agents/acp-adapter';
 import { OPENCODE_ACP } from './agents/opencode';
@@ -125,9 +127,6 @@ export async function createLoom(options: LoomOptions): Promise<Loom> {
     },
   };
 }
-
-/** How long the dashboard waits for the agents' records to be read before showing what Loom has. */
-const DASHBOARD_SYNC_MS = 5_000;
 
 /** The longest feedback message sent, which is plenty for one. */
 const MAX_FEEDBACK = 10_000;
@@ -351,6 +350,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     linkIssue: (id, issue) => sessionService.linkIssue({ id, issue }),
   });
   const adapter = options.adapter ?? new AcpAdapter(OPENCODE_ACP, options.appVersion, options.clock);
+  const usage = new Topic<UsageStatus>({ counting: false, revision: 0 });
   // Usage read from the agents' own records, where they keep them (ADR 0012).
   const usageSync = await UsageSync.load({
     db,
@@ -363,7 +363,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     loomFolder: (environmentId, directory) => {
       const environment = environmentById(environmentId);
       if (!environment) return false;
-      const path = directory.replaceAll('\\', '/').replace(/\/+$/, '');
+      const path = slashed(directory);
       // Session highlights' checks' folder, and the worktrees Loom made (ADR 0012).
       if (path.endsWith('/loom-highlights')) return true;
       try {
@@ -375,7 +375,9 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     },
     session: (id) => sessionService.usageFiling(id),
     onSessionUsage: (id, tokens, cost) => sessionService.addUsage(id, tokens, cost),
+    onStatus: (status) => usage.set(status),
   });
+  usage.set(usageSync.status());
   /** Each Session's agent and Environment, as its usage is counted. */
   const usageOf = (session: Session) => {
     const environmentId = environmentIdOf(session.projectId);
@@ -479,7 +481,7 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     });
   };
 
-  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database, openSession, update: updates.status };
+  const topics: { [T in Exclude<keyof Topics, keyof TopicParams>]: Topic<Topics[T]> } = { environments, projects, removedProjects, settings, sessions, database, openSession, update: updates.status, usage };
   const paramTopics: { [T in keyof TopicParams]: (params: TopicParams[T], listener: (value: Topics[T]) => void) => () => void } = {
     transcript: ({ sessionId }, listener) => sessionService.subscribeTranscript(sessionId, listener),
     panels: ({ sessionId }, listener) => panels.subscribe(sessionId, listener),
@@ -637,14 +639,12 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
     'sessions.trust': (params) => sessionService.trust(params),
     'sessions.approve': (params) => sessionService.approve(params),
     'usage.dashboard': async ({ days }) => {
-      // What the agents' records hold now counts, as far as they can be read in a moment.
-      let timer: unknown;
-      await Promise.race([Promise.all([...environmentsById.keys()].map((id) => usageSync.sync(id))), new Promise<void>((resolve) => (timer = options.clock.setTimeout(resolve, DASHBOARD_SYNC_MS)))]);
-      options.clock.clearTimeout(timer);
-      // What the Sessions have recorded so far counts.
       await sessionService.flush();
-      const data = await dashboard(db, days, options.clock.now());
-      return usageSync.countingPast() ? { ...data, countingPast: true } : data;
+      const models = sessionService.list().flatMap((s) => s.agentConfig?.models ?? []);
+      return dashboard(db, days, options.clock.now(), (model) => modelNameIn(models, model));
+    },
+    'usage.read': () => {
+      for (const id of environmentsById.keys()) void usageSync.sync(id);
     },
     'update.status': () => updates.status.value,
     'update.restart': () => updates.restart(),

@@ -74,11 +74,11 @@ interface StandInSession {
   model?: { providerID: string; id: string };
   cost: number;
   tokens: StandInTokens;
-  time: { updated: number };
+  time: { created?: number; updated: number };
   /** Its steps are too big to list: `session.message.list` prints them cut off. */
   tooBig?: boolean;
   /** Its assistant messages, one per step, as `session.message.list` lists them. */
-  steps: Array<{ id: string; type: 'assistant'; time: { created: number; completed: number }; model?: { providerID: string; id: string }; tokens: StandInTokens; cost: number }>;
+  steps: Array<{ id: string; type: 'assistant'; time: { created: number; completed: number }; finish?: string; model?: { providerID: string; id: string }; tokens: StandInTokens; cost: number }>;
 }
 
 type StandInTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
@@ -390,9 +390,15 @@ exec "$@"
    * `tokens` with `model`, completed now or `at`, as OpenCode's own records
    * count it; `cost` is the session's cumulative cost after it, and `title`
    * what OpenCode used naming the session, counted in its total but in no step.
-   * With `tooBig`, its steps can't be listed whole.
+   * With `tooBig`, its steps can't be listed whole. The step takes `took` ms
+   * (1 by default) and, with `finish: 'tool-calls'`, the run goes on after it.
    */
-  useOpencodeOutsideLoom(id: string, tokens: AcpTokens, model: { providerID: string; id: string }, options: { at?: number; cost?: number; title?: AcpTokens; directory?: string; tooBig?: boolean } = {}): void {
+  useOpencodeOutsideLoom(
+    id: string,
+    tokens: AcpTokens,
+    model: { providerID: string; id: string },
+    options: { at?: number; cost?: number; title?: AcpTokens; directory?: string; tooBig?: boolean; took?: number; finish?: 'tool-calls' | 'stop' } = {},
+  ): void {
     const script = this.scripts.find((s) => basename(s) === 'opencode.json');
     if (!script) throw new Error('no opencode stand-in installed');
     const file = `${script}.sessions.json`;
@@ -416,8 +422,11 @@ exec "$@"
         reasoning: t.reasoning + step.reasoning,
         cache: { read: t.cache.read + step.cache.read, write: t.cache.write + step.cache.write },
       },
-      time: { updated: Math.max(now, completed) },
-      steps: [...was.steps, { id: `msg_${String(completed).padStart(15, '0')}_${was.steps.length}`, type: 'assistant', time: { created: completed - 1, completed }, model, tokens: step, cost: Math.max(0, cost - was.cost) }],
+      time: { created: was.time.created ?? completed - (options.took ?? 1), updated: Math.max(now, completed) },
+      steps: [
+        ...was.steps,
+        { id: `msg_${String(completed).padStart(15, '0')}_${was.steps.length}`, type: 'assistant', time: { created: completed - (options.took ?? 1), completed }, finish: options.finish ?? 'stop', model, tokens: step, cost: Math.max(0, cost - was.cost) },
+      ],
     };
     writeFileSync(file, JSON.stringify(sessions));
   }

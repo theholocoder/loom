@@ -339,4 +339,43 @@ export const migrations: Migration[] = [
       .addPrimaryKeyConstraint('outside_usage_pk', ['agent', 'day', 'model'])
       .execute();
   },
+  async (db) => {
+    await db.schema.dropTable('outside_usage').execute();
+    await db.schema
+      .createTable('outside_usage')
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('environment_id', 'text', (c) => c.notNull())
+      .addColumn('directory', 'text', (c) => c.notNull())
+      .addColumn('day', 'text', (c) => c.notNull())
+      .addColumn('model', 'text', (c) => c.notNull())
+      .addColumn('input_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('output_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_read_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cache_write_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('reasoning_tokens', 'integer', (c) => c.notNull().defaultTo(0))
+      .addColumn('cost', 'real', (c) => c.notNull().defaultTo(0))
+      .addPrimaryKeyConstraint('outside_usage_pk', ['agent', 'environment_id', 'directory', 'day', 'model'])
+      .execute();
+    await db.schema.alterTable('agent_conversations').addColumn('recount', 'integer', (c) => c.notNull().defaultTo(0)).execute();
+    await db.schema.alterTable('agent_conversations').addColumn('started_at', 'integer').execute();
+    await db.schema.alterTable('agent_conversations').addColumn('run_started_at', 'integer').execute();
+    await db.schema
+      .createTable('outside_runs')
+      .addColumn('agent', 'text', (c) => c.notNull())
+      .addColumn('environment_id', 'text', (c) => c.notNull())
+      .addColumn('conversation_id', 'text', (c) => c.notNull())
+      .addColumn('started_at', 'integer', (c) => c.notNull())
+      .addColumn('ended_at', 'integer', (c) => c.notNull())
+      .addPrimaryKeyConstraint('outside_runs_pk', ['agent', 'environment_id', 'conversation_id', 'started_at'])
+      .execute();
+    await db.schema.createIndex('outside_runs_ended').on('outside_runs').column('ended_at').execute();
+    await db.schema.alterTable('usage_steps').addColumn('recounted', 'integer', (c) => c.notNull().defaultTo(1)).execute();
+    await sql`UPDATE usage_steps SET recounted = 0`.execute(db);
+    await sql`UPDATE agent_conversations SET
+        backfill_through = counted_through,
+        counted_step = ${'￿'},
+        recount = 1,
+        past_total = json_object('tokens', json_object('input', input_tokens, 'output', output_tokens, 'reasoning', reasoning_tokens, 'cacheRead', cache_read_tokens, 'cacheWrite', cache_write_tokens), 'cost', cost)
+      WHERE owner = 'outside'`.execute(db);
+  },
 ];

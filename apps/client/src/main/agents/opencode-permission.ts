@@ -14,6 +14,7 @@
 // rules; asks of theirs from the user's own OpenCode config are answered by
 // Loom's settings too, Allow meaning the agent goes ahead.
 import type { ApprovalPolicy } from '../../shared/api';
+import { slashed } from '../../shared/paths';
 import { GLOBAL_FLAG_CLIS, SYSTEM_INSTALLS } from '../sessions/approvals';
 
 export interface PermissionScope {
@@ -96,8 +97,3 @@ export function openCodePermission({ policy, workingCopy, tempDir, attachmentsDi
 
 /** The `permission` config for an agent with every tool refused: Session highlights' checks (ADR 0010). */
 export const NO_TOOLS: OpenCodePermission = { '*': 'deny' };
-
-/** A path with `/` only and no trailing one, as OpenCode's patterns want it. */
-function slashed(path: string): string {
-  return path.replaceAll('\\', '/').replace(/\/+$/, '');
-}

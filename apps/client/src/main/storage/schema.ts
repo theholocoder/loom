@@ -245,6 +245,9 @@ export interface AgentConversationsTable {
   model: string | null;
   /** All it had used when Loom first read the agent's records ({tokens, cost}, JSON), while its past is yet to be counted; null without a total. */
   past_total: string | null;
+  recount: number;
+  started_at: number | null;
+  run_started_at: number | null;
   /**
    * All Loom has accounted for of it: its steps counted, what it used outside
    * them, and, until counted, its past (all it had used when Loom first read
@@ -290,11 +293,22 @@ export interface UsageStepsTable {
   environment_id: string;
   /** `at:model:input:output:reasoning:cacheRead:cacheWrite`. */
   print: string;
+  recounted: Generated<number>;
+}
+
+export interface OutsideRunsTable {
+  agent: string;
+  environment_id: string;
+  conversation_id: string;
+  started_at: number;
+  ended_at: number;
 }
 
 /** What an agent used outside Loom on one day with one model, as its own records count it. */
 export interface OutsideUsageTable {
   agent: string;
+  environment_id: string;
+  directory: string;
   /** The day Loom found it, `YYYY-MM-DD` in local time. */
   day: string;
   model: string;
@@ -326,6 +340,7 @@ export interface Schema {
   agent_conversations: AgentConversationsTable;
   usage_syncs: UsageSyncsTable;
   outside_usage: OutsideUsageTable;
+  outside_runs: OutsideRunsTable;
   usage_baseline: UsageBaselineTable;
   usage_steps: UsageStepsTable;
 }

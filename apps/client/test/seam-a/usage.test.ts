@@ -16,6 +16,7 @@ const models = [
 /** 4 November 2026, 23:59 local time: a minute before midnight. */
 const BEFORE_MIDNIGHT = new Date(2026, 10, 4, 23, 59).getTime();
 const DAY_MS = 24 * 60 * 60_000;
+const HOUR_MS = 60 * 60_000;
 
 function machineWith(turns: AcpTurn[]): { machine: Machine; checkout: string } {
   const machine = tempMachine();
@@ -61,9 +62,9 @@ describe('usage per turn', () => {
     expect(dashboard.mix).toEqual({ input: 1500, output: 300, reasoning: 50, cacheRead: 3000, cacheWrite: 400 });
     expect(dashboard.cacheHitRate).toBeCloseTo(3000 / 4900);
     expect(dashboard.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 5250 }]);
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', color: project.color, tokens: 5250 }]);
+    expect(dashboard.perPlace).toEqual([{ key: `project:${project.id}`, projectId: project.id, label: 'loom', color: project.color, tokens: 5250 }]);
     expect(dashboard.perDay).toHaveLength(7);
-    expect(dashboard.perDay.at(-1)).toMatchObject({ tokens: 5250, byProject: { [project.id]: 5250 } });
+    expect(dashboard.perDay.at(-1)).toMatchObject({ tokens: 5250, byPlace: { [`project:${project.id}`]: 5250 } });
     expect(dashboard.perDay.slice(0, -1).every((d) => d.tokens === 0)).toBe(true);
   });
 });
@@ -101,8 +102,8 @@ describe('where a turn is filed', () => {
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
     expect(dashboard.perDay.slice(-2)).toEqual([
-      { day: '2026-11-04', tokens: 1100, byProject: { [project.id]: 1100 } },
-      { day: '2026-11-05', tokens: 550, byProject: { [project.id]: 550 } },
+      { day: '2026-11-04', tokens: 1100, byPlace: { [`project:${project.id}`]: 1100 } },
+      { day: '2026-11-05', tokens: 550, byPlace: { [`project:${project.id}`]: 550 } },
     ]);
     expect(dashboard.perModel).toEqual([
       { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1100 },
@@ -263,11 +264,11 @@ describe('usage per Project', () => {
 
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
-    expect(dashboard.perProject).toEqual([
-      { projectId: second.id, project: 'loom', color: second.color, tokens: 200 },
-      { projectId: first.id, project: 'loom', color: first.color, tokens: 100 },
+    expect(dashboard.perPlace).toEqual([
+      { key: `project:${second.id}`, projectId: second.id, label: 'loom', color: second.color, tokens: 200 },
+      { key: `project:${first.id}`, projectId: first.id, label: 'loom', color: first.color, tokens: 100 },
     ]);
-    expect(dashboard.perDay.at(-1)!.byProject).toEqual({ [first.id]: 100, [second.id]: 200 });
+    expect(dashboard.perDay.at(-1)!.byPlace).toEqual({ [`project:${first.id}`]: 100, [`project:${second.id}`]: 200 });
   });
 
   it('keeps a removed Project’s usage, marked removed', async () => {
@@ -279,7 +280,7 @@ describe('usage per Project', () => {
 
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', color: project.color, tokens: 100, removed: true }]);
+    expect(dashboard.perPlace).toEqual([{ key: `project:${project.id}`, projectId: project.id, label: 'loom', color: project.color, tokens: 100, removed: true }]);
     expect(dashboard.topSessions).toMatchObject([{ sessionId: id, title: 'Fix the login bug', project: 'loom', projectRemoved: true }]);
   });
 
@@ -292,7 +293,7 @@ describe('usage per Project', () => {
     await main.api.invoke('projects.edit', { id: project.id, name: 'Loom app', color: 'magenta' });
 
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'Loom app', color: 'magenta', tokens: 100 }]);
+    expect(dashboard.perPlace).toEqual([{ key: `project:${project.id}`, projectId: project.id, label: 'Loom app', color: 'magenta', tokens: 100 }]);
     expect(dashboard.topSessions).toMatchObject([{ sessionId: id, project: 'Loom app' }]);
   });
 });
@@ -436,14 +437,11 @@ describe("usage from OpenCode's own records", () => {
   /** Starts Loom now, in real time, as OpenCode stamps its steps. */
   const startNow = (machine: Machine, checkout: string, options: { userDataDir?: string } = {}) => start(machine, checkout, { now: Date.now(), ...options });
 
-  /** The dashboard once Loom has counted the past. */
+  /** The dashboard once Loom has read the records the dashboard asks it to, and counted the past. */
   async function settled(main: MainHarness, days: 7 | 30 | 90 = 7) {
-    for (const deadline = Date.now() + 5_000; ; ) {
-      const dashboard = await main.api.invoke('usage.dashboard', { days });
-      if (!dashboard.countingPast) return dashboard;
-      if (Date.now() > deadline) throw new Error('still counting the past');
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
+    await main.api.invoke('usage.read');
+    await waitFor(main.api, 'usage', (u) => !u.counting);
+    return main.api.invoke('usage.dashboard', { days });
   }
 
   it('counts the Session’s Subagents and the runs its agent starts on its own, once, as the Session’s', async () => {
@@ -475,13 +473,13 @@ describe("usage from OpenCode's own records", () => {
     ]);
     expect(dashboard.topSessions).toMatchObject([{ sessionId: id, tokens: 2102 }]);
     expect(dashboard.perDay.at(-1)!.tokens).toBe(2102);
-    expect(dashboard.outside).toEqual({ tokens: 0, reportedCost: 0, perModel: [] });
+    expect(dashboard.perPlace.map((p) => p.key)).toEqual([`project:${project.id}`]);
     expect(again).toEqual(dashboard);
     const session = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!;
     expect(session.usage).toMatchObject({ tokens: 2102, reportedCost: expect.closeTo(0.2) as number });
   });
 
-  it('counts use outside Loom apart, from before Loom first read the records too, each step on the day it completed', async () => {
+  it('counts use outside Loom with the rest, from before Loom first read the records too, each step on the day it completed', async () => {
     const { machine, checkout } = recordsMachine([]);
     const now = Date.now();
     machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 9000, outputTokens: 900 }, SONNET, { at: now - 40 * DAY_MS, title: { inputTokens: 400, outputTokens: 5 } });
@@ -489,24 +487,170 @@ describe("usage from OpenCode's own records", () => {
     const { main } = await startNow(machine, checkout);
 
     const week = await settled(main, 7);
-    expect(week.tokens).toBe(0);
-    expect(week.outside).toEqual({ tokens: 3300, reportedCost: expect.closeTo(0.5) as number, perModel: [{ agent: 'OpenCode', model: 'anthropic/claude-sonnet-5-5', tokens: 3300 }] });
+    expect(week.tokens).toBe(3300);
+    expect(week.reportedCost).toBeCloseTo(0.5);
+    expect(week.perModel).toEqual([{ model: 'anthropic/claude-sonnet-5-5', tokens: 3300 }]);
+    expect(week.mix).toEqual({ input: 3000, output: 300, reasoning: 0, cacheRead: 0, cacheWrite: 0 });
+    expect(week.perPlace).toEqual([{ key: 'folder:native:/home/dev', label: 'dev', folder: '/home/dev', color: 'blue', tokens: 3300 }]);
+    expect(week.perDay.at(-4)).toMatchObject({ tokens: 3300, byPlace: { 'folder:native:/home/dev': 3300 } });
     // The session's title, which OpenCode counts in its total but in no step, goes with its first step.
-    expect((await settled(main, 90)).outside.tokens).toBe(9900 + 405 + 3300);
+    expect((await settled(main, 90)).tokens).toBe(9900 + 405 + 3300);
 
     machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 100, outputTokens: 10 }, SONNET, { cost: 0.52 });
     machine.useOpencodeOutsideLoom('ses_other', { inputTokens: 40, outputTokens: 4 }, HAIKU, { title: { inputTokens: 6, outputTokens: 1 } });
     const later = await settled(main, 7);
 
-    expect(later.outside).toEqual({
-      tokens: 3300 + 110 + 51,
-      reportedCost: expect.closeTo(0.52) as number,
-      perModel: [
-        { agent: 'OpenCode', model: 'anthropic/claude-sonnet-5-5', tokens: 3410 },
-        { agent: 'OpenCode', model: 'anthropic/claude-haiku-5-5', tokens: 51 },
-      ],
-    });
-    expect(later.perDay.at(-4)!.tokens).toBe(0);
+    expect(later.tokens).toBe(3300 + 110 + 51);
+    expect(later.reportedCost).toBeCloseTo(0.52);
+    expect(later.perModel).toEqual([
+      { model: 'anthropic/claude-sonnet-5-5', tokens: 3410 },
+      { model: 'anthropic/claude-haiku-5-5', tokens: 51 },
+    ]);
+    expect(later.topSessions).toEqual([]);
+  });
+
+  it('names the models used only outside Loom as the agent names them to Loom', async () => {
+    const { machine, checkout } = recordsMachine([{ chunks: ['Done.'], tokens: { inputTokens: 1000, outputTokens: 200 } }]);
+    const { main, project } = await startNow(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(main, id);
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 5000, outputTokens: 500, cachedReadTokens: 2000 }, HAIKU, { at: Date.now() - HOUR_MS });
+
+    const dashboard = await settled(main);
+
+    expect(dashboard.perModel).toEqual([
+      { model: 'anthropic/claude-haiku-5-5', name: 'Claude Haiku 5.5', tokens: 7500 },
+      { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1200 },
+    ]);
+    expect(dashboard.mix).toEqual({ input: 6000, output: 700, reasoning: 0, cacheRead: 2000, cacheWrite: 0 });
+    expect(dashboard.cacheHitRate).toBeCloseTo(2000 / 8000);
+  });
+
+  it('puts use outside Loom under the Project it ran in, else under its folder, the smallest folders together', async () => {
+    const { machine, checkout } = recordsMachine([]);
+    const { main, project } = await startNow(machine, checkout);
+    machine.useOpencodeOutsideLoom('ses_in_checkout', { inputTokens: 500, outputTokens: 50 }, SONNET, { directory: `${project.checkout.path}/src` });
+    const folders = [
+      ['/home/me/notes', 220],
+      ['/w/a', 100],
+      ['/w/b', 90],
+      ['/w/c', 80],
+      ['/w/d', 70],
+      ['/w/e', 5],
+      ['/w/f', 4],
+    ] as const;
+    for (const [directory, tokens] of folders) machine.useOpencodeOutsideLoom(`ses_${directory.replaceAll('/', '_')}`, { inputTokens: tokens, outputTokens: 0 }, SONNET, { directory });
+
+    const dashboard = await settled(main);
+
+    expect(dashboard.tokens).toBe(550 + 220 + 100 + 90 + 80 + 70 + 5 + 4);
+    expect(dashboard.perPlace.map(({ key, label, tokens }) => [key, label, tokens])).toEqual([
+      [`project:${project.id}`, 'loom', 550],
+      ['folder:native:/home/me/notes', 'notes', 220],
+      ['folder:native:/w/a', 'a', 100],
+      ['folder:native:/w/b', 'b', 90],
+      ['folder:native:/w/c', 'c', 80],
+      ['folder:native:/w/d', 'd', 70],
+      ['other', 'Other folders', 9],
+    ]);
+    expect(dashboard.perPlace[0]).toEqual({ key: `project:${project.id}`, projectId: project.id, label: 'loom', color: project.color, tokens: 550 });
+    expect(dashboard.perPlace[1]).toMatchObject({ folder: '/home/me/notes' });
+    const colors = dashboard.perPlace.map((p) => p.color).filter(Boolean);
+    expect(new Set(colors).size).toBe(colors.length);
+    expect(dashboard.perPlace.at(-1)!.color).toBeUndefined();
+    expect(dashboard.perDay.at(-1)!.byPlace).toMatchObject({ [`project:${project.id}`]: 550, 'folder:native:/home/me/notes': 220, other: 9 });
+  });
+
+  it('counts the Sessions the user started outside Loom and their runs, from the prompt to the reply', async () => {
+    const { machine, checkout } = recordsMachine([]);
+    const now = Date.now();
+    machine.useOpencodeOutsideLoom('ses_a', { inputTokens: 11, outputTokens: 1 }, SONNET, { at: now - 2 * HOUR_MS, took: 1000, finish: 'tool-calls', directory: '/home/me/a' });
+    machine.useOpencodeOutsideLoom('ses_a', { inputTokens: 12, outputTokens: 1 }, SONNET, { at: now - 2 * HOUR_MS + 5000, took: 2000 });
+    machine.useOpencodeOutsideLoom('ses_a', { inputTokens: 13, outputTokens: 1 }, SONNET, { at: now - HOUR_MS, took: 4000 });
+    machine.useOpencodeOutsideLoom('ses_b', { inputTokens: 14, outputTokens: 1 }, SONNET, { at: now - HOUR_MS, took: 10_000, directory: '/home/me/b' });
+    machine.useOpencodeOutsideLoom('ses_check', { inputTokens: 15, outputTokens: 1 }, SONNET, { at: now - HOUR_MS, took: 50_000, directory: '/tmp/loom-highlights' });
+    const { main } = await startNow(machine, checkout);
+
+    const past = await settled(main);
+    expect(past).toMatchObject({ sessionsStarted: 0, outsideConversationsStarted: 2, medianRunMs: 6000 });
+
+    machine.useOpencodeOutsideLoom('ses_c', { inputTokens: 16, outputTokens: 1 }, SONNET, { at: now - 30 * 60_000, took: 8000, directory: '/home/me/c' });
+    machine.useOpencodeOutsideLoom('ses_d', { inputTokens: 17, outputTokens: 1 }, SONNET, { at: now - 20 * 60_000, took: 1000, finish: 'tool-calls', directory: '/home/me/d' });
+    await settled(main);
+    machine.useOpencodeOutsideLoom('ses_d', { inputTokens: 18, outputTokens: 1 }, SONNET, { at: now - 10 * 60_000, took: 1000 });
+    const later = await settled(main);
+
+    expect(later).toMatchObject({ sessionsStarted: 0, outsideConversationsStarted: 4, medianRunMs: 8000 });
+  });
+
+  it("leaves out what ran in Loom's own folders outside its Sessions", async () => {
+    const { machine, checkout } = recordsMachine([]);
+    const { main } = await startNow(machine, checkout);
+    machine.useOpencodeOutsideLoom('ses_check', { inputTokens: 70, outputTokens: 7 }, HAIKU, { directory: '/tmp/loom-highlights' });
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 10, outputTokens: 1 }, HAIKU);
+
+    const dashboard = await settled(main);
+
+    expect(dashboard.tokens).toBe(11);
+  });
+
+  it("moves what a conversation counted outside Loom to the Session that turns out to be its", async () => {
+    const { machine, checkout } = recordsMachine([{ chunks: ['Done.'], tokens: { inputTokens: 1000, outputTokens: 200 } }]);
+    const userDataDir = tempDir('loom-usage-');
+    const first = await startNow(machine, checkout, { userDataDir });
+    const { id } = await first.main.api.invoke('sessions.create', { projectId: first.project.id, workingCopy: 'checkout', prompt: 'Fix the login bug' });
+    await waiting(first.main, id);
+    expect((await settled(first.main)).tokens).toBe(1200);
+    await first.main.close();
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.prepare("update agent_conversations set owner = 'outside', session_id = null, seen_through = 0").run();
+    db.prepare(
+      "insert into outside_usage (agent, environment_id, directory, day, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, cost) select 'OpenCode', 'native', '/home/dev', day, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, cost from usage_buckets",
+    ).run();
+    db.prepare('delete from usage_buckets').run();
+    db.close();
+
+    const later = await startMain({ machine, userDataDir, now: Date.now() });
+    await waitFor(later.api, 'environments', ready);
+    const dashboard = await settled(later);
+
+    expect(dashboard.tokens).toBe(1200);
+    expect(dashboard.perPlace.map((p) => [p.key, p.tokens])).toEqual([[`project:${first.project.id}`, 1200]]);
+    expect(dashboard.topSessions).toMatchObject([{ sessionId: id, tokens: 1200 }]);
+  });
+
+  it('counts use outside Loom again by folder after an upgrade from the release that counted it apart, nothing twice', async () => {
+    const { machine, checkout } = recordsMachine([]);
+    const DAY_ONE = Date.now() - 2 * DAY_MS;
+    const DAY_TWO = Date.now() - DAY_MS;
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 1000, outputTokens: 100 }, SONNET, { at: DAY_ONE, title: { inputTokens: 40, outputTokens: 2 }, directory: checkout });
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 500, outputTokens: 50 }, SONNET, { at: DAY_TWO });
+    const seen = Date.now();
+    const userDataDir = tempDir('loom-usage-');
+    await (await openDatabase(userDataDir, { migrations: migrations.slice(0, -1) })).destroy();
+    const db = new Database(join(userDataDir, 'loom.db'));
+    db.prepare("insert into projects (id, name, branch_prefix, created_at) values (1, 'loom', 'loom', 0)").run();
+    db.prepare("insert into checkouts (project_id, environment_id, path) values (1, 'native', ?)").run(checkout);
+    db.prepare("insert into usage_syncs (agent, environment_id, synced_through) values ('OpenCode', 'native', ?)").run(seen);
+    db.prepare(
+      "insert into agent_conversations (agent, environment_id, id, owner, session_id, seen_through, counted_through, counted_step, backfill_through, model, past_total, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, cost) values ('OpenCode', 'native', 'ses_mine', 'outside', null, ?, ?, ?, null, 'anthropic/claude-sonnet-5-5', null, 1540, 152, 0, 0, 0, 0)",
+    ).run(seen, DAY_TWO, `msg_${String(DAY_TWO).padStart(15, '0')}_1`);
+    const day = (at: number) => new Date(at).toLocaleDateString('sv');
+    db.prepare("insert into outside_usage (agent, day, model, input_tokens, output_tokens) values ('OpenCode', ?, 'anthropic/claude-sonnet-5-5', 1040, 102)").run(day(DAY_ONE));
+    db.prepare("insert into outside_usage (agent, day, model, input_tokens, output_tokens) values ('OpenCode', ?, 'anthropic/claude-sonnet-5-5', 500, 50)").run(day(DAY_TWO));
+    for (const [at, input, output] of [[DAY_ONE, 1000, 100], [DAY_TWO, 500, 50]] as const) db.prepare("insert into usage_steps (agent, environment_id, print) values ('OpenCode', 'native', ?)").run(`${at}:anthropic/claude-sonnet-5-5:${input}:${output}:0:0:0`);
+    db.close();
+    machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 10, outputTokens: 1 }, SONNET);
+
+    const main = await startMain({ machine, userDataDir, now: Date.now() });
+    await waitFor(main.api, 'environments', ready);
+    const dashboard = await settled(main);
+
+    expect(dashboard.tokens).toBe(1142 + 550 + 11);
+    expect(dashboard.perPlace).toEqual([{ key: 'project:1', projectId: 1, label: 'loom', color: 'blue', tokens: 1142 + 550 + 11 }]);
+    expect(dashboard.perDay.at(-3)!.tokens).toBe(1142);
+    expect(dashboard.perDay.at(-2)!.tokens).toBe(550);
+    expect(await settled(main)).toEqual(dashboard);
   });
 
   it('counts the past of Sessions Loom counted from their runs only what the runs missed, and leaves out its own folders', async () => {
@@ -539,7 +683,6 @@ describe("usage from OpenCode's own records", () => {
 
     expect(dashboard.tokens).toBe(1200 + 550 + 330);
     expect(dashboard.topSessions).toMatchObject([{ sessionId: id, tokens: 2080 }]);
-    expect(dashboard.outside.tokens).toBe(0);
     const session = (await later.api.invoke('sessions.list')).find((s) => s.id === id)!;
     expect(session.usage?.tokens).toBe(2080);
     expect(await settled(later)).toEqual(dashboard);
@@ -550,12 +693,12 @@ describe("usage from OpenCode's own records", () => {
     const now = Date.now();
     machine.useOpencodeOutsideLoom('ses_huge', { inputTokens: 5000, outputTokens: 500 }, SONNET, { at: now - 2 * DAY_MS, tooBig: true });
     const { main } = await startNow(machine, checkout);
-    expect((await settled(main)).outside.tokens).toBe(5500);
+    expect((await settled(main)).tokens).toBe(5500);
 
     machine.useOpencodeOutsideLoom('ses_huge', { inputTokens: 100, outputTokens: 10 }, SONNET, { tooBig: true });
     const dashboard = await settled(main);
 
-    expect(dashboard.outside.tokens).toBe(5610);
+    expect(dashboard.tokens).toBe(5610);
   });
 
   it('counts the steps a forked session copied from its parent once', async () => {
@@ -564,13 +707,13 @@ describe("usage from OpenCode's own records", () => {
     machine.useOpencodeOutsideLoom('ses_original', { inputTokens: 1000, outputTokens: 100 }, SONNET, { at: now - 2 * DAY_MS });
     machine.forkOpencodeSession('ses_original', 'ses_early_fork');
     const { main } = await startNow(machine, checkout);
-    expect((await settled(main)).outside.tokens).toBe(1100);
+    expect((await settled(main)).tokens).toBe(1100);
 
     machine.forkOpencodeSession('ses_original', 'ses_fork');
     machine.useOpencodeOutsideLoom('ses_fork', { inputTokens: 40, outputTokens: 4 }, SONNET);
     const dashboard = await settled(main);
 
-    expect(dashboard.outside.tokens).toBe(1144);
+    expect(dashboard.tokens).toBe(1144);
   });
 
   it("counts Session highlights' checks as theirs, not as use outside Loom", async () => {
@@ -587,7 +730,7 @@ describe("usage from OpenCode's own records", () => {
 
     expect(dashboard.tokens).toBe(1550);
     expect(dashboard.topSessions.map((s) => s.tokens)).toEqual([1200]);
-    expect(dashboard.outside.tokens).toBe(0);
+    expect(dashboard.perPlace.map((p) => p.key)).toEqual([`project:${project.id}`]);
   });
 
   it('counts nothing again after a restart', async () => {
@@ -604,8 +747,8 @@ describe("usage from OpenCode's own records", () => {
     machine.useOpencodeOutsideLoom('ses_mine', { inputTokens: 10, outputTokens: 1 }, SONNET);
     const dashboard = await settled(later);
 
-    expect(dashboard.tokens).toBe(1200);
-    expect(dashboard.outside.tokens).toBe(11);
+    expect(dashboard.tokens).toBe(1211);
+    expect(dashboard.topSessions.map((s) => s.tokens)).toEqual([1200]);
   });
 
   it('counts what the runs report when OpenCode can’t list its sessions', async () => {
@@ -617,7 +760,6 @@ describe("usage from OpenCode's own records", () => {
     const dashboard = await main.api.invoke('usage.dashboard', { days: 7 });
 
     expect(dashboard.tokens).toBe(1200);
-    expect(dashboard.outside.tokens).toBe(0);
-    expect(dashboard.countingPast).toBeUndefined();
+    expect((await waitFor(main.api, 'usage', (u) => !u.counting)).counting).toBe(false);
   });
 });

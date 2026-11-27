@@ -211,6 +211,7 @@ export interface AgentConversation {
   directory?: string;
   /** The agent's clock time it last changed. */
   updatedAt: number;
+  createdAt?: number;
   /**
    * All it has used so far, when the agent keeps a total: more than its
    * steps when it also ran the model for itself (OpenCode's titles).
@@ -224,6 +225,8 @@ export interface UsageStep {
   id: string;
   /** The agent's clock time it completed: its usage is filed under that day. */
   at: number;
+  startedAt?: number;
+  endsRun: boolean;
   /** The model it ran with, `provider/model`, when the agent says. */
   model?: string;
   tokens: TokenCounts;

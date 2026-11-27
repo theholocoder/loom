@@ -36,8 +36,8 @@ const waiting: Session = {
 const usage: UsageDashboard = {
   ...emptyDashboard(7),
   tokens: 100,
-  perDay: emptyDashboard(7).perDay.map((d, i) => (i === 6 ? { ...d, tokens: 100, byProject: { [web.id]: 100 } } : d)),
-  perProject: [{ projectId: web.id, project: 'web-frontend', color: 'magenta', tokens: 100 }],
+  perDay: emptyDashboard(7).perDay.map((d, i) => (i === 6 ? { ...d, tokens: 100, byPlace: { [`project:${web.id}`]: 100 } } : d)),
+  perPlace: [{ key: `project:${web.id}`, projectId: web.id, label: 'web-frontend', color: 'magenta', tokens: 100 }],
 };
 
 function renderApp(projects: Project[] = [web]) {
@@ -83,8 +83,8 @@ describe("a Project's colour and avatar", () => {
     renderApp();
     fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }));
 
-    const perProject = await screen.findByRole('list', { name: 'Tokens per Project' });
-    expect(perProject.querySelector('.fill')!.getAttribute('style')).toContain(MAGENTA);
+    const perPlace = await screen.findByRole('list', { name: 'Tokens per Project' });
+    expect(perPlace.querySelector('.fill')!.getAttribute('style')).toContain(MAGENTA);
     expect(screen.getByRole('img', { name: 'Tokens per day by Project' }).querySelector('rect[fill]:not(.hit)')?.getAttribute('fill')).toBe(MAGENTA);
   });
 });

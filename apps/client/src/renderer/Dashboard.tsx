@@ -1,17 +1,15 @@
 // The usage dashboard: tokens, reported cost and outcomes across this
-// machine's Sessions over 7, 30 or 90 days, as main computes them.
+// machine's Sessions and the agents' use outside Loom over 7, 30 or 90 days,
+// as main computes them.
 import { Coins, DatabaseZap, GitMerge, MessagesSquare, Receipt, Timer, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange } from '../shared/api';
+import { mergeRequestRef, USAGE_RANGES, type Project, type Session, type SessionOutcome, type TopSession, type UsageDashboard, type UsageRange, type UsagePlace } from '../shared/api';
 import { ErrorText } from './ErrorText';
 import { useApi, useTopic } from './api';
 import { useDates } from './dates';
 import { RemovedTag } from './Archive';
 import { ModelName } from './ModelPicker';
 import { projectColor } from './ProjectAvatar';
-
-/** How often the figures are asked for again while past usage is still being counted. */
-const COUNTING_PAST_POLL_MS = 3_000;
 
 const OUTCOME_LABEL: Record<SessionOutcome, string> = { merged: 'Merged', closed: 'Closed', archived: 'Archived', open: 'Open' };
 
@@ -22,9 +20,14 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
   const [days, setDays] = useState<UsageRange>(7);
   const [data, setData] = useState<UsageDashboard>();
   const [error, setError] = useState<string>();
-  const [again, setAgain] = useState(0);
+  const usage = useTopic('usage');
+  const revision = usage?.revision ?? 0;
   // Worked out again whenever a Session's status changes, as runs end and Sessions are archived.
   const changed = sessions.reduce((latest, s) => Math.max(latest, s.updatedAt), 0);
+
+  useEffect(() => {
+    api.invoke('usage.read').catch(() => {});
+  }, [api]);
 
   useEffect(() => {
     let current = true;
@@ -36,20 +39,9 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
     return () => {
       current = false;
     };
-  }, [api, days, changed, again]);
+  }, [api, days, changed, revision]);
 
-  // While past usage is still being counted, the figures are asked for again every few seconds.
-  useEffect(() => {
-    if (!data?.countingPast) return;
-    const timer = setTimeout(() => setAgain((n) => n + 1), COUNTING_PAST_POLL_MS);
-    return () => clearTimeout(timer);
-  }, [data]);
-
-  // Each Project in its own colour, as everywhere else: a removed one in the colour it had.
-  const colorOf = (projectId: number) => {
-    const color = data?.perProject.find((p) => p.projectId === projectId)?.color ?? projects.find((p) => p.id === projectId)?.color;
-    return color ? projectColor({ color }) : 'var(--muted)';
-  };
+  const colorOf = (place: UsagePlace) => (place.color ? projectColor({ color: place.color }) : 'var(--muted)');
   const shown = data?.days === days ? data : undefined;
 
   return (
@@ -58,7 +50,7 @@ export function Dashboard({ onOpenSession }: { onOpenSession: (session: Session)
         <h1>Dashboard</h1>
         <span className="grow" />
         <span className="muted" style={{ fontSize: 12 }} role="status">
-          {shown?.countingPast ? 'Counting past usage from the agents’ records…' : 'Computed from Sessions on this machine'}
+          {usage?.counting ? 'Counting usage from the agents’ records…' : 'Loom’s Sessions and your own runs of the agents, on this machine'}
         </span>
       </div>
       <div className="dash-filters">
@@ -84,7 +76,7 @@ function Content({
   data: UsageDashboard;
   projects: Project[];
   sessions: Session[];
-  colorOf: (projectId: number) => string;
+  colorOf: (place: UsagePlace) => string;
   onOpenSession: (session: Session) => void;
 }) {
   const { mix } = data;
@@ -107,7 +99,12 @@ function Content({
       <div className="tiles">
         <Tile icon={Coins} label="Tokens" value={formatTokens(data.tokens)} detail={`over the last ${data.days} days`} />
         <Tile icon={Receipt} label="Reported cost" value={formatCost(data.reportedCost)} detail="As agents report it. Subscription and local models report $0." />
-        <Tile icon={MessagesSquare} label="Sessions started" value={String(data.sessionsStarted)} detail={`${data.outcomes.stuck} stuck at least once`} />
+        <Tile
+          icon={MessagesSquare}
+          label="Sessions started"
+          value={String(data.sessionsStarted + data.outsideConversationsStarted)}
+          detail={[data.outsideConversationsStarted > 0 && `${data.outsideConversationsStarted} outside Loom`, `${data.outcomes.stuck} stuck at least once`].filter(Boolean).join(' · ')}
+        />
         <Tile icon={GitMerge} label="Merge requests merged" value={String(data.mergeRequestsMerged)} detail={`${data.outcomes.open} ${data.outcomes.open === 1 ? 'Session' : 'Sessions'} still open`} />
         <Tile
           icon={DatabaseZap}
@@ -115,18 +112,18 @@ function Content({
           value={data.cacheHitRate === undefined ? '—' : percent(data.cacheHitRate)}
           detail="Cache reads out of all prompt tokens"
         />
-        <Tile icon={Timer} label="Median agent run" value={formatDuration(data.medianRunMs)} detail="Per run, Working → Waiting" />
+        <Tile icon={Timer} label="Median agent run" value={formatDuration(data.medianRunMs)} detail="Per run, from the prompt to the reply" />
       </div>
       <div className="cards">
         <section className="card wide" aria-labelledby="dash-per-day">
           <div className="card-head">
             <h3 id="dash-per-day">Tokens per day</h3>
             <div className="legend">
-              {data.perProject.map(({ projectId, project, removed }) => (
-                <span key={projectId}>
-                  <span className="sw" style={{ background: colorOf(projectId) }} />
-                  {project}
-                  {removed && <RemovedTag />}
+              {data.perPlace.map((place) => (
+                <span key={place.key} title={place.folder}>
+                  <span className="sw" style={{ background: colorOf(place) }} />
+                  {place.label}
+                  {place.removed && <RemovedTag />}
                 </span>
               ))}
             </div>
@@ -137,7 +134,7 @@ function Content({
           <div className="card-head">
             <h3 id="dash-per-project">Tokens per Project</h3>
           </div>
-          <Bars label="Tokens per Project" rows={data.perProject.map((p) => ({ key: String(p.projectId), label: p.project, removed: p.removed, value: p.tokens, color: colorOf(p.projectId) }))} format={formatTokens} />
+          <Bars label="Tokens per Project" rows={data.perPlace.map((p) => ({ key: p.key, label: p.label, title: p.folder, removed: p.removed, value: p.tokens, color: colorOf(p) }))} format={formatTokens} />
         </section>
         <section className="card" aria-labelledby="dash-per-model">
           <div className="card-head">
@@ -172,32 +169,10 @@ function Content({
           <div className="card-head">
             <h3 id="dash-outcomes">Session outcomes</h3>
             <span className="muted" style={{ fontSize: 12 }}>
-              of Sessions started
+              of Loom’s Sessions started
             </span>
           </div>
           <Bars label="Session outcomes" rows={outcomes} format={String} />
-        </section>
-        <section className="card wide" aria-labelledby="dash-outside">
-          <div className="card-head">
-            <h3 id="dash-outside">Outside Loom</h3>
-            <span className="muted" style={{ fontSize: 12 }}>
-              Your own runs of the agents, from their records. Not in the figures above.
-            </span>
-          </div>
-          {data.outside.tokens === 0 ? (
-            <div className="empty">No use outside Loom in the last {data.days} days.</div>
-          ) : (
-            <>
-              <p className="muted" style={{ fontSize: 12.5, margin: '0 0 10px' }}>
-                {formatTokens(data.outside.tokens)} tokens · {formatCost(data.outside.reportedCost)} reported
-              </p>
-              <Bars
-                label="Tokens outside Loom per model"
-                rows={data.outside.perModel.map((m) => ({ key: `${m.agent}/${m.model}`, label: `${m.agent} · ${m.name ?? m.model}`, title: m.model, value: m.tokens, color: 'var(--muted)', tech: !m.name }))}
-                format={formatTokens}
-              />
-            </>
-          )}
         </section>
         <section className="card wide" aria-labelledby="dash-top">
           <div className="card-head">
@@ -319,7 +294,7 @@ function Bars({ label, rows, format }: { label: string; rows: Array<{ key?: stri
 }
 
 /** Tokens per day as bars stacked by Project, with a tooltip per day. */
-function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId: number) => string }) {
+function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (place: UsagePlace) => string }) {
   const dates = useDates();
   const W = 820;
   const H = 230;
@@ -333,7 +308,7 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId
   const y = (v: number) => T + (H - T - B) * (1 - v / max);
   const base = H - B;
   const step = Math.ceil(n / 8);
-  const order = data.perProject;
+  const order = data.perPlace;
   return (
     <div className="chart">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Tokens per day by Project">
@@ -352,13 +327,13 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId
           const x = L + i * bw + (bw - barW) / 2;
           let acc = 0;
           const segments = order
-            .filter(({ projectId }) => (day.byProject[projectId] ?? 0) > 0)
-            .map(({ projectId }) => {
-              const v = day.byProject[projectId]!;
+            .filter(({ key }) => (day.byPlace[key] ?? 0) > 0)
+            .map((place) => {
+              const v = day.byPlace[place.key]!;
               const top = y(acc + v);
               const height = y(acc) - top;
               acc += v;
-              return <rect key={projectId} x={x} y={top} width={barW} height={Math.max(0, height - 1)} rx={1.5} fill={colorOf(projectId)} />;
+              return <rect key={place.key} x={x} y={top} width={barW} height={Math.max(0, height - 1)} rx={1.5} fill={colorOf(place)} />;
             });
           const labelled = i % step === (n - 1) % step;
           return (
@@ -371,8 +346,8 @@ function DayChart({ data, colorOf }: { data: UsageDashboard; colorOf: (projectId
               )}
               <rect className="hit" x={L + i * bw} y={T} width={bw} height={base - T}>
                 <title>{`${dates.calendarDay(day.day)}: ${formatTokens(day.tokens)} tokens${order
-                  .filter(({ projectId }) => day.byProject[projectId])
-                  .map(({ projectId, project }) => `\n${project}: ${formatTokens(day.byProject[projectId]!)}`)
+                  .filter(({ key }) => day.byPlace[key])
+                  .map(({ key, label }) => `\n${label}: ${formatTokens(day.byPlace[key]!)}`)
                   .join('')}`}</title>
               </rect>
             </g>

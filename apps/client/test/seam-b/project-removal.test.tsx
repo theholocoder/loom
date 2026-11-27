@@ -250,7 +250,7 @@ describe('a removed Project', () => {
     const dashboard = {
       ...emptyDashboard(7),
       tokens: 100,
-      perProject: [{ projectId: 1, project: 'loom', color: 'blue' as const, tokens: 100, removed: true as const }],
+      perPlace: [{ key: `project:${1}`, projectId: 1, label: 'loom', color: 'blue' as const, tokens: 100, removed: true as const }],
       topSessions: [{ sessionId: 3, title: 'Fix the login bug', projectId: 1, project: 'loom', projectRemoved: true as const, model: 'anthropic/claude-sonnet-5-5', tokens: 100, workingMs: 0, outcome: 'archived' as const }],
     };
     renderApp(new FakeMain({}, { 'usage.dashboard': () => dashboard }));

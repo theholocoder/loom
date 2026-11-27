@@ -21,16 +21,20 @@ A conversation belongs to:
 - a **Session**, if it is the Session's own conversation or one of its Subagents;
 - **Session highlights**, if it is one of their checks, which Loom files before the check runs;
 - the Session or checks the **conversation that started it** belongs to, followed up the chain, so a Subagent's Subagent counts too;
-- **outside Loom** otherwise, kept per agent, day and model (`outside_usage`).
+- **outside Loom** otherwise, kept per agent, Environment, folder, day and model (`outside_usage`), except in Loom's own folders (its worktrees, Session highlights' folder): what ran there was a Session's, possibly since deleted.
 
-One filed as outside Loom is looked for again, as Loom may read it before it has saved that it is a Session's.
+One filed as outside Loom is looked for again, as Loom may read it before it has saved that it is a Session's: once found, what it counted outside Loom moves to its owner.
 
 **The past is counted too.** The first reading only notes where each conversation stands, so it is quick: a Session's first run waits for it, then counts from the records rather than ACP. Everything before that point is then counted in the background, step by step on its own day, and the Dashboard says so until it is done:
 - **use outside Loom**: all of it, except what ran in Loom's own folders (its worktrees, Session highlights' folder), which were Loom's Sessions, possibly since deleted, already counted from their runs;
 - **a Session's**: only what its runs didn't report (its Subagents, the runs its agent started on its own, its titles), as what its steps used by day and model beyond what Loom had recorded of them when it first read the records (`usage_baseline`);
 - **Session highlights' checks'**: nothing, as their runs reported it all.
 
-Loom reads the records when the Environment connects, after a run, a Subagent or a check ends, and when the Dashboard opens, which waits a few seconds at most. The Dashboard shows use outside Loom in a card of its own, apart from its totals, which stay those of Loom's Sessions.
+Loom reads the records when the Environment connects, after a run, a Subagent or a check ends, and when the Dashboard opens (`usage.read`). The Dashboard never waits for a reading: it shows what Loom has counted at once, and is worked out again each time a reading or the past's count adds anything (the `usage` topic), without reading again.
+
+The Dashboard counts use outside Loom with the rest, in every figure but those only Loom knows (outcomes, Merge requests, Top Sessions). A conversation outside Loom that is no Subagent's, and ran in none of Loom's folders, is a Session started on the day the agent started it. Its runs count in the median run: a run is its steps from the prompt to the one that doesn't go on with the tools it called (OpenCode's `finish`), timed from the first step's start to the last one's completion; one going on when Loom reads is taken up at the next reading (`agent_conversations.run_started_at`, `outside_runs`). Each folder it ran in goes under a Project when it is the Project's checkout or a Session's working copy, or inside one, the deepest such folder winning, as of when the Dashboard is worked out: a Project linked later takes its past too. Any other folder shows as its own, for the five that used the most in the range, and the rest together as "Other folders".
+
+Use outside Loom was first kept per agent, day and model, with no folder. On upgrading, each conversation outside Loom is counted again as its past, by folder: its steps up to where it had been counted, and all it had accounted for beyond them, with its first step. The steps counted before are marked (`usage_steps.recounted`), so the count again takes each once, whether or not it was counted before.
 
 ACP is still the only way Loom drives a Session (ADR 0005). This is the agent's own CLI read through the bridge, as `opencode --version` is.
 
@@ -41,5 +45,6 @@ The costs:
 - **A conversation whose steps can't be listed** is counted from its total, as of its last change, rather than step by step. This happens when a step is bigger than the 1 MB of output the bridge passes on, as one with a huge tool output can be; smaller pages are tried first.
 - **A deleted Session's conversation in its Project's checkout** can't be told from the user's own runs there: its past counts as outside Loom as well as under the deleted Session. A worktree Session's can, and doesn't.
 - **A Session from before Loom kept the agent's id** of an earlier conversation (one the agent refused to resume) counts that conversation as outside Loom.
-- **Each reading starts private servers**, about 0.3 s each: one for the list, and one for each changed conversation. The first count of the past reads every conversation's steps, a page of 20 at a time, which can take a few minutes for a long history. It runs in the background and picks up where it left off after a restart.
+- **Each reading starts private servers**, about 0.3 s each: one for the list, and one for each changed conversation. The first count of the past reads every conversation's steps, six conversations at a time, each a page at a time: 20 messages first, then as many as fit in about 512 KB from the size of those before, at most 200. It runs in the background and picks up where it left off after a restart.
+- **A conversation outside Loom forked from a Session's**, counted again on upgrading, counts the steps it copied from the Session's as its own too.
 - **The bookkeeping** is one small row for every conversation the agent ever had, the Sessions' usage as Loom first saw it, and a few rows a day for use outside Loom.
