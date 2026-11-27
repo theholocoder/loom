@@ -20,6 +20,7 @@ export interface PermissionScope {
   policy: ApprovalPolicy;
   workingCopy: string;
   tempDir: string;
+  attachmentsDir?: string;
 }
 
 /** OpenCode's own tools, which the MCP and extension tools category leaves alone. */
@@ -63,7 +64,7 @@ type Effect = 'ask' | 'allow' | 'deny';
 export type OpenCodePermission = Record<string, Effect | Record<string, Effect>>;
 
 /** The `permission` config for an agent working in `workingCopy` under `policy`. */
-export function openCodePermission({ policy, workingCopy, tempDir }: PermissionScope): OpenCodePermission {
+export function openCodePermission({ policy, workingCopy, tempDir, attachmentsDir }: PermissionScope): OpenCodePermission {
   const permission: OpenCodePermission = {};
   // First, so the rules after it win: every tool asks, then OpenCode's own are let through again.
   if (policy.mcp === 'ask') {
@@ -85,7 +86,8 @@ export function openCodePermission({ policy, workingCopy, tempDir }: PermissionS
   if (policy.system === 'ask') for (const pattern of SYSTEM_COMMANDS) shell[pattern] = 'ask';
   permission.shell = shell;
   if (policy.writeElsewhere === 'ask') {
-    permission.external_directory = { '*': 'ask', [`${slashed(workingCopy)}/*`]: 'allow', [`${slashed(tempDir)}/*`]: 'allow' };
+    const allowed = [workingCopy, tempDir, ...(attachmentsDir ? [attachmentsDir] : [])];
+    permission.external_directory = { '*': 'ask', ...Object.fromEntries(allowed.map((folder) => [`${slashed(folder)}/*`, 'allow' as const])) };
   } else if (policy.mcp === 'ask') {
     permission.external_directory = 'allow';
   }

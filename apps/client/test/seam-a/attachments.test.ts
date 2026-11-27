@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,6 +26,10 @@ const session = (id: number, check: (s: Session) => boolean) => (sessions: Sessi
   const found = sessions.find((s) => s.id === id);
   return !!found && check(found);
 };
+
+/** Where Loom puts the agent's copies of attachments on this machine, under the home. */
+const copiesOf = (machine: Machine) =>
+  join(machine.home, ...(process.platform === 'win32' ? ['AppData/Local'] : process.platform === 'darwin' ? ['Library/Caches'] : ['.cache']), 'loom/attachments');
 
 const bytes = (text: string) => new TextEncoder().encode(text);
 const sha256 = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
@@ -165,16 +169,50 @@ describe('attachments', () => {
     expect(git(checkout, 'branch', '--list', 'loom/import')).toBe('');
   });
 
-  it('gets a big image to an agent that takes images whole', async () => {
+  it('links the agent to a big image rather than sending it inline, so a provider never refuses it', async () => {
     const { machine, checkout } = machineWith([{ chunks: ['Big.'] }], { images: true });
     const { main, project } = await withProject(machine, checkout);
-    const image = new Uint8Array(9.5 * 1024 * 1024).map((_, i) => i % 251);
+    const image = new Uint8Array(4 * 1024 * 1024).map((_, i) => i % 251);
 
     const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: [{ name: 'big.png', data: image }] });
 
     await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && s.waitingReason === 'finished'));
     const [, block] = prompts(machine)[0]!;
-    expect(sha256(Buffer.from(block!.data as string, 'base64'))).toBe(sha256(image));
+    expect(block).toEqual({ type: 'resource_link', name: 'big.png', uri: expect.stringMatching(/\/big\.png$/), mimeType: 'image/png', size: image.byteLength });
+    expect(sha256(readFileSync(fileURLToPath(block!.uri as string)))).toBe(sha256(image));
+  });
+
+  it('attaches a file by its path, copying it without the renderer reading it', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Read it.'] }]);
+    const userDataDir = tempDir('loom-attachments-');
+    const { main, project } = await withProject(machine, checkout, userDataDir);
+    const original = join(tempDir('loom-picked-'), 'dump.sql');
+    const content = 'insert into invoices values (1);\n'.repeat(1000);
+    writeFileSync(original, content);
+
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Load it', attachments: [{ name: 'dump.sql', path: original }] });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    expect(readFileSync(join(userDataDir, 'attachments', String(id), `${sha256(content)}.sql`), 'utf8')).toBe(content);
+    const [, block] = prompts(machine)[0]!;
+    expect(block).toMatchObject({ type: 'resource_link', name: 'dump.sql', size: content.length });
+    const copy = fileURLToPath(block!.uri as string);
+    expect(copy).toBe(join(copiesOf(machine), String(id), sha256(content), 'dump.sql'));
+    expect(readFileSync(copy, 'utf8')).toBe(content);
+  });
+
+  it('removes the copies in the Environment with the Session', async () => {
+    const { machine, checkout } = machineWith([{ chunks: ['Read it.'] }]);
+    const { main, project } = await withProject(machine, checkout);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: [{ name: 'a.txt', data: bytes('a') }] });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    const copies = join(copiesOf(machine), String(id));
+    expect(existsSync(copies)).toBe(true);
+
+    await main.api.invoke('sessions.delete', { id });
+
+    await waitFor(main.api, 'sessions', (list) => !list.some((s) => s.id === id));
+    expect(existsSync(copies)).toBe(false);
   });
 
   it('turns down what it cannot attach', async () => {
@@ -184,10 +222,61 @@ describe('attachments', () => {
       main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: attachments as never });
 
     await expect(create(Array.from({ length: 11 }, (_, i) => ({ name: `${i}.txt`, data: bytes('x') })))).rejects.toThrow('at most 10 attachments');
-    await expect(create([{ name: 'huge.bin', data: new Uint8Array(10 * 1024 * 1024 + 1) }])).rejects.toThrow('"huge.bin" is over 10 MB');
+    const picked = tempDir('loom-picked-');
+    const huge = join(picked, 'huge.bin');
+    writeFileSync(huge, '');
+    truncateSync(huge, 1024 * 1024 * 1024 + 1);
+    await expect(create([{ name: 'huge.bin', path: huge }])).rejects.toThrow('"huge.bin" is over 1 GB');
+    await expect(create([{ name: 'pasted.png', data: new Uint8Array(32 * 1024 * 1024 + 1) }])).rejects.toThrow('"pasted.png" is over 32 MB');
+    await expect(create([{ name: 'picked', path: picked }])).rejects.toThrow('"picked" is not a file');
+    await expect(create([{ name: 'gone.txt', path: join(picked, 'gone.txt') }])).rejects.toThrow('"gone.txt" is not a file');
+    await expect(create([{ name: 'relative.txt', path: 'relative.txt' }])).rejects.toThrow('"relative.txt" is not a file');
     await expect(create([{ name: '', data: bytes('x') }])).rejects.toThrow('needs a file name');
     await expect(create([{ name: 'empty.txt' }])).rejects.toThrow('no content');
     expect(await main.api.invoke('sessions.list')).toEqual([]);
+  });
+});
+
+const unix = describe.skipIf(process.platform === 'win32');
+
+unix('attachments in a WSL distro', () => {
+  async function inDistro(turns: AcpTurn[]) {
+    const machine = tempMachine();
+    machine.installWsl(['Ubuntu']);
+    machine.installOpencode({ version: 'opencode v2.1.4', integrations: signedIn, acp: { turns } });
+    const checkout = machine.gitClone(machine.gitOrigin('billing-api', 'main'), 'billing-api');
+    const main = await startMain({ machine });
+    await waitFor(main.api, 'environments', (envs) => envs.some((e) => e.id === 'wsl:Ubuntu'));
+    const project = await main.api.invoke('projects.link', { path: checkout, environmentId: 'wsl:Ubuntu' });
+    return { machine, main, project, home: machine.distroHome('Ubuntu') };
+  }
+
+  it('uploads a file of many chunks into the distro, whole', async () => {
+    const { machine, main, project, home } = await inDistro([{ chunks: ['Read it.'] }]);
+    const original = join(tempDir('loom-picked-'), 'trace.bin');
+    const content = Buffer.from(new Uint8Array(2.5 * 1024 * 1024).map((_, i) => (i * 7) % 256));
+    writeFileSync(original, content);
+
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: [{ name: 'trace.bin', path: original }] });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    const copy = fileURLToPath(prompts(machine)[0]![1]!.uri as string);
+    expect(copy).toBe(`${home}/.cache/loom/attachments/${id}/${sha256(content)}/trace.bin`);
+    expect(sha256(readFileSync(copy))).toBe(sha256(content));
+  });
+
+  it('sends nothing again of a file already in the distro', async () => {
+    const { machine, main, project } = await inDistro([{ chunks: ['One.'] }, { chunks: ['Two.'] }]);
+    const { id } = await main.api.invoke('sessions.create', { projectId: project.id, workingCopy: 'checkout', prompt: 'Look', attachments: [{ name: 'a.log', data: bytes('panic\n') }] });
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting'));
+    const copy = fileURLToPath(prompts(machine)[0]![1]!.uri as string);
+    const first = statSync(copy);
+
+    await main.api.invoke('sessions.send', { id, prompt: 'Again', attachments: [{ name: 'a.log', data: bytes('panic\n') }] });
+
+    await waitFor(main.api, 'sessions', session(id, (s) => s.status === 'waiting' && prompts(machine).length === 2));
+    expect(fileURLToPath(prompts(machine)[1]![1]!.uri as string)).toBe(copy);
+    expect(statSync(copy).ino).toBe(first.ino);
   });
 });
 

@@ -64,6 +64,13 @@ const configs = (machine: Machine) => [...new Set(machine.acpMessages().map((m) 
 
 /** The temp directory Loom gives the agent: `/tmp`, or on Windows its usual place under the home. */
 const tempOf = (machine: Machine) => (process.platform === 'win32' ? `${machine.home.replaceAll('\\', '/')}/AppData/Local/Temp` : '/tmp');
+/** Where Loom puts the agent's copies of attachments, under the home. */
+const attachmentsOf = (machine: Machine) => {
+  const home = machine.home.replaceAll('\\', '/');
+  if (process.platform === 'win32') return `${home}/AppData/Local/loom/attachments`;
+  if (process.platform === 'darwin') return `${home}/Library/Caches/loom/attachments`;
+  return `${home}/.cache/loom/attachments`;
+};
 
 describe('Approval requests', () => {
   it("gives OpenCode Loom's policy as permission rules in OPENCODE_CONFIG_CONTENT, and nothing else", async () => {
@@ -73,7 +80,7 @@ describe('Approval requests', () => {
     expect(Object.keys(config!)).toEqual(['permission']);
     const permission = config!.permission as Record<string, Record<string, string>>;
     // Writing elsewhere asks, but not in the working copy (the worktree) or the temp directory.
-    expect(permission.external_directory).toEqual({ '*': 'ask', [`${s.workingCopy.path}/*`]: 'allow', [`${tempOf(setup.machine)}/*`]: 'allow' });
+    expect(permission.external_directory).toEqual({ '*': 'ask', [`${s.workingCopy.path}/*`]: 'allow', [`${tempOf(setup.machine)}/*`]: 'allow', [`${attachmentsOf(setup.machine)}/*`]: 'allow' });
     // OpenCode's shell rule is `shell`; pushes, Forge CLIs and sudo ask, and Loom answers what its policy allows.
     expect(permission.shell).toMatchObject({ 'git push': 'ask', 'git push *': 'ask', 'gh *': 'ask', 'glab *': 'ask', 'sudo *': 'ask', 'npm * -g': 'ask' });
     expect(permission.shell!['*']).toBeUndefined();
@@ -382,6 +389,6 @@ describe('Approval requests', () => {
     const { session: s } = await startSession(setup, 'checkout');
     expect(s.workingCopy.path).toBe(setup.checkout);
     const permission = configs(setup.machine)[0]!.permission as Record<string, Record<string, string>>;
-    expect(permission.external_directory).toEqual({ '*': 'ask', [`${setup.checkout}/*`]: 'allow', [`${tempOf(setup.machine)}/*`]: 'allow' });
+    expect(permission.external_directory).toEqual({ '*': 'ask', [`${setup.checkout}/*`]: 'allow', [`${tempOf(setup.machine)}/*`]: 'allow', [`${attachmentsOf(setup.machine)}/*`]: 'allow' });
   });
 });

@@ -1,6 +1,6 @@
 // Exposes the LoomApi to the renderer as `window.loom`, carried over IPC.
 import { hookupIpc } from '@sentry/electron/preload-namespaced';
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { LoomApi } from '../shared/api';
 import { rendererTelemetryOf } from '../shared/telemetry';
 import { IPC } from '../shared/ipc-channels';
@@ -27,6 +27,7 @@ const api: LoomApi = {
       ipcRenderer.send(IPC.unsubscribe, subscription);
     };
   },
+  pathOf: (file) => webUtils.getPathForFile(file),
 };
 
 contextBridge.exposeInMainWorld('loom', api);

@@ -24,7 +24,7 @@ import { classifyApproval, mayPush, type ApprovalContext, type ApprovalVerdict }
 import { checkAttachments, type Attachments } from './attachments';
 import { recordSpan, recordTurn } from '../usage/usage';
 import { Subagents } from './subagents';
-import type { AskingSubagent, Subagent } from '../../shared/api';
+import type { AskingSubagent, NewAttachment, Subagent } from '../../shared/api';
 
 export interface SessionsOptions {
   db: LoomDatabase;
@@ -85,6 +85,10 @@ export interface SessionEnvironment extends AgentEnvironment, GitEnvironment {
   restart(): Promise<void>;
   /** Its temp directory, where agents work freely: `/tmp`, or `%TEMP%` on native Windows. */
   tempDir(): string;
+  /** The folder attachments are copied into for the agent, where it works freely too. */
+  attachmentsDir(): string;
+  /** Whether its bridge runs on this machine, so it can copy from Loom's own files. */
+  local: boolean;
   /** The bridge binary's path there, which runs Loom's MCP server; undefined if the bridge didn't say. */
   bridgeExecutable(): string | undefined;
 }
@@ -196,6 +200,8 @@ export class Sessions {
    * to send the queued message `sendNow`.
    */
   private readonly interrupting = this.perSession<Interruption>();
+  /** What stops the delivery of a run's attachments, while they go. */
+  private readonly delivering = this.perSession<AbortController>();
   /** Writes made in this tick, committed together in one transaction. */
   private pending: Write[] = [];
   /** Transactions, one after another so they land in order. */
@@ -406,7 +412,7 @@ export class Sessions {
       if (params.branch !== undefined || params.base !== undefined) throw new Error("A Session on an existing branch or worktree doesn't name or base a new one.");
     }
     if (params.base !== undefined) checkBranch(params.base, 'A base');
-    const newAttachments = checkAttachments(params.attachments);
+    const newAttachments = await checkAttachments(params.attachments);
     const text = promptText(issue ? [issuePrompt(issue), params.prompt.trim()].filter(Boolean).join('\n\n') : params.prompt, { attached: newAttachments.length > 0 });
     let path = project.checkout.path;
     let branch: string | null = null;
@@ -527,7 +533,7 @@ export class Sessions {
   }
 
   async send({ id, prompt, attachments: attached, comments }: Commands['sessions.send']['params']): Promise<void> {
-    const newAttachments = checkAttachments(attached);
+    const newAttachments = await checkAttachments(attached);
     const text = promptText(prompt, { attached: newAttachments.length > 0, comments });
     this.get(id);
     await this.loadTranscript(id);
@@ -579,7 +585,7 @@ export class Sessions {
   }
 
   /** Sends a prompt to the Session, or queues it; `reopening`, to an archived Session made ready by `prepareReopen`. */
-  private async prompt(id: number, text: string, newAttachments: ReturnType<typeof checkAttachments>, { reopening = false } = {}): Promise<void> {
+  private async prompt(id: number, text: string, newAttachments: NewAttachment[], { reopening = false } = {}): Promise<void> {
     // A change of model or Effort made just before goes first: the marker, then this prompt on it.
     await this.switched(id);
     // A prompt that can't go is turned down before its attachments are kept.
@@ -726,6 +732,7 @@ export class Sessions {
    */
   private interrupt(id: number, interruption: Interruption): void {
     this.interrupting.set(id, interruption);
+    this.delivering.get(id)?.abort();
     // Asked again each time: the user stopping twice may be an agent that didn't hear it.
     this.live.get(id)?.cancel();
   }
@@ -1127,6 +1134,7 @@ export class Sessions {
     const context: ApprovalContext = {
       workingCopy: session.workingCopy.path,
       tempDir: environment.tempDir(),
+      attachmentsDir: environment.attachmentsDir(),
       home: environment.home(),
       mergeRequest: session.mergeRequest?.number,
     };
@@ -1279,8 +1287,19 @@ export class Sessions {
     if (!result.archived) return { deleted: false, unsavedWork: result.unsavedWork };
     // What was being looked up after its last turn ends before it is forgotten.
     await this.afterTurns.get(id)?.catch(() => {});
+    await this.removeCopies(id);
     await this.forget(id);
     return { deleted: true };
+  }
+
+  /** Removes the copies of the Session's attachments in its Environment, if it is there to ask. */
+  private async removeCopies(id: number): Promise<void> {
+    try {
+      const environment = this.environmentOf(this.get(id));
+      await this.options.attachments.removeCopies(id, { request: environment.request, folder: environment.attachmentsDir() });
+    } catch (error) {
+      console.error(`could not remove the copies of Session ${id}'s attachments:`, error);
+    }
   }
 
   /** Forgets an archived Session: everything Loom keeps of it but its usage. */
@@ -1833,6 +1852,7 @@ export class Sessions {
     try {
       files = await this.deliver(id, attachments);
     } catch (error) {
+      if (this.interrupting.has(id)) return this.interrupted(id);
       this.fail(id, (error as Error).message);
       return;
     }
@@ -1853,10 +1873,14 @@ export class Sessions {
   private async deliver(id: number, attachments: Attachment[] | undefined): Promise<PromptFile[]> {
     if (!attachments?.length) return [];
     const environment = this.environmentOf(this.get(id));
+    const delivering = new AbortController();
+    this.delivering.set(id, delivering);
     try {
-      return await this.options.attachments.deliver(id, attachments, { request: environment.request, tempDir: environment.tempDir() });
+      return await this.options.attachments.deliver(id, attachments, { request: environment.request, folder: environment.attachmentsDir(), local: environment.local }, delivering.signal);
     } catch (error) {
       throw new Error(`Loom could not give ${this.options.adapter.name} the attachments: ${(error as Error).message}`);
+    } finally {
+      if (this.delivering.get(id) === delivering) this.delivering.delete(id);
     }
   }
 
@@ -1875,6 +1899,7 @@ export class Sessions {
       environment,
       workingCopy: session.workingCopy.path,
       tempDir: environment.tempDir(),
+      attachmentsDir: environment.attachmentsDir(),
       approvals: this.options.approvals(),
       ...(executable ? { loomTools: { command: executable, args: ['mcp'] } } : {}),
       ...(session.agentSessionId ? { resume: session.agentSessionId } : {}),

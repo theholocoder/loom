@@ -18,7 +18,7 @@ describe('the native Environment', () => {
     expect(native(envs)).toMatchObject({
       label: 'Native',
       state: 'connected',
-      bridge: { protocolVersion: 4, version: appVersion, os: goOS, arch: goArch },
+      bridge: { protocolVersion: 5, version: appVersion, os: goOS, arch: goArch },
     });
   });
 });
@@ -82,6 +82,6 @@ describe('a bridge from another Client version', () => {
     const main = await startMain({ appVersion: '9.9.9' });
 
     const envs = await waitFor(main.api, 'environments', (e) => native(e)?.state === 'failed');
-    expect(native(envs)?.error).toMatch(/0\.1\.0.*9\.9\.9|9\.9\.9.*0\.1\.0/);
+    expect(native(envs)?.error).toBe(`loom-bridge ${appVersion} (protocol 5) does not match Loom 9.9.9 (protocol 5)`);
   });
 });

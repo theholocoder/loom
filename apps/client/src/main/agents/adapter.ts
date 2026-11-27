@@ -152,6 +152,8 @@ export interface OpenOptions {
   workingCopy: string;
   /** The Environment's temp directory, where the agent works freely too. */
   tempDir: string;
+  /** The folder attachments are copied into for it, where it works freely too. */
+  attachmentsDir?: string;
   /** What the agent asks approval for, beyond its working copy and the temp directory. */
   approvals: ApprovalPolicy;
   /**

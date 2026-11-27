@@ -19,8 +19,8 @@ export const OPENCODE_ACP: AcpProfile = {
   name: OPENCODE_NAME,
   command: 'opencode',
   args: ['acp'],
-  env: ({ approvals, workingCopy, tempDir, toolsOff }) => ({
-    OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: toolsOff ? NO_TOOLS : openCodePermission({ policy: approvals, workingCopy, tempDir }) }),
+  env: ({ approvals, workingCopy, tempDir, attachmentsDir, toolsOff }) => ({
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: toolsOff ? NO_TOOLS : openCodePermission({ policy: approvals, workingCopy, tempDir, attachmentsDir }) }),
   }),
   ownTools: new Set(OPENCODE_TOOLS),
   // OpenCode keeps its to-do list with a tool, and tells ACP nothing else of it.

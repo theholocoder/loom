@@ -76,6 +76,42 @@ describe('attachments in the composer', () => {
     await waitFor(() => expect(composer.queryByRole('list', { name: 'Attachments' })).toBeNull());
   });
 
+  it('sends the path of a file that has one, rather than its content', async () => {
+    const main = new FakeMain({ projects: [project], sessions: [finished] });
+    const { composer, prompt } = openSession(main);
+    const dump = new File(['insert;\n'], 'dump.sql', { type: 'application/sql' });
+    main.paths.set(dump, '/home/dev/Downloads/dump.sql');
+
+    fireEvent.change(composer.getByLabelText('Attach files or images'), { target: { files: [dump] } });
+    type(prompt, 'Load it');
+    fireEvent.click(composer.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(main.invoked.some((i) => i.command === 'sessions.send')).toBe(true));
+    const sent = main.invoked.find((i) => i.command === 'sessions.send')!.params as { attachments: unknown[] };
+    expect(sent.attachments).toEqual([{ name: 'dump.sql', mimeType: 'application/sql', path: '/home/dev/Downloads/dump.sql' }]);
+  });
+
+  it('turns down a file too big to attach as soon as it is attached, and keeps the rest', () => {
+    const main = new FakeMain({ projects: [project], sessions: [finished] });
+    const { composer, prompt } = openSession(main);
+    const sized = (name: string, size: number) => {
+      const file = new File(['x'], name);
+      Object.defineProperty(file, 'size', { value: size });
+      return file;
+    };
+    const video = sized('capture.mp4', 1024 * 1024 * 1024 + 1);
+    main.paths.set(video, '/home/dev/capture.mp4');
+    const trace = sized('trace.bin', 600 * 1024 * 1024);
+    main.paths.set(trace, '/home/dev/trace.bin');
+
+    fireEvent.change(composer.getByLabelText('Attach files or images'), { target: { files: [video, trace] } });
+    fireEvent.paste(prompt, { clipboardData: { files: [sized('image.png', 32 * 1024 * 1024 + 1)] } });
+
+    const chips = within(composer.getByRole('list', { name: 'Attachments' }));
+    expect(chips.getAllByRole('listitem').map((li) => li.textContent)).toEqual([expect.stringContaining('trace.bin')]);
+    expect(composer.getByRole('alert').textContent).toBe('"image.png" is over 32 MB, too big to attach.');
+  });
+
   it('attaches an image pasted into the prompt', () => {
     const main = new FakeMain({ projects: [project], sessions: [finished] });
     const { composer, prompt } = openSession(main);

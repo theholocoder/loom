@@ -277,6 +277,8 @@ async function startLoom(options: LoomOptions, db: LoomDatabase, database: Topic
       },
       restart: () => environment.restart(),
       tempDir: () => tempDirOf(environment.status.bridge?.os, environment.status.bridge?.home),
+      attachmentsDir: () => attachmentsDirOf(environment.status.bridge?.os, environment.status.bridge?.home),
+      local: environment === native,
       bridgeExecutable: () => environment.status.bridge?.executable || undefined,
     };
     sessionEnvironments.set(environment, made);
@@ -698,4 +700,17 @@ function wslEnv(): Record<string, string> {
 function tempDirOf(os: string | undefined, home: string | undefined): string {
   if (os === 'windows' && home) return `${home.replaceAll('\\', '/')}/AppData/Local/Temp`;
   return '/tmp';
+}
+
+/**
+ * Where the agent's copies of attachments go in the Environment: in the
+ * user's cache folder rather than the temp directory, which may be in memory,
+ * or in the temp directory when the bridge gives no home.
+ */
+function attachmentsDirOf(os: string | undefined, home: string | undefined): string {
+  if (!home) return `${tempDirOf(os, home)}/loom-attachments`;
+  const slashed = home.replaceAll('\\', '/');
+  if (os === 'windows') return `${slashed}/AppData/Local/loom/attachments`;
+  if (os === 'darwin') return `${slashed}/Library/Caches/loom/attachments`;
+  return `${slashed}/.cache/loom/attachments`;
 }
