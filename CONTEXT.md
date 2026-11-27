@@ -43,7 +43,7 @@ The agent has finished, was stopped or interrupted, hit an error, is stuck, has 
 A message the user, or **Babysit**'s auto-prompt, sent a **Working** Session, waiting in the Session's queue to be sent to the agent once the runs before it settle. The user can edit its text, remove it, or send it now: interrupt the run and send it. **Stop** interrupts the run and keeps the queue; so does **Archive**, for when the Session reopens. "The queue" always means a Session's queued messages, never the **Inbox**.
 
 **Attachment**:
-A file or image the user sends with a message. Loom keeps it with the **Session**'s history on the **Client** machine, and writes a copy into the **Environment** for the agent to read with that message.
+A file or image the user sends with a message, up to 1 GiB (32 MiB for one pasted, which has no path). Loom keeps it with the **Session**'s history on the **Client** machine. With that message, Loom puts a copy into the **Environment**'s cache folder for the agent to read, unless that copy is there already. The copy is removed when the **Session** is deleted.
 _Avoid_: Upload
 
 **Approval request**:

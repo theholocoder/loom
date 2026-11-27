@@ -67,6 +67,9 @@ export class FakeMain implements LoomApi {
   private values = new Map<string, unknown>();
   private listeners = new Map<string, Set<(value: never) => void>>();
   readonly invoked: Array<{ command: CommandName; params: unknown }> = [];
+  /** The path on this machine of each file a test gives one, as the preload says; files with none have no path. */
+  readonly paths = new Map<File, string>();
+  pathOf = (file: File) => this.paths.get(file) ?? '';
   private handlers: Handlers;
 
   /** `handlers` replaces what the given commands do; the rest do nothing. */

@@ -13,6 +13,8 @@ export interface ApprovalContext {
   workingCopy: string;
   /** The Environment's temp directory. */
   tempDir: string;
+  /** The folder attachments are copied into for the agent. */
+  attachmentsDir?: string;
   /** The user's home in the Environment, for `~`. */
   home?: string;
   /** The branch the working copy has checked out now; absent on a detached HEAD. */
@@ -104,12 +106,12 @@ function pathOf(word: string, cwd: string, home: string | undefined): string {
   return '';
 }
 
-/** Whether `path`, an absolute one, is neither in the working copy nor in the temp directory. */
-function isOutside(path: string, { workingCopy, tempDir }: ApprovalContext): boolean {
+/** Whether `path`, an absolute one, is neither in the working copy, nor in the temp directory, nor in the attachments folder. */
+function isOutside(path: string, { workingCopy, tempDir, attachmentsDir = '' }: ApprovalContext): boolean {
   if (!path) return false;
   const normal = normalize(path);
   if (!normal.startsWith('/') && !/^[a-z]:\//i.test(normal)) return false;
-  return ![workingCopy, tempDir].some((root) => within(normal, normalize(root)));
+  return ![workingCopy, tempDir, attachmentsDir].some((root) => within(normal, normalize(root)));
 }
 
 /** Whether `path` is `root` or under it, both normalized; case-insensitive for a Windows drive path. */

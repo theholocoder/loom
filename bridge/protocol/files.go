@@ -148,26 +148,15 @@ func writeFile(params fileWriteParams) (*struct{}, *Error) {
 	if params.Path == "" {
 		return nil, &Error{Code: "bad_params", Message: "files.write needs a path"}
 	}
-	dir := filepath.Dir(params.Path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, &Error{Code: "write_failed", Message: err.Error()}
-	}
-	tmp, err := os.CreateTemp(dir, ".loom-write-*")
+	file, err := createBeside(params.Path)
 	if err != nil {
 		return nil, &Error{Code: "write_failed", Message: err.Error()}
 	}
-	_, err = tmp.Write(params.Data)
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
+	if _, err := file.Write(params.Data); err != nil {
+		discard(file)
+		return nil, &Error{Code: "write_failed", Message: err.Error()}
 	}
-	if err == nil {
-		err = os.Chmod(tmp.Name(), 0o644)
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), params.Path)
-	}
-	if err != nil {
-		os.Remove(tmp.Name())
+	if err := putInPlace(file, params.Path); err != nil {
 		return nil, &Error{Code: "write_failed", Message: err.Error()}
 	}
 	return &struct{}{}, nil

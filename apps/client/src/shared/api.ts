@@ -852,14 +852,17 @@ export function hasNothingToSend({ text, attachments }: Pick<QueuedMessage, 'tex
   return !text.trim() && !attachments?.length;
 }
 
-/** A file or image the user attaches to a message, as the renderer read it. */
-export interface NewAttachment {
+/**
+ * A file or image the user attaches to a message: by its path on this
+ * machine, which main copies from, or, for one that has none (pasted, or
+ * dragged from a browser), as the renderer read it.
+ */
+export type NewAttachment = {
   /** Its file name, which the agent sees too. */
   name: string;
   /** Its media type, if the renderer knows it; otherwise guessed from the name. */
   mimeType?: string;
-  data: Uint8Array;
-}
+} & ({ path: string } | { data: Uint8Array });
 
 /**
  * The user's note on a line or range of a Session's diff, sent with a prompt
@@ -927,8 +930,19 @@ export const MAX_LISTED_FILES = 20_000;
 
 /** The most one message can have attached. */
 export const MAX_ATTACHMENTS = 10;
-/** The largest file that can be attached, in bytes. */
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** The largest file that can be attached by its path, in bytes. */
+export const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
+/** The largest file with no path (pasted, or dragged from a browser) that can be attached, in bytes: the renderer sends it whole. */
+export const MAX_PASTED_ATTACHMENT_BYTES = 32 * 1024 * 1024;
+/** The most one message can have attached, all its files together, in bytes. */
+export const MAX_MESSAGE_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024;
+/** The largest image sent to the agent inline, in bytes: about 5 MB once in base64, as providers allow. A bigger one goes as a link to its copy. */
+export const MAX_INLINE_IMAGE_BYTES = 3.75 * 1024 * 1024;
+
+/** A size in bytes, as the caps above are said to people: `1 GB`, `32 MB`. */
+export function bytesLabel(bytes: number): string {
+  return bytes >= 1024 * 1024 * 1024 ? `${bytes / (1024 * 1024 * 1024)} GB` : `${bytes / (1024 * 1024)} MB`;
+}
 
 /** A diff's size: files changed, lines added and removed. Untracked files count as files of added lines. */
 export interface DiffStat {
@@ -1816,7 +1830,9 @@ export interface Commands {
    *
    * `attachments` are stored at once and go to the agent with the prompt;
    * the prompt may then be empty. Rejects more than MAX_ATTACHMENTS, one
-   * over MAX_ATTACHMENT_BYTES, and one with no name.
+   * over MAX_ATTACHMENT_BYTES (MAX_PASTED_ATTACHMENT_BYTES for one sent as
+   * bytes), more than MAX_MESSAGE_ATTACHMENT_BYTES in all, a path that is not
+   * a file, and one with no name.
    *
    * `comments` follow the prompt's text as blocks, in order: a diff
    * comment's `path:start-end`, its quoted lines and its note; a
@@ -2217,4 +2233,6 @@ export interface LoomApi {
    * every new value until unsubscribed.
    */
   subscribe<T extends TopicName>(topic: T, listener: (value: Topics[T]) => void, ...params: TopicArgs<T>): Unsubscribe;
+  /** The path on this machine of a file the user picked or dropped; empty for one with none, as one pasted. */
+  pathOf?(file: File): string;
 }

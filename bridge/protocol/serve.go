@@ -23,7 +23,7 @@ import (
 
 // ProtocolVersion is bumped whenever the frames or messages change in a way
 // an older peer would not understand.
-const ProtocolVersion = 4
+const ProtocolVersion = 5
 
 // MaxFrameSize bounds a single frame so a corrupt length can't make the
 // bridge allocate without limit.
@@ -92,9 +92,10 @@ type handshakeResult struct {
 func Serve(r io.Reader, w io.Writer, info Info, machine Machine) error {
 	out := &writer{w: w}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &server{info: info, home: machine.Home, wsl: machine.WSL, environ: machine.Environ, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out, machine.StopGrace, machine.Shell)}
+	s := &server{info: info, home: machine.Home, wsl: machine.WSL, environ: machine.Environ, env: newEnvironment(ctx, machine), channels: newChannels(ctx, out, machine.StopGrace, machine.Shell), uploads: newUploads()}
 	var inFlight sync.WaitGroup
 	defer s.channels.wait()
+	defer s.uploads.abortAll()
 	defer inFlight.Wait()
 	defer cancel()
 	for {
@@ -128,6 +129,7 @@ type server struct {
 	home     string
 	env      *environment
 	channels *channels
+	uploads  *uploads
 	wsl      string
 	environ  []string
 }
@@ -191,6 +193,42 @@ func (s *server) handle(ctx context.Context, req request) response {
 			return reply(nil, err)
 		}
 		return reply(writeFile(params))
+	case "files.upload.begin":
+		var params uploadBeginParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.uploads.begin(params))
+	case "files.upload.chunk":
+		var params uploadChunkParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.uploads.chunk(params))
+	case "files.upload.end":
+		var params uploadParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.uploads.end(params))
+	case "files.upload.abort":
+		var params uploadParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(s.uploads.abort(params))
+	case "files.copyTo":
+		var params copyToParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(copyTo(params))
+	case "files.remove":
+		var params removeParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return reply(nil, err)
+		}
+		return reply(removeAll(params))
 	case "files.stat":
 		var params statParams
 		if err := decodeParams(req.Params, &params); err != nil {

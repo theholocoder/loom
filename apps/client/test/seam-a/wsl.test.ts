@@ -198,7 +198,7 @@ unix('a Project checked out in a WSL distro', () => {
     const worktree = `${home}/loom/worktrees/billing-api/fix-the-login-bug`;
     expect(sessions.find((s) => s.id === id)?.workingCopy).toEqual({ kind: 'worktree', path: worktree });
     const config = machine.acpMessages().find((m) => m.config)?.config;
-    expect((JSON.parse(config!) as { permission: { external_directory: unknown } }).permission.external_directory).toEqual({ '*': 'ask', [`${worktree}/*`]: 'allow', '/tmp/*': 'allow' });
+    expect((JSON.parse(config!) as { permission: { external_directory: unknown } }).permission.external_directory).toEqual({ '*': 'ask', [`${worktree}/*`]: 'allow', '/tmp/*': 'allow', [`${home}/.cache/loom/attachments/*`]: 'allow' });
     expect(readdirSync(join(home, 'loom'))).toEqual(['worktrees']);
     expect(readdirSync(join(home, '.local/share/loom'))).toEqual(['bridge']);
     expect(readdirSync(userDataDir)).toContain('loom.db');

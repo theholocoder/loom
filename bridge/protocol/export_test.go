@@ -9,3 +9,11 @@ func SetProbeSettleTimeout(d time.Duration) (restore func()) {
 	probeSettleTimeout = d
 	return func() { probeSettleTimeout = was }
 }
+
+// SetUploadIdleTimeout bounds how long an upload may go without a chunk,
+// until the returned func puts the bound back.
+func SetUploadIdleTimeout(d time.Duration) (restore func()) {
+	was := uploadIdleTimeout
+	uploadIdleTimeout = d
+	return func() { uploadIdleTimeout = was }
+}

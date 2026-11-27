@@ -4,7 +4,8 @@
 // and commands.
 import { ArrowUp, Box, ClipboardPaste, Copy, FileText, FolderGit2, Image, ListPlus, MessageSquareCode, MessageSquareQuote, Paperclip, Scissors, Sparkles, Square, SquareSlash, SquareTerminal, User, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
-import { diffCommentRange, isConversationComment, isImage, type AgentCommand, type Attachment, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
+import { bytesLabel, diffCommentRange, isConversationComment, isImage, MAX_ATTACHMENT_BYTES, MAX_PASTED_ATTACHMENT_BYTES, type AgentCommand, type Attachment, type LoomApi, type MessageComment, type NewAttachment, type SkillSource } from '../shared/api';
+import { useApi } from './api';
 import { splitDetails } from '../shared/errors';
 import { addToContextMenu, copyText } from './ContextMenu';
 import { useKeptState } from './drafts';
@@ -145,9 +146,16 @@ export function Composer({
   const [sending, setSending] = useState(false);
   const canSend = !disabled && !held && !sending && (canSendEmpty || draft.trim() !== '' || attached.length > 0 || comments.length > 0);
   const picker = useRef<HTMLInputElement>(null);
+  const api = useApi();
+  /** Why the files last attached were not all taken: some were too big. */
+  const [refused, setRefused] = useState<string>();
   const attach = (added: Iterable<File>) => {
     const list = [...added];
-    if (list.length) setFiles((current) => [...current, ...list.map((file) => ({ key: nextKey.current++, file }))]);
+    if (!list.length) return;
+    const tooBig = list.map((file) => tooBigToAttach(api, file)).filter(Boolean);
+    setRefused(tooBig.length ? tooBig.join(' ') : undefined);
+    const taken = list.filter((file) => !tooBigToAttach(api, file));
+    if (taken.length) setFiles((current) => [...current, ...taken.map((file) => ({ key: nextKey.current++, file }))]);
   };
 
   const menu = useMenu({ draft, caret, commands, loadFiles });
@@ -173,7 +181,7 @@ export function Composer({
     if (sent.for !== undefined) answeredFor.current = sent.for;
     let accepted = false;
     try {
-      const attachments = await Promise.all(sent.files.map(({ file }) => readAttachment(file)));
+      const attachments = await Promise.all(sent.files.map(({ file }) => readAttachment(api, file)));
       accepted = await onSend(sent.text, attachments);
     } finally {
       setSending(false);
@@ -299,6 +307,11 @@ export function Composer({
     <form className="composer-wrap" aria-label="Composer" onSubmit={send}>
       {queue}
       {remarks && <div className="composer-remarks">{remarks}</div>}
+      {refused && (
+        <div className="composer-remarks" role="alert">
+          {refused}
+        </div>
+      )}
       <div className={`composer${dock ? ' docked' : ''}${dock ? ' answering' : ''}`} onDragOver={(event) => attachable && event.preventDefault()} onDrop={onDrop}>
         {dock}
         {menu.open && <MenuList id={listId} open={menu.open} optionId={optionId} onHover={menu.setActive} onPick={pick} />}
@@ -743,9 +756,18 @@ function nameOf(file: File): string {
   return file.name || 'Pasted file';
 }
 
-async function readAttachment(file: File): Promise<NewAttachment> {
-  const data = new Uint8Array(await file.arrayBuffer());
-  return { name: nameOf(file), ...(file.type ? { mimeType: file.type } : {}), data };
+/** The file as main takes it: by its path, or read whole when it has none, as one pasted. */
+async function readAttachment(api: LoomApi, file: File): Promise<NewAttachment> {
+  const named = { name: nameOf(file), ...(file.type ? { mimeType: file.type } : {}) };
+  const path = api.pathOf?.(file);
+  if (path) return { ...named, path };
+  return { ...named, data: new Uint8Array(await file.arrayBuffer()) };
+}
+
+/** Why the file can't be attached, if it is too big: over MAX_ATTACHMENT_BYTES, or MAX_PASTED_ATTACHMENT_BYTES for one with no path. */
+function tooBigToAttach(api: LoomApi, file: File): string | undefined {
+  const cap = api.pathOf?.(file) ? MAX_ATTACHMENT_BYTES : MAX_PASTED_ATTACHMENT_BYTES;
+  return file.size > cap ? `"${nameOf(file)}" is over ${bytesLabel(cap)}, too big to attach.` : undefined;
 }
 
 /** A file's size, as people read it: `512 B`, `14 KB`, `2.3 MB`. */
