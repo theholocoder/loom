@@ -129,6 +129,10 @@ _Avoid_: Note (a review comment on a diff line), summary, notification
 **Session highlights**:
 The setting that has a model of the user's picking, usually a cheap one, check each turn of every **Session** for **Highlights**, as a conversation of its own with every tool refused. Off until turned on with a model. Its usage counts on the dashboard under its model, but isn't the Session's own.
 
+**Use outside Loom**:
+The user's own conversations with an **Agent** that Loom didn't start, as the agent's records keep them, such as its TUI or scripts. Not **Sessions**: the dashboard counts them with Loom's, under the **Project** whose checkout or Session working copy they ran in, else under their folder, and the ones started in its range alongside Sessions started.
+_Avoid_: Session (for one Loom didn't start), external usage
+
 **Terminal**:
 A shell in a **Panel**, run by the **Session**'s **Environment** in its working copy. A Session can have several. They keep running when another Session is shown, and end when closed, when their shell exits, when the Session is archived or when Loom quits. None outlives Loom. "Open in terminal" is different: it opens the working copy in the user's own terminal app.
 _Avoid_: Console, shell (for the Panel's tab)

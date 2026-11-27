@@ -18,6 +18,8 @@ export const OPENCODE_SESSIONS_PAGE = 200;
 export const OPENCODE_MESSAGES_PAGE = 20;
 /** How many pages one listing reads at most. */
 const MAX_PAGES = 500;
+const PAGE_BYTES = 512 * 1024;
+const MAX_GROWTH = 10;
 const PAGE_TIMEOUT_MS = 30_000;
 /**
  * How long a step may take: messages are listed newest started first, so
@@ -31,7 +33,7 @@ interface ApiSession {
   id?: unknown;
   parentID?: unknown;
   location?: { directory?: unknown };
-  time?: { updated?: unknown };
+  time?: { created?: unknown; updated?: unknown };
   cost?: unknown;
   tokens?: ApiTokens;
 }
@@ -50,6 +52,7 @@ interface ApiMessage {
   model?: { id?: unknown; providerID?: unknown };
   cost?: unknown;
   tokens?: ApiTokens;
+  finish?: unknown;
   time?: { created?: unknown; completed?: unknown };
 }
 
@@ -108,7 +111,8 @@ async function pages<T>(call: BridgeCall, operation: string[], first: string[], 
     for (const item of listed.data as T[]) if (!each(item)) return;
     cursor = typeof listed.cursor?.next === 'string' ? listed.cursor.next : undefined;
     if (!cursor || listed.data.length < limit) return;
-    limit = size;
+    const itemBytes = Math.max(1, result.stdout.length / Math.max(1, listed.data.length));
+    limit = Math.max(1, Math.min(size * MAX_GROWTH, Math.floor(PAGE_BYTES / itemBytes)));
   }
 }
 
@@ -120,6 +124,7 @@ function conversationOf(session: ApiSession): AgentConversation | undefined {
     ...(typeof session.parentID === 'string' && session.parentID ? { parentId: session.parentID } : {}),
     ...(typeof directory === 'string' && directory ? { directory } : {}),
     updatedAt: session.time!.updated as number,
+    ...(isCount(session.time?.created) ? { createdAt: session.time.created } : {}),
     // Its steps' usage and its title's, which OpenCode asks a model for and counts with the session.
     ...(session.tokens ? { total: { tokens: tokensOf(session.tokens), cost: costOf(session.cost) } } : {}),
   };
@@ -132,6 +137,8 @@ function stepOf(message: ApiMessage): UsageStep | undefined {
   return {
     id: message.id,
     at,
+    ...(isCount(message.time?.created) ? { startedAt: message.time.created } : {}),
+    endsRun: message.finish !== 'tool-calls',
     ...(typeof model?.providerID === 'string' && typeof model.id === 'string' ? { model: `${model.providerID}/${model.id}` } : {}),
     tokens: tokensOf(message.tokens),
     cost: costOf(message.cost),

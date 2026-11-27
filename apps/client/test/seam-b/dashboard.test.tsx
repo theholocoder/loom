@@ -32,16 +32,16 @@ function dashboard(days: UsageDashboard['days'] = 7): UsageDashboard {
   const empty = emptyDashboard(days);
   return {
     ...empty,
-    perDay: empty.perDay.map((d, i) => (i === days - 1 ? { ...d, tokens: 1_200_000, byProject: { 1: 900_000, 2: 300_000 } } : d)),
+    perDay: empty.perDay.map((d, i) => (i === days - 1 ? { ...d, tokens: 1_200_000, byPlace: { 'project:1': 900_000, 'project:2': 300_000 } } : d)),
     tokens: 1_200_000,
     reportedCost: 3.4,
     sessionsStarted: 5,
     mergeRequestsMerged: 2,
     medianRunMs: 400_000,
     medianWaitMs: 22 * 60_000,
-    perProject: [
-      { projectId: 1, project: 'loom', color: 'blue', tokens: 900_000 },
-      { projectId: 2, project: 'docs', color: 'orange', tokens: 300_000 },
+    perPlace: [
+      { key: 'project:1', projectId: 1, label: 'loom', color: 'blue', tokens: 900_000 },
+      { key: 'project:2', projectId: 2, label: 'docs', color: 'orange', tokens: 300_000 },
     ],
     perModel: [
       { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1_000_000 },
@@ -116,8 +116,8 @@ describe('the dashboard', () => {
     await within(view).findByRole('group', { name: 'Tokens' });
 
     expect(within(view).getByRole('img', { name: 'Tokens per day by Project' })).toBeTruthy();
-    const perProject = within(view).getByRole('list', { name: 'Tokens per Project' });
-    expect(within(perProject).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['loom900k', 'docs300k']);
+    const perPlace = within(view).getByRole('list', { name: 'Tokens per Project' });
+    expect(within(perPlace).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['loom900k', 'docs300k']);
     const perModel = within(view).getByRole('list', { name: 'Tokens per model' });
     expect(within(perModel).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['Claude Sonnet 5.5' + '1.0M', 'openai/gpt-5.1' + '200k']);
     expect(within(perModel).getByText('Claude Sonnet 5.5').title).toBe('anthropic/claude-sonnet-5-5');
@@ -140,19 +140,38 @@ describe('the dashboard', () => {
     expect(within(mix).getByText('output <1%').title).toBe(`${(4000).toLocaleString()} tokens`);
   });
 
-  it('shows use outside Loom apart, by agent and model, or says there was none', async () => {
-    const outside = { ...dashboard(), outside: { tokens: 154_000, reportedCost: 0.02, perModel: [{ agent: 'OpenCode', model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 110_000 }, { agent: 'OpenCode', model: 'opencode/big-pickle', tokens: 44_000 }] } };
-    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': ({ days }) => (days === 7 ? outside : dashboard(days)) });
+  it('shows use outside any Project with the rest, under its folder', async () => {
+    const base = dashboard();
+    const withFolders: UsageDashboard = {
+      ...base,
+      perDay: base.perDay.map((d, i) => (i === 6 ? { ...d, tokens: 1_350_000, byPlace: { ...d.byPlace, 'folder:native:/home/me/notes': 100_000, other: 50_000 } } : d)),
+      tokens: 1_350_000,
+      perPlace: [...base.perPlace, { key: 'folder:native:/home/me/notes', label: 'notes', folder: '/home/me/notes', color: 'aqua', tokens: 100_000 }, { key: 'other', label: 'Other folders', tokens: 50_000 }],
+    };
+    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': () => withFolders });
     const view = openDashboard(main);
     await within(view).findByRole('group', { name: 'Tokens' });
 
-    const card = within(view).getByRole('region', { name: 'Outside Loom' });
-    expect(card.textContent).toContain('154k tokens');
-    const perModel = within(card).getByRole('list', { name: 'Tokens outside Loom per model' });
-    expect(within(perModel).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['OpenCode · Claude Sonnet 5.5' + '110k', 'OpenCode · opencode/big-pickle' + '44k']);
+    const perPlace = within(view).getByRole('list', { name: 'Tokens per Project' });
+    expect(within(perPlace).getAllByRole('listitem').map((i) => i.textContent)).toEqual(['loom900k', 'docs300k', 'notes100k', 'Other folders50k']);
+    expect(within(perPlace).getByText('notes').title).toBe('/home/me/notes');
+    expect(within(view).queryByRole('region', { name: 'Outside Loom' })).toBeNull();
+    expect(within(view).getByRole('img', { name: 'Tokens per day by Project' }).querySelectorAll('rect[fill]')).toHaveLength(4);
+  });
 
-    fireEvent.click(within(view).getByRole('radio', { name: '30 days' }));
-    await waitFor(() => expect(within(view).getByRole('region', { name: 'Outside Loom' }).textContent).toContain('No use outside Loom in the last 30 days.'));
+  it('works the numbers out again as usage is counted from the agents’ records, and says so meanwhile', async () => {
+    const main = new FakeMain({ projects: [project], usage: { counting: true, revision: 0 } }, { 'usage.dashboard': ({ days }) => dashboard(days) });
+    const view = openDashboard(main);
+    await within(view).findByRole('group', { name: 'Tokens' });
+    expect(within(view).getByRole('status').textContent).toBe('Counting usage from the agents’ records…');
+    const asked = () => main.invoked.filter((i) => i.command === 'usage.dashboard').length;
+    const before = asked();
+
+    act(() => main.publish('usage', { counting: false, revision: 1 }));
+
+    await waitFor(() => expect(asked()).toBe(before + 1));
+    expect(within(view).getByRole('status').textContent).not.toContain('Counting');
+    expect(main.invoked.filter((i) => i.command === 'usage.read')).toHaveLength(1);
   });
 
   it('lists the Top Sessions, opening one that is still on this machine', async () => {
@@ -206,6 +225,15 @@ describe('the dashboard', () => {
     act(() => main.publish('sessions', [{ ...session, updatedAt: 99 }]));
 
     await waitFor(() => expect(asked()).toBe(before + 1));
+  });
+
+  it('counts the Sessions started outside Loom with the rest, and says how many', async () => {
+    const main = new FakeMain({ projects: [project] }, { 'usage.dashboard': ({ days }) => ({ ...dashboard(days), sessionsStarted: 5, outsideConversationsStarted: 4 }) });
+    const view = openDashboard(main);
+
+    await waitFor(() => expect(tile(view, 'Sessions started').textContent).toContain('9'));
+    expect(tile(view, 'Sessions started').textContent).toContain('4 outside Loom · 1 stuck at least once');
+    expect(tile(view, 'Median agent run').textContent).toContain('from the prompt to the reply');
   });
 
   it('counts one Session still open in the singular', async () => {

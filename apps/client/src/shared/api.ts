@@ -1478,26 +1478,28 @@ export interface TopSession {
 
 /**
  * The usage dashboard over the last `days` days, today included, from this
- * machine's Sessions: tokens (all kinds summed) and reported cost from the
- * turns that ended in the range, filed under the day each ended; Sessions
- * started in the range and their outcomes; runs and waits that ended in it.
+ * machine's Sessions and the agents' use outside Loom: tokens (all kinds
+ * summed) and reported cost from the turns that ended in the range, filed
+ * under the day each ended; Sessions started in the range and their
+ * outcomes; runs and waits that ended in it.
  */
 export interface UsageDashboard {
   days: UsageRange;
-  /** Every day of the range, oldest first, as `YYYY-MM-DD` in local time, with its tokens by Project id. */
-  perDay: Array<{ day: string; tokens: number; byProject: Record<number, number> }>;
+  /** Every day of the range, oldest first, as `YYYY-MM-DD` in local time, with its tokens by UsagePlace key. */
+  perDay: Array<{ day: string; tokens: number; byPlace: Record<string, number> }>;
   tokens: number;
   /** What the agents reported, in USD: subscription and local models report $0. */
   reportedCost: number;
   sessionsStarted: number;
+  outsideConversationsStarted: number;
   /** Sessions archived in the range whose Merge request was merged. */
   mergeRequestsMerged: number;
-  /** The median agent run (Working until Waiting or archived), in ms; absent with none. */
+  /** The median agent run (Working until Waiting or archived; outside Loom, a prompt until its reply), in ms; absent with none. */
   medianRunMs?: number;
   /** The median wait for the user (on a question or Approval request, or finished and unanswered, while Loom ran), in ms; absent with none. */
   medianWaitMs?: number;
-  /** By tokens, most first; `project` is its name as TopSession's is, `color` its colour (removed or not). */
-  perProject: Array<{ projectId: number; project: string; color: ProjectColor; tokens: number; removed?: true }>;
+  /** By tokens, most first. */
+  perPlace: UsagePlace[];
   /** By tokens, most first: `model` as `provider/model`, `name` as the agent last gave it (absent when it never did). */
   perModel: Array<{ model: string; name?: string; tokens: number }>;
   mix: TokenCounts;
@@ -1507,24 +1509,21 @@ export interface UsageDashboard {
   outcomes: Record<SessionOutcome, number> & { stuck: number };
   /** The Sessions that used the most tokens in the range, most first, at most TOP_SESSIONS. */
   topSessions: TopSession[];
-  /**
-   * What the agents used outside Loom in the range (the user's own runs of
-   * them), as their own records count it, apart from every figure above:
-   * only for an agent whose records Loom reads, and from when Loom first
-   * read them.
-   */
-  outside: OutsideUsage;
-  /** While Loom still counts the usage the agents' records hold from before it first read them (ADR 0012): the figures grow until it has. */
-  countingPast?: true;
 }
 
-/** An agent's use outside Loom (UsageDashboard.outside). */
-export interface OutsideUsage {
+export interface UsagePlace {
+  key: string;
+  projectId?: number;
+  label: string;
+  folder?: string;
+  color?: ProjectColor;
   tokens: number;
-  /** In USD, as the agents reported it. */
-  reportedCost: number;
-  /** By tokens, most first: `model` as `provider/model`, `name` as the agent gave it in Loom (absent when it never did). */
-  perModel: Array<{ agent: string; model: string; name?: string; tokens: number }>;
+  removed?: true;
+}
+
+export interface UsageStatus {
+  counting: boolean;
+  revision: number;
 }
 
 /** How many Sessions the dashboard's Top Sessions lists. */
@@ -2126,6 +2125,7 @@ export interface Commands {
   'sessions.snooze': { params: { id: number; until: number | null }; result: void };
   /** The usage dashboard over the last `days` days (see UsageDashboard). Rejects a range not in USAGE_RANGES. */
   'usage.dashboard': { params: { days: UsageRange }; result: UsageDashboard };
+  'usage.read': { params: void; result: void };
   /**
    * Moves the damaged database file (and its -wal and -shm) aside under a
    * timestamped name, copies the latest snapshot into its place, and starts.
@@ -2192,6 +2192,7 @@ export interface Topics {
   openSession: OpenSessionRequest | null;
   /** Whether a newer release is downloaded, waiting to install on the next quit or a restart. */
   update: UpdateStatus;
+  usage: UsageStatus;
 }
 
 /** A click on a desktop notification, asking the window to open its Session. */

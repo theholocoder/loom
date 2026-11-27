@@ -10,7 +10,7 @@ import { clampInboxWidth } from '../../src/shared/window';
 export function emptyDashboard(days: UsageRange): UsageDashboard {
   const perDay = Array.from({ length: days }, (_, i) => {
     const day = new Date(2026, 10, 5 - (days - 1 - i));
-    return { day: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`, tokens: 0, byProject: {} };
+    return { day: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`, tokens: 0, byPlace: {} };
   });
   return {
     days,
@@ -18,13 +18,13 @@ export function emptyDashboard(days: UsageRange): UsageDashboard {
     tokens: 0,
     reportedCost: 0,
     sessionsStarted: 0,
+    outsideConversationsStarted: 0,
     mergeRequestsMerged: 0,
-    perProject: [],
+    perPlace: [],
     perModel: [],
     mix: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
     outcomes: { merged: 0, closed: 0, archived: 0, open: 0, stuck: 0 },
     topSessions: [],
-    outside: { tokens: 0, reportedCost: 0, perModel: [] },
   };
 }
 
@@ -41,7 +41,7 @@ export const HIDDEN_PANELS: SessionPanels = { side: { panels: ['changes'], shown
 type Handlers = { [C in CommandName]: (params: Commands[C]['params']) => Commands[C]['result'] | Promise<Commands[C]['result']> };
 
 /** Topics that need no parameters, which the constructor can seed. */
-type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database' | 'openSession' | 'update'>;
+type PlainTopics = Pick<Topics, 'environments' | 'projects' | 'removedProjects' | 'settings' | 'sessions' | 'database' | 'openSession' | 'update' | 'usage'>;
 
 const EMPTY: { [T in TopicName]: Topics[T] } = {
   environments: [],
@@ -60,6 +60,7 @@ const EMPTY: { [T in TopicName]: Topics[T] } = {
   database: { state: 'ok' },
   openSession: null,
   update: { state: 'none' },
+  usage: { counting: false, revision: 0 },
 };
 
 export class FakeMain implements LoomApi {
@@ -288,6 +289,7 @@ export class FakeMain implements LoomApi {
       'sessions.trust': () => {},
       'sessions.approve': () => {},
       'usage.dashboard': ({ days }) => emptyDashboard(days),
+      'usage.read': () => {},
       'database.restoreLatestSnapshot': () => {},
       'update.status': () => this.value('update'),
       'update.restart': () => {},

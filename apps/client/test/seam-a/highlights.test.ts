@@ -390,7 +390,7 @@ describe('Session highlights', () => {
       { model: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5', tokens: 1200 },
       { model: CHEAP, name: 'Claude Haiku 5.5', tokens: 350 },
     ]);
-    expect(dashboard.perProject).toEqual([{ projectId: project.id, project: 'loom', color: project.color, tokens: 1550 }]);
+    expect(dashboard.perPlace).toEqual([{ key: `project:${project.id}`, projectId: project.id, label: 'loom', color: project.color, tokens: 1550 }]);
     expect(dashboard.topSessions.map((s) => s.tokens)).toEqual([1200]);
     const session = (await main.api.invoke('sessions.list')).find((s) => s.id === id)!;
     expect(session.usage?.tokens).toBe(1200);

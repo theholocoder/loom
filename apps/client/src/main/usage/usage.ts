@@ -2,8 +2,9 @@
 // the dashboard measures, and computes the dashboard from them and the
 // Sessions' facts. Usage is kept indefinitely; nothing here deletes any.
 import type { Kysely, Transaction } from 'kysely';
-import { TOP_SESSIONS, totalTokens, USAGE_RANGES, type MergeRequestState, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsageRange } from '../../shared/api';
-import { projectColorOf } from '../../shared/projects';
+import { TOP_SESSIONS, totalTokens, USAGE_RANGES, type MergeRequestState, type SessionOutcome, type SessionStatus, type TokenCounts, type TopSession, type UsageDashboard, type UsagePlace, type UsageRange } from '../../shared/api';
+import { baseName, slashed } from '../../shared/paths';
+import { PROJECT_COLOR_NAMES, projectColorOf, type ProjectColor } from '../../shared/projects';
 import type { Schema, SessionSpansTable } from '../storage/schema';
 
 /** One turn's usage, as the Session service records it. */
@@ -77,7 +78,7 @@ export function outcomeOf({ status, mergeRequestState }: { status: SessionStatus
 }
 
 /** The usage dashboard over the last `days` days up to `now`, today included. */
-export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: number): Promise<UsageDashboard> {
+export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: number, knownModelName: (model: string) => string | undefined): Promise<UsageDashboard> {
   if (!USAGE_RANGES.includes(days)) throw new Error(`The dashboard covers ${USAGE_RANGES.join(', ')} days, not ${String(days)}.`);
   const first = new Date(now);
   first.setHours(0, 0, 0, 0);
@@ -91,13 +92,31 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
   const from = dayList[0]!;
   const to = dayList.at(-1)!;
 
-  const [sessionBuckets, highlightBuckets, outsideBuckets, sessions, spans, projectRows] = await Promise.all([
+  const [sessionBuckets, highlightBuckets, outsideBuckets, sessions, spans, projectRows, checkouts, outsideRuns, outsideStarted] = await Promise.all([
     db.selectFrom('usage_buckets').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('highlight_usage').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('outside_usage').selectAll().where('day', '>=', from).where('day', '<=', to).execute(),
     db.selectFrom('sessions').selectAll().execute(),
     db.selectFrom('session_spans').selectAll().where('ended_at', '>=', since).where('ended_at', '<=', now).execute(),
     db.selectFrom('projects').select(['id', 'name', 'color', 'removed_at']).execute(),
+    db.selectFrom('checkouts').select(['project_id', 'environment_id', 'path']).execute(),
+    db
+      .selectFrom('outside_runs')
+      .innerJoin('agent_conversations', (join) =>
+        join.onRef('agent_conversations.agent', '=', 'outside_runs.agent').onRef('agent_conversations.environment_id', '=', 'outside_runs.environment_id').onRef('agent_conversations.id', '=', 'outside_runs.conversation_id'),
+      )
+      .where('agent_conversations.owner', '=', 'outside')
+      .where('outside_runs.ended_at', '>=', since)
+      .where('outside_runs.ended_at', '<=', now)
+      .select(['outside_runs.started_at', 'outside_runs.ended_at'])
+      .execute(),
+    db
+      .selectFrom('agent_conversations')
+      .where('owner', '=', 'outside')
+      .where('started_at', '>=', since)
+      .where('started_at', '<=', now)
+      .select((eb) => eb.fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow(),
   ]);
   // Every Project by id, removed ones too: removing a Project keeps its row.
   const projectsById = new Map(projectRows.map((r) => [r.id, r]));
@@ -109,17 +128,15 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
 
   const mix: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   let reportedCost = 0;
-  const perDay = new Map(dayList.map((day) => [day, { day, tokens: 0, byProject: {} as Record<number, number> }]));
-  const perProject = new Map<number, number>();
+  const perDay = new Map(dayList.map((day) => [day, { day, tokens: 0, byPlace: {} as Record<string, number> }]));
+  const perPlace = new Map<string, number>();
   /** Each Project's name, as of the latest day its usage was recorded. */
   const projectNames = new Map<number, { name: string; day: string }>();
   const perModel = new Map<string, number>();
   /** Each model's name, as of the latest day the agent gave it. */
   const modelNames = new Map<string, { name: string; day: string }>();
   const perSession = new Map<number, { tokens: number; projectId: number; byModel: Map<string, number> }>();
-  // Session highlights' checks count as usage like any other, but are no Session's own: left out of the top Sessions.
-  const buckets = [...sessionBuckets.map((b) => ({ ...b, own: true })), ...highlightBuckets.map((b) => ({ ...b, own: false }))];
-  for (const b of buckets) {
+  const count = (b: { day: string; model: string; cost: number } & TokenColumns, place: string) => {
     const tokens = b.input_tokens + b.output_tokens + b.cache_read_tokens + b.cache_write_tokens + b.reasoning_tokens;
     mix.input += b.input_tokens;
     mix.output += b.output_tokens;
@@ -129,11 +146,17 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     reportedCost += b.cost;
     const day = perDay.get(b.day)!;
     day.tokens += tokens;
-    day.byProject[b.project_id] = (day.byProject[b.project_id] ?? 0) + tokens;
-    add(perProject, b.project_id, tokens);
+    day.byPlace[place] = (day.byPlace[place] ?? 0) + tokens;
+    add(perPlace, place, tokens);
+    add(perModel, b.model, tokens);
+    return tokens;
+  };
+  // Session highlights' checks count as usage like any other, but are no Session's own: left out of the top Sessions.
+  const buckets = [...sessionBuckets.map((b) => ({ ...b, own: true })), ...highlightBuckets.map((b) => ({ ...b, own: false }))];
+  for (const b of buckets) {
+    const tokens = count(b, projectKey(b.project_id));
     const named = projectNames.get(b.project_id);
     if (!named || named.day < b.day) projectNames.set(b.project_id, { name: b.project_name, day: b.day });
-    add(perModel, b.model, tokens);
     const modelNamed = modelNames.get(b.model);
     if (b.model_name !== null && (!modelNamed || modelNamed.day < b.day)) modelNames.set(b.model, { name: b.model_name, day: b.day });
     if (!b.own) continue;
@@ -180,21 +203,37 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
       });
     });
 
-  // What the agents used outside Loom, apart from Loom's own figures.
-  const outsideByModel = new Map<string, { agent: string; model: string; tokens: number }>();
-  let outsideCost = 0;
-  for (const b of outsideBuckets) {
-    const tokens = b.input_tokens + b.output_tokens + b.cache_read_tokens + b.cache_write_tokens + b.reasoning_tokens;
-    outsideCost += b.cost;
-    const key = `${b.agent}\0${b.model}`;
-    const entry = outsideByModel.get(key) ?? { agent: b.agent, model: b.model, tokens: 0 };
-    entry.tokens += tokens;
-    outsideByModel.set(key, entry);
+  const projectOf = projectFinder([
+    ...checkouts.map((c) => ({ projectId: c.project_id, environmentId: c.environment_id, path: c.path })),
+    ...sessions.flatMap((s) => {
+      const checkout = checkouts.find((c) => c.project_id === s.project_id);
+      return checkout ? [{ projectId: s.project_id, environmentId: checkout.environment_id, path: s.working_copy_path }] : [];
+    }),
+  ]);
+  const outside = outsideBuckets.map((b) => ({ ...b, projectId: projectOf(b.environment_id, b.directory) }));
+  const perFolder = new Map<string, number>();
+  for (const b of outside) if (b.projectId === undefined && b.directory) add(perFolder, folderKey(b.environment_id, b.directory), totalTokens(tokensOf(b)));
+  const folders = new Set(byTokens(perFolder).filter(({ tokens }) => tokens > 0).slice(0, MAX_FOLDERS).map(({ key }) => key));
+  const folderPaths = new Map<string, string>();
+  for (const b of outside) {
+    const folder = folderKey(b.environment_id, b.directory);
+    const place = b.projectId !== undefined ? projectKey(b.projectId) : folders.has(folder) ? folder : OTHER_FOLDERS;
+    if (place === folder) folderPaths.set(folder, b.directory);
+    count(b, place);
   }
-  const outsidePerModel = [...outsideByModel.values()]
-    .filter((m) => m.tokens > 0)
-    .sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent) || a.model.localeCompare(b.model))
-    .map((m) => withoutUndefined({ ...m, name: modelNames.get(m.model)?.name }));
+  const colorsTaken = new Set<ProjectColor>();
+  const ranked = byTokens(perPlace).filter(({ tokens }) => tokens > 0);
+  for (const { key } of ranked) if (key.startsWith(PROJECT_PREFIX)) colorsTaken.add(projectColor(projectIdOf(key)));
+  const freeColors = PROJECT_COLOR_NAMES.filter((c) => !colorsTaken.has(c));
+  const places: UsagePlace[] = ranked.map(({ key, tokens }) => {
+    if (key.startsWith(PROJECT_PREFIX)) {
+      const projectId = projectIdOf(key);
+      return withoutUndefined({ key, projectId, label: projectName(projectId), color: projectColor(projectId), tokens, removed: removedFlag(projectId) });
+    }
+    if (key === OTHER_FOLDERS) return { key, label: 'Other folders', tokens };
+    const folder = folderPaths.get(key)!;
+    return withoutUndefined({ key, label: baseName(folder), folder, color: freeColors.shift(), tokens });
+  });
 
   const prompt = mix.input + mix.cacheRead + mix.cacheWrite;
   return withoutUndefined({
@@ -203,17 +242,57 @@ export async function dashboard(db: Kysely<Schema>, days: UsageRange, now: numbe
     tokens: totalTokens(mix),
     reportedCost,
     sessionsStarted: started.length,
+    outsideConversationsStarted: Number(outsideStarted.count),
     mergeRequestsMerged: sessions.filter((s) => s.merge_request_state === 'merged' && s.archived_at !== null && s.archived_at >= since && s.archived_at <= now).length,
-    medianRunMs: median(runs.map((s) => s.ended_at - s.started_at)),
+    medianRunMs: median([...runs, ...outsideRuns].map((s) => s.ended_at - s.started_at)),
     medianWaitMs: median(waits.map((s) => s.ended_at - s.started_at)),
-    perProject: byTokens(perProject).map(({ key: projectId, tokens }) => withoutUndefined({ projectId, project: projectName(projectId), color: projectColor(projectId), tokens, removed: removedFlag(projectId) })),
-    perModel: byTokens(perModel).map(({ key: model, tokens }) => withoutUndefined({ model, name: modelNames.get(model)?.name, tokens })),
+    perPlace: places,
+    perModel: byTokens(perModel).map(({ key: model, tokens }) => withoutUndefined({ model, name: modelNames.get(model)?.name ?? knownModelName(model), tokens })),
     mix,
     cacheHitRate: prompt > 0 ? mix.cacheRead / prompt : undefined,
     outcomes,
     topSessions,
-    outside: { tokens: outsidePerModel.reduce((sum, m) => sum + m.tokens, 0), reportedCost: outsideCost, perModel: outsidePerModel },
   });
+}
+
+const MAX_FOLDERS = 5;
+const PROJECT_PREFIX = 'project:';
+const OTHER_FOLDERS = 'other';
+
+type TokenColumns = { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; reasoning_tokens: number };
+
+function projectKey(projectId: number): string {
+  return `${PROJECT_PREFIX}${projectId}`;
+}
+
+function projectIdOf(key: string): number {
+  return Number(key.slice(PROJECT_PREFIX.length));
+}
+
+function folderKey(environmentId: string, directory: string): string {
+  return `folder:${environmentId}:${comparable(directory)}`;
+}
+
+function comparable(path: string): string {
+  const plain = slashed(path);
+  return /^[A-Za-z]:(\/|$)/.test(plain) ? plain.toLowerCase() : plain;
+}
+
+function tokensOf(b: TokenColumns): TokenCounts {
+  return { input: b.input_tokens, output: b.output_tokens, cacheRead: b.cache_read_tokens, cacheWrite: b.cache_write_tokens, reasoning: b.reasoning_tokens };
+}
+
+function projectFinder(places: Array<{ projectId: number; environmentId: string; path: string }>): (environmentId: string, directory: string) => number | undefined {
+  const all = places.map((p) => ({ ...p, path: comparable(p.path) })).filter((p) => p.path).sort((a, b) => b.path.length - a.path.length);
+  const found = new Map<string, number | undefined>();
+  return (environmentId, directory) => {
+    const key = `${environmentId}\0${directory}`;
+    if (found.has(key)) return found.get(key);
+    const path = comparable(directory);
+    const projectId = path ? all.find((p) => p.environmentId === environmentId && (path === p.path || path.startsWith(`${p.path}/`)))?.projectId : undefined;
+    found.set(key, projectId);
+    return projectId;
+  };
 }
 
 /** A clock time's day, `YYYY-MM-DD` in local time. */

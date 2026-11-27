@@ -40,7 +40,7 @@ describe('the local database', () => {
     await main.close();
 
     expect(existsSync(join(userDataDir, 'loom.db'))).toBe(true);
-    expect(inspect(userDataDir)).toEqual({ journalMode: 'wal', userVersion: migrations.length, tables: ['agent_conversations', 'babysit', 'checkouts', 'events', 'highlight_checks', 'highlight_usage', 'highlights', 'outside_usage', 'projects', 'queued_messages', 'session_panels', 'session_spans', 'sessions', 'settings', 'sqlite_sequence', 'subagent_events', 'subagents', 'usage_baseline', 'usage_buckets', 'usage_steps', 'usage_syncs'] });
+    expect(inspect(userDataDir)).toEqual({ journalMode: 'wal', userVersion: migrations.length, tables: ['agent_conversations', 'babysit', 'checkouts', 'events', 'highlight_checks', 'highlight_usage', 'highlights', 'outside_runs', 'outside_usage', 'projects', 'queued_messages', 'session_panels', 'session_spans', 'sessions', 'settings', 'sqlite_sequence', 'subagent_events', 'subagents', 'usage_baseline', 'usage_buckets', 'usage_steps', 'usage_syncs'] });
   });
 
   it('keeps its data and schema version when main starts again', async () => {

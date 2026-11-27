@@ -43,11 +43,6 @@ export function copyable(what: string, value: string | undefined): { 'data-copy'
   return value ? { 'data-copy': value, 'data-copy-what': what } : {};
 }
 
-/** A path's last part: a worktree's folder name. */
-export function baseName(path: string): string {
-  return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) ?? path;
-}
-
 /** Puts `text` on the clipboard; a failure is only logged, as there is nowhere to say it. */
 export function copyText(text: string): void {
   navigator.clipboard.writeText(text).catch((error: unknown) => console.error('could not copy:', error));
